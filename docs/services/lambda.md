@@ -422,6 +422,21 @@ aws lambda create-event-source-mapping \
   --endpoint-url $AWS_ENDPOINT_URL
 ```
 
+### Function URL response streaming
+
+Function URLs created with `InvokeMode: RESPONSE_STREAM` pass streamed
+responses through unbuffered: a handler wrapped in
+`awslambda.streamifyResponse` has its chunks forwarded to the HTTP client
+as they are written, so time-to-first-byte is decoupled from total
+execution time. The
+`application/vnd.awslambda.http-integration-response` prelude emitted by
+`awslambda.HttpResponseStream.from` (status code, headers, cookies) is
+applied to the HTTP response and stripped from the body. URLs with the
+default `BUFFERED` mode still assemble the full body first, with the same
+prelude handling. The `InvokeWithResponseStream` management endpoint
+(`/2021-11-15/.../response-streaming-invocations`, AWS event-stream
+framing) is not yet routed.
+
 ### Event source mapping tags
 
 `CreateEventSourceMapping` accepts a `Tags` map, and the tag endpoints

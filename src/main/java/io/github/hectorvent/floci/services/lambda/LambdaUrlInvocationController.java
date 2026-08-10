@@ -7,6 +7,8 @@ import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
+import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
+import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -27,11 +29,14 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
+import jakarta.ws.rs.core.StreamingOutput;
+
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Handles Lambda Function URL invocations.
@@ -97,13 +102,16 @@ public class LambdaUrlInvocationController {
         Object target = lambdaService.getTargetByUrlId(urlId);
         String functionName;
         String region;
+        LambdaUrlConfig urlConfig;
 
         if (target instanceof LambdaAlias alias) {
             functionName = alias.getFunctionName();
             region = AwsArnUtils.parse(alias.getAliasArn()).region();
+            urlConfig = alias.getUrlConfig();
         } else if (target instanceof LambdaFunction fn) {
             functionName = fn.getFunctionName();
             region = AwsArnUtils.parse(fn.getFunctionArn()).region();
+            urlConfig = fn.getUrlConfig();
         } else {
             return Response.status(404).entity(jsonMessage("Function URL not found")).type(MediaType.APPLICATION_JSON).build();
         }
@@ -113,8 +121,12 @@ public class LambdaUrlInvocationController {
 
         LOG.infov("Lambda URL invocation: {0} {1} -> {2} (region: {3})", method, urlId, functionName, region);
 
+        boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
         try {
             InvokeResult result = lambdaService.invoke(region, functionName, event.getBytes(), InvocationType.RequestResponse);
+            if (result.isStreaming()) {
+                return buildStreamedResponse(result, responseStream);
+            }
             return buildResponse(result);
         } catch (AwsException e) {
             return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
@@ -189,6 +201,128 @@ public class LambdaUrlInvocationController {
         } catch (Exception e) {
             return Response.ok(result.getPayload()).build();
         }
+    }
+
+    /**
+     * Builds the HTTP response for a streaming invocation result
+     * (awslambda.streamifyResponse). With {@code InvokeMode=RESPONSE_STREAM} body
+     * chunks pass through unbuffered (flushed as they arrive); with the default
+     * BUFFERED mode the stream is drained and returned whole. Either way the
+     * {@code application/vnd.awslambda.http-integration-response} prelude
+     * (JSON metadata, an 8-NUL delimiter, then the raw body) is parsed off the
+     * front when present.
+     */
+    private Response buildStreamedResponse(InvokeResult result, boolean passThrough) {
+        StreamingPayload stream = result.getStream();
+        boolean framed = stream.getContentType() != null
+                && stream.getContentType().startsWith("application/vnd.awslambda.http-integration-response");
+
+        int status = 200;
+        ObjectNode prelude = null;
+        byte[] initialBody = new byte[0];
+        try {
+            if (framed) {
+                Prelude parsed = readPrelude(stream);
+                prelude = parsed.metadata();
+                initialBody = parsed.remainder();
+                if (prelude.has("statusCode")) {
+                    status = prelude.get("statusCode").asInt();
+                }
+            }
+        } catch (Exception e) {
+            LOG.warnv("Failed to parse streaming response prelude: {0}", e.getMessage());
+            return Response.status(500).entity(jsonMessage("Malformed streaming response"))
+                    .type(MediaType.APPLICATION_JSON).build();
+        }
+
+        Response.ResponseBuilder builder = Response.status(status);
+        if (prelude != null) {
+            if (prelude.has("headers")) {
+                prelude.get("headers").fields()
+                        .forEachRemaining(e -> builder.header(e.getKey(), e.getValue().asText()));
+            }
+            if (prelude.has("cookies") && prelude.get("cookies").isArray()) {
+                prelude.get("cookies").forEach(c -> builder.header("Set-Cookie", c.asText()));
+            }
+        } else if (stream.getContentType() != null) {
+            builder.header("Content-Type", stream.getContentType());
+        }
+
+        if (passThrough) {
+            byte[] head = initialBody;
+            StreamingOutput out = output -> {
+                try {
+                    if (head.length > 0) {
+                        output.write(head);
+                        output.flush();
+                    }
+                    byte[] chunk;
+                    while ((chunk = stream.next()) != null) {
+                        output.write(chunk);
+                        output.flush();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (TimeoutException e) {
+                    LOG.warnv("Streaming response stalled: {0}", e.getMessage());
+                }
+            };
+            return builder.entity(out).build();
+        }
+
+        try {
+            byte[] rest = stream.drain();
+            byte[] full = new byte[initialBody.length + rest.length];
+            System.arraycopy(initialBody, 0, full, 0, initialBody.length);
+            System.arraycopy(rest, 0, full, initialBody.length, rest.length);
+            return builder.entity(full).build();
+        } catch (Exception e) {
+            LOG.warnv("Failed to drain streaming response: {0}", e.getMessage());
+            return Response.status(500).entity(jsonMessage("Truncated streaming response"))
+                    .type(MediaType.APPLICATION_JSON).build();
+        }
+    }
+
+    record Prelude(ObjectNode metadata, byte[] remainder) {}
+
+    /**
+     * Reads chunks until the 8-NUL prelude delimiter is found (it may span chunk
+     * boundaries), parses the JSON metadata before it, and returns any body bytes
+     * already received after it.
+     */
+    Prelude readPrelude(StreamingPayload stream) throws Exception {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        while (true) {
+            byte[] accumulated = buffer.toByteArray();
+            int delimiter = indexOfDelimiter(accumulated);
+            if (delimiter >= 0) {
+                JsonNode metadata = objectMapper.readTree(accumulated, 0, delimiter);
+                if (!(metadata instanceof ObjectNode metadataObject)) {
+                    throw new IllegalStateException("Prelude metadata is not a JSON object");
+                }
+                byte[] remainder = java.util.Arrays.copyOfRange(
+                        accumulated, delimiter + PRELUDE_DELIMITER_LENGTH, accumulated.length);
+                return new Prelude(metadataObject, remainder);
+            }
+            byte[] chunk = stream.next();
+            if (chunk == null) {
+                throw new IllegalStateException("Stream ended before prelude delimiter");
+            }
+            buffer.write(chunk);
+        }
+    }
+
+    private static final int PRELUDE_DELIMITER_LENGTH = 8;
+
+    static int indexOfDelimiter(byte[] data) {
+        int run = 0;
+        for (int i = 0; i < data.length; i++) {
+            run = data[i] == 0 ? run + 1 : 0;
+            if (run == PRELUDE_DELIMITER_LENGTH) {
+                return i - PRELUDE_DELIMITER_LENGTH + 1;
+            }
+        }
+        return -1;
     }
 
     private String jsonMessage(String message) {

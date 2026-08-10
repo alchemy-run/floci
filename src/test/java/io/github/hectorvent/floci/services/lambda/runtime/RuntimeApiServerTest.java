@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -1380,6 +1382,93 @@ class RuntimeApiServerTest {
             }
         }
         throw new IOException("no free port in " + TEST_PORT_BASE + "-" + (TEST_PORT_BASE + TEST_PORT_RANGE));
+    }
+
+    // ──────────────────────────── Streaming responses ────────────────────────────
+
+    @Test
+    @Timeout(15)
+    void streamingResponse_completesFutureAtHeaders_thenDeliversChunksLive() throws Exception {
+        PendingInvocation invocation = new PendingInvocation(
+                "req-streaming", "{}".getBytes(), System.currentTimeMillis() + 60_000,
+                "arn:aws:lambda:us-east-1:000000000000:function:test",
+                new CompletableFuture<>());
+        server.enqueue(invocation);
+        httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/next"))
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        PipedOutputStream bodySource = new PipedOutputStream();
+        PipedInputStream bodySink = new PipedInputStream(bodySource);
+        CompletableFuture<HttpResponse<String>> post = httpClient.sendAsync(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port
+                                + "/2018-06-01/runtime/invocation/req-streaming/response"))
+                        .header("Lambda-Runtime-Function-Response-Mode", "streaming")
+                        .header("Content-Type", "application/vnd.awslambda.http-integration-response")
+                        .POST(HttpRequest.BodyPublishers.ofInputStream(() -> bodySink))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        bodySource.write("chunk-1".getBytes());
+        bodySource.flush();
+
+        // The future must complete while the response body is still open.
+        InvokeResult result = invocation.getResultFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(result.isStreaming());
+        assertEquals("application/vnd.awslambda.http-integration-response",
+                result.getStream().getContentType());
+        assertEquals("chunk-1", new String(result.getStream().next()));
+
+        bodySource.write("chunk-2".getBytes());
+        bodySource.flush();
+        assertEquals("chunk-2", new String(result.getStream().next()));
+
+        bodySource.close();
+        assertNull(result.getStream().next());
+        assertEquals(202, post.get(5, TimeUnit.SECONDS).statusCode());
+    }
+
+    @Test
+    @Timeout(15)
+    void streamingResponse_getPayloadDrainsWholeBody() throws Exception {
+        PendingInvocation invocation = new PendingInvocation(
+                "req-streaming-drain", "{}".getBytes(), System.currentTimeMillis() + 60_000,
+                "arn:aws:lambda:us-east-1:000000000000:function:test",
+                new CompletableFuture<>());
+        server.enqueue(invocation);
+        httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/next"))
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port
+                                + "/2018-06-01/runtime/invocation/req-streaming-drain/response"))
+                        .header("Lambda-Runtime-Function-Response-Mode", "streaming")
+                        .POST(HttpRequest.BodyPublishers.ofString("hello streaming world"))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(202, response.statusCode());
+
+        InvokeResult result = invocation.getResultFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(result.isStreaming());
+        assertEquals("hello streaming world", new String(result.getPayload()));
+        // Drained payload is cached — a second read sees the same bytes.
+        assertEquals("hello streaming world", new String(result.getPayload()));
+    }
+
+    @Test
+    @Timeout(15)
+    void streamingResponse_unknownRequestId_stillAcknowledged() throws Exception {
+        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port
+                                + "/2018-06-01/runtime/invocation/no-such-request/response"))
+                        .header("Lambda-Runtime-Function-Response-Mode", "streaming")
+                        .POST(HttpRequest.BodyPublishers.ofString("ignored"))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(202, response.statusCode());
     }
 
     /**
