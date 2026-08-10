@@ -12,6 +12,8 @@
 | `ListTopics` | List all topics |
 | `GetTopicAttributes` | Get topic configuration |
 | `SetTopicAttributes` | Update topic configuration |
+| `GetDataProtectionPolicy` | Get a topic's data protection policy (empty string when none is set) |
+| `PutDataProtectionPolicy` | Set or replace a topic's data protection policy |
 | `Subscribe` | Subscribe an endpoint (SQS, HTTP, Lambda, email) |
 | `Unsubscribe` | Remove a subscription |
 | `ListSubscriptions` | List all subscriptions |

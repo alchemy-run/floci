@@ -820,6 +820,26 @@ public class SnsService implements Resettable {
         return new BatchPublishResult(successful, failed);
     }
 
+    public String getDataProtectionPolicy(String resourceArn, String region) {
+        String key = topicKey(region, resourceArn);
+        Topic topic = topicStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Resource does not exist.", 404));
+        return topic.getDataProtectionPolicy() != null ? topic.getDataProtectionPolicy() : "";
+    }
+
+    public void putDataProtectionPolicy(String resourceArn, String dataProtectionPolicy, String region) {
+        if (dataProtectionPolicy == null) {
+            throw new AwsException("InvalidParameter", "DataProtectionPolicy is required.", 400);
+        }
+        String key = topicKey(region, resourceArn);
+        Topic topic = topicStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Resource does not exist.", 404));
+        topic.setDataProtectionPolicy(dataProtectionPolicy);
+        topicStore.put(key, topic);
+    }
+
     public void tagResource(String resourceArn, Map<String, String> tags, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)

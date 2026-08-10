@@ -43,6 +43,8 @@ public class SnsQueryHandler {
             case "ListTopics" -> handleListTopics(params, region);
             case "GetTopicAttributes" -> handleGetTopicAttributes(params, region);
             case "SetTopicAttributes" -> handleSetTopicAttributes(params, region);
+            case "GetDataProtectionPolicy" -> handleGetDataProtectionPolicy(params, region);
+            case "PutDataProtectionPolicy" -> handlePutDataProtectionPolicy(params, region);
             case "Subscribe" -> handleSubscribe(params, region);
             case "Unsubscribe" -> handleUnsubscribe(params, region);
             case "ListSubscriptions" -> handleListSubscriptions(params, region);
@@ -127,6 +129,28 @@ public class SnsQueryHandler {
         try {
             snsService.setTopicAttributes(topicArn, attributeName, attributeValue, region);
             return Response.ok(AwsQueryResponse.envelopeNoResult("SetTopicAttributes", AwsNamespaces.SNS)).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response handleGetDataProtectionPolicy(MultivaluedMap<String, String> params, String region) {
+        String resourceArn = getParam(params, "ResourceArn");
+        try {
+            String policy = snsService.getDataProtectionPolicy(resourceArn, region);
+            String result = new XmlBuilder().elem("DataProtectionPolicy", policy).build();
+            return Response.ok(AwsQueryResponse.envelope("GetDataProtectionPolicy", AwsNamespaces.SNS, result)).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response handlePutDataProtectionPolicy(MultivaluedMap<String, String> params, String region) {
+        String resourceArn = getParam(params, "ResourceArn");
+        String dataProtectionPolicy = getParam(params, "DataProtectionPolicy");
+        try {
+            snsService.putDataProtectionPolicy(resourceArn, dataProtectionPolicy, region);
+            return Response.ok(AwsQueryResponse.envelopeNoResult("PutDataProtectionPolicy", AwsNamespaces.SNS)).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
         }

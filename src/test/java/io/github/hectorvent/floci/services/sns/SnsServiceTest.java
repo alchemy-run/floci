@@ -459,6 +459,54 @@ class SnsServiceTest {
     }
 
     @Test
+    void getDataProtectionPolicy_returnsEmptyStringWhenUnset() {
+        Topic topic = snsService.createTopic("dpp-topic", null, null, REGION);
+        assertEquals("", snsService.getDataProtectionPolicy(topic.getTopicArn(), REGION));
+    }
+
+    @Test
+    void putDataProtectionPolicy_roundTrips() {
+        Topic topic = snsService.createTopic("dpp-topic", null, null, REGION);
+        String policy = "{\"Name\":\"policy\",\"Version\":\"2021-06-01\",\"Statement\":[]}";
+        snsService.putDataProtectionPolicy(topic.getTopicArn(), policy, REGION);
+        assertEquals(policy, snsService.getDataProtectionPolicy(topic.getTopicArn(), REGION));
+    }
+
+    @Test
+    void putDataProtectionPolicy_emptyStringClearsPolicy() {
+        Topic topic = snsService.createTopic("dpp-topic", null, null, REGION);
+        snsService.putDataProtectionPolicy(topic.getTopicArn(), "{\"Statement\":[]}", REGION);
+        snsService.putDataProtectionPolicy(topic.getTopicArn(), "", REGION);
+        assertEquals("", snsService.getDataProtectionPolicy(topic.getTopicArn(), REGION));
+    }
+
+    @Test
+    void dataProtectionPolicy_missingTopicThrowsResourceNotFound() {
+        String arn = "arn:aws:sns:us-east-1:000000000000:no-such-topic";
+        AwsException get = assertThrows(AwsException.class,
+                () -> snsService.getDataProtectionPolicy(arn, REGION));
+        assertEquals("ResourceNotFoundException", get.getErrorCode());
+        AwsException put = assertThrows(AwsException.class,
+                () -> snsService.putDataProtectionPolicy(arn, "{}", REGION));
+        assertEquals("ResourceNotFoundException", put.getErrorCode());
+    }
+
+    @Test
+    void putDataProtectionPolicy_requiresPolicy() {
+        Topic topic = snsService.createTopic("dpp-topic", null, null, REGION);
+        assertThrows(AwsException.class,
+                () -> snsService.putDataProtectionPolicy(topic.getTopicArn(), null, REGION));
+    }
+
+    @Test
+    void dataProtectionPolicy_notLeakedIntoTopicAttributes() {
+        Topic topic = snsService.createTopic("dpp-topic", null, null, REGION);
+        snsService.putDataProtectionPolicy(topic.getTopicArn(), "{\"Statement\":[]}", REGION);
+        assertFalse(snsService.getTopicAttributes(topic.getTopicArn(), REGION)
+                .containsKey("DataProtectionPolicy"));
+    }
+
+    @Test
     void filterPolicy_messageAttributes_unchanged() {
         Subscription sub = subscriptionWithPolicy("{\"event\":[\"order\"]}", null);
         Map<String, io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue> matching = Map.of(

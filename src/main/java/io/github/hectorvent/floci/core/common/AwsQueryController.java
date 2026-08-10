@@ -63,6 +63,7 @@ public class AwsQueryController {
 
     private static final Set<String> SNS_ACTIONS = Set.of(
             "CreateTopic", "DeleteTopic", "ListTopics", "GetTopicAttributes", "SetTopicAttributes",
+            "GetDataProtectionPolicy", "PutDataProtectionPolicy",
             "Subscribe", "Unsubscribe", "ListSubscriptions", "ListSubscriptionsByTopic",
             "Publish", "PublishBatch", "TagResource", "UntagResource", "ListTagsForResource",
             "CreatePlatformApplication", "DeletePlatformApplication", "GetPlatformApplicationAttributes",
