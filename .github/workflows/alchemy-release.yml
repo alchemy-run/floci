@@ -1,0 +1,85 @@
+# Publishes alchemy's floci distribution to GHCR.
+#
+# Trigger: push a tag shaped `<upstream-version>-alchemy.<N>` (e.g.
+# `1.6.0-alchemy.1`) pointing at the fork's patched tree (upstream release
+# + alchemy patch set). Reuses the in-repo `build-images.yml` reusable
+# workflow (GITHUB_TOKEN auth to GHCR — no external secrets), then aliases
+# the timestamped image refs with the semantic tag:
+#
+#   ghcr.io/alchemy-run/floci:<tag>          native (the runtime default,
+#                                            matching upstream's convention
+#                                            that floci/floci:x.y.z is the
+#                                            native image)
+#   ghcr.io/alchemy-run/floci:<tag>-jvm      JVM image
+#   ghcr.io/alchemy-run/floci:<tag>-compat   native + AWS CLI/boto3
+#
+# `@alchemy.run/floci` pins the `<tag>` ref; bumping that pin in an alchemy
+# release is how a patch reaches users.
+#
+# NOTE (first publish only): the GHCR package is created private — flip it
+# to public in the package settings so anonymous pulls work.
+
+name: Alchemy Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+-alchemy.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      source-ref:
+        description: Branch, tag, or commit to build (defaults to the current ref)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      source-ref: ${{ inputs.source-ref || github.ref_name }}
+      image: ghcr.io/${{ github.repository_owner }}/floci
+      publish-native: true
+
+  retag:
+    # Alias the timestamped refs with the semantic release tag. Only for
+    # tag pushes — dispatch runs keep just the commit-tagged refs.
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Tag release aliases
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/floci
+          TAG: ${{ github.ref_name }}
+          NATIVE_REF: ${{ needs.build.outputs.native-digest-ref }}
+          JVM_REF: ${{ needs.build.outputs.jvm-digest-ref }}
+          COMPAT_REF: ${{ needs.build.outputs.compat-digest-ref }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create -t "$IMAGE:$TAG" "$NATIVE_REF"
+          docker buildx imagetools create -t "$IMAGE:$TAG-jvm" "$JVM_REF"
+          docker buildx imagetools create -t "$IMAGE:$TAG-compat" "$COMPAT_REF"
+      - name: Summary
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/floci
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo "## Published"
+            echo '```'
+            echo "$IMAGE:$TAG          (native — pin this in @alchemy.run/floci)"
+            echo "$IMAGE:$TAG-jvm"
+            echo "$IMAGE:$TAG-compat"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
