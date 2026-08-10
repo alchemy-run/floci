@@ -37,9 +37,9 @@ Floci Lambda runs your function code locally inside real Docker containers - clo
 | `GetFunctionUrlConfig` | Read function URL config |
 | `UpdateFunctionUrlConfig` | Update function URL config |
 | `DeleteFunctionUrlConfig` | Delete function URL config |
-| `ListTags` | List tags on a function |
-| `TagResource` | Tag a function |
-| `UntagResource` | Untag a function |
+| `ListTags` | List tags on a function or event source mapping |
+| `TagResource` | Tag a function or event source mapping |
+| `UntagResource` | Untag a function or event source mapping |
 | `PutFunctionConcurrency` | Set reserved concurrent executions |
 | `GetFunctionConcurrency` | Get reserved concurrent executions |
 | `DeleteFunctionConcurrency` | Clear reserved concurrent executions |
@@ -421,6 +421,14 @@ aws lambda create-event-source-mapping \
   --batch-size 10 \
   --endpoint-url $AWS_ENDPOINT_URL
 ```
+
+### Event source mapping tags
+
+`CreateEventSourceMapping` accepts a `Tags` map, and the tag endpoints
+(`ListTags`, `TagResource`, `UntagResource`) accept event-source-mapping
+ARNs (`arn:aws:lambda:REGION:ACCOUNT:event-source-mapping:UUID`) in
+addition to function ARNs. Mapping responses include the
+`EventSourceMappingArn` field, matching the AWS wire format.
 
 ### ScalingConfig (SQS only)
 
