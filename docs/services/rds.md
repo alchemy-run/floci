@@ -54,8 +54,11 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 | `ResetDBClusterParameterGroup` | Reset user parameters on a cluster parameter group |
 | `DescribeEvents` | List RDS events (empty locally) |
 | `DescribePendingMaintenanceActions` | List pending maintenance (empty locally) |
-| `StartDBInstance` / `StopDBInstance` | Return the instance unchanged |
-| `StartDBCluster` / `StopDBCluster` / `FailoverDBCluster` | Return the cluster unchanged |
+| `StartDBInstance` | Return the instance unchanged |
+| `StopDBInstance` | Return the instance unchanged |
+| `StartDBCluster` | Return the cluster unchanged |
+| `StopDBCluster` | Return the cluster unchanged |
+| `FailoverDBCluster` | Return the cluster unchanged |
 | `AddTagsToResource` | Add tags to a DB resource |
 | `ListTagsForResource` | List tags for a DB resource |
 | `RemoveTagsFromResource` | Remove tags from a DB resource |

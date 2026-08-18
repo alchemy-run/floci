@@ -26,6 +26,7 @@
 | `DeleteResourcePolicy` | Remove the resource policy |
 | `PutResourcePolicy` | Attach a resource policy |
 | `UpdateSecretVersionStage` | Move a staging label between versions |
+| `CancelRotateSecret` | Disable rotation; keep the Lambda ARN and rules |
 <!-- floci:actions:end -->
 
 ## Configuration
