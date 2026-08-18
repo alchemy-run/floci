@@ -257,10 +257,12 @@ class S3Test {
     void deleteBucketTagging() {
         s3.deleteBucketTagging(DeleteBucketTaggingRequest.builder().bucket(BUCKET).build());
 
-        GetBucketTaggingResponse response = s3.getBucketTagging(
-                GetBucketTaggingRequest.builder().bucket(BUCKET).build());
-
-        assertThat(response.tagSet()).isEmpty();
+        // Real S3 returns 404 NoSuchTagSet once the tag set is gone — not an empty TagSet.
+        assertThatThrownBy(() -> s3.getBucketTagging(
+                GetBucketTaggingRequest.builder().bucket(BUCKET).build()))
+                .isInstanceOf(software.amazon.awssdk.services.s3.model.S3Exception.class)
+                .extracting(e -> ((software.amazon.awssdk.services.s3.model.S3Exception) e).awsErrorDetails().errorCode())
+                .isEqualTo("NoSuchTagSet");
     }
 
     @Test

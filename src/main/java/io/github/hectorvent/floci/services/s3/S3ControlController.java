@@ -65,7 +65,7 @@ public class S3ControlController {
 
         try {
             String bucketName = extractBucketName(resourceArn);
-            Map<String, String> tags = s3Service.getBucketTagging(bucketName);
+            Map<String, String> tags = s3Service.listBucketTags(bucketName);
 
             XmlBuilder xml = new XmlBuilder()
                     .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
@@ -155,7 +155,7 @@ public class S3ControlController {
 
         try {
             String bucketName = extractBucketName(resourceArn);
-            Map<String, String> existing = new HashMap<>(s3Service.getBucketTagging(bucketName));
+            Map<String, String> existing = new HashMap<>(s3Service.listBucketTags(bucketName));
             tagKeys.forEach(existing::remove);
             s3Service.putBucketTagging(bucketName, existing);
             return Response.noContent().build();

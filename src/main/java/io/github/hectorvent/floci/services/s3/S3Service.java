@@ -1187,6 +1187,19 @@ public class S3Service implements Resettable {
     }
 
     public Map<String, String> getBucketTagging(String bucketName) {
+        Map<String, String> tags = listBucketTags(bucketName);
+        if (tags.isEmpty()) {
+            throw new AwsException("NoSuchTagSet", "The TagSet does not exist", 404);
+        }
+        return tags;
+    }
+
+    /**
+     * Tags as stored, including the empty set. S3 Control {@code ListTagsForResource}
+     * returns an empty list for an untagged bucket; {@link #getBucketTagging} matches
+     * real S3 and raises {@code NoSuchTagSet} instead.
+     */
+    public Map<String, String> listBucketTags(String bucketName) {
         Bucket bucket = bucketStore.get(bucketName)
                 .orElseThrow(() -> new AwsException("NoSuchBucket",
                         "The specified bucket does not exist.", 404));
@@ -1615,8 +1628,51 @@ public class S3Service implements Resettable {
     public void putBucketPolicy(String bucketName, String policy) {
         Bucket bucket = bucketStore.get(bucketName)
                 .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        bucket.setPolicy(policy);
+        bucket.setPolicy(normalizeBucketPolicy(policy));
         bucketStore.put(bucketName, bucket);
+    }
+
+    /**
+     * Real S3 collapses singleton {@code Action}/{@code Resource} (and Not*) arrays
+     * to a bare string when storing a bucket policy. Clients that PUT
+     * {@code ["s3:GetObject"]} therefore GET {@code "s3:GetObject"}.
+     */
+    private String normalizeBucketPolicy(String policy) {
+        if (policy == null || policy.isBlank()) {
+            return policy;
+        }
+        try {
+            var root = objectMapper.readTree(policy);
+            if (!root.isObject()) {
+                return policy;
+            }
+            var statements = root.get("Statement");
+            if (statements == null || statements.isNull()) {
+                return policy;
+            }
+            if (statements.isArray()) {
+                for (var statement : statements) {
+                    collapseSingletonPolicyFields(statement);
+                }
+            } else {
+                collapseSingletonPolicyFields(statements);
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return policy;
+        }
+    }
+
+    private static void collapseSingletonPolicyFields(com.fasterxml.jackson.databind.JsonNode statement) {
+        if (!(statement instanceof com.fasterxml.jackson.databind.node.ObjectNode object)) {
+            return;
+        }
+        for (String field : List.of("Action", "NotAction", "Resource", "NotResource")) {
+            var node = object.get(field);
+            if (node != null && node.isArray() && node.size() == 1) {
+                object.set(field, node.get(0));
+            }
+        }
     }
 
     public void deleteBucketPolicy(String bucketName) {
@@ -1932,6 +1988,123 @@ public class S3Service implements Resettable {
                 .elem("Payer", payer)
                 .end("RequestPaymentConfiguration")
                 .build();
+    }
+
+    public void putBucketAccelerateConfiguration(String bucketName, String accelerateXml) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        String status = XmlParser.extractFirst(accelerateXml, "Status", null);
+        if (status == null) {
+            throw new AwsException("MalformedXML",
+                    "The XML you provided was not well-formed or did not validate against our published schema.",
+                    400);
+        }
+        status = status.trim();
+        if (!"Enabled".equals(status) && !"Suspended".equals(status)) {
+            throw new AwsException("MalformedXML",
+                    "The XML you provided was not well-formed or did not validate against our published schema.",
+                    400);
+        }
+        bucket.setAccelerateStatus(status);
+        bucketStore.put(bucketName, bucket);
+    }
+
+    public String getBucketAccelerateConfiguration(String bucketName) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        XmlBuilder xml = new XmlBuilder()
+                .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+                .start("AccelerateConfiguration", AwsNamespaces.S3);
+        if (bucket.getAccelerateStatus() != null) {
+            xml.elem("Status", bucket.getAccelerateStatus());
+        }
+        return xml.end("AccelerateConfiguration").build();
+    }
+
+    public void putBucketReplication(String bucketName, String replicationXml) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        if (replicationXml == null || replicationXml.isBlank()) {
+            throw new AwsException("MalformedXML",
+                    "The XML you provided was not well-formed or did not validate against our published schema.",
+                    400);
+        }
+        bucket.setReplicationConfiguration(replicationXml);
+        bucketStore.put(bucketName, bucket);
+    }
+
+    public String getBucketReplication(String bucketName) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        String xml = bucket.getReplicationConfiguration();
+        if (xml == null || xml.isBlank()) {
+            throw new AwsException("ReplicationConfigurationNotFoundError",
+                    "The replication configuration was not found", 404);
+        }
+        return xml;
+    }
+
+    public void deleteBucketReplication(String bucketName) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        bucket.setReplicationConfiguration(null);
+        bucketStore.put(bucketName, bucket);
+    }
+
+    public void putBucketIntelligentTieringConfiguration(String bucketName, String configurationXml) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        String id = XmlParser.extractFirst(configurationXml, "Id", null);
+        if (id == null || id.isBlank()) {
+            throw new AwsException("InvalidArgument",
+                    "Intelligent-Tiering configuration Id must be specified.", 400);
+        }
+        bucket.getIntelligentTieringConfigurations().put(id.trim(), configurationXml);
+        bucketStore.put(bucketName, bucket);
+    }
+
+    public String listBucketIntelligentTieringConfigurations(String bucketName) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        XmlBuilder xml = new XmlBuilder()
+                .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+                .start("ListBucketIntelligentTieringConfigurationsOutput", AwsNamespaces.S3)
+                .elem("IsTruncated", "false");
+        for (String configXml : bucket.getIntelligentTieringConfigurations().values()) {
+            xml.raw(stripXmlDeclaration(configXml));
+        }
+        return xml.end("ListBucketIntelligentTieringConfigurationsOutput").build();
+    }
+
+    private static String stripXmlDeclaration(String xml) {
+        if (xml == null) return "";
+        return xml.replaceFirst("^\\s*<\\?xml[^>]*\\?>\\s*", "");
+    }
+
+    public String getBucketIntelligentTieringConfiguration(String bucketName, String id) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        if (id == null || id.isBlank()) {
+            throw new AwsException("InvalidArgument",
+                    "Intelligent-Tiering configuration Id must be specified.", 400);
+        }
+        String xml = bucket.getIntelligentTieringConfigurations().get(id);
+        if (xml == null) {
+            throw new AwsException("NoSuchConfiguration",
+                    "The specified configuration does not exist.", 404);
+        }
+        return xml;
+    }
+
+    public void deleteBucketIntelligentTieringConfiguration(String bucketName, String id) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        if (id == null || id.isBlank()) {
+            throw new AwsException("InvalidArgument",
+                    "Intelligent-Tiering configuration Id must be specified.", 400);
+        }
+        bucket.getIntelligentTieringConfigurations().remove(id);
+        bucketStore.put(bucketName, bucket);
     }
 
     public void restoreObject(String bucketName, String key, String versionId, String restoreXml) {

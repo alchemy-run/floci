@@ -25,6 +25,39 @@ class S3ReplicationIntegrationTest {
             .statusCode(200);
     }
 
+    private static final String REPLICATION_XML = """
+            <ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <Role>arn:aws:iam::000000000000:role/replication-role</Role>
+                <Rule>
+                    <ID>replicate-all</ID>
+                    <Status>Enabled</Status>
+                    <Priority>1</Priority>
+                    <Filter></Filter>
+                    <DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication>
+                    <Destination><Bucket>arn:aws:s3:::replication-dest</Bucket></Destination>
+                </Rule>
+            </ReplicationConfiguration>
+            """;
+
+    @Test
+    @Order(2)
+    void putAndGetReplicationRoundTripsRole() {
+        given()
+            .body(REPLICATION_XML)
+        .when()
+            .put("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(200);
+
+        given()
+        .when()
+            .get("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(200)
+            .body(containsString("arn:aws:iam::000000000000:role/replication-role"))
+            .body(containsString("replicate-all"));
+    }
+
     /**
      * Regression test for the bucket-destroying bug where {@code DELETE /{bucket}?replication}
      * (DeleteBucketReplication) was not handled and fell through to the unqualified
@@ -32,7 +65,7 @@ class S3ReplicationIntegrationTest {
      * replication configuration and returns 204.
      */
     @Test
-    @Order(2)
+    @Order(3)
     void deleteReplicationDoesNotDeleteBucket() {
         given()
         .when()
@@ -42,7 +75,18 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(3)
+    @Order(4)
+    void getReplicationAfterDeleteReturnsNotFound() {
+        given()
+        .when()
+            .get("/" + BUCKET + "?replication")
+        .then()
+            .statusCode(404)
+            .body(containsString("ReplicationConfigurationNotFoundError"));
+    }
+
+    @Test
+    @Order(5)
     void bucketStillExistsAfterReplicationDelete() {
         // A sub-resource-qualified DELETE must never remove the bucket itself.
         given()
@@ -53,7 +97,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(4)
+    @Order(6)
     void putVersioningAfterReplicationDeleteSucceeds() {
         given()
             .body("""
@@ -68,7 +112,7 @@ class S3ReplicationIntegrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(7)
     void unqualifiedDeleteStillRemovesBucket() {
         given()
         .when()

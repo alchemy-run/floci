@@ -320,6 +320,18 @@ public class S3Controller {
                 s3Service.putBucketRequestPayment(bucket, new String(body, StandardCharsets.UTF_8));
                 return Response.ok().build();
             }
+            if (hasQueryParam(uriInfo, "accelerate")) {
+                s3Service.putBucketAccelerateConfiguration(bucket, new String(body, StandardCharsets.UTF_8));
+                return Response.ok().build();
+            }
+            if (hasQueryParam(uriInfo, "replication")) {
+                s3Service.putBucketReplication(bucket, new String(body, StandardCharsets.UTF_8));
+                return Response.ok().build();
+            }
+            if (hasQueryParam(uriInfo, "intelligent-tiering")) {
+                s3Service.putBucketIntelligentTieringConfiguration(bucket, new String(body, StandardCharsets.UTF_8));
+                return Response.ok().build();
+            }
 
             String locationConstraint = null;
             if (body != null && body.length > 0) {
@@ -398,9 +410,12 @@ public class S3Controller {
                 return Response.noContent().build();
             }
             if (hasQueryParam(uriInfo, "replication")) {
-                // Floci does not model bucket replication; DeleteBucketReplication is a
-                // no-op that always returns 204, matching real S3. Crucially it must be
-                // handled here so it does NOT fall through to deleting the whole bucket.
+                s3Service.deleteBucketReplication(bucket);
+                return Response.noContent().build();
+            }
+            if (hasQueryParam(uriInfo, "intelligent-tiering")) {
+                s3Service.deleteBucketIntelligentTieringConfiguration(
+                        bucket, uriInfo.getQueryParameters().getFirst("id"));
                 return Response.noContent().build();
             }
             s3Service.deleteBucket(bucket);
@@ -501,6 +516,31 @@ public class S3Controller {
             if (hasQueryParam(uriInfo, "requestPayment")) {
                 s3Service.authorizeBucketRead(bucket, "s3:GetBucketRequestPayment", authorization);
                 return Response.ok(s3Service.getBucketRequestPayment(bucket)).build();
+            }
+            if (hasQueryParam(uriInfo, "accelerate")) {
+                s3Service.authorizeBucketRead(bucket, "s3:GetAccelerateConfiguration", authorization);
+                return Response.ok(s3Service.getBucketAccelerateConfiguration(bucket))
+                        .type(MediaType.APPLICATION_XML)
+                        .build();
+            }
+            if (hasQueryParam(uriInfo, "replication")) {
+                s3Service.authorizeBucketRead(bucket, "s3:GetReplicationConfiguration", authorization);
+                return Response.ok(s3Service.getBucketReplication(bucket))
+                        .type(MediaType.APPLICATION_XML)
+                        .build();
+            }
+            if (hasQueryParam(uriInfo, "intelligent-tiering")) {
+                String id = uriInfo.getQueryParameters().getFirst("id");
+                if (id == null || id.isBlank()) {
+                    s3Service.authorizeBucketRead(bucket, "s3:ListBucketIntelligentTieringConfigurations", authorization);
+                    return Response.ok(s3Service.listBucketIntelligentTieringConfigurations(bucket))
+                            .type(MediaType.APPLICATION_XML)
+                            .build();
+                }
+                s3Service.authorizeBucketRead(bucket, "s3:GetIntelligentTieringConfiguration", authorization);
+                return Response.ok(s3Service.getBucketIntelligentTieringConfiguration(bucket, id))
+                        .type(MediaType.APPLICATION_XML)
+                        .build();
             }
 
             // --- S3 static-website index resolution (site root) ---
