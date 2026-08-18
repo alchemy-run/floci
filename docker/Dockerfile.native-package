@@ -35,6 +35,12 @@ RUN mkdir -p /app/data \
 VOLUME /app/data
 
 COPY --chmod=755 --chown=1001:root native/${TARGETARCH}/ /app/
+# Graal ships `floci-<version>-runner`; the image CMD and the entrypoint's
+# empty-argv fallback expect `/app/application` (see Dockerfile.native).
+RUN set -eux; \
+    runner="$(ls -1 /app/*-runner)"; \
+    test -x "$runner"; \
+    ln -sfn "$(basename "$runner")" /app/application
 
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=755 docker/localstack-parity.sh /usr/local/bin/localstack-parity.sh
