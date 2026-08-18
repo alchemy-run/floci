@@ -22,6 +22,11 @@ Auto Scaling groups over the Query protocol under the `autoscaling` signing name
 | `PutScalingPolicy` | Creates or updates a scaling policy and its CloudWatch alarms |
 | `DescribeScalingPolicies` | Lists scaling policies in a namespace, optionally filtered |
 | `DeleteScalingPolicy` | Deletes a scaling policy and its CloudWatch alarms |
+| `PutScheduledAction` | Creates or updates a scheduled action; unspecified StartTime/EndTime are deleted |
+| `DescribeScheduledActions` | Lists scheduled actions in a namespace, optionally filtered |
+| `DeleteScheduledAction` | Deletes a scheduled action; missing action is `ObjectNotFoundException` |
+| `DescribeScalingActivities` | Lists stored activities (empty unless a control loop records one) |
+| `GetPredictiveScalingForecast` | ECS-only; non-ECS namespaces return `AccessDeniedException` ("GetPredictiveScalingForecast is not supported.") |
 | `ListTagsForResource` | Returns the tags on a scalable target |
 | `TagResource` | Adds or overwrites tags on a scalable target |
 | `UntagResource` | Removes tags from a scalable target |
@@ -80,14 +85,13 @@ arn:aws:iam::<account>:role/aws-service-role/<namespace>.application-autoscaling
   MSK broker storage will not grow. This matches the existing behavior of EC2 Auto
   Scaling's `PutScalingPolicy` in Floci. The control plane is faithful; the control loop
   is not emulated.
-- `PutScheduledAction`, `DescribeScheduledActions`, and `DeleteScheduledAction` are not
-  implemented.
-- `DescribeScalingActivities` is not implemented; there are no scaling activities to
-  report because policies never fire.
+- `GetPredictiveScalingForecast` for ECS returns empty load/capacity series. Non-ECS
+  namespaces match AWS: `AccessDeniedException` with "GetPredictiveScalingForecast is not
+  supported."
 - `PredictiveScalingPolicyConfiguration` is accepted only insofar as `PolicyType` is
   validated; the configuration block is not stored.
-- Pagination is not implemented — `DescribeScalableTargets` and `DescribeScalingPolicies`
-  return all matching results and never emit a `NextToken`.
+- Pagination is not implemented — describe APIs return all matching results and never
+  emit a `NextToken`.
 
 ## Terraform
 

@@ -362,4 +362,132 @@ class AppConfigIntegrationTest {
                 .header("Version-Label", equalTo(""))
                 .body(equalTo(""));
     }
+
+    @Test @Order(23)
+    void updateApplicationChangesDescription() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Description\": \"updated\"}")
+                .when().patch("/applications/" + appId)
+                .then()
+                .statusCode(200)
+                .body("Description", equalTo("updated"));
+    }
+
+    @Test @Order(24)
+    void listDeploymentStrategiesIncludesBuiltinsAndCustom() {
+        given()
+                .when().get("/deploymentstrategies")
+                .then()
+                .statusCode(200)
+                .body("Items.Id", hasItem("AppConfig.AllAtOnce"))
+                .body("Items.Id", hasItem(strategyId));
+    }
+
+    @Test @Order(25)
+    void extensionLifecycle() {
+        String extensionId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"notify\", \"Description\": \"v1\", \"Actions\": {\"ON_DEPLOYMENT_COMPLETE\": [{\"Name\": \"bus\", \"Uri\": \"arn:aws:events:us-east-1:000000000000:event-bus/default\"}]}}")
+                .when().post("/extensions")
+                .then()
+                .statusCode(201)
+                .body("Name", equalTo("notify"))
+                .body("VersionNumber", equalTo(1))
+                .extract().path("Id");
+
+        String extensionArn = given()
+                .when().get("/extensions/" + extensionId)
+                .then()
+                .statusCode(200)
+                .body("Description", equalTo("v1"))
+                .extract().path("Arn");
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Tags\": {\"alchemy::id\": \"Ext\"}}")
+                .when().post("/tags/" + extensionArn)
+                .then()
+                .statusCode(204);
+
+        given()
+                .when().get("/tags/" + extensionArn)
+                .then()
+                .statusCode(200)
+                .body("Tags.'alchemy::id'", equalTo("Ext"));
+
+        String associationId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"ExtensionIdentifier\": \"" + extensionId + "\", \"ResourceIdentifier\": \"arn:aws:appconfig:us-east-1:000000000000:application/" + appId + "\"}")
+                .when().post("/extensionassociations")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        given()
+                .when().get("/extensionassociations/" + associationId)
+                .then()
+                .statusCode(200)
+                .body("ExtensionArn", equalTo(extensionArn));
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"Description\": \"v2\"}")
+                .when().patch("/extensions/" + extensionId)
+                .then()
+                .statusCode(200)
+                .body("Description", equalTo("v2"))
+                .body("VersionNumber", equalTo(2));
+
+        given()
+                .when().delete("/extensions/" + extensionId)
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("BadRequestException"));
+
+        given()
+                .when().delete("/extensionassociations/" + associationId)
+                .then()
+                .statusCode(204);
+
+        given()
+                .when().delete("/extensions/" + extensionId)
+                .then()
+                .statusCode(204);
+    }
+
+    @Test @Order(26)
+    void deleteEnvironmentAndStrategy() {
+        String isolatedApp = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"isolated-app\"}")
+                .when().post("/applications")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        String isolatedEnv = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"isolated-env\"}")
+                .when().post("/applications/" + isolatedApp + "/environments")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        given()
+                .when().delete("/applications/" + isolatedApp)
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("BadRequestException"));
+
+        given()
+                .when().delete("/applications/" + isolatedApp + "/environments/" + isolatedEnv)
+                .then()
+                .statusCode(204);
+
+        given()
+                .when().delete("/applications/" + isolatedApp)
+                .then()
+                .statusCode(204);
+    }
 }

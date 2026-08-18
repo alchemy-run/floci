@@ -156,7 +156,7 @@ class CloudMapIntegrationTest {
     }
 
     @Test
-    @Order(11)
+    @Order(15)
     void teardown() {
         call("DeregisterInstance",
                 "{\"ServiceId\":\"" + serviceId + "\",\"InstanceId\":\"" + INSTANCE_ID + "\"}")
@@ -169,6 +169,68 @@ class CloudMapIntegrationTest {
 
     @Test
     @Order(12)
+    void updateHttpNamespaceAndServiceAttributes() {
+        call("UpdateHttpNamespace",
+                "{\"Id\":\"" + namespaceId + "\",\"Namespace\":{\"Description\":\"updated ns\"}}")
+                .then().statusCode(200).body("OperationId", notNullValue());
+
+        call("GetNamespace", "{\"Id\":\"" + namespaceId + "\"}")
+                .then().statusCode(200)
+                .body("Namespace.Type", equalTo("HTTP"))
+                .body("Namespace.Description", equalTo("updated ns"));
+
+        call("UpdateService",
+                "{\"Id\":\"" + serviceId + "\",\"Service\":{\"Description\":\"updated svc\"}}")
+                .then().statusCode(200).body("OperationId", notNullValue());
+
+        call("GetService", "{\"Id\":\"" + serviceId + "\"}")
+                .then().statusCode(200)
+                .body("Service.Description", equalTo("updated svc"));
+
+        call("UpdateServiceAttributes",
+                "{\"ServiceId\":\"" + serviceId + "\",\"Attributes\":{\"env\":\"test\"}}")
+                .then().statusCode(200);
+
+        call("GetServiceAttributes", "{\"ServiceId\":\"" + serviceId + "\"}")
+                .then().statusCode(200)
+                .body("ServiceAttributes.Attributes.env", equalTo("test"));
+
+        call("DeleteServiceAttributes",
+                "{\"ServiceId\":\"" + serviceId + "\",\"Attributes\":[\"env\"]}")
+                .then().statusCode(200);
+
+        call("GetServiceAttributes", "{\"ServiceId\":\"" + serviceId + "\"}")
+                .then().statusCode(200)
+                .body("ServiceAttributes.Attributes.env", equalTo(null));
+
+        call("UpdateInstanceCustomHealthStatus",
+                "{\"ServiceId\":\"" + serviceId + "\",\"InstanceId\":\"" + INSTANCE_ID
+                        + "\",\"Status\":\"UNHEALTHY\"}")
+                .then().statusCode(200);
+
+        call("GetInstancesHealthStatus",
+                "{\"ServiceId\":\"" + serviceId + "\",\"Instances\":[\"" + INSTANCE_ID + "\"]}")
+                .then().statusCode(200)
+                .body("Status." + INSTANCE_ID, equalTo("UNHEALTHY"));
+    }
+
+    @Test
+    @Order(13)
+    void listNamespacesFiltersByTypeAndName() {
+        call("ListNamespaces",
+                "{\"Filters\":[{\"Name\":\"TYPE\",\"Values\":[\"HTTP\"]},{\"Name\":\"NAME\",\"Values\":[\"floci-cm-ns\"]}]}")
+                .then().statusCode(200)
+                .body("Namespaces", hasSize(1))
+                .body("Namespaces[0].Id", equalTo(namespaceId));
+
+        call("ListNamespaces",
+                "{\"Filters\":[{\"Name\":\"TYPE\",\"Values\":[\"DNS_PRIVATE\"]}]}")
+                .then().statusCode(200)
+                .body("Namespaces.find { it.Name == 'floci-cm-ns' }", equalTo(null));
+    }
+
+    @Test
+    @Order(14)
     void getMissingNamespaceReturnsNotFound() {
         call("GetNamespace", "{\"Id\":\"ns-doesnotexist00000\"}")
                 .then().statusCode(404)

@@ -48,9 +48,10 @@ public class SecretsManagerJsonHandler {
             case "GetResourcePolicy" -> handleGetResourcePolicy(request, region);
             case "GetRandomPassword" -> handleGetRandomPassword(request, region);
             case "BatchGetSecretValue" -> handleBatchGetSecretValue(request, region);
-            case "DeleteResourcePolicy" -> Response.ok(objectMapper.createObjectNode()).build();
-            case "PutResourcePolicy" -> Response.ok(objectMapper.createObjectNode()).build();
+            case "DeleteResourcePolicy" -> handleDeleteResourcePolicy(request, region);
+            case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
             case "UpdateSecretVersionStage" -> handleUpdateSecretVersionStage(request, region);
+            case "CancelRotateSecret" -> handleCancelRotateSecret(request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                     .build();
@@ -394,6 +395,9 @@ public class SecretsManagerJsonHandler {
                 node.put("KmsKeyId", secret.getKmsKeyId());
             }
             node.put("RotationEnabled", secret.isRotationEnabled());
+            if (secret.getRotationLambdaArn() != null) {
+                node.put("RotationLambdaARN", secret.getRotationLambdaArn());
+            }
             if (secret.getCreatedDate() != null) {
                 node.put("CreatedDate", secret.getCreatedDate().toEpochMilli() / 1000.0);
             }
@@ -528,10 +532,52 @@ public class SecretsManagerJsonHandler {
 
     private Response handleGetResourcePolicy(JsonNode request, String region) {
         String secretId = request.path("SecretId").asText();
-        Secret secret = service.describeSecret(secretId, region);
+        Secret secret = service.getResourcePolicy(secretId, region);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("ARN", secret.getArn());
         response.put("Name", secret.getName());
+        if (secret.getResourcePolicy() != null) {
+            response.put("ResourcePolicy", secret.getResourcePolicy());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handlePutResourcePolicy(JsonNode request, String region) {
+        String secretId = request.path("SecretId").asText();
+        JsonNode policyNode = request.get("ResourcePolicy");
+        String resourcePolicy = policyNode == null || policyNode.isNull()
+                ? null
+                : policyNode.isTextual() ? policyNode.asText() : policyNode.toString();
+        Boolean blockPublicPolicy = request.has("BlockPublicPolicy")
+                ? request.path("BlockPublicPolicy").asBoolean() : null;
+        Secret secret = service.putResourcePolicy(secretId, resourcePolicy, blockPublicPolicy, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ARN", secret.getArn());
+        response.put("Name", secret.getName());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteResourcePolicy(JsonNode request, String region) {
+        String secretId = request.path("SecretId").asText();
+        Secret secret = service.deleteResourcePolicy(secretId, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ARN", secret.getArn());
+        response.put("Name", secret.getName());
+        return Response.ok(response).build();
+    }
+
+    private Response handleCancelRotateSecret(JsonNode request, String region) {
+        String secretId = request.path("SecretId").asText();
+        Secret secret = service.cancelRotateSecret(secretId, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ARN", secret.getArn());
+        response.put("Name", secret.getName());
+        if (secret.getCurrentVersionId() != null) {
+            response.put("VersionId", secret.getCurrentVersionId());
+        }
         return Response.ok(response).build();
     }
 

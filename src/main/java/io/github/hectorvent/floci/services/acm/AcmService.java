@@ -144,7 +144,10 @@ public class AcmService {
             status = CertificateStatus.ISSUED;
         } else {
             type = CertificateType.AMAZON_ISSUED;
-            status = validationWaitSeconds > 0 ? CertificateStatus.PENDING_VALIDATION : CertificateStatus.ISSUED;
+            // Public certs stay PENDING until DNS/email validation completes.
+            // validationWaitSeconds > 0 is reserved for a delayed auto-issue;
+            // 0 (the default) means never auto-issue — matching live ACM.
+            status = CertificateStatus.PENDING_VALIDATION;
         }
 
         // Generate real X.509 certificate
@@ -181,7 +184,7 @@ public class AcmService {
         cert.setCertificateBody(generated.certificatePem());
         cert.setPrivateKey(generated.privateKeyPem());
         cert.setCertificateChain(getAwsRootCa());
-        cert.setCertOptions(options != null ? options : CertificateOptions.defaultOptions());
+        cert.setCertOptions(resolveRequestOptions(options));
         cert.setCertAuthorityArn(certAuthorityArn);
         cert.setIdempotencyToken(idempotencyToken);
         cert.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
@@ -243,11 +246,14 @@ public class AcmService {
                                        String region, int maxItems, String nextToken) {
         int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
         String lastArn = decodeToken(nextToken);
+        // AWS ListCertificates defaults to RSA_1024 + RSA_2048 when Includes.keyTypes is omitted.
+        List<KeyAlgorithm> effectiveKeyTypes = (keyTypes == null || keyTypes.isEmpty())
+            ? List.of(KeyAlgorithm.RSA_1024, KeyAlgorithm.RSA_2048)
+            : keyTypes;
 
-        List<Certificate> allCerts = store.scan(k -> true).stream()
-            .filter(c -> c.getArn().contains(":acm:" + region + ":"))
+        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
             .filter(c -> statuses == null || statuses.isEmpty() || statuses.contains(c.getStatus()))
-            .filter(c -> keyTypes == null || keyTypes.isEmpty() || keyTypes.contains(c.getKeyAlgorithm()))
+            .filter(c -> effectiveKeyTypes.contains(c.getKeyAlgorithm()))
             .sorted(Comparator.comparing(Certificate::getArn))
             .collect(Collectors.toList());
 
@@ -412,12 +418,143 @@ public class AcmService {
         // Encrypt the private key
         String encryptedKey = certificateGenerator.encryptPrivateKey(cert.getPrivateKey(), passphrase);
 
+        cert.setExported(true);
+        store.put(regionKey(region, cert.extractCertificateId()), cert);
+
         // Return certificate with encrypted private key
         Certificate exportCert = new Certificate();
         exportCert.setCertificateBody(cert.getCertificateBody());
         exportCert.setCertificateChain(cert.getCertificateChain());
         exportCert.setPrivateKey(encryptedKey);
         return exportCert;
+    }
+
+    // ============ UpdateCertificateOptions ============
+
+    /**
+     * Syncs mutable certificate options. Export is fixed at request time —
+     * AWS rejects changing it ("Export option for certificates cannot be updated").
+     */
+    public Certificate updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        CertificateOptions current = cert.getCertOptions() != null
+            ? cert.getCertOptions()
+            : CertificateOptions.defaultOptions();
+
+        if (options != null && options.export() != null
+            && !options.export().equals(current.export())) {
+            throw new AwsException("InvalidStateException",
+                "Export option for certificates cannot be updated", 400);
+        }
+
+        String ctPref = options != null && options.certificateTransparencyLoggingPreference() != null
+            ? options.certificateTransparencyLoggingPreference()
+            : current.certificateTransparencyLoggingPreference();
+        cert.setCertOptions(new CertificateOptions(ctPref, current.export()));
+        store.put(regionKey(region, cert.extractCertificateId()), cert);
+        return cert;
+    }
+
+    // ============ SearchCertificates ============
+
+    /**
+     * Lists certificates matching an optional predicate, with the same
+     * cursor pagination as {@link #listCertificates}.
+     */
+    public ListResult searchCertificates(java.util.function.Predicate<Certificate> filter,
+                                         String region, int maxItems, String nextToken) {
+        java.util.function.Predicate<Certificate> predicate = filter != null ? filter : c -> true;
+        int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
+        String lastArn = decodeToken(nextToken);
+
+        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
+            .filter(predicate)
+            .sorted(Comparator.comparing(Certificate::getArn))
+            .collect(Collectors.toList());
+
+        int startIndex = 0;
+        if (lastArn != null) {
+            for (int i = 0; i < allCerts.size(); i++) {
+                if (allCerts.get(i).getArn().compareTo(lastArn) > 0) {
+                    startIndex = i;
+                    break;
+                }
+                if (i == allCerts.size() - 1) {
+                    startIndex = allCerts.size();
+                }
+            }
+        }
+
+        List<Certificate> page = allCerts.stream()
+            .skip(startIndex)
+            .limit(limit)
+            .collect(Collectors.toList());
+
+        String newNextToken = null;
+        if (startIndex + limit < allCerts.size() && !page.isEmpty()) {
+            newNextToken = encodeToken(page.get(page.size() - 1).getArn());
+        }
+
+        return new ListResult(page, newNextToken);
+    }
+
+    // ============ RenewCertificate ============
+
+    public void renewCertificate(String certificateArn, String region) {
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
+            throw new AwsException("RequestInProgressException",
+                "The certificate request is in progress.", 400);
+        }
+        throw new AwsException("ValidationException",
+            "Certificate is not eligible for renewal.", 400);
+    }
+
+    // ============ ResendValidationEmail ============
+
+    public void resendValidationEmail(String certificateArn, String domain,
+                                      String validationDomain, String region) {
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        if (cert.getValidationMethod() != ValidationMethod.EMAIL) {
+            throw new AwsException("InvalidStateException",
+                "Email validation cannot be resent for a certificate that uses "
+                    + (cert.getValidationMethod() != null ? cert.getValidationMethod().name() : "DNS")
+                    + " validation.",
+                400);
+        }
+        boolean knownDomain = domain != null && (
+            domain.equalsIgnoreCase(cert.getDomainName())
+                || (cert.getSubjectAlternativeNames() != null
+                    && cert.getSubjectAlternativeNames().stream()
+                        .anyMatch(san -> san.equalsIgnoreCase(domain)))
+        );
+        if (!knownDomain) {
+            throw new AwsException("InvalidDomainValidationOptionsException",
+                "Domain is not associated with the certificate.", 400);
+        }
+        if (validationDomain == null || validationDomain.isBlank()) {
+            throw new AwsException("InvalidDomainValidationOptionsException",
+                "ValidationDomain must not be empty.", 400);
+        }
+        // Emulator: no email is sent. Success is enough for the control plane.
+    }
+
+    // ============ RevokeCertificate ============
+
+    public Certificate revokeCertificate(String certificateArn, String revocationReason, String region) {
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        if (!cert.isExported()) {
+            throw new AwsException("ConflictException",
+                "Only exported certificates can be revoked.", 409);
+        }
+        if (cert.getStatus() == CertificateStatus.REVOKED) {
+            throw new AwsException("ConflictException",
+                "Certificate is already revoked.", 409);
+        }
+        cert.setStatus(CertificateStatus.REVOKED);
+        cert.setRevokedAt(Instant.now());
+        store.put(regionKey(region, cert.extractCertificateId()), cert);
+        return cert;
     }
 
     // ============ Tagging Operations ============
@@ -482,6 +619,18 @@ public class AcmService {
     }
 
     // ============ Helper Methods ============
+
+    private static CertificateOptions resolveRequestOptions(CertificateOptions options) {
+        if (options == null) {
+            return CertificateOptions.defaultOptions();
+        }
+        return new CertificateOptions(
+            options.certificateTransparencyLoggingPreference() != null
+                ? options.certificateTransparencyLoggingPreference()
+                : "ENABLED",
+            options.export() != null ? options.export() : "DISABLED"
+        );
+    }
 
     private Certificate getCertificateByArn(String arn, String region) {
         String certId = extractCertificateIdFromArn(arn);

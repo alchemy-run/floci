@@ -70,6 +70,7 @@ public class ElbV2QueryHandler {
                 case "ModifyLoadBalancerAttributes"  -> handleModifyLoadBalancerAttributes(params, region);
                 case "DescribeLoadBalancerAttributes"-> handleDescribeLoadBalancerAttributes(params, region);
                 case "DescribeCapacityReservation"   -> handleDescribeCapacityReservation(params, region);
+                case "ModifyCapacityReservation"     -> handleModifyCapacityReservation(params, region);
                 case "SetSecurityGroups"             -> handleSetSecurityGroups(params, region);
                 case "SetSubnets"                    -> handleSetSubnets(params, region);
                 case "SetIpAddressType"              -> handleSetIpAddressType(params, region);
@@ -108,6 +109,13 @@ public class ElbV2QueryHandler {
                 case "AddListenerCertificates"       -> handleAddListenerCertificates(params, region);
                 case "RemoveListenerCertificates"    -> handleRemoveListenerCertificates(params, region);
                 case "DescribeListenerCertificates"  -> handleDescribeListenerCertificates(params, region);
+                // Trust Stores
+                case "CreateTrustStore"              -> handleCreateTrustStore(params, region);
+                case "DescribeTrustStores"           -> handleDescribeTrustStores(params, region);
+                case "ModifyTrustStore"              -> handleModifyTrustStore(params, region);
+                case "DeleteTrustStore"              -> handleDeleteTrustStore(params, region);
+                case "GetTrustStoreCaCertificatesBundle" -> handleGetTrustStoreCaCertificatesBundle(params, region);
+                case "GetTrustStoreRevocationContent" -> handleGetTrustStoreRevocationContent(params, region);
                 default -> xmlError("UnsupportedOperation",
                         "Action " + action + " is not supported.", 400);
             };
@@ -233,6 +241,33 @@ public class ElbV2QueryHandler {
            .end("DescribeCapacityReservationResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeCapacityReservationResponse");
+        return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleModifyCapacityReservation(MultivaluedMap<String, String> p, String region) {
+        String arn = p.getFirst("LoadBalancerArn");
+        Integer capacityUnits = parseIntOrNull(p.getFirst("MinimumLoadBalancerCapacity.CapacityUnits"));
+        Boolean reset = parseBoolOrNull(p.getFirst("ResetCapacityReservation"));
+        ElbV2Service.CapacityReservation cr = service.modifyCapacityReservation(region, arn, capacityUnits, reset);
+
+        XmlBuilder xml = new XmlBuilder()
+                .start("ModifyCapacityReservationResponse", AwsNamespaces.ELB_V2)
+                .start("ModifyCapacityReservationResult");
+        if (cr.lastModifiedTime() != null) {
+            xml.elem("LastModifiedTime", ISO_FMT.format(cr.lastModifiedTime()));
+        }
+        if (cr.decreaseRequestsRemaining() != null) {
+            xml.elem("DecreaseRequestsRemaining", cr.decreaseRequestsRemaining());
+        }
+        if (cr.minimumCapacityUnits() != null) {
+            xml.start("MinimumLoadBalancerCapacity")
+                 .elem("CapacityUnits", cr.minimumCapacityUnits())
+               .end("MinimumLoadBalancerCapacity");
+        }
+        xml.start("CapacityReservationState").end("CapacityReservationState")
+           .end("ModifyCapacityReservationResult")
+           .raw(AwsQueryResponse.responseMetadata())
+           .end("ModifyCapacityReservationResponse");
         return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
     }
 
@@ -813,6 +848,103 @@ public class ElbV2QueryHandler {
         return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
     }
 
+    // ── Trust Stores ──────────────────────────────────────────────────────────
+
+    private Response handleCreateTrustStore(MultivaluedMap<String, String> p, String region) {
+        TrustStore trustStore = service.createTrustStore(
+                region,
+                p.getFirst("Name"),
+                p.getFirst("CaCertificatesBundleS3Bucket"),
+                p.getFirst("CaCertificatesBundleS3Key"),
+                p.getFirst("CaCertificatesBundleS3ObjectVersion"),
+                parseTags(p));
+
+        String xml = new XmlBuilder()
+                .start("CreateTrustStoreResponse", AwsNamespaces.ELB_V2)
+                .start("CreateTrustStoreResult")
+                  .start("TrustStores")
+                    .start("member").raw(trustStoreXml(trustStore)).end("member")
+                  .end("TrustStores")
+                .end("CreateTrustStoreResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("CreateTrustStoreResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleDescribeTrustStores(MultivaluedMap<String, String> p, String region) {
+        List<String> arns = memberList(p, "TrustStoreArns");
+        List<String> names = memberList(p, "Names");
+        List<TrustStore> stores = service.describeTrustStores(region, arns, names);
+
+        XmlBuilder xml = new XmlBuilder()
+                .start("DescribeTrustStoresResponse", AwsNamespaces.ELB_V2)
+                .start("DescribeTrustStoresResult")
+                  .start("TrustStores");
+        for (TrustStore ts : stores) {
+            xml.start("member").raw(trustStoreXml(ts)).end("member");
+        }
+        xml.end("TrustStores")
+           .elem("NextMarker", "")
+           .end("DescribeTrustStoresResult")
+           .raw(AwsQueryResponse.responseMetadata())
+           .end("DescribeTrustStoresResponse");
+        return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleModifyTrustStore(MultivaluedMap<String, String> p, String region) {
+        TrustStore trustStore = service.modifyTrustStore(
+                region,
+                p.getFirst("TrustStoreArn"),
+                p.getFirst("CaCertificatesBundleS3Bucket"),
+                p.getFirst("CaCertificatesBundleS3Key"),
+                p.getFirst("CaCertificatesBundleS3ObjectVersion"));
+
+        String xml = new XmlBuilder()
+                .start("ModifyTrustStoreResponse", AwsNamespaces.ELB_V2)
+                .start("ModifyTrustStoreResult")
+                  .start("TrustStores")
+                    .start("member").raw(trustStoreXml(trustStore)).end("member")
+                  .end("TrustStores")
+                .end("ModifyTrustStoreResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("ModifyTrustStoreResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleDeleteTrustStore(MultivaluedMap<String, String> p, String region) {
+        service.deleteTrustStore(region, p.getFirst("TrustStoreArn"));
+        return voidResponse("DeleteTrustStoreResponse");
+    }
+
+    private Response handleGetTrustStoreCaCertificatesBundle(MultivaluedMap<String, String> p, String region) {
+        String location = service.getTrustStoreCaCertificatesBundleLocation(region, p.getFirst("TrustStoreArn"));
+        String xml = new XmlBuilder()
+                .start("GetTrustStoreCaCertificatesBundleResponse", AwsNamespaces.ELB_V2)
+                .start("GetTrustStoreCaCertificatesBundleResult")
+                  .elem("Location", location)
+                .end("GetTrustStoreCaCertificatesBundleResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("GetTrustStoreCaCertificatesBundleResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private Response handleGetTrustStoreRevocationContent(MultivaluedMap<String, String> p, String region) {
+        String location = service.getTrustStoreRevocationContentLocation(
+                region, p.getFirst("TrustStoreArn"), parseLongOrNull(p.getFirst("RevocationId")));
+        String xml = new XmlBuilder()
+                .start("GetTrustStoreRevocationContentResponse", AwsNamespaces.ELB_V2)
+                .start("GetTrustStoreRevocationContentResult")
+                  .elem("Location", location)
+                .end("GetTrustStoreRevocationContentResult")
+                .raw(AwsQueryResponse.responseMetadata())
+                .end("GetTrustStoreRevocationContentResponse")
+                .build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
     // ── XML builders ─────────────────────────────────────────────────────────
 
     private String loadBalancerXml(LoadBalancer lb) {
@@ -897,6 +1029,16 @@ public class ElbV2QueryHandler {
         return xml.build();
     }
 
+    private String trustStoreXml(TrustStore ts) {
+        XmlBuilder xml = new XmlBuilder();
+        xml.elem("Name", safe(ts.getName()));
+        xml.elem("TrustStoreArn", ts.getTrustStoreArn());
+        xml.elem("Status", safe(ts.getStatus()));
+        xml.elem("NumberOfCaCertificates", ts.getNumberOfCaCertificates());
+        xml.elem("TotalRevokedEntries", ts.getTotalRevokedEntries());
+        return xml.build();
+    }
+
     private String ruleXml(Rule r) {
         XmlBuilder xml = new XmlBuilder();
         xml.elem("RuleArn", r.getRuleArn());
@@ -956,6 +1098,32 @@ public class ElbV2QueryHandler {
             if (a.getFixedResponseContentType() != null) xml.elem("ContentType", a.getFixedResponseContentType());
             if (a.getFixedResponseMessageBody() != null) xml.elem("MessageBody", a.getFixedResponseMessageBody());
             xml.end("FixedResponseConfig");
+        }
+        if ("authenticate-oidc".equals(a.getType())) {
+            xml.start("AuthenticateOidcConfig");
+            if (a.getOidcIssuer() != null) xml.elem("Issuer", a.getOidcIssuer());
+            if (a.getOidcAuthorizationEndpoint() != null) xml.elem("AuthorizationEndpoint", a.getOidcAuthorizationEndpoint());
+            if (a.getOidcTokenEndpoint() != null) xml.elem("TokenEndpoint", a.getOidcTokenEndpoint());
+            if (a.getOidcUserInfoEndpoint() != null) xml.elem("UserInfoEndpoint", a.getOidcUserInfoEndpoint());
+            if (a.getOidcClientId() != null) xml.elem("ClientId", a.getOidcClientId());
+            // AWS Describe never echoes ClientSecret.
+            if (a.getOidcScope() != null) xml.elem("Scope", a.getOidcScope());
+            if (a.getOidcSessionCookieName() != null) xml.elem("SessionCookieName", a.getOidcSessionCookieName());
+            if (a.getOidcSessionTimeout() != null) xml.elem("SessionTimeout", a.getOidcSessionTimeout());
+            if (a.getOidcOnUnauthenticatedRequest() != null) {
+                xml.elem("OnUnauthenticatedRequest", a.getOidcOnUnauthenticatedRequest());
+            }
+            if (a.getOidcUseExistingClientSecret() != null) {
+                xml.elem("UseExistingClientSecret", a.getOidcUseExistingClientSecret());
+            }
+            if (!a.getOidcAuthenticationRequestExtraParams().isEmpty()) {
+                xml.start("AuthenticationRequestExtraParams");
+                for (Map.Entry<String, String> e : a.getOidcAuthenticationRequestExtraParams().entrySet()) {
+                    xml.start("entry").elem("key", e.getKey()).elem("value", e.getValue()).end("entry");
+                }
+                xml.end("AuthenticationRequestExtraParams");
+            }
+            xml.end("AuthenticateOidcConfig");
         }
         return xml.build();
     }
@@ -1104,6 +1272,38 @@ public class ElbV2QueryHandler {
                     a.setFixedResponseStatusCode(p.getFirst(prefix + ".member." + i + ".FixedResponseConfig.StatusCode"));
                     a.setFixedResponseContentType(p.getFirst(prefix + ".member." + i + ".FixedResponseConfig.ContentType"));
                     a.setFixedResponseMessageBody(p.getFirst(prefix + ".member." + i + ".FixedResponseConfig.MessageBody"));
+                }
+                case "authenticate-oidc" -> {
+                    String cfg = prefix + ".member." + i + ".AuthenticateOidcConfig";
+                    a.setOidcIssuer(p.getFirst(cfg + ".Issuer"));
+                    a.setOidcAuthorizationEndpoint(p.getFirst(cfg + ".AuthorizationEndpoint"));
+                    a.setOidcTokenEndpoint(p.getFirst(cfg + ".TokenEndpoint"));
+                    a.setOidcUserInfoEndpoint(p.getFirst(cfg + ".UserInfoEndpoint"));
+                    a.setOidcClientId(p.getFirst(cfg + ".ClientId"));
+                    a.setOidcClientSecret(p.getFirst(cfg + ".ClientSecret"));
+                    a.setOidcScope(p.getFirst(cfg + ".Scope"));
+                    a.setOidcSessionCookieName(p.getFirst(cfg + ".SessionCookieName"));
+                    String timeout = p.getFirst(cfg + ".SessionTimeout");
+                    if (timeout != null) a.setOidcSessionTimeout(Long.parseLong(timeout));
+                    a.setOidcOnUnauthenticatedRequest(p.getFirst(cfg + ".OnUnauthenticatedRequest"));
+                    String useExisting = p.getFirst(cfg + ".UseExistingClientSecret");
+                    if (useExisting != null) a.setOidcUseExistingClientSecret(Boolean.parseBoolean(useExisting));
+                    Map<String, String> extra = new LinkedHashMap<>();
+                    int e = 1;
+                    while (true) {
+                        String extraKey = p.getFirst(cfg + ".AuthenticationRequestExtraParams.member." + e + ".key");
+                        if (extraKey == null) {
+                            extraKey = p.getFirst(cfg + ".AuthenticationRequestExtraParams.entry." + e + ".key");
+                        }
+                        if (extraKey == null) break;
+                        String extraVal = p.getFirst(cfg + ".AuthenticationRequestExtraParams.member." + e + ".value");
+                        if (extraVal == null) {
+                            extraVal = p.getFirst(cfg + ".AuthenticationRequestExtraParams.entry." + e + ".value");
+                        }
+                        extra.put(extraKey, extraVal != null ? extraVal : "");
+                        e++;
+                    }
+                    a.setOidcAuthenticationRequestExtraParams(extra);
                 }
             }
             result.add(a);
@@ -1264,6 +1464,11 @@ public class ElbV2QueryHandler {
     private static Integer parseIntOrNull(String s) {
         if (s == null || s.isEmpty()) return null;
         return Integer.parseInt(s);
+    }
+
+    private static Long parseLongOrNull(String s) {
+        if (s == null || s.isEmpty()) return null;
+        return Long.parseLong(s);
     }
 
     private static Boolean parseBoolOrNull(String s) {

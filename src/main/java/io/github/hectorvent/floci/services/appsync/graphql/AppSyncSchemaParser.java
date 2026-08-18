@@ -3,11 +3,14 @@ package io.github.hectorvent.floci.services.appsync.graphql;
 import graphql.GraphQLError;
 import graphql.language.SourceLocation;
 import graphql.parser.InvalidSyntaxException;
+import graphql.schema.DataFetcher;
 import graphql.schema.GraphQLSchema;
+import graphql.schema.idl.FieldWiringEnvironment;
 import graphql.schema.idl.RuntimeWiring;
 import graphql.schema.idl.SchemaGenerator;
 import graphql.schema.idl.SchemaParser;
 import graphql.schema.idl.TypeDefinitionRegistry;
+import graphql.schema.idl.WiringFactory;
 import graphql.schema.idl.errors.SchemaProblem;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.appsync.graphql.scalars.AppSyncScalarRegistry;
@@ -32,6 +35,10 @@ public class AppSyncSchemaParser {
     }
 
     public GraphQLSchema parse(String sdl) {
+        return parse(sdl, null);
+    }
+
+    public GraphQLSchema parse(String sdl, DataFetcher<?> defaultFetcher) {
         String sdlWithDirectives = injectDirectiveDefinitions(sdl);
         validateNoUnknownDirectives(sdl);
 
@@ -56,6 +63,19 @@ public class AppSyncSchemaParser {
         RuntimeWiring.Builder wiringBuilder = RuntimeWiring.newRuntimeWiring();
         for (var entry : scalarRegistry.scalarMap().entrySet()) {
             wiringBuilder = wiringBuilder.scalar(entry.getValue());
+        }
+        if (defaultFetcher != null) {
+            wiringBuilder = wiringBuilder.wiringFactory(new WiringFactory() {
+                @Override
+                public boolean providesDataFetcher(FieldWiringEnvironment environment) {
+                    return !environment.getFieldDefinition().getName().startsWith("__");
+                }
+
+                @Override
+                public DataFetcher<?> getDataFetcher(FieldWiringEnvironment environment) {
+                    return defaultFetcher;
+                }
+            });
         }
 
         try {

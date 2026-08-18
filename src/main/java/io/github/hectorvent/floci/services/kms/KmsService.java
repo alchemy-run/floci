@@ -39,6 +39,7 @@ import org.bouncycastle.jce.ECNamedCurveTable;
 import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec;
 import org.jboss.logging.Logger;
 
+import javax.crypto.KeyAgreement;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.ByteArrayOutputStream;
@@ -125,6 +126,11 @@ public class KmsService {
     }
 
     public KmsKey createKey(String description, String keyUsage, String keySpec, String policy, Map<String, String> tags, String region) {
+        return createKey(description, keyUsage, keySpec, policy, tags, false, region);
+    }
+
+    public KmsKey createKey(String description, String keyUsage, String keySpec, String policy,
+                            Map<String, String> tags, boolean multiRegion, String region) {
         String keyId = resolveKeyId(tags);
         if (keyStore.get(region + "::" + keyId).isPresent()) {
             throw new AwsException("AlreadyExistsException", "Key already exists", 400);
@@ -145,6 +151,7 @@ public class KmsService {
         key.setDescription(description);
         key.setKeyUsage(effectiveUsage);
         key.setKeySpec(effectiveSpec);
+        key.setMultiRegion(multiRegion);
         key.setPolicy(policy != null ? policy : buildDefaultKeyPolicy());
         key.getTags().putAll(ReservedTags.stripReservedTags(tags));
 
@@ -173,44 +180,22 @@ public class KmsService {
 
     private void generateKeyMaterial(KmsKey key) {
         KmsKeySpec spec = key.getKeySpec();
-        try {
-            switch (spec.getKeyType()) {
-                case HMAC -> {
-                    // HMAC keys are symmetric byte strings; generate outside the try block
-                    // so ValidationException (400) isn't rewrapped as InternalFailure (500).
-                    byte[] material = new byte[hmacKeyByteLength(spec)];
-                    new SecureRandom().nextBytes(material);
-                    key.setPrivateKeyEncoded(Base64.getEncoder().encodeToString(material));
-                }
-                case SYMMETRIC -> {/* // Use existing mock behavior for symmetric keys */}
-                case RSA -> {
-                    KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-                    int size = Integer.parseInt(spec.name().substring(4));
-                    generator.initialize(size);
-                    KeyPair pair = generator.generateKeyPair();
-                    key.setPrivateKeyEncoded(Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded()));
-                    key.setPublicKeyEncoded(Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
-                }
-                case ECC -> {
-                    String curveName = spec.curveName();
-
-                    // For secp256k1 (ECC_SECG_P256K1), instantiate BC's SPI directly.
-                    // JCA's ClassLoader.loadClass cannot find BC SPI classes in GraalVM native image
-                    // unless they are allocated directly in code (GraalVM escape analysis eliminates
-                    // unused allocations, keeping them out of the native image type registry).
-                    KeyPairGenerator generator = isSecgP256k1(spec)
-                            ? new KeyPairGeneratorSpi.EC()
-                            : KeyPairGenerator.getInstance("EC");
-                    generator.initialize(new ECGenParameterSpec(curveName));
-                    KeyPair pair = generator.generateKeyPair();
-                    key.setPrivateKeyEncoded(Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded()));
-                    key.setPublicKeyEncoded(Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
-                }
-                default ->
-                        throw new AwsException("InvalidCustomerMasterKeySpecException", "Unsupported key spec: " + spec, 400);
+        switch (spec.getKeyType()) {
+            case HMAC -> {
+                // HMAC keys are symmetric byte strings; generate outside a catch-all
+                // so ValidationException (400) isn't rewrapped as InternalFailure (500).
+                byte[] material = new byte[hmacKeyByteLength(spec)];
+                new SecureRandom().nextBytes(material);
+                key.setPrivateKeyEncoded(Base64.getEncoder().encodeToString(material));
             }
-        } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException e) {
-            throw new AwsException("InternalFailure", "Failed to generate key material: " + e.getMessage(), 500);
+            case SYMMETRIC -> {/* // Use existing mock behavior for symmetric keys */}
+            case RSA, ECC -> {
+                KeyPair pair = generateAsymmetricKeyPair(spec);
+                key.setPrivateKeyEncoded(Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded()));
+                key.setPublicKeyEncoded(Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
+            }
+            default ->
+                    throw new AwsException("InvalidCustomerMasterKeySpecException", "Unsupported key spec: " + spec, 400);
         }
     }
 
@@ -463,13 +448,16 @@ public class KmsService {
     public void scheduleKeyDeletion(String keyId, int pendingWindowInDays, String region) {
         KmsKey key = resolveKey(keyId, region);
         key.setKeyState("PendingDeletion");
+        key.setEnabled(false);
         key.setDeletionDate(Instant.now().plusSeconds((long) pendingWindowInDays * 86400).getEpochSecond());
         keyStore.put(region + "::" + key.getKeyId(), key);
     }
 
     public void cancelKeyDeletion(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
-        key.setKeyState("Enabled");
+        // AWS CancelKeyDeletion leaves the key Disabled; callers must EnableKey.
+        key.setKeyState("Disabled");
+        key.setEnabled(false);
         key.setDeletionDate(0);
         keyStore.put(region + "::" + key.getKeyId(), key);
     }
@@ -519,18 +507,39 @@ public class KmsService {
 
     // ──────────────────────────── Key Rotation ────────────────────────────
 
-    public boolean getKeyRotationStatus(String keyId, String region) {
+    public record KeyRotationStatus(boolean keyRotationEnabled, Integer rotationPeriodInDays) {}
+
+    public KeyRotationStatus getKeyRotationStatus(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
         if (KmsKeyUsage.ENCRYPT_DECRYPT != key.getKeyUsage()
                 || KmsKeySpec.SYMMETRIC_DEFAULT != key.getKeySpec()) {
-            return false;
+            return new KeyRotationStatus(false, null);
         }
-        return key.isKeyRotationEnabled();
+        if (!key.isKeyRotationEnabled()) {
+            return new KeyRotationStatus(false, null);
+        }
+        int period = key.getRotationPeriodInDays() > 0 ? key.getRotationPeriodInDays() : DEFAULT_ROTATION_PERIOD_DAYS;
+        return new KeyRotationStatus(true, period);
     }
 
     public void enableKeyRotation(String keyId, String region) {
+        enableKeyRotation(keyId, null, region);
+    }
+
+    public void enableKeyRotation(String keyId, Integer rotationPeriodInDays, String region) {
         KmsKey key = resolveKey(keyId, region);
         validateRotationSupported(key);
+        if (rotationPeriodInDays != null) {
+            if (rotationPeriodInDays < MIN_ROTATION_PERIOD_DAYS || rotationPeriodInDays > MAX_ROTATION_PERIOD_DAYS) {
+                throw new AwsException("ValidationException",
+                        "RotationPeriodInDays must be between " + MIN_ROTATION_PERIOD_DAYS
+                                + " and " + MAX_ROTATION_PERIOD_DAYS + ".",
+                        400);
+            }
+            key.setRotationPeriodInDays(rotationPeriodInDays);
+        } else if (key.getRotationPeriodInDays() <= 0) {
+            key.setRotationPeriodInDays(DEFAULT_ROTATION_PERIOD_DAYS);
+        }
         key.setKeyRotationEnabled(true);
         keyStore.put(region + "::" + key.getKeyId(), key);
         LOG.infov("Enabled key rotation for KMS key: {0} in {1}", key.getKeyId(), region);
@@ -565,6 +574,9 @@ public class KmsService {
     }
 
     private static final int ON_DEMAND_ROTATION_LIMIT = 25;
+    private static final int DEFAULT_ROTATION_PERIOD_DAYS = 365;
+    private static final int MIN_ROTATION_PERIOD_DAYS = 90;
+    private static final int MAX_ROTATION_PERIOD_DAYS = 2560;
     public String rotateKeyOnDemand(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
         if (!key.isEnabled()) {
@@ -597,12 +609,30 @@ public class KmsService {
         if (!aliasName.startsWith("alias/")) {
             throw new AwsException("InvalidAliasNameException", "Alias name must begin with 'alias/'", 400);
         }
+        String storageKey = region + "::" + aliasName;
+        if (aliasStore.get(storageKey).isPresent()) {
+            throw new AwsException("AlreadyExistsException",
+                    "An alias with the name " + aliasName + " already exists", 400);
+        }
         KmsKey key = resolveKey(targetKeyId, region); // Validate key exists and normalize to plain key ID
 
         String aliasArn = regionResolver.buildArn("kms", region, aliasName);
         KmsAlias alias = new KmsAlias(aliasName, aliasArn, key.getKeyId());
-        aliasStore.put(region + "::" + aliasName, alias);
+        aliasStore.put(storageKey, alias);
         LOG.infov("Created KMS alias: {0} -> {1}", aliasName, key.getKeyId());
+    }
+
+    public void updateAlias(String aliasName, String targetKeyId, String region) {
+        if (aliasName == null || !aliasName.startsWith("alias/")) {
+            throw new AwsException("InvalidAliasNameException", "Alias name must begin with 'alias/'", 400);
+        }
+        String storageKey = region + "::" + aliasName;
+        KmsAlias alias = aliasStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("NotFoundException", "Alias not found: " + aliasName, 404));
+        KmsKey key = resolveKey(targetKeyId, region);
+        alias.setTargetKeyId(key.getKeyId());
+        aliasStore.put(storageKey, alias);
+        LOG.infov("Updated KMS alias: {0} -> {1}", aliasName, key.getKeyId());
     }
 
     public void deleteAlias(String aliasName, String region) {
@@ -977,6 +1007,135 @@ public class KmsService {
         result.put("CiphertextBlob", ciphertext);
         result.put("KeyId", resolveKey(keyId, region).getArn());
         return result;
+    }
+
+    public Map<String, Object> generateDataKeyPair(String keyId, String keyPairSpec,
+                                                   Map<String, String> encryptionContext, String region) {
+        if (keyPairSpec == null || keyPairSpec.isBlank()) {
+            throw new AwsException("ValidationException", "KeyPairSpec is required", 400);
+        }
+        KmsKey wrappingKey = resolveKey(keyId, region);
+        if (!wrappingKey.isEnabled()) {
+            throw new AwsException("DisabledException",
+                    "KMS key " + wrappingKey.getKeyId() + " is disabled.", 400);
+        }
+        if (KmsKeyUsage.ENCRYPT_DECRYPT != wrappingKey.getKeyUsage()
+                || KmsKeySpec.SYMMETRIC_DEFAULT != wrappingKey.getKeySpec()) {
+            throw new AwsException("UnsupportedOperationException",
+                    "GenerateDataKeyPair is only supported on symmetric ENCRYPT_DECRYPT keys.", 400);
+        }
+        KmsKeySpec spec = KmsKeySpec.fromString(keyPairSpec);
+        if (spec.getKeyType() != KmsKeySpec.KeyType.RSA && spec.getKeyType() != KmsKeySpec.KeyType.ECC) {
+            throw new AwsException("ValidationException",
+                    "KeyPairSpec " + keyPairSpec + " is not a valid data-key pair spec.", 400);
+        }
+        KeyPair pair = generateAsymmetricKeyPair(spec);
+        byte[] privateDer = pair.getPrivate().getEncoded();
+        byte[] publicDer = pair.getPublic().getEncoded();
+        byte[] ciphertext = encrypt(keyId, privateDer, encryptionContext, region);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("PrivateKeyPlaintext", privateDer);
+        result.put("PrivateKeyCiphertextBlob", ciphertext);
+        result.put("PublicKey", publicDer);
+        result.put("KeyPairSpec", spec.name());
+        result.put("KeyId", wrappingKey.getArn());
+        return result;
+    }
+
+    public record DeriveSharedSecretResult(byte[] sharedSecret, String keyArn, String algorithm) {}
+
+    public DeriveSharedSecretResult deriveSharedSecret(String keyId, byte[] publicKeyDer, String algorithm, String region) {
+        if (algorithm == null || algorithm.isBlank()) {
+            throw new AwsException("ValidationException", "KeyAgreementAlgorithm is required", 400);
+        }
+        if (!"ECDH".equals(algorithm)) {
+            throw new AwsException("ValidationException", "KeyAgreementAlgorithm must be ECDH", 400);
+        }
+        if (publicKeyDer == null || publicKeyDer.length == 0) {
+            throw new AwsException("ValidationException", "PublicKey is required", 400);
+        }
+        KmsKey key = resolveKey(keyId, region);
+        if (!key.isEnabled()) {
+            throw new AwsException("DisabledException",
+                    "KMS key " + key.getKeyId() + " is disabled.", 400);
+        }
+        if (KmsKeyUsage.KEY_AGREEMENT != key.getKeyUsage()) {
+            throw new AwsException("InvalidKeyUsageException",
+                    "DeriveSharedSecret requires a key with KeyUsage KEY_AGREEMENT.", 400);
+        }
+        try {
+            PrivateKey privateKey = loadPrivateKey(key.getPrivateKeyEncoded(), key.getKeySpec());
+            PublicKey peerPublic = loadPublicKey(
+                    Base64.getEncoder().encodeToString(publicKeyDer), key.getKeySpec());
+            byte[] secret = isSecgP256k1(key.getKeySpec())
+                    ? ecdhSecgP256k1(privateKey, peerPublic)
+                    : ecdhJca(privateKey, peerPublic);
+            return new DeriveSharedSecretResult(secret, key.getArn(), algorithm);
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AwsException("InvalidKeyUsageException",
+                    "Unable to derive shared secret: " + e.getMessage(), 400);
+        }
+    }
+
+    private KeyPair generateAsymmetricKeyPair(KmsKeySpec spec) {
+        try {
+            return switch (spec.getKeyType()) {
+                case RSA -> {
+                    KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+                    int size = Integer.parseInt(spec.name().substring(4));
+                    generator.initialize(size);
+                    yield generator.generateKeyPair();
+                }
+                case ECC -> {
+                    // For secp256k1 (ECC_SECG_P256K1), instantiate BC's SPI directly.
+                    // JCA's ClassLoader.loadClass cannot find BC SPI classes in GraalVM native image
+                    // unless they are allocated directly in code (GraalVM escape analysis eliminates
+                    // unused allocations, keeping them out of the native image type registry).
+                    KeyPairGenerator generator = isSecgP256k1(spec)
+                            ? new KeyPairGeneratorSpi.EC()
+                            : KeyPairGenerator.getInstance("EC");
+                    generator.initialize(new ECGenParameterSpec(spec.curveName()));
+                    yield generator.generateKeyPair();
+                }
+                default -> throw new AwsException("ValidationException",
+                        "Unsupported key pair spec: " + spec, 400);
+            };
+        } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException e) {
+            throw new AwsException("InternalFailure", "Failed to generate key material: " + e.getMessage(), 500);
+        }
+    }
+
+    private static byte[] ecdhJca(PrivateKey privateKey, PublicKey peerPublic) throws Exception {
+        KeyAgreement agreement = KeyAgreement.getInstance("ECDH");
+        agreement.init(privateKey);
+        agreement.doPhase(peerPublic, true);
+        return agreement.generateSecret();
+    }
+
+    private static byte[] ecdhSecgP256k1(PrivateKey privateKey, PublicKey peerPublic) {
+        org.bouncycastle.jce.spec.ECNamedCurveParameterSpec spec =
+                ECNamedCurveTable.getParameterSpec("secp256k1");
+        ECDomainParameters domain = new ECDomainParameters(spec.getCurve(), spec.getG(), spec.getN(), spec.getH());
+        org.bouncycastle.crypto.agreement.ECDHBasicAgreement agreement =
+                new org.bouncycastle.crypto.agreement.ECDHBasicAgreement();
+        agreement.init(new ECPrivateKeyParameters(((BCECPrivateKey) privateKey).getD(), domain));
+        BigInteger z = agreement.calculateAgreement(
+                new ECPublicKeyParameters(((BCECPublicKey) peerPublic).getQ(), domain));
+        byte[] secret = z.toByteArray();
+        // ECDH shared secret is the unsigned x-coordinate, left-padded to the field size (32 for P-256k1).
+        if (secret.length == 32) {
+            return secret;
+        }
+        byte[] padded = new byte[32];
+        if (secret.length > 32) {
+            System.arraycopy(secret, secret.length - 32, padded, 0, 32);
+        } else {
+            System.arraycopy(secret, 0, padded, 32 - secret.length, secret.length);
+        }
+        return padded;
     }
 
     // ──────────────────────────── Tags ────────────────────────────

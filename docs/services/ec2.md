@@ -168,6 +168,8 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | DescribeInstanceStatus | Returns status records for stored instances. |
 | DescribeInstanceAttribute | Returns a supported attribute for an instance. |
 | ModifyInstanceAttribute | Updates supported mutable attributes for an instance. |
+| GetConsoleOutput | Returns dummy console output for a stored instance. |
+| GetPasswordData | Returns empty password data for a stored instance. |
 
 ### VPCs
 
@@ -182,6 +184,18 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | CreateVpcEndpoint | Creates a VPC endpoint record. |
 | DescribeVpcEndpoints | Lists or returns stored VPC endpoints. |
 | DeleteVpcEndpoints | Deletes VPC endpoint records. |
+| ModifyVpcEndpoint | Updates route tables, subnets, security groups, policy, and DNS options. |
+| CreateVpcPeeringConnection | Creates a VPC peering connection in `pending-acceptance`. |
+| AcceptVpcPeeringConnection | Marks a peering connection `active`. |
+| DeleteVpcPeeringConnection | Deletes a VPC peering connection. |
+| DescribeVpcPeeringConnections | Lists or returns stored VPC peering connections. |
+| CreateEgressOnlyInternetGateway | Creates an egress-only internet gateway attached to a VPC. |
+| DeleteEgressOnlyInternetGateway | Deletes an egress-only internet gateway. |
+| DescribeEgressOnlyInternetGateways | Lists or returns stored egress-only internet gateways. |
+| CreateDhcpOptions | Creates a DHCP options set. |
+| AssociateDhcpOptions | Associates a DHCP options set with a VPC. |
+| DeleteDhcpOptions | Deletes a DHCP options set. |
+| DescribeDhcpOptions | Lists or returns stored DHCP options sets. |
 | CreateDefaultVpc | Creates or returns the default VPC for the region. |
 | AssociateVpcCidrBlock | Adds a secondary CIDR block association to a VPC. |
 | DisassociateVpcCidrBlock | Removes a secondary CIDR block association from a VPC. |
@@ -191,7 +205,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Action | Description |
 |--------|-------------|
 | CreateSubnet | Creates a subnet in a VPC. |
-| DescribeSubnets | Lists or returns stored subnets. |
+| DescribeSubnets | Lists or returns stored subnets. A missing `SubnetId` is `InvalidSubnetID.NotFound`. |
 | DeleteSubnet | Deletes a subnet from the local EC2 store. |
 | ModifySubnetAttribute | Updates supported subnet attributes. |
 
@@ -200,7 +214,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Action | Description |
 |--------|-------------|
 | CreateSecurityGroup | Creates a security group in a VPC. |
-| DescribeSecurityGroups | Lists or returns stored security groups. |
+| DescribeSecurityGroups | Lists or returns stored security groups. A missing `GroupId` is `InvalidGroup.NotFound`. |
 | DeleteSecurityGroup | Deletes a security group from the local EC2 store. |
 | AuthorizeSecurityGroupIngress | Adds inbound permissions to a security group. |
 | AuthorizeSecurityGroupEgress | Adds outbound permissions to a security group. |
@@ -215,8 +229,8 @@ Floci seeds the following resources on first use in each region so Terraform, th
 
 | Action | Description |
 |--------|-------------|
-| CreateKeyPair | Creates and stores a local key pair. |
-| DescribeKeyPairs | Lists or returns stored key pairs. |
+| CreateKeyPair | Creates and stores a local key pair (`KeyType` + create-time tags). Dummy PEM key material. |
+| DescribeKeyPairs | Lists or returns stored key pairs. A missing name or `KeyPairId` is `InvalidKeyPair.NotFound`. |
 | DeleteKeyPair | Deletes a key pair from the local EC2 store. |
 | ImportKeyPair | Imports a public key as a local key pair. |
 
@@ -239,7 +253,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Action | Description |
 |--------|-------------|
 | CreateInternetGateway | Creates an internet gateway. |
-| DescribeInternetGateways | Lists or returns stored internet gateways. |
+| DescribeInternetGateways | Lists or returns stored internet gateways. A missing `InternetGatewayId` is `InvalidInternetGatewayID.NotFound`. |
 | DeleteInternetGateway | Deletes an internet gateway. |
 | AttachInternetGateway | Attaches an internet gateway to a VPC. |
 | DetachInternetGateway | Detaches an internet gateway from a VPC. |
@@ -249,11 +263,12 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Action | Description |
 |--------|-------------|
 | CreateRouteTable | Creates a route table in a VPC. |
-| DescribeRouteTables | Lists or returns stored route tables. |
+| DescribeRouteTables | Lists or returns stored route tables. A missing `RouteTableId` is `InvalidRouteTableID.NotFound`. |
 | DeleteRouteTable | Deletes a route table from the local EC2 store. |
-| AssociateRouteTable | Associates a route table with a subnet. |
+| AssociateRouteTable | Associates a route table with a subnet or gateway. |
 | DisassociateRouteTable | Removes a route table association. |
-| CreateRoute | Adds a route to a route table. |
+| ReplaceRouteTableAssociation | Moves a subnet/gateway association to another route table. |
+| CreateRoute | Adds a route to a route table (IPv4, IPv6, or prefix-list destination). |
 | ReplaceRoute | Replaces the target of an existing route. |
 | DeleteRoute | Removes a route from a route table. |
 
@@ -262,7 +277,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Action | Description |
 |--------|-------------|
 | CreateNetworkAcl | Creates a network ACL in a VPC. |
-| DescribeNetworkAcls | Lists or returns stored network ACLs. |
+| DescribeNetworkAcls | Lists or returns stored network ACLs. A missing `NetworkAclId` is `InvalidNetworkAclID.NotFound`. |
 | DeleteNetworkAcl | Deletes a network ACL from the local EC2 store. |
 | CreateNetworkAclEntry | Adds an entry to a network ACL. |
 | ReplaceNetworkAclEntry | Replaces an entry in a network ACL. |
@@ -273,7 +288,12 @@ Floci seeds the following resources on first use in each region so Terraform, th
 
 | Action | Description |
 |--------|-------------|
-| DescribePrefixLists | Returns prefix lists known to the local EC2 service. |
+| DescribePrefixLists | Returns AWS-managed prefix lists known to the local EC2 service. |
+| CreateManagedPrefixList | Creates a customer-managed prefix list. |
+| ModifyManagedPrefixList | Updates name, max entries, or CIDR entries and increments version. |
+| DeleteManagedPrefixList | Deletes a customer-managed prefix list. |
+| DescribeManagedPrefixLists | Lists or returns customer-managed prefix lists. |
+| GetManagedPrefixListEntries | Returns CIDR entries for a customer-managed prefix list. |
 
 ### NAT Gateways
 
@@ -288,7 +308,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Action | Description |
 |--------|-------------|
 | AllocateAddress | Allocates an Elastic IP address record. |
-| DescribeAddresses | Lists or returns stored Elastic IP address records. |
+| DescribeAddresses | Lists or returns stored Elastic IP address records. A missing `AllocationId` is `InvalidAllocationID.NotFound`. |
 | DescribeAddressesAttribute | Returns allocation ID and public IP attributes for Elastic IP addresses. |
 | AssociateAddress | Associates an Elastic IP address with a resource. |
 | DisassociateAddress | Removes an Elastic IP address association. |
@@ -332,7 +352,12 @@ Launch templates store versioned launch data. New template versions can be creat
 
 | Action | Description |
 |--------|-------------|
-| DescribeNetworkInterfaces | Lists network interfaces known to the local EC2 service. |
+| DescribeNetworkInterfaces | Lists instance-attached and standalone network interfaces. |
+| CreateNetworkInterface | Creates a standalone network interface in a subnet. |
+| DeleteNetworkInterface | Deletes a standalone network interface. |
+| ModifyNetworkInterfaceAttribute | Updates description, source/dest check, or security groups. |
+| AttachNetworkInterface | Attaches a standalone network interface to an instance. |
+| DetachNetworkInterface | Detaches a standalone network interface. |
 
 ### Volumes
 
@@ -341,6 +366,9 @@ Launch templates store versioned launch data. New template versions can be creat
 | CreateVolume | Creates an EBS volume record. |
 | DescribeVolumes | Lists or returns stored EBS volume records. |
 | DeleteVolume | Deletes an EBS volume record. |
+| ModifyVolume | Updates size, type, IOPS, or throughput on a volume. |
+| CreateSnapshot | Creates a completed snapshot of a volume. |
+| DeleteSnapshot | Deletes a snapshot. |
 
 ## Configuration
 
@@ -445,7 +473,9 @@ aws ec2 associate-address \
 
 ## Notes
 
+- Peering connections, egress-only IGWs, DHCP options, customer-managed prefix lists, and standalone ENIs are in-memory only (not persisted across emulator restarts).
 - `DescribeImages` returns AMIs from the EC2 image catalog, including common AMIs and Floci-native AMI IDs.
-- Key material returned by `CreateKeyPair` is a dummy RSA PEM — not usable for real SSH. Use `ImportKeyPair` for working SSH access.
+- Key material returned by `CreateKeyPair` is dummy PEM — not usable for real SSH. Use `ImportKeyPair` for working SSH access.
+- Default VPC seed (`vpc-default` / `subnet-default-a|b|c`) runs when that VPC is missing, even if other VPCs already exist. `CreateDefaultVpc` reseeds after a delete.
 - Security group rules are not enforced as a firewall (Docker bridge networking handles routing), but TCP ingress rules opened to a CIDR source are published on the host via socat sidecars so the instance's app is reachable from `localhost` — see [Security Group Port Publishing](#security-group-port-publishing).
 - The IMDS server identifies which instance is calling via IMDSv2 tokens (mapped at token issuance time) or by the container's bridge IP for IMDSv1.

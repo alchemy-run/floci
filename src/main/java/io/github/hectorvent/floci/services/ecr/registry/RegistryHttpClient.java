@@ -140,6 +140,99 @@ public class RegistryHttpClient {
         return new ManifestResult(digest, resp.body(), mediaType);
     }
 
+    /**
+     * HEAD a blob. Returns the {@code Content-Length} when the blob exists, or
+     * {@code null} when it does not.
+     */
+    public Long headBlob(String name, String digest) throws IOException, InterruptedException {
+        HttpResponse<Void> resp = http.send(
+                HttpRequest.newBuilder(URI.create(baseUrl + "/v2/" + name + "/blobs/" + digest))
+                        .timeout(Duration.ofSeconds(10))
+                        .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                HttpResponse.BodyHandlers.discarding());
+        if (resp.statusCode() == 404) {
+            return null;
+        }
+        if (resp.statusCode() >= 400) {
+            LOG.warnv("Registry HEAD blob {0}/{1} returned {2}", name, digest, resp.statusCode());
+            return null;
+        }
+        return resp.headers().firstValueAsLong("Content-Length").orElse(0L);
+    }
+
+    /**
+     * Monolithic blob upload: {@code POST /blobs/uploads/} then
+     * {@code PUT <location>?digest=} with the full body.
+     */
+    public boolean putBlob(String name, String digest, byte[] data) throws IOException, InterruptedException {
+        HttpResponse<Void> start = http.send(
+                HttpRequest.newBuilder(URI.create(baseUrl + "/v2/" + name + "/blobs/uploads/"))
+                        .timeout(Duration.ofSeconds(10))
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                HttpResponse.BodyHandlers.discarding());
+        if (start.statusCode() >= 400) {
+            LOG.warnv("Registry start blob upload {0} returned {1}", name, start.statusCode());
+            return false;
+        }
+        String location = start.headers().firstValue("Location").orElse(null);
+        if (location == null || location.isBlank()) {
+            LOG.warnv("Registry start blob upload {0} omitted Location", name);
+            return false;
+        }
+        String putUrl = resolveUploadLocation(location, digest);
+        HttpResponse<Void> put = http.send(
+                HttpRequest.newBuilder(URI.create(putUrl))
+                        .timeout(Duration.ofSeconds(30))
+                        .header("Content-Type", "application/octet-stream")
+                        .PUT(HttpRequest.BodyPublishers.ofByteArray(data == null ? new byte[0] : data))
+                        .build(),
+                HttpResponse.BodyHandlers.discarding());
+        if (put.statusCode() >= 400) {
+            LOG.warnv("Registry PUT blob {0}/{1} returned {2}", name, digest, put.statusCode());
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * PUT a manifest by tag or digest. Returns the {@code Docker-Content-Digest}
+     * header, or {@code null} on failure.
+     */
+    public String putManifest(String name, String reference, String body, String mediaType)
+            throws IOException, InterruptedException {
+        String contentType = (mediaType == null || mediaType.isBlank())
+                ? "application/vnd.docker.distribution.manifest.v2+json"
+                : mediaType;
+        HttpResponse<String> resp = http.send(
+                HttpRequest.newBuilder(URI.create(baseUrl + "/v2/" + name + "/manifests/" + reference))
+                        .timeout(Duration.ofSeconds(10))
+                        .header("Content-Type", contentType)
+                        .PUT(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() >= 400) {
+            LOG.warnv("Registry PUT manifest {0}/{1} returned {2}: {3}",
+                    name, reference, resp.statusCode(), resp.body());
+            return null;
+        }
+        return resp.headers().firstValue("Docker-Content-Digest").orElse(null);
+    }
+
+    private String resolveUploadLocation(String location, String digest) {
+        String url;
+        if (location.startsWith("http://") || location.startsWith("https://")) {
+            url = location;
+        } else if (location.startsWith("/")) {
+            url = baseUrl + location;
+        } else {
+            url = baseUrl + "/" + location;
+        }
+        String sep = url.contains("?") ? "&" : "?";
+        return url + sep + "digest=" + digest;
+    }
+
     /** DELETE a manifest by digest. Returns true on 202/200, false on 404. */
     public boolean deleteManifest(String name, String digest) throws IOException, InterruptedException {
         HttpResponse<Void> resp = http.send(

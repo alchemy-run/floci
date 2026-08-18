@@ -4,10 +4,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.glue.model.Column;
+import io.github.hectorvent.floci.services.glue.model.Connection;
+import io.github.hectorvent.floci.services.glue.model.Crawler;
 import io.github.hectorvent.floci.services.glue.model.Database;
+import io.github.hectorvent.floci.services.glue.model.Job;
+import io.github.hectorvent.floci.services.glue.model.JobRun;
 import io.github.hectorvent.floci.services.glue.model.Partition;
 import io.github.hectorvent.floci.services.glue.model.SchemaReference;
 import io.github.hectorvent.floci.services.glue.model.StorageDescriptor;
@@ -34,6 +39,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -62,6 +68,12 @@ public class GlueService {
     private final StorageBackend<String, Partition> partitionStore;
     private final StorageBackend<String, Map<String, Object>> partitionColumnStatisticsStore;
     private final StorageBackend<String, UserDefinedFunction> functionStore;
+    private final StorageBackend<String, Job> jobStore;
+    private final StorageBackend<String, JobRun> jobRunStore;
+    private final StorageBackend<String, Map<String, Object>> jobBookmarkStore;
+    private final StorageBackend<String, Crawler> crawlerStore;
+    private final StorageBackend<String, Connection> connectionStore;
+    private final StorageBackend<String, Map<String, String>> resourceTagStore;
     private final GlueSchemaRegistryService schemaRegistryService;
     private final RegionResolver regionResolver;
     private final ResourceGroupsTaggingService resourceGroupsTaggingService;
@@ -79,6 +91,12 @@ public class GlueService {
         this.partitionColumnStatisticsStore = storageFactory.create(
                 "glue", "partition_column_statistics.json", new TypeReference<>() {});
         this.functionStore = storageFactory.create("glue", "functions.json", new TypeReference<>() {});
+        this.jobStore = storageFactory.create("glue", "jobs.json", new TypeReference<>() {});
+        this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
+        this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
+        this.crawlerStore = storageFactory.create("glue", "crawlers.json", new TypeReference<>() {});
+        this.connectionStore = storageFactory.create("glue", "connections.json", new TypeReference<>() {});
+        this.resourceTagStore = storageFactory.create("glue", "resource_tags.json", new TypeReference<>() {});
         this.schemaRegistryService = schemaRegistryService;
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
@@ -101,6 +119,12 @@ public class GlueService {
         this.partitionStore = partitionStore;
         this.partitionColumnStatisticsStore = partitionColumnStatisticsStore;
         this.functionStore = functionStore;
+        this.jobStore = new InMemoryStorage<>();
+        this.jobRunStore = new InMemoryStorage<>();
+        this.jobBookmarkStore = new InMemoryStorage<>();
+        this.crawlerStore = new InMemoryStorage<>();
+        this.connectionStore = new InMemoryStorage<>();
+        this.resourceTagStore = new InMemoryStorage<>();
         this.schemaRegistryService = schemaRegistryService;
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
@@ -638,6 +662,310 @@ public class GlueService {
             throw new AwsException("InvalidInputException", field + " is required", 400);
         }
         return value;
+    }
+
+    // ---- Jobs / crawlers / connections -----------------------------------
+
+    public void createJob(Job job, Map<String, String> tags, String region) {
+        if (job.getName() == null || job.getName().isBlank()) {
+            throw new AwsException("InvalidInputException", "Name is required", 400);
+        }
+        if (jobStore.get(job.getName()).isPresent()) {
+            throw new AwsException("AlreadyExistsException", "Job already exists: " + job.getName(), 400);
+        }
+        Instant now = Instant.now();
+        job.setCreatedOn(now);
+        job.setLastModifiedOn(now);
+        jobStore.put(job.getName(), job);
+        putResourceTags(jobArn(region, job.getName()), tags, region);
+        LOG.infov("Created Glue Job: {0}", job.getName());
+    }
+
+    public Job getJob(String name) {
+        return jobStore.get(name)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Job not found: " + name, 400));
+    }
+
+    public List<Job> getJobs() {
+        return jobStore.scan(k -> true).stream()
+                .sorted(Comparator.comparing(Job::getName))
+                .toList();
+    }
+
+    public void updateJob(String name, Job update) {
+        Job existing = getJob(name);
+        update.setName(name);
+        update.setCreatedOn(existing.getCreatedOn());
+        update.setLastModifiedOn(Instant.now());
+        jobStore.put(name, update);
+    }
+
+    public void deleteJob(String name, String region) {
+        jobStore.delete(name);
+        jobRunStore.scan(k -> true).stream()
+                .filter(run -> name.equals(run.getJobName()))
+                .map(JobRun::getId)
+                .forEach(jobRunStore::delete);
+        jobBookmarkStore.delete(name);
+        deleteResourceTags(jobArn(region, name), region);
+    }
+
+    public String startJobRun(String jobName, Map<String, String> arguments) {
+        getJob(jobName);
+        JobRun run = new JobRun();
+        run.setId(UUID.randomUUID().toString());
+        run.setJobName(jobName);
+        run.setJobRunState("SUCCEEDED");
+        Instant now = Instant.now();
+        run.setStartedOn(now);
+        run.setCompletedOn(now);
+        run.setArguments(arguments);
+        jobRunStore.put(run.getId(), run);
+        jobBookmarkStore.put(jobName, defaultBookmark(jobName, run.getId()));
+        return run.getId();
+    }
+
+    public JobRun getJobRun(String jobName, String runId) {
+        JobRun run = jobRunStore.get(runId)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Job run not found: " + runId, 400));
+        if (!jobName.equals(run.getJobName())) {
+            throw new AwsException("EntityNotFoundException", "Job run not found: " + runId, 400);
+        }
+        return run;
+    }
+
+    public List<JobRun> getJobRuns(String jobName) {
+        getJob(jobName);
+        return jobRunStore.scan(k -> true).stream()
+                .filter(run -> jobName.equals(run.getJobName()))
+                .sorted(Comparator.comparing(JobRun::getStartedOn, Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
+    }
+
+    public Map<String, Object> batchStopJobRun(String jobName, List<String> jobRunIds) {
+        List<Map<String, Object>> successful = new ArrayList<>();
+        List<Map<String, Object>> errors = new ArrayList<>();
+        for (String runId : jobRunIds == null ? List.<String>of() : jobRunIds) {
+            Optional<JobRun> found = jobRunStore.get(runId);
+            if (found.isEmpty() || !jobName.equals(found.get().getJobName())) {
+                errors.add(Map.of(
+                        "JobName", jobName,
+                        "JobRunId", runId,
+                        "ErrorDetail", Map.of(
+                                "ErrorCode", "EntityNotFoundException",
+                                "ErrorMessage", "Job run not found: " + runId)));
+                continue;
+            }
+            JobRun run = found.get();
+            if ("RUNNING".equals(run.getJobRunState()) || "STARTING".equals(run.getJobRunState())
+                    || "STOPPING".equals(run.getJobRunState())) {
+                run.setJobRunState("STOPPED");
+                run.setCompletedOn(Instant.now());
+                jobRunStore.put(runId, run);
+            }
+            successful.add(Map.of("JobName", jobName, "JobRunId", runId));
+        }
+        return Map.of("SuccessfulSubmissions", successful, "Errors", errors);
+    }
+
+    public Map<String, Object> getJobBookmark(String jobName, String runId) {
+        getJob(jobName);
+        return jobBookmarkStore.get(jobName)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException",
+                        "Job bookmark not found: " + jobName, 400));
+    }
+
+    public Map<String, Object> resetJobBookmark(String jobName, String runId) {
+        getJob(jobName);
+        if (jobBookmarkStore.get(jobName).isEmpty()) {
+            throw new AwsException("EntityNotFoundException",
+                    "Job bookmark not found: " + jobName, 400);
+        }
+        Map<String, Object> bookmark = defaultBookmark(jobName, runId);
+        jobBookmarkStore.put(jobName, bookmark);
+        return bookmark;
+    }
+
+    public void createCrawler(Crawler crawler, Map<String, String> tags, String region) {
+        if (crawler.getName() == null || crawler.getName().isBlank()) {
+            throw new AwsException("InvalidInputException", "Name is required", 400);
+        }
+        if (crawlerStore.get(crawler.getName()).isPresent()) {
+            throw new AwsException("AlreadyExistsException", "Crawler already exists: " + crawler.getName(), 400);
+        }
+        Instant now = Instant.now();
+        crawler.setState("READY");
+        crawler.setCreationTime(now);
+        crawler.setLastUpdated(now);
+        crawlerStore.put(crawler.getName(), crawler);
+        putResourceTags(crawlerArn(region, crawler.getName()), tags, region);
+        LOG.infov("Created Glue Crawler: {0}", crawler.getName());
+    }
+
+    public Crawler getCrawler(String name) {
+        return crawlerStore.get(name)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Crawler not found: " + name, 400));
+    }
+
+    public List<Crawler> getCrawlers() {
+        return crawlerStore.scan(k -> true).stream()
+                .sorted(Comparator.comparing(Crawler::getName))
+                .toList();
+    }
+
+    public void updateCrawler(Crawler update) {
+        Crawler existing = getCrawler(update.getName());
+        if ("RUNNING".equals(existing.getState())) {
+            throw new AwsException("CrawlerRunningException", "Crawler is running: " + update.getName(), 400);
+        }
+        update.setState(existing.getState());
+        update.setCreationTime(existing.getCreationTime());
+        update.setLastUpdated(Instant.now());
+        crawlerStore.put(update.getName(), update);
+    }
+
+    public void deleteCrawler(String name, String region) {
+        Crawler existing = getCrawler(name);
+        if ("RUNNING".equals(existing.getState())) {
+            throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
+        }
+        crawlerStore.delete(name);
+        deleteResourceTags(crawlerArn(region, name), region);
+    }
+
+    public void startCrawler(String name) {
+        Crawler crawler = getCrawler(name);
+        if ("RUNNING".equals(crawler.getState())) {
+            throw new AwsException("CrawlerRunningException", "Crawler is already running: " + name, 400);
+        }
+        crawler.setState("RUNNING");
+        crawler.setLastUpdated(Instant.now());
+        crawlerStore.put(name, crawler);
+    }
+
+    public void stopCrawler(String name) {
+        Crawler crawler = getCrawler(name);
+        if (!"RUNNING".equals(crawler.getState())) {
+            throw new AwsException("CrawlerNotRunningException", "Crawler is not running: " + name, 400);
+        }
+        crawler.setState("READY");
+        crawler.setLastUpdated(Instant.now());
+        crawlerStore.put(name, crawler);
+    }
+
+    public void createConnection(Connection connection, Map<String, String> tags, String region) {
+        if (connection.getName() == null || connection.getName().isBlank()) {
+            throw new AwsException("InvalidInputException", "Name is required", 400);
+        }
+        if (connectionStore.get(connection.getName()).isPresent()) {
+            throw new AwsException("AlreadyExistsException", "Connection already exists: " + connection.getName(), 400);
+        }
+        Instant now = Instant.now();
+        connection.setCreationTime(now);
+        connection.setLastUpdatedTime(now);
+        connectionStore.put(connection.getName(), connection);
+        putResourceTags(connectionArn(region, connection.getName()), tags, region);
+        LOG.infov("Created Glue Connection: {0}", connection.getName());
+    }
+
+    public Connection getConnection(String name, boolean hidePassword) {
+        Connection connection = connectionStore.get(name)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Connection not found: " + name, 400));
+        return hidePassword ? connection.withoutPassword() : connection;
+    }
+
+    public List<Connection> getConnections(boolean hidePassword) {
+        return connectionStore.scan(k -> true).stream()
+                .sorted(Comparator.comparing(Connection::getName))
+                .map(connection -> hidePassword ? connection.withoutPassword() : connection)
+                .toList();
+    }
+
+    public void updateConnection(String name, Connection update) {
+        Connection existing = getConnection(name, false);
+        update.setName(name);
+        update.setCreationTime(existing.getCreationTime());
+        update.setLastUpdatedTime(Instant.now());
+        connectionStore.put(name, update);
+    }
+
+    public void deleteConnection(String name, String region) {
+        getConnection(name, false);
+        connectionStore.delete(name);
+        deleteResourceTags(connectionArn(region, name), region);
+    }
+
+    public boolean handlesResourceArn(String resourceArn) {
+        if (resourceArn == null) {
+            return false;
+        }
+        return resourceArn.contains(":job/")
+                || resourceArn.contains(":crawler/")
+                || resourceArn.contains(":connection/")
+                || resourceArn.contains(":database/")
+                || resourceArn.contains(":table/");
+    }
+
+    public void tagResource(String resourceArn, Map<String, String> tagsToAdd, String region) {
+        if (tagsToAdd == null || tagsToAdd.isEmpty()) {
+            return;
+        }
+        Map<String, String> tags = new LinkedHashMap<>(resourceTagStore.get(resourceArn).orElse(Map.of()));
+        tags.putAll(tagsToAdd);
+        resourceTagStore.put(resourceArn, tags);
+        resourceGroupsTaggingService.tagResources(List.of(resourceArn), tagsToAdd, region);
+    }
+
+    public void untagResource(String resourceArn, List<String> tagKeys, String region) {
+        if (tagKeys == null || tagKeys.isEmpty()) {
+            return;
+        }
+        Map<String, String> tags = new LinkedHashMap<>(resourceTagStore.get(resourceArn).orElse(Map.of()));
+        tagKeys.forEach(tags::remove);
+        if (tags.isEmpty()) {
+            resourceTagStore.delete(resourceArn);
+        } else {
+            resourceTagStore.put(resourceArn, tags);
+        }
+        resourceGroupsTaggingService.untagResources(List.of(resourceArn), tagKeys, region);
+    }
+
+    public Map<String, String> getTags(String resourceArn) {
+        return new LinkedHashMap<>(resourceTagStore.get(resourceArn).orElse(Map.of()));
+    }
+
+    private void putResourceTags(String arn, Map<String, String> tags, String region) {
+        if (tags == null || tags.isEmpty()) {
+            return;
+        }
+        resourceTagStore.put(arn, new LinkedHashMap<>(tags));
+        resourceGroupsTaggingService.tagResources(List.of(arn), tags, region);
+    }
+
+    private void deleteResourceTags(String arn, String region) {
+        resourceTagStore.delete(arn);
+        resourceGroupsTaggingService.deleteResources(List.of(arn), region);
+    }
+
+    private Map<String, Object> defaultBookmark(String jobName, String runId) {
+        Map<String, Object> bookmark = new LinkedHashMap<>();
+        bookmark.put("JobName", jobName);
+        bookmark.put("RunId", runId == null ? "" : runId);
+        bookmark.put("Attempt", 0);
+        bookmark.put("Version", 0);
+        return bookmark;
+    }
+
+    private String jobArn(String region, String name) {
+        return regionResolver.buildArn("glue", region, "job/" + name);
+    }
+
+    private String crawlerArn(String region, String name) {
+        return regionResolver.buildArn("glue", region, "crawler/" + name);
+    }
+
+    private String connectionArn(String region, String name) {
+        return regionResolver.buildArn("glue", region, "connection/" + name);
     }
 
     private static String normalizeName(String name) {

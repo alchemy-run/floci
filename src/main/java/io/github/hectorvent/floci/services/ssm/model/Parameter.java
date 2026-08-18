@@ -36,6 +36,15 @@ public class Parameter {
     @JsonProperty("DataType")
     private String dataType = "text";
 
+    @JsonProperty("Tier")
+    private String tier = "Standard";
+
+    @JsonProperty("KeyId")
+    private String keyId;
+
+    @JsonProperty("AllowedPattern")
+    private String allowedPattern;
+
     private Map<String, String> tags = new HashMap<>();
 
     public Parameter() {}
@@ -71,6 +80,15 @@ public class Parameter {
 
     public String getDataType() { return dataType; }
     public void setDataType(String dataType) { this.dataType = dataType; }
+
+    public String getTier() { return tier; }
+    public void setTier(String tier) { this.tier = tier; }
+
+    public String getKeyId() { return keyId; }
+    public void setKeyId(String keyId) { this.keyId = keyId; }
+
+    public String getAllowedPattern() { return allowedPattern; }
+    public void setAllowedPattern(String allowedPattern) { this.allowedPattern = allowedPattern; }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }

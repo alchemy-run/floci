@@ -122,13 +122,92 @@ public class AppSyncController {
 
     @GET
     @Path("/v1/apis/{apiId}/schema")
-    public Response getIntrospectionSchema(@PathParam("apiId") String apiId) {
+    public Response getIntrospectionSchema(@PathParam("apiId") String apiId,
+                                           @QueryParam("format") String format) {
         String schema = service.getIntrospectionSchema(apiId);
+        // AWS returns the schema as the HTTP payload (blob), not a JSON wrapper.
+        return Response.ok(schema)
+                .type(MediaType.APPLICATION_OCTET_STREAM)
+                .build();
+    }
+
+    // ──────────────────────────── API Cache ────────────────────────────
+
+    @POST
+    @Path("/v1/apis/{apiId}/ApiCaches")
+    public Response createApiCache(@PathParam("apiId") String apiId, String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        var cache = service.createApiCache(apiId, request);
         ObjectNode root = objectMapper.createObjectNode();
-        ObjectNode schemaNode = objectMapper.createObjectNode();
-        schemaNode.put("definition", schema);
-        root.set("schema", schemaNode);
+        root.set("apiCache", objectMapper.valueToTree(cache));
         return Response.ok(root).build();
+    }
+
+    @GET
+    @Path("/v1/apis/{apiId}/ApiCaches")
+    public Response getApiCache(@PathParam("apiId") String apiId) {
+        var cache = service.getApiCache(apiId);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("apiCache", objectMapper.valueToTree(cache));
+        return Response.ok(root).build();
+    }
+
+    @POST
+    @Path("/v1/apis/{apiId}/ApiCaches/update")
+    public Response updateApiCache(@PathParam("apiId") String apiId, String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        var cache = service.updateApiCache(apiId, request);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("apiCache", objectMapper.valueToTree(cache));
+        return Response.ok(root).build();
+    }
+
+    @DELETE
+    @Path("/v1/apis/{apiId}/ApiCaches")
+    public Response deleteApiCache(@PathParam("apiId") String apiId) {
+        service.deleteApiCache(apiId);
+        return Response.ok().build();
+    }
+
+    @DELETE
+    @Path("/v1/apis/{apiId}/FlushCache")
+    public Response flushApiCache(@PathParam("apiId") String apiId) {
+        service.flushApiCache(apiId);
+        return Response.ok().build();
+    }
+
+    // ──────────────────────────── Evaluate / GraphQL ────────────────────────────
+
+    @POST
+    @Path("/v1/dataplane-evaluatecode")
+    public Response evaluateCode(String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        return Response.ok(service.evaluateCode(request)).build();
+    }
+
+    @POST
+    @Path("/v1/dataplane-evaluatetemplate")
+    public Response evaluateMappingTemplate(String body) throws IOException {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body, Map.class);
+        return Response.ok(service.evaluateMappingTemplate(request)).build();
+    }
+
+    @POST
+    @Path("/v1/apis/{apiId}/graphql")
+    public Response executeGraphql(@Context HttpHeaders headers,
+                                   @PathParam("apiId") String apiId,
+                                   String body) throws IOException {
+        service.assertGraphqlAuthorized(
+                apiId,
+                headers.getHeaderString("x-api-key"),
+                headers.getHeaderString("Authorization"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> request = objectMapper.readValue(body == null || body.isBlank() ? "{}" : body, Map.class);
+        return Response.ok(service.executeGraphql(apiId, request)).build();
     }
 
     // ──────────────────────────── Data Sources ────────────────────────────
@@ -415,6 +494,15 @@ public class AppSyncController {
         ObjectNode root = objectMapper.createObjectNode();
         root.set("apiKey", objectMapper.valueToTree(key));
         return Response.status(200).entity(root).build();
+    }
+
+    @GET
+    @Path("/v1/apis/{apiId}/apikeys/{keyId}")
+    public Response getApiKey(@PathParam("apiId") String apiId, @PathParam("keyId") String keyId) {
+        ApiKey key = service.getApiKey(apiId, keyId);
+        ObjectNode root = objectMapper.createObjectNode();
+        root.set("apiKey", objectMapper.valueToTree(key));
+        return Response.ok(root).build();
     }
 
     @GET

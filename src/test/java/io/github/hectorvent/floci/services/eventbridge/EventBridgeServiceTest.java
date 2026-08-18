@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
+import io.github.hectorvent.floci.services.eventbridge.model.Connection;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
 import io.github.hectorvent.floci.services.eventbridge.model.Rule;
 import io.github.hectorvent.floci.services.eventbridge.model.RuleState;
@@ -33,6 +35,8 @@ class EventBridgeServiceTest {
     void setUp() {
         invokerMock = mock(EventBridgeInvoker.class);
         service = new EventBridgeService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -742,5 +746,77 @@ class EventBridgeServiceTest {
         com.fasterxml.jackson.databind.JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals(REGION, envelope.path("region").asText());
         assertEquals("000000000000", envelope.path("account").asText());
+    }
+
+    @Test
+    void listRuleNamesByTargetFindsMatchingRules() {
+        service.getOrCreateDefaultBus(REGION);
+        service.putRule("consume", null, "{\"source\":[\"app\"]}", null, RuleState.ENABLED,
+                null, null, null, REGION);
+        Target target = new Target();
+        target.setId("fn");
+        target.setArn("arn:aws:lambda:us-east-1:000000000000:function:consumer");
+        service.putTargets("consume", null, List.of(target), REGION);
+
+        List<String> names = service.listRuleNamesByTarget(
+                "arn:aws:lambda:us-east-1:000000000000:function:consumer", null, REGION);
+        assertEquals(List.of("consume"), names);
+        assertTrue(service.listRuleNamesByTarget(
+                "arn:aws:lambda:us-east-1:000000000000:function:other", null, REGION).isEmpty());
+    }
+
+    @Test
+    void connectionAndApiDestinationLifecycle() {
+        Connection created = service.createConnection(
+                "partner", "desc", "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-api-key\",\"ApiKeyValue\":\"secret\"}}",
+                null, REGION);
+        assertEquals("AUTHORIZED", created.getConnectionState());
+        assertTrue(created.getConnectionArn().contains("connection/partner/"));
+        assertNotNull(created.getSecretArn());
+
+        Connection described = service.describeConnection("partner", REGION);
+        assertEquals("desc", described.getDescription());
+        assertEquals("API_KEY", described.getAuthorizationType());
+
+        service.updateConnection("partner", "updated", null, null, null, REGION);
+        assertEquals("updated", service.describeConnection("partner", REGION).getDescription());
+
+        ApiDestination destination = service.createApiDestination(
+                "webhook", null, created.getConnectionArn(),
+                "https://example.com/events", "POST", 5, REGION);
+        assertEquals("ACTIVE", destination.getApiDestinationState());
+        assertEquals(5, destination.getInvocationRateLimitPerSecond());
+        assertEquals(5, service.describeApiDestination("webhook", REGION)
+                .getInvocationRateLimitPerSecond());
+
+        service.updateApiDestination("webhook", null, null, null, null, 10, REGION);
+        assertEquals(10, service.describeApiDestination("webhook", REGION)
+                .getInvocationRateLimitPerSecond());
+
+        AwsException inUse = assertThrows(AwsException.class,
+                () -> service.deleteConnection("partner", REGION));
+        assertEquals("ConcurrentModificationException", inUse.getErrorCode());
+
+        service.deleteApiDestination("webhook", REGION);
+        assertThrows(AwsException.class, () -> service.describeApiDestination("webhook", REGION));
+        service.deleteConnection("partner", REGION);
+        assertThrows(AwsException.class, () -> service.describeConnection("partner", REGION));
+    }
+
+    @Test
+    void createArchiveRequiresExistingBus() {
+        AwsException missing = assertThrows(AwsException.class, () ->
+                service.createArchive("arch",
+                        "arn:aws:events:us-east-1:000000000000:event-bus/missing-bus",
+                        null, null, 1, REGION));
+        assertEquals("ResourceNotFoundException", missing.getErrorCode());
+        assertTrue(missing.getMessage().contains("missing-bus"));
+
+        EventBus bus = service.createEventBus("archive-src", null, null, REGION);
+        var archive = service.createArchive("arch", bus.getArn(), "kept",
+                "{\"source\":[\"app\"]}", 1, REGION);
+        assertEquals(bus.getArn(), archive.getEventSourceArn());
+        assertEquals(1, archive.getRetentionDays());
     }
 }

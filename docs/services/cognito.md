@@ -27,7 +27,7 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | DescribeUserPool | Returns the stored user pool configuration. |
 | ListUserPools | Lists local user pools visible in the request region. |
 | UpdateUserPool | Updates mutable user pool settings and persisted user-pool tags. |
-| DeleteUserPool | Deletes a local user pool and its related state. |
+| DeleteUserPool | Deletes a local user pool and cascades groups, users, clients, resource servers, identity providers, domains, and risk configuration. |
 
 ### User Pool Tags
 
@@ -53,7 +53,34 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | CreateResourceServer | Registers a resource server and scopes for a user pool. |
 | DescribeResourceServer | Returns a registered resource server. |
 | ListResourceServers | Lists resource servers for a user pool. |
+| UpdateResourceServer | Updates a resource server's name and scopes. |
 | DeleteResourceServer | Deletes a resource server from a user pool. |
+
+### Identity Providers
+
+| Action | Description |
+|--------|-------------|
+| CreateIdentityProvider | Registers a SAML, OIDC, or social IdP on a user pool. |
+| DescribeIdentityProvider | Returns a registered identity provider. |
+| UpdateIdentityProvider | Updates provider details, attribute mapping, and identifiers. |
+| ListIdentityProviders | Lists identity providers for a user pool. |
+| DeleteIdentityProvider | Deletes an identity provider from a user pool. |
+
+### User Pool Domains
+
+| Action | Description |
+|--------|-------------|
+| CreateUserPoolDomain | Creates a Cognito-prefix or custom domain. Status is `ACTIVE` immediately and a CloudFront distribution hostname is issued. |
+| DescribeUserPoolDomain | Returns the domain description, or an empty `DomainDescription` (no `UserPoolId`) when the domain does not exist. |
+| UpdateUserPoolDomain | Updates managed-login version and custom-domain certificate config. |
+| DeleteUserPoolDomain | Deletes a user pool domain. |
+
+### Risk Configuration
+
+| Action | Description |
+|--------|-------------|
+| SetRiskConfiguration | Stores pool- or client-level threat-protection settings and reads them back verbatim. |
+| DescribeRiskConfiguration | Returns the stored risk configuration, or a `UserPoolId`-only object when none has been set. |
 
 ### Admin User Management
 

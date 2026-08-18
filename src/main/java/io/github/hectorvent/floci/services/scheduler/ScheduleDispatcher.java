@@ -180,7 +180,7 @@ public class ScheduleDispatcher implements Resettable {
     private void fire(Schedule schedule) {
         String region = regionOf(schedule);
         try {
-            invoker.invoke(schedule.getTarget(), region);
+            invoker.invoke(schedule, Instant.now());
             LOG.infov("Fired schedule {0} in group {1}", schedule.getName(), schedule.getGroupName());
         } catch (Exception e) {
             LOG.warnv("Schedule {0} invocation failed: {1}", schedule.getArn(), e.getMessage());

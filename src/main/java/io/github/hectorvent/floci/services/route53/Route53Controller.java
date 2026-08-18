@@ -10,8 +10,10 @@ import io.github.hectorvent.floci.services.route53.model.ChangeInfo;
 import io.github.hectorvent.floci.services.route53.model.HealthCheck;
 import io.github.hectorvent.floci.services.route53.model.HealthCheckConfig;
 import io.github.hectorvent.floci.services.route53.model.HostedZone;
+import io.github.hectorvent.floci.services.route53.model.QueryLoggingConfig;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecordSet;
+import io.github.hectorvent.floci.services.route53.model.ZoneVpc;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
@@ -67,7 +69,10 @@ public class Route53Controller {
                 throw new AwsException("InvalidInput", "Name and CallerReference are required.", 400);
             }
 
-            CreateZoneResult result = service.createHostedZone(name, callerRef, comment, privateZone);
+            String vpcId = XmlParser.extractFirst(body, "VPCId", null);
+            String vpcRegion = XmlParser.extractFirst(body, "VPCRegion", null);
+            CreateZoneResult result = service.createHostedZone(
+                    name, callerRef, comment, privateZone, vpcId, vpcRegion);
             String xml = new XmlBuilder()
                     .start("CreateHostedZoneResponse", NS)
                     .raw(xmlHostedZone(result.zone()))
@@ -94,6 +99,7 @@ public class Route53Controller {
                     .start("GetHostedZoneResponse", NS)
                     .raw(xmlHostedZone(zone))
                     .raw(xmlDelegationSet())
+                    .raw(xmlVpcs(zone))
                     .end("GetHostedZoneResponse")
                     .build();
             return Response.ok(xml, XML).build();
@@ -111,6 +117,23 @@ public class Route53Controller {
                     .start("DeleteHostedZoneResponse", NS)
                     .raw(xmlChangeInfo(change))
                     .end("DeleteHostedZoneResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @POST
+    @Path("/hostedzone/{Id}")
+    public Response updateHostedZoneComment(@PathParam("Id") String id, String body) {
+        try {
+            String comment = XmlParser.extractFirst(body, "Comment", "");
+            HostedZone zone = service.updateHostedZoneComment(id, comment);
+            String xml = new XmlBuilder()
+                    .start("UpdateHostedZoneCommentResponse", NS)
+                    .raw(xmlHostedZone(zone))
+                    .end("UpdateHostedZoneCommentResponse")
                     .build();
             return Response.ok(xml, XML).build();
         } catch (AwsException e) {
@@ -476,6 +499,226 @@ public class Route53Controller {
         }
     }
 
+    @POST
+    @Path("/hostedzone/{Id}/associatevpc")
+    public Response associateVpc(@PathParam("Id") String id, String body) {
+        try {
+            ChangeInfo change = service.associateVpc(id,
+                    XmlParser.extractFirst(body, "VPCId", null),
+                    XmlParser.extractFirst(body, "VPCRegion", null));
+            String xml = new XmlBuilder()
+                    .start("AssociateVPCWithHostedZoneResponse", NS)
+                    .raw(xmlChangeInfo(change))
+                    .end("AssociateVPCWithHostedZoneResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @POST
+    @Path("/hostedzone/{Id}/disassociatevpc")
+    public Response disassociateVpc(@PathParam("Id") String id, String body) {
+        try {
+            ChangeInfo change = service.disassociateVpc(id,
+                    XmlParser.extractFirst(body, "VPCId", null),
+                    XmlParser.extractFirst(body, "VPCRegion", null));
+            String xml = new XmlBuilder()
+                    .start("DisassociateVPCFromHostedZoneResponse", NS)
+                    .raw(xmlChangeInfo(change))
+                    .end("DisassociateVPCFromHostedZoneResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @POST
+    @Path("/hostedzone/{Id}/authorizevpcassociation")
+    public Response createVpcAssociationAuthorization(@PathParam("Id") String id, String body) {
+        try {
+            ZoneVpc vpc = service.createVpcAssociationAuthorization(id,
+                    XmlParser.extractFirst(body, "VPCId", null),
+                    XmlParser.extractFirst(body, "VPCRegion", null));
+            String xml = new XmlBuilder()
+                    .start("CreateVPCAssociationAuthorizationResponse", NS)
+                    .raw(xmlVpc(vpc))
+                    .end("CreateVPCAssociationAuthorizationResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @POST
+    @Path("/hostedzone/{Id}/deauthorizevpcassociation")
+    public Response deleteVpcAssociationAuthorization(@PathParam("Id") String id, String body) {
+        try {
+            service.deleteVpcAssociationAuthorization(id, XmlParser.extractFirst(body, "VPCId", null));
+            String xml = new XmlBuilder()
+                    .start("DeleteVPCAssociationAuthorizationResponse", NS)
+                    .end("DeleteVPCAssociationAuthorizationResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/hostedzone/{Id}/authorizevpcassociation")
+    public Response listVpcAssociationAuthorizations(@PathParam("Id") String id) {
+        try {
+            List<ZoneVpc> vpcs = service.listVpcAssociationAuthorizations(id);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("ListVPCAssociationAuthorizationsResponse", NS)
+                    .elem("HostedZoneId", "/hostedzone/" + Route53Service.normalizeZoneId(id))
+                    .start("VPCs");
+            for (ZoneVpc vpc : vpcs) {
+                xml.raw(xmlVpc(vpc));
+            }
+            xml.end("VPCs").end("ListVPCAssociationAuthorizationsResponse");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/hostedzonesbyvpc")
+    public Response listHostedZonesByVpc(@QueryParam("vpcid") String vpcId,
+                                          @QueryParam("vpcregion") String vpcRegion) {
+        try {
+            List<HostedZone> zones = service.listHostedZonesByVpc(vpcId, vpcRegion);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("ListHostedZonesByVPCResponse", NS)
+                    .start("HostedZoneSummaries");
+            for (HostedZone zone : zones) {
+                xml.start("HostedZoneSummary")
+                   .elem("HostedZoneId", zone.getId())
+                   .elem("Name", zone.getName())
+                   .elem("Owner", "")
+                   .end("HostedZoneSummary");
+            }
+            xml.end("HostedZoneSummaries").end("ListHostedZonesByVPCResponse");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @POST
+    @Path("/queryloggingconfig")
+    public Response createQueryLoggingConfig(String body) {
+        try {
+            QueryLoggingConfig cfg = service.createQueryLoggingConfig(
+                    XmlParser.extractFirst(body, "HostedZoneId", null),
+                    XmlParser.extractFirst(body, "CloudWatchLogsLogGroupArn", null));
+            String xml = new XmlBuilder()
+                    .start("CreateQueryLoggingConfigResponse", NS)
+                    .raw(xmlQueryLoggingConfig(cfg))
+                    .end("CreateQueryLoggingConfigResponse")
+                    .build();
+            return Response.created(URI.create("/2013-04-01/queryloggingconfig/" + cfg.getId()))
+                    .type(XML)
+                    .entity(xml)
+                    .build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/queryloggingconfig/{Id}")
+    public Response getQueryLoggingConfig(@PathParam("Id") String id) {
+        try {
+            QueryLoggingConfig cfg = service.getQueryLoggingConfig(id);
+            String xml = new XmlBuilder()
+                    .start("GetQueryLoggingConfigResponse", NS)
+                    .raw(xmlQueryLoggingConfig(cfg))
+                    .end("GetQueryLoggingConfigResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @DELETE
+    @Path("/queryloggingconfig/{Id}")
+    public Response deleteQueryLoggingConfig(@PathParam("Id") String id) {
+        try {
+            service.deleteQueryLoggingConfig(id);
+            return Response.ok("", XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/queryloggingconfig")
+    public Response listQueryLoggingConfigs(@QueryParam("hostedzoneid") String hostedZoneId) {
+        try {
+            List<QueryLoggingConfig> configs = service.listQueryLoggingConfigs(hostedZoneId);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("ListQueryLoggingConfigsResponse", NS)
+                    .start("QueryLoggingConfigs");
+            for (QueryLoggingConfig cfg : configs) {
+                xml.raw(xmlQueryLoggingConfig(cfg));
+            }
+            xml.end("QueryLoggingConfigs").end("ListQueryLoggingConfigsResponse");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/testdnsanswer")
+    public Response testDnsAnswer(@QueryParam("hostedzoneid") String hostedZoneId,
+                                   @QueryParam("recordname") String recordName,
+                                   @QueryParam("recordtype") String recordType) {
+        try {
+            Route53Service.DnsAnswer answer = service.testDnsAnswer(hostedZoneId, recordName, recordType);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("TestDNSAnswerResponse", NS)
+                    .elem("Nameserver", service.getNameServers().get(0))
+                    .elem("RecordName", answer.recordName())
+                    .elem("RecordType", answer.recordType())
+                    .start("RecordData");
+            for (String value : answer.records()) {
+                xml.elem("RecordDataEntry", value);
+            }
+            xml.end("RecordData")
+               .elem("ResponseCode", answer.records().isEmpty() ? "NXDOMAIN" : "NOERROR")
+               .elem("Protocol", "UDP")
+               .end("TestDNSAnswerResponse");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/healthcheck/{HealthCheckId}/lastfailurereason")
+    public Response getHealthCheckLastFailureReason(@PathParam("HealthCheckId") String id) {
+        try {
+            service.getHealthCheck(id);
+            String xml = new XmlBuilder()
+                    .start("GetHealthCheckLastFailureReasonResponse", NS)
+                    .start("HealthCheckObservations")
+                    .end("HealthCheckObservations")
+                    .end("GetHealthCheckLastFailureReasonResponse")
+                    .build();
+            return Response.ok(xml, XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
     @GET
     @Path("/hostedzonelimit/{HostedZoneId}/{Type}")
     public Response getHostedZoneLimit(@PathParam("HostedZoneId") String zoneId,
@@ -541,6 +784,36 @@ public class Route53Controller {
         return xml.build();
     }
 
+    private String xmlVpcs(HostedZone zone) {
+        if (zone.getVpcs() == null || zone.getVpcs().isEmpty()) {
+            return "";
+        }
+        XmlBuilder xml = new XmlBuilder().start("VPCs");
+        for (ZoneVpc vpc : zone.getVpcs()) {
+            xml.raw(xmlVpc(vpc));
+        }
+        return xml.end("VPCs").build();
+    }
+
+    private String xmlVpc(ZoneVpc vpc) {
+        return new XmlBuilder()
+                .start("VPC")
+                .elem("VPCId", vpc.getVpcId())
+                .elem("VPCRegion", vpc.getVpcRegion())
+                .end("VPC")
+                .build();
+    }
+
+    private String xmlQueryLoggingConfig(QueryLoggingConfig cfg) {
+        return new XmlBuilder()
+                .start("QueryLoggingConfig")
+                .elem("Id", cfg.getId())
+                .elem("HostedZoneId", cfg.getHostedZoneId())
+                .elem("CloudWatchLogsLogGroupArn", cfg.getCloudWatchLogsLogGroupArn())
+                .end("QueryLoggingConfig")
+                .build();
+    }
+
     private String xmlResourceRecordSet(ResourceRecordSet rrs) {
         XmlBuilder xml = new XmlBuilder()
                 .start("ResourceRecordSet")
@@ -567,6 +840,28 @@ public class Route53Controller {
                .end("AliasTarget");
         }
         if (rrs.getHealthCheckId() != null) xml.elem("HealthCheckId", rrs.getHealthCheckId());
+        if (rrs.getGeoContinentCode() != null || rrs.getGeoCountryCode() != null) {
+            xml.start("GeoLocation");
+            if (rrs.getGeoContinentCode() != null) xml.elem("ContinentCode", rrs.getGeoContinentCode());
+            if (rrs.getGeoCountryCode() != null) xml.elem("CountryCode", rrs.getGeoCountryCode());
+            if (rrs.getGeoSubdivisionCode() != null) xml.elem("SubdivisionCode", rrs.getGeoSubdivisionCode());
+            xml.end("GeoLocation");
+        }
+        if (rrs.getCidrCollectionId() != null) {
+            xml.start("CidrRoutingConfig")
+               .elem("CollectionId", rrs.getCidrCollectionId())
+               .elem("LocationName", rrs.getCidrLocationName())
+               .end("CidrRoutingConfig");
+        }
+        if (rrs.getGeoProximityAwsRegion() != null || rrs.getGeoProximityLocalZoneGroup() != null) {
+            xml.start("GeoProximityLocation");
+            if (rrs.getGeoProximityAwsRegion() != null) xml.elem("AWSRegion", rrs.getGeoProximityAwsRegion());
+            if (rrs.getGeoProximityLocalZoneGroup() != null) {
+                xml.elem("LocalZoneGroup", rrs.getGeoProximityLocalZoneGroup());
+            }
+            if (rrs.getGeoProximityBias() != null) xml.elem("Bias", rrs.getGeoProximityBias().longValue());
+            xml.end("GeoProximityLocation");
+        }
         xml.end("ResourceRecordSet");
         return xml.build();
     }
@@ -633,6 +928,9 @@ public class Route53Controller {
             boolean inResourceRecords = false;
             boolean inAlias = false;
             boolean inHealthCheckConfig = false;
+            boolean inGeo = false;
+            boolean inCidr = false;
+            boolean inGeoProx = false;
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -664,6 +962,9 @@ public class Route53Controller {
                                 currentAlias = new AliasTarget();
                             }
                         }
+                        case "GeoLocation" -> { if (inRrs) inGeo = true; }
+                        case "CidrRoutingConfig" -> { if (inRrs) inCidr = true; }
+                        case "GeoProximityLocation" -> { if (inRrs) inGeoProx = true; }
                         case "Name" -> {
                             if (inRrs && !inAlias) {
                                 String n = r.getElementText();
@@ -719,6 +1020,35 @@ public class Route53Controller {
                                         "true".equalsIgnoreCase(r.getElementText()));
                             }
                         }
+                        case "ContinentCode" -> {
+                            if (inGeo && currentRrs != null) currentRrs.setGeoContinentCode(r.getElementText());
+                        }
+                        case "CountryCode" -> {
+                            if (inGeo && currentRrs != null) currentRrs.setGeoCountryCode(r.getElementText());
+                        }
+                        case "SubdivisionCode" -> {
+                            if (inGeo && currentRrs != null) currentRrs.setGeoSubdivisionCode(r.getElementText());
+                        }
+                        case "CollectionId" -> {
+                            if (inCidr && currentRrs != null) currentRrs.setCidrCollectionId(r.getElementText());
+                        }
+                        case "LocationName" -> {
+                            if (inCidr && currentRrs != null) currentRrs.setCidrLocationName(r.getElementText());
+                        }
+                        case "AWSRegion" -> {
+                            if (inGeoProx && currentRrs != null) currentRrs.setGeoProximityAwsRegion(r.getElementText());
+                        }
+                        case "LocalZoneGroup" -> {
+                            if (inGeoProx && currentRrs != null) {
+                                currentRrs.setGeoProximityLocalZoneGroup(r.getElementText());
+                            }
+                        }
+                        case "Bias" -> {
+                            if (inGeoProx && currentRrs != null) {
+                                try { currentRrs.setGeoProximityBias(Integer.parseInt(r.getElementText())); }
+                                catch (NumberFormatException ignored) {}
+                            }
+                        }
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
@@ -730,6 +1060,9 @@ public class Route53Controller {
                             inAlias = false;
                             currentAlias = null;
                         }
+                        case "GeoLocation" -> inGeo = false;
+                        case "CidrRoutingConfig" -> inCidr = false;
+                        case "GeoProximityLocation" -> inGeoProx = false;
                         case "ResourceRecordSet" -> {
                             if (inRrs && currentRrs != null && currentRecords != null) {
                                 if (!currentRecords.isEmpty()) currentRrs.setRecords(currentRecords);

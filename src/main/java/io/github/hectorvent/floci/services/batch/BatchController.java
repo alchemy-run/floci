@@ -105,6 +105,76 @@ public class BatchController {
                 Response.ok(service.listJobs(request)).build());
     }
 
+    @POST
+    @Path("/v1/updatecomputeenvironment")
+    public Response updateComputeEnvironment(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.updateComputeEnvironment(request)).build());
+    }
+
+    @POST
+    @Path("/v1/deletecomputeenvironment")
+    public Response deleteComputeEnvironment(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.deleteComputeEnvironment(request)).build());
+    }
+
+    @POST
+    @Path("/v1/updatejobqueue")
+    public Response updateJobQueue(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.updateJobQueue(request)).build());
+    }
+
+    @POST
+    @Path("/v1/deletejobqueue")
+    public Response deleteJobQueue(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.deleteJobQueue(request)).build());
+    }
+
+    @POST
+    @Path("/v1/canceljob")
+    public Response cancelJob(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.cancelJob(request)).build());
+    }
+
+    @POST
+    @Path("/v1/terminatejob")
+    public Response terminateJob(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.terminateJob(request)).build());
+    }
+
+    @POST
+    @Path("/v1/getjobqueuesnapshot")
+    public Response getJobQueueSnapshot(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.getJobQueueSnapshot(request)).build());
+    }
+
+    @POST
+    @Path("/v1/tagresource")
+    public Response tagResource(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.tagResource(request)).build());
+    }
+
+    @POST
+    @Path("/v1/untagresource")
+    public Response untagResource(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.untagResource(request)).build());
+    }
+
+    @POST
+    @Path("/v1/listtagsforresource")
+    public Response listTagsForResource(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.listTagsForResource(request)).build());
+    }
+
     private Response handle(HttpHeaders headers, String body, Handler handler) {
         try {
             JsonNode request = body == null || body.isBlank()

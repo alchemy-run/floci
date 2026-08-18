@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.services.stepfunctions.model.Activity;
 import io.github.hectorvent.floci.services.stepfunctions.model.ActivityTask;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
 import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
+import io.github.hectorvent.floci.services.stepfunctions.model.MapRun;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,6 +35,7 @@ public class StepFunctionsJsonHandler {
     public Response handle(String action, JsonNode request, String region) {
         return switch (action) {
             case "CreateStateMachine" -> handleCreateStateMachine(request, region);
+            case "UpdateStateMachine" -> handleUpdateStateMachine(request);
             case "DescribeStateMachine" -> handleDescribeStateMachine(request);
             case "ListStateMachines" -> handleListStateMachines(request, region);
             case "DeleteStateMachine" -> handleDeleteStateMachine(request);
@@ -41,12 +43,14 @@ public class StepFunctionsJsonHandler {
             case "ListStateMachineVersions" -> handleListStateMachineVersions(request);
             case "DeleteStateMachineVersion" -> handleDeleteStateMachineVersion(request);
             case "ValidateStateMachineDefinition" -> handleValidateStateMachineDefinition(request);
+            case "TestState" -> handleTestState(request);
             case "StartExecution" -> handleStartExecution(request, region);
             case "StartSyncExecution" -> handleStartSyncExecution(request, region);
             case "DescribeExecution" -> handleDescribeExecution(request);
             case "ListExecutions" -> handleListExecutions(request);
             case "StopExecution" -> handleStopExecution(request);
             case "GetExecutionHistory" -> handleGetExecutionHistory(request);
+            case "RedriveExecution" -> handleRedriveExecution(request);
             case "SendTaskSuccess" -> handleSendTaskSuccess(request);
             case "SendTaskFailure" -> handleSendTaskFailure(request);
             case "SendTaskHeartbeat" -> handleSendTaskHeartbeat(request);
@@ -55,6 +59,9 @@ public class StepFunctionsJsonHandler {
             case "DescribeActivity" -> handleDescribeActivity(request);
             case "ListActivities" -> handleListActivities(request, region);
             case "GetActivityTask" -> handleGetActivityTask(request);
+            case "ListMapRuns" -> handleListMapRuns(request);
+            case "DescribeMapRun" -> handleDescribeMapRun(request);
+            case "UpdateMapRun" -> handleUpdateMapRun(request);
             case "ListTagsForResource" -> handleListTagsForResource(request);
             case "TagResource" -> handleTagResource(request);
             case "UntagResource" -> handleUntagResource(request);
@@ -71,11 +78,16 @@ public class StepFunctionsJsonHandler {
                 request.path("roleArn").asText(),
                 request.path("type").asText(null),
                 region,
-                parseTagsArray(request.path("tags"))
+                parseTagsArray(request.path("tags")),
+                request.get("loggingConfiguration"),
+                request.get("tracingConfiguration")
         );
         ObjectNode response = objectMapper.createObjectNode();
         response.put("stateMachineArn", sm.getStateMachineArn());
         response.put("creationDate", sm.getCreationDate());
+        if (sm.getRevisionId() != null) {
+            response.put("revisionId", sm.getRevisionId());
+        }
         // Publishing a version on create is opt-in (publish=true).
         if (request.path("publish").asBoolean(false)) {
             var version = service.publishStateMachineVersion(sm.getStateMachineArn());
@@ -119,6 +131,35 @@ public class StepFunctionsJsonHandler {
         response.put("type", sm.getType());
         response.put("status", sm.getStatus());
         response.put("creationDate", sm.getCreationDate());
+        if (sm.getRevisionId() != null) {
+            response.put("revisionId", sm.getRevisionId());
+        }
+        ObjectNode tracing = response.putObject("tracingConfiguration");
+        tracing.put("enabled", sm.isTracingEnabled());
+        ObjectNode logging = response.putObject("loggingConfiguration");
+        logging.put("level", sm.getLoggingLevel() != null ? sm.getLoggingLevel() : "OFF");
+        logging.put("includeExecutionData", sm.isIncludeExecutionData());
+        if (sm.getLoggingDestinationsJson() != null && !sm.getLoggingDestinationsJson().isBlank()) {
+            try {
+                logging.set("destinations", objectMapper.readTree(sm.getLoggingDestinationsJson()));
+            } catch (Exception ignored) {
+                // omit malformed persisted destinations rather than fail describe
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateStateMachine(JsonNode request) {
+        StateMachine sm = service.updateStateMachine(
+                request.path("stateMachineArn").asText(),
+                request.path("definition").asText(null),
+                request.path("roleArn").asText(null),
+                request.get("loggingConfiguration"),
+                request.get("tracingConfiguration")
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("updateDate", System.currentTimeMillis() / 1000.0);
+        response.put("revisionId", sm.getRevisionId());
         return Response.ok(response).build();
     }
 
@@ -247,8 +288,10 @@ public class StepFunctionsJsonHandler {
     private Response handleGetExecutionHistory(JsonNode request) {
         var arn = request.path("executionArn").asText();
         var includeExecutionData = request.path("includeExecutionData").asBoolean(true);
+        var reverseOrder = request.path("reverseOrder").asBoolean(false);
+        Integer maxResults = parseOptionalInt(request, "maxResults");
 
-        List<HistoryEvent> events = service.getExecutionHistory(arn);
+        List<HistoryEvent> events = service.getExecutionHistory(arn, reverseOrder, maxResults);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("events");
         for (HistoryEvent e : events) {
@@ -272,6 +315,92 @@ public class StepFunctionsJsonHandler {
             return "stateExitedEventDetails";
         }
         return Character.toLowerCase(type.charAt(0)) + type.substring(1) + "EventDetails";
+    }
+
+    private Response handleTestState(JsonNode request) {
+        StepFunctionsService.TestStateResult result = service.testState(
+                request.path("definition").asText(null),
+                request.path("input").asText(null)
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("status", result.status());
+        if (result.output() != null) {
+            response.put("output", result.output());
+        }
+        if (result.error() != null) {
+            response.put("error", result.error());
+        }
+        if (result.cause() != null) {
+            response.put("cause", result.cause());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleRedriveExecution(JsonNode request) {
+        double redriveDate = service.redriveExecution(request.path("executionArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("redriveDate", redriveDate);
+        return Response.ok(response).build();
+    }
+
+    private Response handleListMapRuns(JsonNode request) {
+        List<MapRun> runs = service.listMapRuns(request.path("executionArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("mapRuns");
+        for (MapRun run : runs) {
+            ObjectNode item = array.addObject();
+            item.put("mapRunArn", run.getMapRunArn());
+            item.put("executionArn", run.getExecutionArn());
+            item.put("status", run.getStatus());
+            item.put("startDate", run.getStartDate());
+            if (run.getStopDate() != null) {
+                item.put("stopDate", run.getStopDate());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeMapRun(JsonNode request) {
+        MapRun run = service.describeMapRun(request.path("mapRunArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("mapRunArn", run.getMapRunArn());
+        response.put("executionArn", run.getExecutionArn());
+        response.put("status", run.getStatus());
+        response.put("startDate", run.getStartDate());
+        if (run.getStopDate() != null) {
+            response.put("stopDate", run.getStopDate());
+        }
+        response.put("maxConcurrency", run.getMaxConcurrency());
+        response.put("toleratedFailurePercentage", run.getToleratedFailurePercentage());
+        response.put("toleratedFailureCount", run.getToleratedFailureCount());
+        response.set("itemCounts", mapRunCounts(run));
+        response.set("executionCounts", mapRunCounts(run));
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode mapRunCounts(MapRun run) {
+        ObjectNode counts = objectMapper.createObjectNode();
+        counts.put("pending", run.getPending());
+        counts.put("running", run.getRunning());
+        counts.put("succeeded", run.getSucceeded());
+        counts.put("failed", run.getFailed());
+        counts.put("timedOut", run.getTimedOut());
+        counts.put("aborted", run.getAborted());
+        counts.put("total", run.getTotal());
+        counts.put("resultsWritten", 0);
+        counts.put("failuresNotRedrivable", 0);
+        counts.put("pendingRedrive", 0);
+        return counts;
+    }
+
+    private Response handleUpdateMapRun(JsonNode request) {
+        service.updateMapRun(
+                request.path("mapRunArn").asText(),
+                parseOptionalInt(request, "maxConcurrency"),
+                parseOptionalLong(request, "toleratedFailureCount"),
+                parseOptionalDouble(request, "toleratedFailurePercentage")
+        );
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleSendTaskSuccess(JsonNode request) {
@@ -408,6 +537,32 @@ public class StepFunctionsJsonHandler {
                             + "' failed to satisfy constraint: Member must be an integer.", 400);
         }
         return node.intValue();
+    }
+
+    private static Long parseOptionalLong(JsonNode request, String fieldName) {
+        JsonNode node = request.get(fieldName);
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isNumber()) {
+            throw new AwsException("ValidationException",
+                    "Value '" + node + "' at '" + fieldName
+                            + "' failed to satisfy constraint: Member must be a number.", 400);
+        }
+        return node.longValue();
+    }
+
+    private static Double parseOptionalDouble(JsonNode request, String fieldName) {
+        JsonNode node = request.get(fieldName);
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isNumber()) {
+            throw new AwsException("ValidationException",
+                    "Value '" + node + "' at '" + fieldName
+                            + "' failed to satisfy constraint: Member must be a number.", 400);
+        }
+        return node.doubleValue();
     }
 
 }

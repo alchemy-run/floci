@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.PredefinedMetricSpecification;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTarget;
+import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTargetAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalingPolicy;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.TargetTrackingConfiguration;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
@@ -293,6 +294,74 @@ class ApplicationAutoScalingServiceTest {
         register();
         assertEquals(1, service.describeScalableTargets(NAMESPACE, null, null, REGION).size());
         assertEquals(0, service.describeScalableTargets(NAMESPACE, null, null, "eu-west-1").size());
+    }
+
+    @Test
+    void scheduledActionUpsertPreservesArnAndClearsUnspecifiedTimes() {
+        register();
+        var created = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+                "at(2030-01-01T00:00:00)", "UTC", 1_893_456_000.0, null,
+                capacity(2, null), REGION);
+
+        assertTrue(created.getScheduledActionArn().contains("scheduledAction"));
+        assertEquals(2, created.getScalableTargetAction().getMinCapacity());
+        assertEquals(1_893_456_000.0, created.getStartTime());
+
+        var updated = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+                "at(2030-06-01T00:00:00)", "UTC", null, null,
+                capacity(3, null), REGION);
+
+        assertEquals(created.getScheduledActionArn(), updated.getScheduledActionArn());
+        assertEquals("at(2030-06-01T00:00:00)", updated.getSchedule());
+        assertNull(updated.getStartTime(), "unspecified StartTime must be deleted on update");
+        assertEquals(3, updated.getScalableTargetAction().getMinCapacity());
+        assertEquals(1, service.describeScheduledActions(NAMESPACE, RESOURCE_ID, DIMENSION,
+                List.of("biz-hours"), REGION).size());
+
+        service.deleteScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION, REGION);
+        assertEquals(0, service.describeScheduledActions(NAMESPACE, RESOURCE_ID, DIMENSION,
+                List.of("biz-hours"), REGION).size());
+    }
+
+    @Test
+    void scheduledActionRequiresRegisteredTarget() {
+        AwsException e = assertThrows(AwsException.class, () -> service.putScheduledAction(
+                "orphan", NAMESPACE, RESOURCE_ID, DIMENSION, "rate(1 hour)", null,
+                null, null, capacity(2, null), REGION));
+        assertEquals("ObjectNotFoundException", e.getErrorCode());
+    }
+
+    @Test
+    void deregisterCascadesToScheduledActions() {
+        register();
+        service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+                "cron(0 8 * * ? *)", "UTC", null, null, capacity(2, 10), REGION);
+
+        service.deregisterScalableTarget(NAMESPACE, RESOURCE_ID, DIMENSION, REGION);
+
+        assertEquals(0, service.describeScheduledActions(NAMESPACE, null, null, null, REGION).size());
+    }
+
+    @Test
+    void describeScalingActivitiesReturnsEmptyPageForFreshTarget() {
+        register();
+        assertEquals(0, service.describeScalingActivities(NAMESPACE, RESOURCE_ID, DIMENSION, REGION).size());
+    }
+
+    @Test
+    void predictiveForecastIsDeniedOutsideEcs() {
+        AwsException e = assertThrows(AwsException.class, () -> service.requirePredictiveScalingForecast(
+                "dynamodb", "table/alchemy-probe-nonexistent",
+                "dynamodb:table:ReadCapacityUnits", "alchemy-probe-nonexistent", REGION));
+        assertEquals("AccessDeniedException", e.getErrorCode());
+        assertTrue(e.getMessage().contains("GetPredictiveScalingForecast is not supported"));
+    }
+
+    private static ScalableTargetAction capacity(Integer min, Integer max) {
+        ScalableTargetAction action = new ScalableTargetAction();
+        action.setMinCapacity(min);
+        action.setMaxCapacity(max);
+        return action;
     }
 
     private TargetTrackingConfiguration withCooldowns(TargetTrackingConfiguration config) {

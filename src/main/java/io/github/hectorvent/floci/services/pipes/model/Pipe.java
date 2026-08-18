@@ -54,6 +54,12 @@ public class Pipe {
     @JsonProperty("Tags")
     private Map<String, String> tags;
 
+    @JsonProperty("LogConfiguration")
+    private JsonNode logConfiguration;
+
+    @JsonProperty("KmsKeyIdentifier")
+    private String kmsKeyIdentifier;
+
     @JsonProperty("CreationTime")
     @JsonFormat(shape = JsonFormat.Shape.NUMBER)
     private Instant creationTime;
@@ -108,6 +114,12 @@ public class Pipe {
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
+
+    public JsonNode getLogConfiguration() { return logConfiguration; }
+    public void setLogConfiguration(JsonNode logConfiguration) { this.logConfiguration = logConfiguration; }
+
+    public String getKmsKeyIdentifier() { return kmsKeyIdentifier; }
+    public void setKmsKeyIdentifier(String kmsKeyIdentifier) { this.kmsKeyIdentifier = kmsKeyIdentifier; }
 
     public Instant getCreationTime() { return creationTime; }
     public void setCreationTime(Instant creationTime) { this.creationTime = creationTime; }

@@ -891,6 +891,42 @@ class RdsQueryHandlerTest {
         return group;
     }
 
+    @Test
+    void describeDbClusterEndpoints_listsEndpoints() {
+        io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint endpoint =
+                new io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint();
+        endpoint.setDbClusterEndpointIdentifier("reader");
+        endpoint.setDbClusterIdentifier("cluster-1");
+        endpoint.setCustomEndpointType("READER");
+        when(service.listDbClusterEndpoints(null, null)).thenReturn(List.of(endpoint));
+
+        Response response = handler.handle("DescribeDBClusterEndpoints", params());
+
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<DBClusterEndpoint>"));
+        assertTrue(body.contains("<DBClusterEndpointIdentifier>reader</DBClusterEndpointIdentifier>"));
+    }
+
+    @Test
+    void deleteDbSnapshot_missingReturnsNotFound() {
+        when(service.getDbSnapshot("missing")).thenThrow(new AwsException("DBSnapshotNotFound",
+                "DBSnapshot missing not found.", 404));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBSnapshotIdentifier", "missing");
+        Response response = handler.handle("DeleteDBSnapshot", p);
+
+        assertEquals(404, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("DBSnapshotNotFound"));
+    }
+
+    @Test
+    void describeEvents_returnsEmptyList() {
+        Response response = handler.handle("DescribeEvents", params());
+        assertEquals(200, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<Events>"));
+    }
+
     private static DbCluster makeCluster(String id) {
         DbCluster c = new DbCluster();
         c.setDbClusterIdentifier(id);

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.CsvParser;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.athena.model.*;
@@ -37,11 +38,15 @@ public class AthenaService {
 
     private final StorageBackend<String, QueryExecution> queryStore;
     private final StorageBackend<String, WorkGroup> workGroupStore;
+    private final StorageBackend<String, DataCatalog> dataCatalogStore;
+    private final StorageBackend<String, NamedQuery> namedQueryStore;
+    private final StorageBackend<String, PreparedStatement> preparedStatementStore;
     private final FlociDuckClient duckClient;
     private final GlueService glueService;
     private final S3Service s3Service;
     private final EmulatorConfig config;
     private final Vertx vertx;
+    private final RegionResolver regionResolver;
 
     @Inject
     public AthenaService(StorageFactory storageFactory,
@@ -49,16 +54,24 @@ public class AthenaService {
                          GlueService glueService,
                          S3Service s3Service,
                          EmulatorConfig config,
-                         Vertx vertx) {
+                         Vertx vertx,
+                         RegionResolver regionResolver) {
         this.queryStore = storageFactory.create("athena", "queries.json",
                 new TypeReference<>() {});
         this.workGroupStore = storageFactory.create("athena", "workgroups.json",
+                new TypeReference<>() {});
+        this.dataCatalogStore = storageFactory.create("athena", "datacatalogs.json",
+                new TypeReference<>() {});
+        this.namedQueryStore = storageFactory.create("athena", "named_queries.json",
+                new TypeReference<>() {});
+        this.preparedStatementStore = storageFactory.create("athena", "prepared_statements.json",
                 new TypeReference<>() {});
         this.duckClient = duckClient;
         this.glueService = glueService;
         this.s3Service = s3Service;
         this.config = config;
         this.vertx = vertx;
+        this.regionResolver = regionResolver;
     }
 
     public String startQueryExecution(String query,
@@ -123,6 +136,12 @@ public class AthenaService {
 
     public void stopQueryExecution(String id) {
         QueryExecution execution = getQueryExecution(id);
+        QueryExecutionState state = execution.getStatus().getState();
+        if (state == QueryExecutionState.SUCCEEDED
+                || state == QueryExecutionState.FAILED
+                || state == QueryExecutionState.CANCELLED) {
+            return;
+        }
         execution.getStatus().setState(QueryExecutionState.CANCELLED);
         execution.getStatus().setCompletionDateTime(Instant.now());
         queryStore.put(id, execution);
@@ -161,8 +180,43 @@ public class AthenaService {
         return toWorkGroupDetail(workGroup);
     }
 
-    public void deleteWorkGroup(String name, String region) {
+    public void deleteWorkGroup(String name, String region, boolean recursive) {
+        if (recursive) {
+            namedQueryStore.scan(k -> true).stream()
+                    .filter(q -> name.equals(q.getWorkGroup()))
+                    .map(NamedQuery::getNamedQueryId)
+                    .forEach(namedQueryStore::delete);
+            preparedStatementStore.scan(k -> true).stream()
+                    .filter(s -> name.equals(s.getWorkGroupName()))
+                    .map(s -> preparedStatementKey(s.getWorkGroupName(), s.getStatementName()))
+                    .forEach(preparedStatementStore::delete);
+        }
         workGroupStore.delete(workGroupKey(region, name));
+    }
+
+    public void deleteWorkGroup(String name, String region) {
+        deleteWorkGroup(name, region, false);
+    }
+
+    public void updateWorkGroup(String name, String description, String state,
+                                Map<String, Object> configurationUpdates, String region) {
+        if (DEFAULT_WORKGROUP.equals(name)) {
+            throw new AwsException("InvalidRequestException", "The primary workgroup cannot be updated.", 400);
+        }
+        String key = workGroupKey(region, name);
+        WorkGroup workGroup = workGroupStore.get(key)
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "WorkGroup " + name + " is not found.", 400));
+        if (description != null) {
+            workGroup.setDescription(description);
+        }
+        if (state != null) {
+            workGroup.setState(state);
+        }
+        if (configurationUpdates != null && !configurationUpdates.isEmpty()) {
+            applyWorkGroupUpdates(workGroup, configurationUpdates);
+        }
+        workGroupStore.put(key, workGroup);
     }
 
     public List<Map<String, Object>> listWorkGroups(String region) {
@@ -176,11 +230,273 @@ public class AthenaService {
     }
 
     public List<Map<String, Object>> listDataCatalogs() {
-        return List.of(Map.of("CatalogName", DEFAULT_CATALOG, "Type", "GLUE"));
+        List<Map<String, Object>> catalogs = new ArrayList<>();
+        catalogs.add(Map.of("CatalogName", DEFAULT_CATALOG, "Type", "GLUE"));
+        catalogs.addAll(dataCatalogStore.scan(k -> true).stream()
+                .sorted(Comparator.comparing(DataCatalog::getName))
+                .map(catalog -> {
+                    Map<String, Object> summary = new LinkedHashMap<>();
+                    summary.put("CatalogName", catalog.getName());
+                    summary.put("Type", catalog.getType());
+                    return summary;
+                })
+                .toList());
+        return catalogs;
     }
 
     public Map<String, Object> getDataCatalog(String name) {
-        return Map.of("Name", name == null || name.isBlank() ? DEFAULT_CATALOG : name, "Type", "GLUE");
+        String resolved = name == null || name.isBlank() ? DEFAULT_CATALOG : name;
+        if (DEFAULT_CATALOG.equals(resolved)) {
+            return Map.of("Name", DEFAULT_CATALOG, "Type", "GLUE");
+        }
+        DataCatalog catalog = dataCatalogStore.get(resolved)
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "DataCatalog " + resolved + " is not found.", 400));
+        return toDataCatalogDetail(catalog);
+    }
+
+    public void createDataCatalog(DataCatalog catalog) {
+        if (catalog.getName() == null || catalog.getName().isBlank()) {
+            throw new AwsException("InvalidRequestException", "Name is required", 400);
+        }
+        if (DEFAULT_CATALOG.equals(catalog.getName())) {
+            throw new AwsException("InvalidRequestException", "AwsDataCatalog already exists", 400);
+        }
+        if (dataCatalogStore.get(catalog.getName()).isPresent()) {
+            throw new AwsException("InvalidRequestException", "DataCatalog already exists", 400);
+        }
+        if (catalog.getParameters() == null) {
+            catalog.setParameters(new LinkedHashMap<>());
+        }
+        dataCatalogStore.put(catalog.getName(), catalog);
+    }
+
+    public void updateDataCatalog(String name, String type, String description, Map<String, String> parameters) {
+        DataCatalog catalog = dataCatalogStore.get(name)
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "DataCatalog " + name + " is not found.", 400));
+        if (type != null) {
+            catalog.setType(type);
+        }
+        if (description != null) {
+            catalog.setDescription(description);
+        }
+        if (parameters != null) {
+            catalog.setParameters(new LinkedHashMap<>(parameters));
+        }
+        dataCatalogStore.put(name, catalog);
+    }
+
+    public void deleteDataCatalog(String name) {
+        if (DEFAULT_CATALOG.equals(name)) {
+            throw new AwsException("InvalidRequestException", "AwsDataCatalog cannot be deleted", 400);
+        }
+        if (dataCatalogStore.get(name).isEmpty()) {
+            throw new AwsException("InvalidRequestException", "DataCatalog " + name + " is not found.", 400);
+        }
+        dataCatalogStore.delete(name);
+    }
+
+    public Map<String, Object> getDatabase(String catalog, String name) {
+        Database database = glueService.getDatabase(name);
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("Name", database.getName());
+        if (database.getDescription() != null) {
+            detail.put("Description", database.getDescription());
+        }
+        if (database.getParameters() != null) {
+            detail.put("Parameters", database.getParameters());
+        }
+        return detail;
+    }
+
+    public String createNamedQuery(NamedQuery query) {
+        if (query.getClientRequestToken() != null && !query.getClientRequestToken().isBlank()) {
+            Optional<NamedQuery> existing = namedQueryStore.scan(k -> true).stream()
+                    .filter(q -> query.getClientRequestToken().equals(q.getClientRequestToken()))
+                    .findFirst();
+            if (existing.isPresent()) {
+                return existing.get().getNamedQueryId();
+            }
+        }
+        if (query.getWorkGroup() == null || query.getWorkGroup().isBlank()) {
+            query.setWorkGroup(DEFAULT_WORKGROUP);
+        }
+        query.setNamedQueryId(UUID.randomUUID().toString());
+        namedQueryStore.put(query.getNamedQueryId(), query);
+        return query.getNamedQueryId();
+    }
+
+    public NamedQuery getNamedQuery(String id) {
+        return namedQueryStore.get(id)
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "NamedQuery " + id + " is not found.", 400));
+    }
+
+    public List<String> listNamedQueries(String workGroup) {
+        String wg = workGroup == null || workGroup.isBlank() ? DEFAULT_WORKGROUP : workGroup;
+        return namedQueryStore.scan(k -> true).stream()
+                .filter(q -> wg.equals(q.getWorkGroup()))
+                .map(NamedQuery::getNamedQueryId)
+                .toList();
+    }
+
+    public void updateNamedQuery(String id, String name, String description, String queryString) {
+        NamedQuery query = getNamedQuery(id);
+        if (name != null) {
+            query.setName(name);
+        }
+        if (description != null) {
+            query.setDescription(description);
+        }
+        if (queryString != null) {
+            query.setQueryString(queryString);
+        }
+        namedQueryStore.put(id, query);
+    }
+
+    public void deleteNamedQuery(String id) {
+        if (namedQueryStore.get(id).isEmpty()) {
+            throw new AwsException("InvalidRequestException", "NamedQuery " + id + " is not found.", 400);
+        }
+        namedQueryStore.delete(id);
+    }
+
+    public Map<String, Object> batchGetNamedQuery(List<String> ids) {
+        List<NamedQuery> found = new ArrayList<>();
+        List<Map<String, Object>> unprocessed = new ArrayList<>();
+        for (String id : ids == null ? List.<String>of() : ids) {
+            Optional<NamedQuery> query = namedQueryStore.get(id);
+            if (query.isPresent()) {
+                found.add(query.get());
+            } else {
+                unprocessed.add(Map.of("NamedQueryId", id));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("NamedQueries", found);
+        out.put("UnprocessedNamedQueryIds", unprocessed);
+        return out;
+    }
+
+    public void createPreparedStatement(PreparedStatement statement) {
+        if (statement.getWorkGroupName() == null || statement.getWorkGroupName().isBlank()) {
+            statement.setWorkGroupName(DEFAULT_WORKGROUP);
+        }
+        statement.setLastModifiedTime(Instant.now());
+        preparedStatementStore.put(preparedStatementKey(statement.getWorkGroupName(), statement.getStatementName()),
+                statement);
+    }
+
+    public PreparedStatement getPreparedStatement(String workGroup, String statementName) {
+        return preparedStatementStore.get(preparedStatementKey(workGroup, statementName))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Prepared statement not found: " + statementName, 400));
+    }
+
+    public List<Map<String, Object>> listPreparedStatements(String workGroup) {
+        String wg = workGroup == null || workGroup.isBlank() ? DEFAULT_WORKGROUP : workGroup;
+        return preparedStatementStore.scan(k -> true).stream()
+                .filter(s -> wg.equals(s.getWorkGroupName()))
+                .sorted(Comparator.comparing(PreparedStatement::getStatementName))
+                .map(s -> {
+                    Map<String, Object> summary = new LinkedHashMap<>();
+                    summary.put("StatementName", s.getStatementName());
+                    if (s.getLastModifiedTime() != null) {
+                        summary.put("LastModifiedTime", s.getLastModifiedTime().getEpochSecond());
+                    }
+                    return summary;
+                })
+                .toList();
+    }
+
+    public void updatePreparedStatement(PreparedStatement statement) {
+        PreparedStatement existing = getPreparedStatement(statement.getWorkGroupName(), statement.getStatementName());
+        if (statement.getQueryStatement() != null) {
+            existing.setQueryStatement(statement.getQueryStatement());
+        }
+        if (statement.getDescription() != null) {
+            existing.setDescription(statement.getDescription());
+        }
+        existing.setLastModifiedTime(Instant.now());
+        preparedStatementStore.put(preparedStatementKey(existing.getWorkGroupName(), existing.getStatementName()),
+                existing);
+    }
+
+    public void deletePreparedStatement(String workGroup, String statementName) {
+        getPreparedStatement(workGroup, statementName);
+        preparedStatementStore.delete(preparedStatementKey(workGroup, statementName));
+    }
+
+    public Map<String, Object> batchGetPreparedStatement(String workGroup, List<String> names) {
+        List<PreparedStatement> found = new ArrayList<>();
+        List<Map<String, Object>> unprocessed = new ArrayList<>();
+        for (String name : names == null ? List.<String>of() : names) {
+            Optional<PreparedStatement> statement = preparedStatementStore.get(preparedStatementKey(workGroup, name));
+            if (statement.isPresent()) {
+                found.add(statement.get());
+            } else {
+                unprocessed.add(Map.of("StatementName", name));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("PreparedStatements", found);
+        out.put("UnprocessedPreparedStatementNames", unprocessed);
+        return out;
+    }
+
+    public Map<String, Object> batchGetQueryExecution(List<String> ids) {
+        List<QueryExecution> found = new ArrayList<>();
+        List<Map<String, Object>> unprocessed = new ArrayList<>();
+        for (String id : ids == null ? List.<String>of() : ids) {
+            Optional<QueryExecution> execution = queryStore.get(id);
+            if (execution.isPresent()) {
+                found.add(execution.get());
+            } else {
+                unprocessed.add(Map.of("QueryExecutionId", id));
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("QueryExecutions", found);
+        out.put("UnprocessedQueryExecutionIds", unprocessed);
+        return out;
+    }
+
+    public Map<String, Object> getQueryRuntimeStatistics(String id) {
+        getQueryExecution(id);
+        Map<String, Object> timeline = new LinkedHashMap<>();
+        timeline.put("QueryQueueTimeInMillis", 0L);
+        timeline.put("QueryPlanningTimeInMillis", 0L);
+        timeline.put("EngineExecutionTimeInMillis", 1L);
+        timeline.put("ServiceProcessingTimeInMillis", 0L);
+        timeline.put("TotalExecutionTimeInMillis", 1L);
+        return Map.of("QueryRuntimeStatistics", Map.of("Timeline", timeline));
+    }
+
+    public void tagResource(String resourceArn, List<WorkGroupTag> tags, String region) {
+        TaggedAthenaResource resource = resolveTaggedResource(resourceArn, region);
+        Map<String, String> merged = tagsToMap(resource.getTags());
+        for (WorkGroupTag tag : tags == null ? List.<WorkGroupTag>of() : tags) {
+            if (tag != null && tag.getKey() != null) {
+                merged.put(tag.getKey(), tag.getValue());
+            }
+        }
+        resource.setTags(mapToTags(merged));
+        resource.persist();
+    }
+
+    public void untagResource(String resourceArn, List<String> keys, String region) {
+        TaggedAthenaResource resource = resolveTaggedResource(resourceArn, region);
+        Map<String, String> merged = tagsToMap(resource.getTags());
+        if (keys != null) {
+            keys.forEach(merged::remove);
+        }
+        resource.setTags(mapToTags(merged));
+        resource.persist();
+    }
+
+    public List<WorkGroupTag> listTagsForResource(String resourceArn, String region) {
+        return resolveTaggedResource(resourceArn, region).getTags();
     }
 
     public List<Map<String, Object>> listDatabases(String catalog) {
@@ -289,11 +605,11 @@ public class AthenaService {
             return normalized;
         }
 
-        if (configuration.getResultConfiguration() != null
-                && configuration.getResultConfiguration().getOutputLocation() != null
-                && !configuration.getResultConfiguration().getOutputLocation().isBlank()) {
-            normalized.setResultConfiguration(
-                    new ResultConfiguration(configuration.getResultConfiguration().getOutputLocation()));
+        if (configuration.getResultConfiguration() != null) {
+            ResultConfiguration result = new ResultConfiguration(
+                    configuration.getResultConfiguration().getOutputLocation());
+            result.setEncryptionConfiguration(configuration.getResultConfiguration().getEncryptionConfiguration());
+            normalized.setResultConfiguration(result);
         }
         if (configuration.getEnforceWorkGroupConfiguration() != null) {
             normalized.setEnforceWorkGroupConfiguration(configuration.getEnforceWorkGroupConfiguration());
@@ -397,6 +713,134 @@ public class AthenaService {
 
     private String workGroupKey(String region, String name) {
         return region + ":" + name;
+    }
+
+    private String preparedStatementKey(String workGroup, String statementName) {
+        return workGroup + ":" + statementName;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyWorkGroupUpdates(WorkGroup workGroup, Map<String, Object> updates) {
+        WorkGroupConfiguration configuration = workGroup.getConfiguration() != null
+                ? workGroup.getConfiguration()
+                : defaultWorkGroupConfiguration();
+        if (updates.get("EnforceWorkGroupConfiguration") instanceof Boolean enforce) {
+            configuration.setEnforceWorkGroupConfiguration(enforce);
+        }
+        if (updates.get("PublishCloudWatchMetricsEnabled") instanceof Boolean publish) {
+            configuration.setPublishCloudWatchMetricsEnabled(publish);
+        }
+        if (updates.get("RequesterPaysEnabled") instanceof Boolean requesterPays) {
+            configuration.setRequesterPaysEnabled(requesterPays);
+        }
+        if (Boolean.TRUE.equals(updates.get("RemoveBytesScannedCutoffPerQuery"))) {
+            configuration.setBytesScannedCutoffPerQuery(null);
+        } else if (updates.get("BytesScannedCutoffPerQuery") instanceof Number cutoff) {
+            configuration.setBytesScannedCutoffPerQuery(cutoff.longValue());
+        }
+        if (updates.get("EngineVersion") instanceof Map<?, ?> engine) {
+            Object selected = engine.get("SelectedEngineVersion");
+            if (selected instanceof String selectedVersion) {
+                QueryExecution.EngineVersion version = new QueryExecution.EngineVersion();
+                version.setSelectedEngineVersion(selectedVersion);
+                version.setEffectiveEngineVersion(resolveEffectiveEngineVersion(selectedVersion));
+                configuration.setEngineVersion(version);
+            }
+        }
+        if (updates.get("ResultConfigurationUpdates") instanceof Map<?, ?> resultUpdates) {
+            ResultConfiguration result = configuration.getResultConfiguration() != null
+                    ? configuration.getResultConfiguration()
+                    : new ResultConfiguration();
+            Object output = resultUpdates.get("OutputLocation");
+            if (output instanceof String location) {
+                result.setOutputLocation(location);
+            }
+            if (resultUpdates.get("EncryptionConfiguration") instanceof Map<?, ?> encryption) {
+                ResultConfiguration.EncryptionConfiguration enc = new ResultConfiguration.EncryptionConfiguration();
+                Object option = encryption.get("EncryptionOption");
+                Object kms = encryption.get("KmsKey");
+                if (option instanceof String encryptionOption) {
+                    enc.setEncryptionOption(encryptionOption);
+                }
+                if (kms instanceof String kmsKey) {
+                    enc.setKmsKey(kmsKey);
+                }
+                result.setEncryptionConfiguration(enc);
+            }
+            configuration.setResultConfiguration(result);
+        }
+        workGroup.setConfiguration(configuration);
+    }
+
+    private Map<String, Object> toDataCatalogDetail(DataCatalog catalog) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("Name", catalog.getName());
+        detail.put("Type", catalog.getType());
+        if (catalog.getDescription() != null) {
+            detail.put("Description", catalog.getDescription());
+        }
+        if (catalog.getParameters() != null) {
+            detail.put("Parameters", catalog.getParameters());
+        }
+        return detail;
+    }
+
+    private TaggedAthenaResource resolveTaggedResource(String resourceArn, String region) {
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("InvalidRequestException", "ResourceARN is required", 400);
+        }
+        int workgroupIdx = resourceArn.indexOf(":workgroup/");
+        if (workgroupIdx >= 0) {
+            String name = resourceArn.substring(workgroupIdx + ":workgroup/".length());
+            if (DEFAULT_WORKGROUP.equals(name)) {
+                throw new AwsException("InvalidRequestException", "The primary workgroup cannot be tagged.", 400);
+            }
+            WorkGroup workGroup = workGroupStore.get(workGroupKey(region, name))
+                    .orElseThrow(() -> new AwsException("InvalidRequestException",
+                            "WorkGroup " + name + " is not found.", 400));
+            return new TaggedAthenaResource() {
+                @Override public List<WorkGroupTag> getTags() { return workGroup.getTags(); }
+                @Override public void setTags(List<WorkGroupTag> tags) { workGroup.setTags(tags); }
+                @Override public void persist() { workGroupStore.put(workGroupKey(region, name), workGroup); }
+            };
+        }
+        int catalogIdx = resourceArn.indexOf(":datacatalog/");
+        if (catalogIdx >= 0) {
+            String name = resourceArn.substring(catalogIdx + ":datacatalog/".length());
+            DataCatalog catalog = dataCatalogStore.get(name)
+                    .orElseThrow(() -> new AwsException("InvalidRequestException",
+                            "DataCatalog " + name + " is not found.", 400));
+            return new TaggedAthenaResource() {
+                @Override public List<WorkGroupTag> getTags() { return catalog.getTags(); }
+                @Override public void setTags(List<WorkGroupTag> tags) { catalog.setTags(tags); }
+                @Override public void persist() { dataCatalogStore.put(name, catalog); }
+            };
+        }
+        throw new AwsException("InvalidRequestException", "Unsupported resource ARN: " + resourceArn, 400);
+    }
+
+    private Map<String, String> tagsToMap(List<WorkGroupTag> tags) {
+        Map<String, String> map = new LinkedHashMap<>();
+        if (tags != null) {
+            for (WorkGroupTag tag : tags) {
+                if (tag != null && tag.getKey() != null) {
+                    map.put(tag.getKey(), tag.getValue());
+                }
+            }
+        }
+        return map;
+    }
+
+    private List<WorkGroupTag> mapToTags(Map<String, String> tags) {
+        return tags.entrySet().stream()
+                .map(e -> new WorkGroupTag(e.getKey(), e.getValue()))
+                .toList();
+    }
+
+    private interface TaggedAthenaResource {
+        List<WorkGroupTag> getTags();
+        void setTags(List<WorkGroupTag> tags);
+        void persist();
     }
 
     private void validateWorkGroupName(String name) {

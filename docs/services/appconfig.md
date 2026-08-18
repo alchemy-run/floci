@@ -11,19 +11,42 @@ The management plane allows you to create and manage applications, environments,
 - `CreateApplication`
 - `GetApplication`
 - `ListApplications`
+- `UpdateApplication`
 - `DeleteApplication`
 - `CreateEnvironment`
 - `GetEnvironment`
 - `ListEnvironments`
+- `UpdateEnvironment`
+- `DeleteEnvironment`
 - `CreateConfigurationProfile`
 - `GetConfigurationProfile`
 - `ListConfigurationProfiles`
+- `UpdateConfigurationProfile`
+- `DeleteConfigurationProfile`
+- `ValidateConfiguration`
 - `CreateHostedConfigurationVersion`
 - `GetHostedConfigurationVersion`
+- `ListHostedConfigurationVersions`
+- `DeleteHostedConfigurationVersion`
 - `CreateDeploymentStrategy`
 - `GetDeploymentStrategy`
+- `ListDeploymentStrategies`
+- `UpdateDeploymentStrategy`
+- `DeleteDeploymentStrategy`
 - `StartDeployment`
 - `GetDeployment`
+- `StopDeployment`
+- `CreateExtension`
+- `GetExtension`
+- `ListExtensions`
+- `UpdateExtension`
+- `DeleteExtension`
+- `CreateExtensionAssociation`
+- `GetExtensionAssociation`
+- `ListExtensionAssociations`
+- `UpdateExtensionAssociation`
+- `DeleteExtensionAssociation`
+- `TagResource` / `UntagResource` / `ListTagsForResource` (applications, environments, profiles, strategies, extensions, associations)
 
 ## Data Plane (AppConfigData) {#data-plane}
 

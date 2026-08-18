@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.secretsmanager.model.SecretVersion;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
@@ -687,6 +688,137 @@ public class SecretsManagerService {
         existing.removeIf(t -> tagKeys.contains(t.key()));
         secret.setTags(existing);
         store.put(regionKey(region, secret.getName()), secret);
+    }
+
+    /**
+     * Attaches or replaces the resource-based policy on a secret.
+     *
+     * @param blockPublicPolicy {@code null} defaults to {@code true}, matching AWS: a
+     *        policy that grants {@code Principal: "*"} is rejected unless the caller
+     *        explicitly sets {@code BlockPublicPolicy=false}.
+     */
+    public Secret putResourcePolicy(String secretId, String resourcePolicy, Boolean blockPublicPolicy, String region) {
+        Secret secret = requireActiveSecret(secretId, region);
+        if (resourcePolicy == null || resourcePolicy.isBlank()) {
+            throw new AwsException("InvalidParameterException",
+                    "ResourcePolicy is a required parameter.", 400);
+        }
+        if (resourcePolicy.length() > 20_480) {
+            throw new AwsException("InvalidParameterException",
+                    "ResourcePolicy must be less than or equal to 20480 characters.", 400);
+        }
+        boolean blockPublic = blockPublicPolicy == null || blockPublicPolicy;
+        if (blockPublic && isPublicResourcePolicy(resourcePolicy)) {
+            throw new AwsException("MalformedPolicyDocumentException",
+                    "The resource policy contains a Principal that allows public access. Set BlockPublicPolicy to false to attach this policy.",
+                    400);
+        }
+        secret.setResourcePolicy(resourcePolicy);
+        secret.setLastChangedDate(Instant.now());
+        store.put(regionKey(region, secret.getName()), secret);
+        LOG.infov("Put resource policy on secret: {0}", secret.getName());
+        return secret;
+    }
+
+    /**
+     * Returns the secret so the handler can emit ARN/Name and the optional
+     * {@code ResourcePolicy}. A missing policy is not an error — AWS returns the
+     * metadata with {@code ResourcePolicy} omitted.
+     */
+    public Secret getResourcePolicy(String secretId, String region) {
+        return requireActiveSecret(secretId, region);
+    }
+
+    /**
+     * Removes the resource-based policy. AWS returns {@code ResourceNotFoundException}
+     * when the secret has no policy attached.
+     */
+    public Secret deleteResourcePolicy(String secretId, String region) {
+        Secret secret = requireActiveSecret(secretId, region);
+        if (secret.getResourcePolicy() == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Secrets Manager can't find a resource-based policy attached to the secret.", 400);
+        }
+        secret.setResourcePolicy(null);
+        secret.setLastChangedDate(Instant.now());
+        store.put(regionKey(region, secret.getName()), secret);
+        LOG.infov("Deleted resource policy on secret: {0}", secret.getName());
+        return secret;
+    }
+
+    /**
+     * Turns off automatic rotation. Rotation Lambda / rules are kept so a later
+     * {@code RotateSecret} can re-enable without re-supplying them. In-progress
+     * {@code AWSPENDING} versions are left in place (AWS: "the secret remains in
+     * the state it was in when you canceled").
+     */
+    public Secret cancelRotateSecret(String secretId, String region) {
+        Secret secret = requireActiveSecret(secretId, region);
+        if (!secret.isRotationEnabled()) {
+            throw new AwsException("InvalidRequestException",
+                    "You can't perform this operation on the secret because rotation is not enabled.", 400);
+        }
+        secret.setRotationEnabled(false);
+        secret.setLastChangedDate(Instant.now());
+        store.put(regionKey(region, secret.getName()), secret);
+        LOG.infov("Cancelled rotation for secret: {0}", secret.getName());
+        return secret;
+    }
+
+    private Secret requireActiveSecret(String secretId, String region) {
+        Secret secret = resolveSecret(secretId, region);
+        if (secret.getDeletedDate() != null) {
+            throw new AwsException("InvalidRequestException",
+                    "You can't perform this operation on the secret because it was marked for deletion.", 400);
+        }
+        return secret;
+    }
+
+    private boolean isPublicResourcePolicy(String resourcePolicy) {
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(resourcePolicy);
+        } catch (Exception e) {
+            throw new AwsException("MalformedPolicyDocumentException",
+                    "The resource policy is not valid JSON.", 400);
+        }
+        JsonNode statements = root.path("Statement");
+        if (statements.isObject()) {
+            return statementGrantsPublicAccess(statements);
+        }
+        if (statements.isArray()) {
+            for (JsonNode statement : statements) {
+                if (statementGrantsPublicAccess(statement)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean statementGrantsPublicAccess(JsonNode statement) {
+        JsonNode principal = statement.path("Principal");
+        if (principal.isTextual()) {
+            return "*".equals(principal.asText());
+        }
+        if (!principal.isObject()) {
+            return false;
+        }
+        JsonNode aws = principal.get("AWS");
+        if (aws == null || aws.isNull()) {
+            return false;
+        }
+        if (aws.isTextual()) {
+            return "*".equals(aws.asText());
+        }
+        if (aws.isArray()) {
+            for (JsonNode value : aws) {
+                if ("*".equals(value.asText())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public Map<String, List<String>> listSecretVersionIds(String secretId, String region) {

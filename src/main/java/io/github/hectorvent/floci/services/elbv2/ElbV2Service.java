@@ -11,13 +11,18 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.elbv2.model.*;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -41,13 +46,18 @@ public class ElbV2Service {
     @Inject
     EmulatorConfig config;
 
+    @Inject
+    S3Service s3Service;
+
     private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
+    private static final Pattern PEM_CERT = Pattern.compile("-----BEGIN CERTIFICATE-----");
 
     // region → ARN → resource
     private Map<String, Map<String, LoadBalancer>> loadBalancers = new ConcurrentHashMap<>();
     private Map<String, Map<String, TargetGroup>> targetGroups = new ConcurrentHashMap<>();
     private Map<String, Map<String, Listener>> listeners = new ConcurrentHashMap<>();
     private Map<String, Map<String, Rule>> rules = new ConcurrentHashMap<>();
+    private Map<String, Map<String, TrustStore>> trustStores = new ConcurrentHashMap<>();
 
     // indexes
     private final Map<String, List<String>> lbToListeners   = new ConcurrentHashMap<>(); // LB-ARN → listener ARNs
@@ -71,12 +81,15 @@ public class ElbV2Service {
                 new TypeReference<Map<String, Map<String, Listener>>>() {});
         this.rules = storageBacked("elbv2-rules.json",
                 new TypeReference<Map<String, Map<String, Rule>>>() {});
+        this.trustStores = storageBacked("elbv2-trust-stores.json",
+                new TypeReference<Map<String, Map<String, TrustStore>>>() {});
         this.tags = storageBacked("elbv2-tags.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
         normalizeRegionMaps(loadBalancers);
         normalizeRegionMaps(targetGroups);
         normalizeRegionMaps(listeners);
         normalizeRegionMaps(rules);
+        normalizeRegionMaps(trustStores);
         normalizeRegionMaps(tags);
         rebuildIndexes();
     }
@@ -283,16 +296,44 @@ public class ElbV2Service {
         return loadBalancers.getOrDefault(region, Map.of()).get(arn);
     }
 
-    /** Capacity reservation status for a load balancer. All fields are {@code null} when no
-     *  capacity is reserved, which is always the case in Floci (capacity cannot be reserved). */
+    /** Capacity reservation status for a load balancer. Fields are {@code null} when no
+     *  capacity is reserved. */
     public record CapacityReservation(Integer decreaseRequestsRemaining,
                                       Integer minimumCapacityUnits,
                                       Instant lastModifiedTime) {}
 
     public CapacityReservation describeCapacityReservation(String region, String arn) {
-        requireLoadBalancer(region, arn);
-        // Floci does not reserve load balancer capacity, so there is never a reservation to report.
-        return new CapacityReservation(null, null, null);
+        LoadBalancer lb = requireLoadBalancer(region, arn);
+        return new CapacityReservation(
+                lb.getDecreaseRequestsRemaining(),
+                lb.getMinimumCapacityUnits(),
+                lb.getCapacityReservationLastModified());
+    }
+
+    /**
+     * Stores or clears the requested minimum capacity. Floci does not provision LCUs, so a reset
+     * of a never-set reservation is a no-op success — the same as AWS when nothing is reserved.
+     */
+    public CapacityReservation modifyCapacityReservation(String region, String arn,
+                                                         Integer minimumCapacityUnits,
+                                                         Boolean reset) {
+        LoadBalancer lb = requireLoadBalancer(region, arn);
+        boolean doReset = Boolean.TRUE.equals(reset);
+        if (!doReset && minimumCapacityUnits == null) {
+            throw new AwsException("InvalidConfigurationRequest",
+                    "You must specify MinimumLoadBalancerCapacity or ResetCapacityReservation.", 400);
+        }
+        if (doReset) {
+            lb.setMinimumCapacityUnits(null);
+            lb.setDecreaseRequestsRemaining(null);
+            lb.setCapacityReservationLastModified(null);
+        } else {
+            lb.setMinimumCapacityUnits(minimumCapacityUnits);
+            lb.setDecreaseRequestsRemaining(2);
+            lb.setCapacityReservationLastModified(Instant.now());
+        }
+        persistRegion(loadBalancers, region);
+        return describeCapacityReservation(region, arn);
     }
 
     public void setSecurityGroups(String region, String arn, List<String> sgIds) {
@@ -857,6 +898,133 @@ public class ElbV2Service {
         return new ArrayList<>(listener.getCertificates());
     }
 
+    // ── Trust Stores ──────────────────────────────────────────────────────────
+
+    public TrustStore createTrustStore(String region, String name,
+                                       String caCertificatesBundleS3Bucket,
+                                       String caCertificatesBundleS3Key,
+                                       String caCertificatesBundleS3ObjectVersion,
+                                       Map<String, String> initialTags) {
+        validateName(name, "trust store");
+        if (caCertificatesBundleS3Bucket == null || caCertificatesBundleS3Bucket.isEmpty()
+                || caCertificatesBundleS3Key == null || caCertificatesBundleS3Key.isEmpty()) {
+            throw new AwsException("ValidationError",
+                    "CaCertificatesBundleS3Bucket and CaCertificatesBundleS3Key are required.", 400);
+        }
+        Map<String, TrustStore> regionStores = trustStores.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        boolean duplicate = regionStores.values().stream().anyMatch(ts -> ts.getName().equals(name));
+        if (duplicate) {
+            throw new AwsException("DuplicateTrustStoreName",
+                    "A trust store with name '" + name + "' already exists.", 400);
+        }
+
+        int certCount = loadCaBundleCertificateCount(
+                caCertificatesBundleS3Bucket, caCertificatesBundleS3Key, caCertificatesBundleS3ObjectVersion);
+
+        String id = randomHex16();
+        String arn = AwsArnUtils.Arn.of(
+                "elasticloadbalancing", region, regionResolver.getAccountId(),
+                "truststore/" + name + "/" + id).toString();
+
+        TrustStore trustStore = new TrustStore();
+        trustStore.setName(name);
+        trustStore.setTrustStoreArn(arn);
+        trustStore.setStatus("ACTIVE");
+        trustStore.setNumberOfCaCertificates(certCount);
+        trustStore.setTotalRevokedEntries(0);
+        trustStore.setCaCertificatesBundleS3Bucket(caCertificatesBundleS3Bucket);
+        trustStore.setCaCertificatesBundleS3Key(caCertificatesBundleS3Key);
+        trustStore.setCaCertificatesBundleS3ObjectVersion(caCertificatesBundleS3ObjectVersion);
+        trustStore.setRegion(region);
+
+        regionStores.put(arn, trustStore);
+        trustStores.put(region, regionStores);
+        if (initialTags != null && !initialTags.isEmpty()) {
+            tags.put(arn, new LinkedHashMap<>(initialTags));
+        }
+        return trustStore;
+    }
+
+    public List<TrustStore> describeTrustStores(String region, List<String> arns, List<String> names) {
+        Map<String, TrustStore> regionStores = trustStores.getOrDefault(region, Map.of());
+        List<TrustStore> result = new ArrayList<>(regionStores.values());
+
+        if (arns != null && !arns.isEmpty()) {
+            Set<String> arnSet = new HashSet<>(arns);
+            result = result.stream()
+                    .filter(ts -> arnSet.contains(ts.getTrustStoreArn()))
+                    .collect(Collectors.toList());
+            if (result.size() != arnSet.size()) {
+                throw new AwsException("TrustStoreNotFound",
+                        "One or more trust stores not found.", 400);
+            }
+        }
+        if (names != null && !names.isEmpty()) {
+            Set<String> nameSet = new HashSet<>(names);
+            result = result.stream()
+                    .filter(ts -> nameSet.contains(ts.getName()))
+                    .collect(Collectors.toList());
+            if (result.size() != nameSet.size()) {
+                throw new AwsException("TrustStoreNotFound",
+                        "One or more trust stores not found.", 400);
+            }
+        }
+        return result;
+    }
+
+    public TrustStore modifyTrustStore(String region, String arn,
+                                       String caCertificatesBundleS3Bucket,
+                                       String caCertificatesBundleS3Key,
+                                       String caCertificatesBundleS3ObjectVersion) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        if (caCertificatesBundleS3Bucket == null || caCertificatesBundleS3Bucket.isEmpty()
+                || caCertificatesBundleS3Key == null || caCertificatesBundleS3Key.isEmpty()) {
+            throw new AwsException("ValidationError",
+                    "CaCertificatesBundleS3Bucket and CaCertificatesBundleS3Key are required.", 400);
+        }
+        int certCount = loadCaBundleCertificateCount(
+                caCertificatesBundleS3Bucket, caCertificatesBundleS3Key, caCertificatesBundleS3ObjectVersion);
+        trustStore.setCaCertificatesBundleS3Bucket(caCertificatesBundleS3Bucket);
+        trustStore.setCaCertificatesBundleS3Key(caCertificatesBundleS3Key);
+        trustStore.setCaCertificatesBundleS3ObjectVersion(caCertificatesBundleS3ObjectVersion);
+        trustStore.setNumberOfCaCertificates(certCount);
+        persistRegion(trustStores, region);
+        return trustStore;
+    }
+
+    public void deleteTrustStore(String region, String arn) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        if (isTrustStoreInUse(trustStore.getTrustStoreArn())) {
+            throw new AwsException("TrustStoreInUse",
+                    "The specified trust store is currently in use.", 400);
+        }
+        Map<String, TrustStore> regionStores = trustStores.getOrDefault(region, Map.of());
+        regionStores.remove(arn);
+        tags.remove(arn);
+        persistRegion(trustStores, region);
+    }
+
+    public String getTrustStoreCaCertificatesBundleLocation(String region, String arn) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        return "https://s3." + region + ".amazonaws.com/"
+                + trustStore.getCaCertificatesBundleS3Bucket() + "/"
+                + trustStore.getCaCertificatesBundleS3Key();
+    }
+
+    public String getTrustStoreRevocationContentLocation(String region, String arn, Long revocationId) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        if (revocationId == null) {
+            throw new AwsException("ValidationError", "RevocationId is required.", 400);
+        }
+        TrustStoreRevocation revocation = trustStore.getRevocations().stream()
+                .filter(r -> r.getRevocationId() == revocationId)
+                .findFirst()
+                .orElseThrow(() -> new AwsException("RevocationIdNotFound",
+                        "The specified revocation identifier was not found.", 400));
+        return "https://s3." + region + ".amazonaws.com/"
+                + revocation.getS3Bucket() + "/" + revocation.getS3Key();
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private LoadBalancer requireLoadBalancer(String region, String arn) {
@@ -959,6 +1127,64 @@ public class ElbV2Service {
             throw new AwsException("RuleNotFound", "One or more rules not found.", 400);
         }
         return r;
+    }
+
+    private TrustStore requireTrustStore(String region, String arn) {
+        TrustStore trustStore = trustStores.getOrDefault(region, Map.of()).get(arn);
+        if (trustStore == null) {
+            throw new AwsException("TrustStoreNotFound",
+                    "One or more trust stores not found.", 400);
+        }
+        return trustStore;
+    }
+
+    private boolean isTrustStoreInUse(String trustStoreArn) {
+        for (Map<String, Listener> regionListeners : listeners.values()) {
+            for (Listener listener : regionListeners.values()) {
+                String mode = listener.getAttributes().get("mutualAuthentication.trustStoreArn");
+                if (trustStoreArn.equals(mode)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private int loadCaBundleCertificateCount(String bucket, String key, String versionId) {
+        if (s3Service == null) {
+            throw new AwsException("CaCertificatesBundleNotFound",
+                    "The specified CA certificates bundle could not be found.", 400);
+        }
+        S3Object object;
+        try {
+            object = versionId != null && !versionId.isEmpty()
+                    ? s3Service.getObject(bucket, key, versionId)
+                    : s3Service.getObject(bucket, key);
+        } catch (AwsException e) {
+            if ("NoSuchBucket".equals(e.getErrorCode())
+                    || "NoSuchKey".equals(e.getErrorCode())
+                    || "NoSuchVersion".equals(e.getErrorCode())) {
+                throw new AwsException("CaCertificatesBundleNotFound",
+                        "The specified CA certificates bundle could not be found.", 400);
+            }
+            throw e;
+        }
+        byte[] data = object.getData();
+        if (data == null || data.length == 0) {
+            throw new AwsException("InvalidCaCertificatesBundle",
+                    "The CA certificates bundle is empty.", 400);
+        }
+        String pem = new String(data, StandardCharsets.UTF_8);
+        Matcher matcher = PEM_CERT.matcher(pem);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        if (count == 0) {
+            throw new AwsException("InvalidCaCertificatesBundle",
+                    "The CA certificates bundle does not contain a valid certificate.", 400);
+        }
+        return count;
     }
 
     public TargetGroup getTargetGroup(String region, String arn) {

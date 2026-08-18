@@ -4,7 +4,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -17,6 +19,7 @@ public class RestApi {
     private long createdDate;
     private Map<String, String> tags = new HashMap<>();
     private EndpointConfiguration endpointConfiguration;
+    private List<String> binaryMediaTypes = new ArrayList<>();
 
 
     public String getId() {
@@ -65,5 +68,13 @@ public class RestApi {
 
     public void setEndpointConfiguration(EndpointConfiguration endpointConfiguration) {
         this.endpointConfiguration = endpointConfiguration;
+    }
+
+    public List<String> getBinaryMediaTypes() {
+        return binaryMediaTypes;
+    }
+
+    public void setBinaryMediaTypes(List<String> binaryMediaTypes) {
+        this.binaryMediaTypes = binaryMediaTypes != null ? binaryMediaTypes : new ArrayList<>();
     }
 }

@@ -834,6 +834,18 @@ public class CloudFrontController {
 
     @GET
     @Path("/function/{Name}")
+    public Response getFunction(@PathParam("Name") String name,
+                                @QueryParam("Stage") String stage) {
+        try {
+            CloudFrontFunction fn = service.describeFunction(name, stage);
+            return Response.ok(xmlFunctionResponse(fn), XML).header("ETag", fn.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/function/{Name}/describe")
     public Response describeFunction(@PathParam("Name") String name,
                                      @QueryParam("Stage") String stage) {
         try {
@@ -914,6 +926,7 @@ public class CloudFrontController {
                         .start("FunctionConfig")
                         .elem("Comment", fn.getComment() != null ? fn.getComment() : "")
                         .elem("Runtime", fn.getRuntime() != null ? fn.getRuntime() : "cloudfront-js-2.0")
+                        .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                         .end("FunctionConfig")
                         .start("FunctionMetadata")
                         .elem("FunctionARN", AwsArnUtils.Arn.of("cloudfront", "", service.getAccountId(),
@@ -1713,6 +1726,182 @@ public class CloudFrontController {
         }
     }
 
+    // ── VPC Origins ───────────────────────────────────────────────────────────
+
+    @POST
+    @Path("/vpc-origin")
+    public Response createVpcOrigin(String body) {
+        try {
+            VpcOrigin origin = parseVpcOrigin(body);
+            Map<String, String> tags = parseTags(body);
+            origin = service.createVpcOrigin(origin, tags);
+            return Response.created(URI.create("/2020-05-31/vpc-origin/" + origin.getId()))
+                    .type(XML)
+                    .header("ETag", origin.getEtag())
+                    .header("Location", "/2020-05-31/vpc-origin/" + origin.getId())
+                    .entity(xmlVpcOrigin(origin))
+                    .build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/vpc-origin/{Id}")
+    public Response getVpcOrigin(@PathParam("Id") String id) {
+        try {
+            VpcOrigin origin = service.getVpcOrigin(id);
+            return Response.ok(xmlVpcOrigin(origin), XML).header("ETag", origin.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @PUT
+    @Path("/vpc-origin/{Id}")
+    public Response updateVpcOrigin(@PathParam("Id") String id,
+                                    @HeaderParam("If-Match") String ifMatch,
+                                    String body) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            VpcOrigin origin = parseVpcOrigin(body);
+            origin = service.updateVpcOrigin(id, ifMatch, origin);
+            return Response.ok(xmlVpcOrigin(origin), XML).header("ETag", origin.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @DELETE
+    @Path("/vpc-origin/{Id}")
+    public Response deleteVpcOrigin(@PathParam("Id") String id,
+                                    @HeaderParam("If-Match") String ifMatch) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            service.deleteVpcOrigin(id, ifMatch);
+            return Response.noContent().build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/vpc-origin")
+    public Response listVpcOrigins(@QueryParam("Marker") String marker,
+                                   @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
+        try {
+            List<VpcOrigin> origins = service.listVpcOrigins(marker, maxItems);
+            boolean truncated = origins.size() == maxItems;
+            XmlBuilder xml = new XmlBuilder()
+                    .start("VpcOriginList", NS)
+                    .elem("Marker", marker != null ? marker : "")
+                    .elem("MaxItems", maxItems)
+                    .elem("IsTruncated", truncated)
+                    .elem("Quantity", origins.size())
+                    .start("Items");
+            for (VpcOrigin o : origins) {
+                xml.raw(xmlVpcOriginSummary(o));
+            }
+            xml.end("Items").end("VpcOriginList");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    // ── Key Value Stores ──────────────────────────────────────────────────────
+
+    @POST
+    @Path("/key-value-store")
+    public Response createKeyValueStore(String body) {
+        try {
+            KeyValueStore store = parseKeyValueStore(body);
+            Map<String, String> tags = parseTags(body);
+            store = service.createKeyValueStore(store, tags);
+            return Response.created(URI.create("/2020-05-31/key-value-store/" + store.getName()))
+                    .type(XML)
+                    .header("ETag", store.getEtag())
+                    .header("Location", "/2020-05-31/key-value-store/" + store.getName())
+                    .entity(xmlKeyValueStore(store))
+                    .build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/key-value-store/{Name}")
+    public Response describeKeyValueStore(@PathParam("Name") String name) {
+        try {
+            KeyValueStore store = service.describeKeyValueStore(name);
+            return Response.ok(xmlKeyValueStore(store), XML).header("ETag", store.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @PUT
+    @Path("/key-value-store/{Name}")
+    public Response updateKeyValueStore(@PathParam("Name") String name,
+                                        @HeaderParam("If-Match") String ifMatch,
+                                        String body) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            String comment = XmlParser.extractFirst(body, "Comment", "");
+            KeyValueStore store = service.updateKeyValueStore(name, ifMatch, comment);
+            return Response.ok(xmlKeyValueStore(store), XML).header("ETag", store.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @DELETE
+    @Path("/key-value-store/{Name}")
+    public Response deleteKeyValueStore(@PathParam("Name") String name,
+                                        @HeaderParam("If-Match") String ifMatch) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            service.deleteKeyValueStore(name, ifMatch);
+            return Response.noContent().build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/key-value-store")
+    public Response listKeyValueStores(@QueryParam("Marker") String marker,
+                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems,
+                                       @QueryParam("Status") String status) {
+        try {
+            List<KeyValueStore> stores = service.listKeyValueStores(marker, maxItems, status);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("KeyValueStoreList", NS)
+                    .elem("MaxItems", maxItems)
+                    .elem("Quantity", stores.size())
+                    .start("Items");
+            for (KeyValueStore store : stores) {
+                xml.raw(xmlKeyValueStore(store));
+            }
+            xml.end("Items").end("KeyValueStoreList");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
     // ── XML builders ──────────────────────────────────────────────────────────
 
     private String xmlDistribution(Distribution dist) {
@@ -1802,7 +1991,7 @@ public class CloudFrontController {
             xml.start("S3OriginConfig")
                     .elem("OriginAccessIdentity", s3Config.getOrDefault("OriginAccessIdentity", ""))
                     .end("S3OriginConfig");
-        } else if (o.getCustomOriginConfig() == null) {
+        } else if (o.getCustomOriginConfig() == null && o.getVpcOriginConfig() == null) {
             xml.start("S3OriginConfig").elem("OriginAccessIdentity", "").end("S3OriginConfig");
         }
 
@@ -1814,6 +2003,19 @@ public class CloudFrontController {
                     .elem("OriginProtocolPolicy",
                             coc.getOrDefault("OriginProtocolPolicy", "https-only").toString())
                     .end("CustomOriginConfig");
+        }
+
+        if (o.getVpcOriginConfig() != null) {
+            Map<String, String> voc = o.getVpcOriginConfig();
+            xml.start("VpcOriginConfig")
+                    .elem("VpcOriginId", voc.getOrDefault("VpcOriginId", ""));
+            if (voc.containsKey("OriginReadTimeout")) {
+                xml.elem("OriginReadTimeout", voc.get("OriginReadTimeout"));
+            }
+            if (voc.containsKey("OriginKeepaliveTimeout")) {
+                xml.elem("OriginKeepaliveTimeout", voc.get("OriginKeepaliveTimeout"));
+            }
+            xml.end("VpcOriginConfig");
         }
 
         xml.end("Origin");
@@ -1954,45 +2156,54 @@ public class CloudFrontController {
     }
 
     private String xmlCachePolicyResponse(CachePolicy policy) {
-        return new XmlBuilder()
+        XmlBuilder xml = new XmlBuilder()
                 .start("CachePolicy")
                 .elem("Id", policy.getId())
                 .elem("LastModifiedTime",
-                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "")
-                .start("CachePolicyConfig")
-                .elem("Name", policy.getName())
-                .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
-                .end("CachePolicyConfig")
-                .end("CachePolicy")
-                .build();
+                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "");
+        if (policy.getConfigXml() != null && !policy.getConfigXml().isBlank()) {
+            xml.raw(policy.getConfigXml());
+        } else {
+            xml.start("CachePolicyConfig")
+                    .elem("Name", policy.getName())
+                    .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
+                    .end("CachePolicyConfig");
+        }
+        return xml.end("CachePolicy").build();
     }
 
     private String xmlOriginRequestPolicyResponse(OriginRequestPolicy policy) {
-        return new XmlBuilder()
+        XmlBuilder xml = new XmlBuilder()
                 .start("OriginRequestPolicy")
                 .elem("Id", policy.getId())
                 .elem("LastModifiedTime",
-                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "")
-                .start("OriginRequestPolicyConfig")
-                .elem("Name", policy.getName())
-                .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
-                .end("OriginRequestPolicyConfig")
-                .end("OriginRequestPolicy")
-                .build();
+                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "");
+        if (policy.getConfigXml() != null && !policy.getConfigXml().isBlank()) {
+            xml.raw(policy.getConfigXml());
+        } else {
+            xml.start("OriginRequestPolicyConfig")
+                    .elem("Name", policy.getName())
+                    .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
+                    .end("OriginRequestPolicyConfig");
+        }
+        return xml.end("OriginRequestPolicy").build();
     }
 
     private String xmlResponseHeadersPolicyResponse(ResponseHeadersPolicy policy) {
-        return new XmlBuilder()
+        XmlBuilder xml = new XmlBuilder()
                 .start("ResponseHeadersPolicy")
                 .elem("Id", policy.getId())
                 .elem("LastModifiedTime",
-                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "")
-                .start("ResponseHeadersPolicyConfig")
-                .elem("Name", policy.getName())
-                .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
-                .end("ResponseHeadersPolicyConfig")
-                .end("ResponseHeadersPolicy")
-                .build();
+                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "");
+        if (policy.getConfigXml() != null && !policy.getConfigXml().isBlank()) {
+            xml.raw(policy.getConfigXml());
+        } else {
+            xml.start("ResponseHeadersPolicyConfig")
+                    .elem("Name", policy.getName())
+                    .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
+                    .end("ResponseHeadersPolicyConfig");
+        }
+        return xml.end("ResponseHeadersPolicy").build();
     }
 
     private String xmlOriginAccessControlResponse(OriginAccessControl oac) {
@@ -2046,6 +2257,7 @@ public class CloudFrontController {
                 .start("FunctionConfig")
                 .elem("Comment", fn.getComment() != null ? fn.getComment() : "")
                 .elem("Runtime", fn.getRuntime() != null ? fn.getRuntime() : "cloudfront-js-2.0")
+                .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                 .end("FunctionConfig")
                 .start("FunctionMetadata")
                 .elem("FunctionARN",
@@ -2056,6 +2268,89 @@ public class CloudFrontController {
                         fn.getLastModifiedTime() != null ? fn.getLastModifiedTime().toString() : "")
                 .end("FunctionMetadata")
                 .end("FunctionSummary")
+                .build();
+    }
+
+    private String xmlKeyValueStoreAssociations(List<String> arns) {
+        List<String> items = arns != null ? arns : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("KeyValueStoreAssociations")
+                .elem("Quantity", items.size());
+        if (!items.isEmpty()) {
+            xml.start("Items");
+            for (String arn : items) {
+                xml.start("KeyValueStoreAssociation")
+                        .elem("KeyValueStoreARN", arn)
+                        .end("KeyValueStoreAssociation");
+            }
+            xml.end("Items");
+        }
+        xml.end("KeyValueStoreAssociations");
+        return xml.build();
+    }
+
+    private String xmlVpcOrigin(VpcOrigin origin) {
+        List<String> protocols = origin.getOriginSslProtocols() != null
+                ? origin.getOriginSslProtocols() : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("VpcOrigin")
+                .elem("Id", origin.getId())
+                .elem("Arn", origin.getArn() != null ? origin.getArn() : "")
+                .elem("AccountId", origin.getAccountId() != null ? origin.getAccountId() : "")
+                .elem("Status", origin.getStatus() != null ? origin.getStatus() : "Deployed")
+                .elem("CreatedTime", origin.getCreatedTime() != null ? origin.getCreatedTime().toString() : "")
+                .elem("LastModifiedTime",
+                        origin.getLastModifiedTime() != null ? origin.getLastModifiedTime().toString() : "")
+                .start("VpcOriginEndpointConfig")
+                .elem("Name", origin.getName() != null ? origin.getName() : "")
+                .elem("Arn", origin.getOriginEndpointArn() != null ? origin.getOriginEndpointArn() : "")
+                .elem("HTTPPort", origin.getHttpPort())
+                .elem("HTTPSPort", origin.getHttpsPort())
+                .elem("OriginProtocolPolicy",
+                        origin.getOriginProtocolPolicy() != null ? origin.getOriginProtocolPolicy() : "https-only")
+                .start("OriginSslProtocols")
+                .elem("Quantity", protocols.size());
+        if (!protocols.isEmpty()) {
+            xml.start("Items");
+            for (String protocol : protocols) {
+                xml.elem("SslProtocol", protocol);
+            }
+            xml.end("Items");
+        }
+        xml.end("OriginSslProtocols")
+                .end("VpcOriginEndpointConfig")
+                .end("VpcOrigin");
+        return xml.build();
+    }
+
+    private String xmlVpcOriginSummary(VpcOrigin origin) {
+        return new XmlBuilder()
+                .start("VpcOriginSummary")
+                .elem("Id", origin.getId())
+                .elem("Name", origin.getName() != null ? origin.getName() : "")
+                .elem("Status", origin.getStatus() != null ? origin.getStatus() : "Deployed")
+                .elem("CreatedTime", origin.getCreatedTime() != null ? origin.getCreatedTime().toString() : "")
+                .elem("LastModifiedTime",
+                        origin.getLastModifiedTime() != null ? origin.getLastModifiedTime().toString() : "")
+                .elem("Arn", origin.getArn() != null ? origin.getArn() : "")
+                .elem("AccountId", origin.getAccountId() != null ? origin.getAccountId() : "")
+                .elem("OriginEndpointArn",
+                        origin.getOriginEndpointArn() != null ? origin.getOriginEndpointArn() : "")
+                .end("VpcOriginSummary")
+                .build();
+    }
+
+    private String xmlKeyValueStore(KeyValueStore store) {
+        return new XmlBuilder()
+                .start("KeyValueStore")
+                .elem("Name", store.getName() != null ? store.getName() : "")
+                .elem("Id", store.getId())
+                .elem("Comment", store.getComment() != null ? store.getComment() : "")
+                .elem("ARN", store.getArn() != null ? store.getArn() : "")
+                .elem("Status", store.getStatus() != null ? store.getStatus() : "READY")
+                .elem("LastModifiedTime",
+                        store.getLastModifiedTime() != null ? store.getLastModifiedTime().toString() : "")
+                .end("KeyValueStore")
                 .build();
     }
 
@@ -2121,9 +2416,11 @@ public class CloudFrontController {
             boolean inOrigin = false;
             boolean inS3OriginConfig = false;
             boolean inCustomOriginConfig = false;
+            boolean inVpcOriginConfig = false;
             Origin current = null;
             Map<String, String> s3Config = null;
             Map<String, Object> customConfig = null;
+            Map<String, String> vpcConfig = null;
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -2149,28 +2446,39 @@ public class CloudFrontController {
                                 customConfig = new LinkedHashMap<>();
                             }
                         }
+                        case "VpcOriginConfig" -> {
+                            if (inOrigin) {
+                                inVpcOriginConfig = true;
+                                vpcConfig = new LinkedHashMap<>();
+                            }
+                        }
                         case "Id" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setId(r.getElementText());
                             }
                         }
                         case "DomainName" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setDomainName(r.getElementText());
                             }
                         }
                         case "OriginPath" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setOriginPath(r.getElementText());
                             }
                         }
                         case "OriginAccessControlId" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 current.setOriginAccessControlId(r.getElementText());
                             }
                         }
                         case "ConnectionAttempts" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 try {
                                     current.setConnectionAttempts(Integer.parseInt(r.getElementText()));
                                 } catch (NumberFormatException ignored) {
@@ -2178,11 +2486,17 @@ public class CloudFrontController {
                             }
                         }
                         case "ConnectionTimeout" -> {
-                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
+                                    && !inVpcOriginConfig && current != null) {
                                 try {
                                     current.setConnectionTimeout(Integer.parseInt(r.getElementText()));
                                 } catch (NumberFormatException ignored) {
                                 }
+                            }
+                        }
+                        case "VpcOriginId", "OriginReadTimeout", "OriginKeepaliveTimeout" -> {
+                            if (inVpcOriginConfig && vpcConfig != null) {
+                                vpcConfig.put(local, r.getElementText());
                             }
                         }
                         case "OriginAccessIdentity" -> {
@@ -2223,6 +2537,13 @@ public class CloudFrontController {
                             }
                             inCustomOriginConfig = false;
                             customConfig = null;
+                        }
+                        case "VpcOriginConfig" -> {
+                            if (inVpcOriginConfig && current != null) {
+                                current.setVpcOriginConfig(vpcConfig);
+                            }
+                            inVpcOriginConfig = false;
+                            vpcConfig = null;
                         }
                         case "Origin" -> {
                             if (inOrigin && current != null) {
@@ -2466,6 +2787,7 @@ public class CloudFrontController {
         CachePolicy policy = new CachePolicy();
         policy.setName(XmlParser.extractFirst(body, "Name", null));
         policy.setComment(XmlParser.extractFirst(body, "Comment", null));
+        policy.setConfigXml(extractXmlElement(body, "CachePolicyConfig"));
         return policy;
     }
 
@@ -2473,6 +2795,7 @@ public class CloudFrontController {
         OriginRequestPolicy policy = new OriginRequestPolicy();
         policy.setName(XmlParser.extractFirst(body, "Name", null));
         policy.setComment(XmlParser.extractFirst(body, "Comment", null));
+        policy.setConfigXml(extractXmlElement(body, "OriginRequestPolicyConfig"));
         return policy;
     }
 
@@ -2480,7 +2803,17 @@ public class CloudFrontController {
         ResponseHeadersPolicy policy = new ResponseHeadersPolicy();
         policy.setName(XmlParser.extractFirst(body, "Name", null));
         policy.setComment(XmlParser.extractFirst(body, "Comment", null));
+        policy.setConfigXml(extractXmlElement(body, "ResponseHeadersPolicyConfig"));
         return policy;
+    }
+
+    private static String extractXmlElement(String body, String localName) {
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        String pattern = "(?is)<(?:[\\w.-]+:)?" + localName + "\\b[^>]*>.*?</(?:[\\w.-]+:)?" + localName + ">";
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(body);
+        return matcher.find() ? matcher.group() : null;
     }
 
     private OriginAccessControl parseOriginAccessControl(String body) {
@@ -2506,7 +2839,37 @@ public class CloudFrontController {
         fn.setComment(XmlParser.extractFirst(body, "Comment", null));
         fn.setRuntime(XmlParser.extractFirst(body, "Runtime", "cloudfront-js-2.0"));
         fn.setFunctionCode(XmlParser.extractFirst(body, "FunctionCode", null));
+        fn.setKeyValueStoreArns(XmlParser.extractAll(body, "KeyValueStoreARN"));
         return fn;
+    }
+
+    private VpcOrigin parseVpcOrigin(String body) {
+        VpcOrigin origin = new VpcOrigin();
+        origin.setName(XmlParser.extractFirst(body, "Name", null));
+        origin.setOriginEndpointArn(XmlParser.extractFirst(body, "Arn", null));
+        origin.setOriginProtocolPolicy(XmlParser.extractFirst(body, "OriginProtocolPolicy", "https-only"));
+        try {
+            origin.setHttpPort(Integer.parseInt(XmlParser.extractFirst(body, "HTTPPort", "80")));
+        } catch (NumberFormatException ignored) {
+            origin.setHttpPort(80);
+        }
+        try {
+            origin.setHttpsPort(Integer.parseInt(XmlParser.extractFirst(body, "HTTPSPort", "443")));
+        } catch (NumberFormatException ignored) {
+            origin.setHttpsPort(443);
+        }
+        List<String> protocols = XmlParser.extractAll(body, "SslProtocol");
+        if (!protocols.isEmpty()) {
+            origin.setOriginSslProtocols(protocols);
+        }
+        return origin;
+    }
+
+    private KeyValueStore parseKeyValueStore(String body) {
+        KeyValueStore store = new KeyValueStore();
+        store.setName(XmlParser.extractFirst(body, "Name", null));
+        store.setComment(XmlParser.extractFirst(body, "Comment", ""));
+        return store;
     }
 
     // ── Phase 2 XML builders ──────────────────────────────────────────────────

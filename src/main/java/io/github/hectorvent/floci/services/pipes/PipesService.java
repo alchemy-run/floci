@@ -59,6 +59,16 @@ public class PipesService implements TagHandler {
                            JsonNode sourceParameters, JsonNode targetParameters,
                            JsonNode enrichmentParameters, Map<String, String> tags,
                            String region) {
+        return createPipe(name, source, target, roleArn, description, desiredState, enrichment,
+                sourceParameters, targetParameters, enrichmentParameters, tags, null, null, region);
+    }
+
+    public Pipe createPipe(String name, String source, String target, String roleArn,
+                           String description, DesiredState desiredState, String enrichment,
+                           JsonNode sourceParameters, JsonNode targetParameters,
+                           JsonNode enrichmentParameters, Map<String, String> tags,
+                           JsonNode logConfiguration, String kmsKeyIdentifier,
+                           String region) {
         if (name == null || name.isBlank()) {
             throw new AwsException("ValidationException", "Name is required", 400);
         }
@@ -98,6 +108,8 @@ public class PipesService implements TagHandler {
         pipe.setTargetParameters(targetParameters);
         pipe.setEnrichmentParameters(enrichmentParameters);
         pipe.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
+        pipe.setLogConfiguration(logConfiguration);
+        pipe.setKmsKeyIdentifier(kmsKeyIdentifier);
         pipe.setCreationTime(now);
         pipe.setLastModifiedTime(now);
         pipe.setAccountId(regionResolver.getAccountId());
@@ -122,6 +134,15 @@ public class PipesService implements TagHandler {
                            DesiredState desiredState, String enrichment,
                            JsonNode sourceParameters, JsonNode targetParameters,
                            JsonNode enrichmentParameters, String region) {
+        return updatePipe(name, target, roleArn, description, desiredState, enrichment,
+                sourceParameters, targetParameters, enrichmentParameters, null, null, region);
+    }
+
+    public Pipe updatePipe(String name, String target, String roleArn, String description,
+                           DesiredState desiredState, String enrichment,
+                           JsonNode sourceParameters, JsonNode targetParameters,
+                           JsonNode enrichmentParameters, JsonNode logConfiguration,
+                           String kmsKeyIdentifier, String region) {
         String key = region + "::" + name;
         Pipe pipe = storage.get(key)
                 .orElseThrow(() -> new AwsException("NotFoundException",
@@ -145,6 +166,8 @@ public class PipesService implements TagHandler {
         if (sourceParameters != null) pipe.setSourceParameters(sourceParameters);
         if (targetParameters != null) pipe.setTargetParameters(targetParameters);
         if (enrichmentParameters != null) pipe.setEnrichmentParameters(enrichmentParameters);
+        if (logConfiguration != null) pipe.setLogConfiguration(logConfiguration);
+        if (kmsKeyIdentifier != null) pipe.setKmsKeyIdentifier(kmsKeyIdentifier);
 
         pipe.setLastModifiedTime(Instant.now());
         storage.put(key, pipe);

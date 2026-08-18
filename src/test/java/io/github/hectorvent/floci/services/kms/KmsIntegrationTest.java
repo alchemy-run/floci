@@ -1183,4 +1183,187 @@ class KmsIntegrationTest {
                 .then()
                 .body("__type", equalTo("NotFoundException"));
     }
+
+    @Test
+    void updateAliasRetargetsThroughJsonHandler() {
+        String keyA = given()
+                .header("X-Amz-Target", "TrentService.CreateKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("{\"Description\":\"alias-target-a\"}")
+                .when().post("/").then().statusCode(200)
+                .extract().path("KeyMetadata.KeyId");
+        String keyB = given()
+                .header("X-Amz-Target", "TrentService.CreateKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("{\"Description\":\"alias-target-b\"}")
+                .when().post("/").then().statusCode(200)
+                .extract().path("KeyMetadata.KeyId");
+
+        given()
+                .header("X-Amz-Target", "TrentService.CreateAlias")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"AliasName":"alias/floci-retarget","TargetKeyId":"%s"}
+                    """.formatted(keyA))
+                .when().post("/").then().statusCode(200);
+
+        given()
+                .header("X-Amz-Target", "TrentService.UpdateAlias")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"AliasName":"alias/floci-retarget","TargetKeyId":"%s"}
+                    """.formatted(keyB))
+                .when().post("/").then().statusCode(200);
+
+        given()
+                .header("X-Amz-Target", "TrentService.DescribeKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("{\"KeyId\":\"alias/floci-retarget\"}")
+                .when().post("/")
+                .then()
+                .statusCode(200)
+                .body("KeyMetadata.KeyId", equalTo(keyB));
+    }
+
+    @Test
+    void enableKeyRotationReturnsCustomPeriodThroughJsonHandler() {
+        String keyId = given()
+                .header("X-Amz-Target", "TrentService.CreateKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("{\"Description\":\"rotation-period\"}")
+                .when().post("/").then().statusCode(200)
+                .extract().path("KeyMetadata.KeyId");
+
+        given()
+                .header("X-Amz-Target", "TrentService.EnableKeyRotation")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"KeyId":"%s","RotationPeriodInDays":90}
+                    """.formatted(keyId))
+                .when().post("/").then().statusCode(200);
+
+        given()
+                .header("X-Amz-Target", "TrentService.GetKeyRotationStatus")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("{\"KeyId\":\"%s\"}".formatted(keyId))
+                .when().post("/")
+                .then()
+                .statusCode(200)
+                .body("KeyRotationEnabled", equalTo(true))
+                .body("RotationPeriodInDays", equalTo(90));
+    }
+
+    @Test
+    void generateDataKeyPairRoundTripsThroughJsonHandler() {
+        String keyId = given()
+                .header("X-Amz-Target", "TrentService.CreateKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("{\"Description\":\"data-key-pair\"}")
+                .when().post("/").then().statusCode(200)
+                .extract().path("KeyMetadata.KeyId");
+
+        var generated = given()
+                .header("X-Amz-Target", "TrentService.GenerateDataKeyPair")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"KeyId":"%s","KeyPairSpec":"ECC_NIST_P256"}
+                    """.formatted(keyId))
+                .when().post("/")
+                .then()
+                .statusCode(200)
+                .body("KeyPairSpec", equalTo("ECC_NIST_P256"))
+                .body("PublicKey", notNullValue())
+                .body("PrivateKeyPlaintext", notNullValue())
+                .body("PrivateKeyCiphertextBlob", notNullValue())
+                .extract().jsonPath();
+
+        given()
+                .header("X-Amz-Target", "TrentService.Decrypt")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"CiphertextBlob":"%s"}
+                    """.formatted(generated.getString("PrivateKeyCiphertextBlob")))
+                .when().post("/")
+                .then()
+                .statusCode(200)
+                .body("Plaintext", equalTo(generated.getString("PrivateKeyPlaintext")));
+    }
+
+    @Test
+    void deriveSharedSecretThroughJsonHandler() {
+        String keyId = given()
+                .header("X-Amz-Target", "TrentService.CreateKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"Description":"ecdh","KeyUsage":"KEY_AGREEMENT","KeySpec":"ECC_NIST_P256"}
+                    """)
+                .when().post("/")
+                .then()
+                .statusCode(200)
+                .body("KeyMetadata.KeyUsage", equalTo("KEY_AGREEMENT"))
+                .body("KeyMetadata.KeyAgreementAlgorithms", equalTo(List.of("ECDH")))
+                .extract().path("KeyMetadata.KeyId");
+
+        String peerPublic = given()
+                .header("X-Amz-Target", "TrentService.CreateKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"Description":"peer","KeyUsage":"KEY_AGREEMENT","KeySpec":"ECC_NIST_P256"}
+                    """)
+                .when().post("/").then().statusCode(200)
+                .extract().path("KeyMetadata.KeyId");
+
+        String publicKey = given()
+                .header("X-Amz-Target", "TrentService.GetPublicKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("{\"KeyId\":\"%s\"}".formatted(peerPublic))
+                .when().post("/").then().statusCode(200)
+                .extract().path("PublicKey");
+
+        given()
+                .header("X-Amz-Target", "TrentService.DeriveSharedSecret")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"KeyId":"%s","KeyAgreementAlgorithm":"ECDH","PublicKey":"%s"}
+                    """.formatted(keyId, publicKey))
+                .when().post("/")
+                .then()
+                .statusCode(200)
+                .body("KeyAgreementAlgorithm", equalTo("ECDH"))
+                .body("SharedSecret", notNullValue());
+    }
+
+    @Test
+    void verifyInvalidSignatureThrowsThroughJsonHandler() {
+        String keyId = given()
+                .header("X-Amz-Target", "TrentService.CreateKey")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"Description":"verify-invalid","KeyUsage":"SIGN_VERIFY","KeySpec":"ECC_NIST_P256"}
+                    """)
+                .when().post("/").then().statusCode(200)
+                .extract().path("KeyMetadata.KeyId");
+
+        String message = Base64.getEncoder().encodeToString("manifest".getBytes(StandardCharsets.UTF_8));
+        String signature = given()
+                .header("X-Amz-Target", "TrentService.Sign")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"KeyId":"%s","Message":"%s","SigningAlgorithm":"ECDSA_SHA_256"}
+                    """.formatted(keyId, message))
+                .when().post("/").then().statusCode(200)
+                .extract().path("Signature");
+
+        String tampered = Base64.getEncoder().encodeToString("forged".getBytes(StandardCharsets.UTF_8));
+        given()
+                .header("X-Amz-Target", "TrentService.Verify")
+                .contentType(KMS_CONTENT_TYPE)
+                .body("""
+                    {"KeyId":"%s","Message":"%s","Signature":"%s","SigningAlgorithm":"ECDSA_SHA_256"}
+                    """.formatted(keyId, tampered, signature))
+                .when().post("/")
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("KMSInvalidSignatureException"));
+    }
 }

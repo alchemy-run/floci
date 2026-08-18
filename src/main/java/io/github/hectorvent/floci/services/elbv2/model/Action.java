@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -33,6 +35,20 @@ public class Action {
     private String fixedResponseStatusCode;
     private String fixedResponseContentType;
     private String fixedResponseMessageBody;
+
+    // authenticate-oidc
+    private String oidcIssuer;
+    private String oidcAuthorizationEndpoint;
+    private String oidcTokenEndpoint;
+    private String oidcUserInfoEndpoint;
+    private String oidcClientId;
+    private String oidcClientSecret;
+    private String oidcScope;
+    private String oidcSessionCookieName;
+    private Long oidcSessionTimeout;
+    private String oidcOnUnauthenticatedRequest;
+    private Boolean oidcUseExistingClientSecret;
+    private Map<String, String> oidcAuthenticationRequestExtraParams = new LinkedHashMap<>();
 
     public Action() {}
 
@@ -80,6 +96,54 @@ public class Action {
 
     public String getFixedResponseMessageBody() { return fixedResponseMessageBody; }
     public void setFixedResponseMessageBody(String fixedResponseMessageBody) { this.fixedResponseMessageBody = fixedResponseMessageBody; }
+
+    public String getOidcIssuer() { return oidcIssuer; }
+    public void setOidcIssuer(String oidcIssuer) { this.oidcIssuer = oidcIssuer; }
+
+    public String getOidcAuthorizationEndpoint() { return oidcAuthorizationEndpoint; }
+    public void setOidcAuthorizationEndpoint(String oidcAuthorizationEndpoint) {
+        this.oidcAuthorizationEndpoint = oidcAuthorizationEndpoint;
+    }
+
+    public String getOidcTokenEndpoint() { return oidcTokenEndpoint; }
+    public void setOidcTokenEndpoint(String oidcTokenEndpoint) { this.oidcTokenEndpoint = oidcTokenEndpoint; }
+
+    public String getOidcUserInfoEndpoint() { return oidcUserInfoEndpoint; }
+    public void setOidcUserInfoEndpoint(String oidcUserInfoEndpoint) { this.oidcUserInfoEndpoint = oidcUserInfoEndpoint; }
+
+    public String getOidcClientId() { return oidcClientId; }
+    public void setOidcClientId(String oidcClientId) { this.oidcClientId = oidcClientId; }
+
+    public String getOidcClientSecret() { return oidcClientSecret; }
+    public void setOidcClientSecret(String oidcClientSecret) { this.oidcClientSecret = oidcClientSecret; }
+
+    public String getOidcScope() { return oidcScope; }
+    public void setOidcScope(String oidcScope) { this.oidcScope = oidcScope; }
+
+    public String getOidcSessionCookieName() { return oidcSessionCookieName; }
+    public void setOidcSessionCookieName(String oidcSessionCookieName) { this.oidcSessionCookieName = oidcSessionCookieName; }
+
+    public Long getOidcSessionTimeout() { return oidcSessionTimeout; }
+    public void setOidcSessionTimeout(Long oidcSessionTimeout) { this.oidcSessionTimeout = oidcSessionTimeout; }
+
+    public String getOidcOnUnauthenticatedRequest() { return oidcOnUnauthenticatedRequest; }
+    public void setOidcOnUnauthenticatedRequest(String oidcOnUnauthenticatedRequest) {
+        this.oidcOnUnauthenticatedRequest = oidcOnUnauthenticatedRequest;
+    }
+
+    public Boolean getOidcUseExistingClientSecret() { return oidcUseExistingClientSecret; }
+    public void setOidcUseExistingClientSecret(Boolean oidcUseExistingClientSecret) {
+        this.oidcUseExistingClientSecret = oidcUseExistingClientSecret;
+    }
+
+    public Map<String, String> getOidcAuthenticationRequestExtraParams() {
+        return oidcAuthenticationRequestExtraParams;
+    }
+    public void setOidcAuthenticationRequestExtraParams(Map<String, String> oidcAuthenticationRequestExtraParams) {
+        this.oidcAuthenticationRequestExtraParams = oidcAuthenticationRequestExtraParams != null
+                ? oidcAuthenticationRequestExtraParams
+                : new LinkedHashMap<>();
+    }
 
     @RegisterForReflection
     @JsonIgnoreProperties(ignoreUnknown = true)

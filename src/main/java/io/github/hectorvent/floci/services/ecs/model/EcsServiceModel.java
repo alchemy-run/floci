@@ -28,6 +28,9 @@ public class EcsServiceModel {
     private Map<String, String> tags = new HashMap<>();
     private List<EcsLoadBalancer> loadBalancers = new ArrayList<>();
     private NetworkConfiguration networkConfiguration;
+    private DeploymentConfiguration deploymentConfiguration;
+    private Integer healthCheckGracePeriodSeconds;
+    private List<CapacityProviderStrategyItem> capacityProviderStrategy;
 
     public String getServiceArn() { return serviceArn; }
     public void setServiceArn(String serviceArn) { this.serviceArn = serviceArn; }
@@ -78,5 +81,20 @@ public class EcsServiceModel {
     public NetworkConfiguration getNetworkConfiguration() { return networkConfiguration; }
     public void setNetworkConfiguration(NetworkConfiguration networkConfiguration) {
         this.networkConfiguration = networkConfiguration;
+    }
+
+    public DeploymentConfiguration getDeploymentConfiguration() { return deploymentConfiguration; }
+    public void setDeploymentConfiguration(DeploymentConfiguration deploymentConfiguration) {
+        this.deploymentConfiguration = deploymentConfiguration;
+    }
+
+    public Integer getHealthCheckGracePeriodSeconds() { return healthCheckGracePeriodSeconds; }
+    public void setHealthCheckGracePeriodSeconds(Integer healthCheckGracePeriodSeconds) {
+        this.healthCheckGracePeriodSeconds = healthCheckGracePeriodSeconds;
+    }
+
+    public List<CapacityProviderStrategyItem> getCapacityProviderStrategy() { return capacityProviderStrategy; }
+    public void setCapacityProviderStrategy(List<CapacityProviderStrategyItem> capacityProviderStrategy) {
+        this.capacityProviderStrategy = capacityProviderStrategy;
     }
 }

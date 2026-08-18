@@ -525,4 +525,91 @@ class SecretsManagerJsonHandlerTest {
         assertThat(body.get("RotationRules").get("AutomaticallyAfterDays").asInt(), is(45));
         assertThat(body.get("RotationRules").get("Duration").asText(), is("2h"));
     }
+
+    @Test
+    void resourcePolicyHandlersRoundTrip() {
+        ObjectNode createReq = MAPPER.createObjectNode();
+        createReq.put("Name", "policy-handler-secret");
+        createReq.put("SecretString", "value");
+        handler.handle("CreateSecret", createReq, REGION);
+
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"arn:aws:iam::000000000000:root\"},\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"*\"}]}";
+        ObjectNode putReq = MAPPER.createObjectNode();
+        putReq.put("SecretId", "policy-handler-secret");
+        putReq.put("ResourcePolicy", policy);
+        Response put = handler.handle("PutResourcePolicy", putReq, REGION);
+        assertThat(put.getStatus(), is(200));
+        ObjectNode putBody = (ObjectNode) put.getEntity();
+        assertThat(putBody.get("ARN").asText(), containsString("secretsmanager"));
+        assertThat(putBody.get("Name").asText(), is("policy-handler-secret"));
+
+        ObjectNode getReq = MAPPER.createObjectNode();
+        getReq.put("SecretId", "policy-handler-secret");
+        ObjectNode got = (ObjectNode) handler.handle("GetResourcePolicy", getReq, REGION).getEntity();
+        assertThat(got.get("ResourcePolicy").asText(), is(policy));
+
+        Response deleted = handler.handle("DeleteResourcePolicy", getReq, REGION);
+        assertThat(deleted.getStatus(), is(200));
+        ObjectNode afterDelete = (ObjectNode) handler.handle("GetResourcePolicy", getReq, REGION).getEntity();
+        assertThat(afterDelete.has("ResourcePolicy"), is(false));
+    }
+
+    @Test
+    void cancelRotateSecretDisablesRotationAndIsIdempotentOnSecondCall() {
+        ObjectNode createReq = MAPPER.createObjectNode();
+        createReq.put("Name", "cancel-rotate-secret");
+        handler.handle("CreateSecret", createReq, REGION);
+
+        ObjectNode rotateReq = MAPPER.createObjectNode();
+        rotateReq.put("SecretId", "cancel-rotate-secret");
+        rotateReq.put("RotationLambdaARN", "arn:aws:lambda:us-east-1:000000000000:function:rotate");
+        rotateReq.put("RotateImmediately", false);
+        ObjectNode rules = MAPPER.createObjectNode();
+        rules.put("AutomaticallyAfterDays", 30);
+        rotateReq.set("RotationRules", rules);
+        assertThat(handler.handle("RotateSecret", rotateReq, REGION).getStatus(), is(200));
+
+        ObjectNode cancelReq = MAPPER.createObjectNode();
+        cancelReq.put("SecretId", "cancel-rotate-secret");
+        Response cancelled = handler.handle("CancelRotateSecret", cancelReq, REGION);
+        assertThat(cancelled.getStatus(), is(200));
+        ObjectNode cancelBody = (ObjectNode) cancelled.getEntity();
+        assertThat(cancelBody.get("ARN").asText(), containsString("secretsmanager"));
+        assertThat(cancelBody.get("Name").asText(), is("cancel-rotate-secret"));
+        assertThat(cancelBody.has("VersionId"), is(true));
+
+        ObjectNode describeReq = MAPPER.createObjectNode();
+        describeReq.put("SecretId", "cancel-rotate-secret");
+        ObjectNode described = (ObjectNode) handler.handle("DescribeSecret", describeReq, REGION).getEntity();
+        assertThat(described.get("RotationEnabled").asBoolean(), is(false));
+        assertThat(described.get("RotationLambdaARN").asText(),
+                is("arn:aws:lambda:us-east-1:000000000000:function:rotate"));
+
+        io.github.hectorvent.floci.core.common.AwsException again = org.junit.jupiter.api.Assertions.assertThrows(
+                io.github.hectorvent.floci.core.common.AwsException.class,
+                () -> handler.handle("CancelRotateSecret", cancelReq, REGION));
+        assertThat(again.getErrorCode(), is("InvalidRequestException"));
+    }
+
+    @Test
+    void listSecretsIncludesRotationLambdaArn() {
+        ObjectNode createReq = MAPPER.createObjectNode();
+        createReq.put("Name", "listed-rotation-secret");
+        handler.handle("CreateSecret", createReq, REGION);
+
+        ObjectNode rotateReq = MAPPER.createObjectNode();
+        rotateReq.put("SecretId", "listed-rotation-secret");
+        rotateReq.put("RotationLambdaARN", "arn:aws:lambda:us-east-1:000000000000:function:rotate");
+        rotateReq.put("RotateImmediately", false);
+        ObjectNode rules = MAPPER.createObjectNode();
+        rules.put("AutomaticallyAfterDays", 7);
+        rotateReq.set("RotationRules", rules);
+        handler.handle("RotateSecret", rotateReq, REGION);
+
+        ObjectNode listed = (ObjectNode) handler.handle("ListSecrets", MAPPER.createObjectNode(), REGION).getEntity();
+        ObjectNode secret = (ObjectNode) listed.get("SecretList").get(0);
+        assertThat(secret.get("RotationEnabled").asBoolean(), is(true));
+        assertThat(secret.get("RotationLambdaARN").asText(),
+                is("arn:aws:lambda:us-east-1:000000000000:function:rotate"));
+    }
 }

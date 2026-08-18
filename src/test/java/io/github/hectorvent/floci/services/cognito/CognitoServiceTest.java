@@ -9,8 +9,10 @@ import io.github.hectorvent.floci.core.common.ReservedTags;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.cognito.model.CognitoGroup;
 import io.github.hectorvent.floci.services.cognito.model.CognitoUser;
+import io.github.hectorvent.floci.services.cognito.model.IdentityProvider;
 import io.github.hectorvent.floci.services.cognito.model.UserPool;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolClient;
+import io.github.hectorvent.floci.services.cognito.model.UserPoolDomain;
 import io.github.hectorvent.floci.services.cognito.verification.CognitoMessageDispatcher;
 import io.github.hectorvent.floci.services.cognito.verification.VerificationCode;
 import io.github.hectorvent.floci.services.cognito.verification.VerificationCodeService;
@@ -2328,5 +2330,107 @@ class CognitoServiceTest {
                 ));
         assertEquals("InvalidParameterException", ex.getErrorCode());
 
+    }
+
+    @Test
+    void identityProviderRoundTrip() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "IdpPool"), "us-east-1");
+        IdentityProvider created = service.createIdentityProvider(
+                pool.getId(),
+                "corporate-oidc",
+                "OIDC",
+                Map.of(
+                        "client_id", "alchemy-test-client",
+                        "client_secret", "alchemy-test-secret",
+                        "oidc_issuer", "https://accounts.google.com"
+                ),
+                Map.of("email", "email"),
+                List.of()
+        );
+        assertEquals("OIDC", created.getProviderType());
+        assertEquals("https://accounts.google.com", created.getProviderDetails().get("oidc_issuer"));
+
+        IdentityProvider described = service.describeIdentityProvider(pool.getId(), "corporate-oidc");
+        assertEquals("corporate-oidc", described.getProviderName());
+        assertEquals("email", described.getAttributeMapping().get("email"));
+
+        IdentityProvider updated = service.updateIdentityProvider(
+                pool.getId(),
+                "corporate-oidc",
+                Map.of(
+                        "client_id", "alchemy-test-client",
+                        "client_secret", "alchemy-test-secret",
+                        "oidc_issuer", "https://accounts.google.com"
+                ),
+                Map.of("email", "email", "username", "sub"),
+                List.of("corp")
+        );
+        assertEquals("sub", updated.getAttributeMapping().get("username"));
+        assertEquals(List.of("corp"), updated.getIdpIdentifiers());
+
+        assertEquals(1, service.listIdentityProviders(pool.getId()).size());
+        service.deleteIdentityProvider(pool.getId(), "corporate-oidc");
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.describeIdentityProvider(pool.getId(), "corporate-oidc"));
+        assertEquals("ResourceNotFoundException", missing.getErrorCode());
+    }
+
+    @Test
+    void createIdentityProviderDuplicateThrows() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "IdpDupPool"), "us-east-1");
+        service.createIdentityProvider(pool.getId(), "corporate-oidc", "OIDC",
+                Map.of("oidc_issuer", "https://accounts.google.com"), Map.of(), List.of());
+        AwsException ex = assertThrows(AwsException.class, () ->
+                service.createIdentityProvider(pool.getId(), "corporate-oidc", "OIDC",
+                        Map.of("oidc_issuer", "https://accounts.google.com"), Map.of(), List.of()));
+        assertEquals("DuplicateProviderException", ex.getErrorCode());
+    }
+
+    @Test
+    void userPoolDomainRoundTripAndMissingDescribeIsEmpty() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        UserPoolDomain created = service.createUserPoolDomain(pool.getId(), "my-app-auth", 2, null);
+        assertEquals("ACTIVE", created.getStatus());
+        assertTrue(created.getCloudFrontDistribution().endsWith(".cloudfront.net"));
+        assertEquals(2, created.getManagedLoginVersion());
+
+        UserPoolDomain described = service.describeUserPoolDomain("my-app-auth").orElseThrow();
+        assertEquals(pool.getId(), described.getUserPoolId());
+        assertTrue(service.describeUserPoolDomain("missing-prefix").isEmpty());
+
+        UserPoolDomain updated = service.updateUserPoolDomain(pool.getId(), "my-app-auth", 1, null);
+        assertEquals(1, updated.getManagedLoginVersion());
+
+        service.deleteUserPoolDomain(pool.getId(), "my-app-auth");
+        assertTrue(service.describeUserPoolDomain("my-app-auth").isEmpty());
+    }
+
+    @Test
+    void createUserPoolDomainRejectsDuplicateDomain() {
+        UserPool first = service.createUserPool(Map.of("PoolName", "DomainOne"), "us-east-1");
+        UserPool second = service.createUserPool(Map.of("PoolName", "DomainTwo"), "us-east-1");
+        service.createUserPoolDomain(first.getId(), "shared-prefix", null, null);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                service.createUserPoolDomain(second.getId(), "shared-prefix", null, null));
+        assertEquals("InvalidParameterException", ex.getErrorCode());
+    }
+
+    @Test
+    void riskConfigurationSetAndReadBack() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "RiskPool"), "us-east-1");
+        Map<String, Object> set = service.setRiskConfiguration(
+                pool.getId(),
+                null,
+                Map.of("Actions", Map.of("EventAction", "BLOCK")),
+                null,
+                null
+        );
+        assertEquals("BLOCK", ((Map<?, ?>) ((Map<?, ?>) set.get("CompromisedCredentialsRiskConfiguration"))
+                .get("Actions")).get("EventAction"));
+
+        Map<String, Object> described = service.describeRiskConfiguration(pool.getId(), null);
+        assertEquals(pool.getId(), described.get("UserPoolId"));
+        assertEquals("BLOCK", ((Map<?, ?>) ((Map<?, ?>) described.get("CompromisedCredentialsRiskConfiguration"))
+                .get("Actions")).get("EventAction"));
     }
 }

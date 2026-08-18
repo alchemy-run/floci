@@ -7,10 +7,12 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.services.stepfunctions.model.Activity;
 import io.github.hectorvent.floci.services.stepfunctions.model.ActivityTask;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
 import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
+import io.github.hectorvent.floci.services.stepfunctions.model.MapRun;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachineVersion;
 import io.github.hectorvent.floci.core.common.Resettable;
@@ -41,6 +43,7 @@ public class StepFunctionsService implements Resettable {
     private final Map<String, List<HistoryEvent>> historyCache = new ConcurrentHashMap<>();
     private final Map<String, BlockingQueue<ActivityTask>> activityQueues = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<JsonNode>> pendingTaskTokens = new ConcurrentHashMap<>();
+    private final Map<String, MapRun> mapRunStore = new ConcurrentHashMap<>();
     private final RegionResolver regionResolver;
     private final AslExecutor aslExecutor;
     private final ObjectMapper objectMapper;
@@ -74,11 +77,18 @@ public class StepFunctionsService implements Resettable {
         activityQueues.clear();
         pendingTaskTokens.values().forEach(f -> f.completeExceptionally(new RuntimeException("StepFunctionsService cleared")));
         pendingTaskTokens.clear();
+        mapRunStore.clear();
     }
 
     // ──────────────────────────── State Machines ────────────────────────────
 
     public StateMachine createStateMachine(String name, String definition, String roleArn, String type, String region, Map<String, String> tags) {
+        return createStateMachine(name, definition, roleArn, type, region, tags, null, null);
+    }
+
+    public StateMachine createStateMachine(String name, String definition, String roleArn, String type, String region,
+                                           Map<String, String> tags, JsonNode loggingConfiguration,
+                                           JsonNode tracingConfiguration) {
         String arn = regionResolver.buildArn("states", region, "stateMachine:" + name);
         if (stateMachineStore.get(arn).isPresent()) {
             throw new AwsException("StateMachineAlreadyExists", "State machine already exists: " + arn, 400);
@@ -97,10 +107,56 @@ public class StepFunctionsService implements Resettable {
         if (tags != null && !tags.isEmpty()) {
             sm.getTags().putAll(tags);
         }
+        applyLogging(sm, loggingConfiguration);
+        applyTracing(sm, tracingConfiguration);
 
         stateMachineStore.put(arn, sm);
         LOG.infov("Created State Machine: {0}", arn);
         return sm;
+    }
+
+    public StateMachine updateStateMachine(String arn, String definition, String roleArn,
+                                           JsonNode loggingConfiguration, JsonNode tracingConfiguration) {
+        StateMachine sm = describeStateMachine(arn);
+        if (definition != null && !definition.isBlank()) {
+            validateDefinition(definition);
+            sm.setDefinition(definition);
+        }
+        if (roleArn != null && !roleArn.isBlank()) {
+            sm.setRoleArn(roleArn);
+        }
+        applyLogging(sm, loggingConfiguration);
+        applyTracing(sm, tracingConfiguration);
+        sm.setRevisionId(UUID.randomUUID().toString());
+        stateMachineStore.put(arn, sm);
+        LOG.infov("Updated State Machine: {0} revision {1}", arn, sm.getRevisionId());
+        return sm;
+    }
+
+    private static void applyLogging(StateMachine sm, JsonNode loggingConfiguration) {
+        if (loggingConfiguration == null || loggingConfiguration.isNull() || loggingConfiguration.isMissingNode()) {
+            return;
+        }
+        if (loggingConfiguration.has("level")) {
+            sm.setLoggingLevel(loggingConfiguration.path("level").asText("OFF"));
+        }
+        if (loggingConfiguration.has("includeExecutionData")) {
+            sm.setIncludeExecutionData(loggingConfiguration.path("includeExecutionData").asBoolean(false));
+        }
+        if (loggingConfiguration.has("destinations")) {
+            JsonNode destinations = loggingConfiguration.get("destinations");
+            sm.setLoggingDestinationsJson(destinations.isArray() && !destinations.isEmpty()
+                    ? destinations.toString() : null);
+        }
+    }
+
+    private static void applyTracing(StateMachine sm, JsonNode tracingConfiguration) {
+        if (tracingConfiguration == null || tracingConfiguration.isNull() || tracingConfiguration.isMissingNode()) {
+            return;
+        }
+        if (tracingConfiguration.has("enabled")) {
+            sm.setTracingEnabled(tracingConfiguration.path("enabled").asBoolean(false));
+        }
     }
 
     public StateMachine describeStateMachine(String arn) {
@@ -271,8 +327,177 @@ public class StepFunctionsService implements Resettable {
     }
 
     public List<HistoryEvent> getExecutionHistory(String arn) {
+        return getExecutionHistory(arn, false, null);
+    }
+
+    public List<HistoryEvent> getExecutionHistory(String arn, boolean reverseOrder, Integer maxResults) {
         describeExecution(arn);
-        return historyCache.getOrDefault(arn, Collections.emptyList());
+        List<HistoryEvent> events = new ArrayList<>(historyCache.getOrDefault(arn, Collections.emptyList()));
+        if (reverseOrder) {
+            Collections.reverse(events);
+        }
+        if (maxResults != null && maxResults > 0 && events.size() > maxResults) {
+            return events.subList(0, maxResults);
+        }
+        return events;
+    }
+
+    /**
+     * Restarts a failed/aborted/timed-out STANDARD execution. SUCCEEDED and RUNNING
+     * executions are not redrivable — matching AWS {@code ExecutionNotRedrivable}.
+     */
+    public double redriveExecution(String executionArn) {
+        Execution exec = describeExecution(executionArn);
+        String status = exec.getStatus();
+        if ("SUCCEEDED".equals(status) || "RUNNING".equals(status)) {
+            throw new AwsException("ExecutionNotRedrivable",
+                    "Execution " + executionArn + " is not redrivable: status is " + status, 400);
+        }
+        StateMachine sm = describeStateMachine(exec.getStateMachineArn());
+        exec.setStatus("RUNNING");
+        exec.setStopDate(null);
+        exec.setError(null);
+        exec.setCause(null);
+        exec.setOutput(null);
+        executionStore.put(executionArn, exec);
+
+        List<HistoryEvent> history = new ArrayList<>();
+        HistoryEvent startEvent = new HistoryEvent();
+        startEvent.setId(1L);
+        startEvent.setType("ExecutionStarted");
+        startEvent.setDetails(Map.of("input", exec.getInput() != null ? exec.getInput() : "{}",
+                "roleArn", sm.getRoleArn() != null ? sm.getRoleArn() : "",
+                "redriveCount", 1));
+        history.add(startEvent);
+        historyCache.put(executionArn, history);
+
+        aslExecutor.executeAsync(sm, exec, history, (updatedExec, updatedHistory) -> {
+            executionStore.put(updatedExec.getExecutionArn(), updatedExec);
+            historyCache.put(updatedExec.getExecutionArn(), updatedHistory);
+        });
+        return System.currentTimeMillis() / 1000.0;
+    }
+
+    public record TestStateResult(String status, String output, String error, String cause) {}
+
+    /**
+     * Execute a single ASL state without creating a state machine (AWS {@code TestState}).
+     */
+    public TestStateResult testState(String definition, String input) {
+        if (definition == null || definition.isBlank()) {
+            throw new AwsException("ValidationException", "definition is required.", 400);
+        }
+        JsonNode stateDef;
+        try {
+            stateDef = objectMapper.readTree(definition);
+        } catch (Exception e) {
+            throw new AwsException("ValidationException", "Invalid state definition: " + e.getMessage(), 400);
+        }
+        if (!stateDef.isObject() || !stateDef.has("Type")) {
+            throw new AwsException("ValidationException",
+                    "State definition must be an object with a Type field.", 400);
+        }
+
+        ObjectNode wrapper = objectMapper.createObjectNode();
+        if (stateDef.has("QueryLanguage")) {
+            wrapper.put("QueryLanguage", stateDef.path("QueryLanguage").asText());
+        }
+        wrapper.put("StartAt", "TestState");
+        ObjectNode states = objectMapper.createObjectNode();
+        states.set("TestState", stateDef);
+        wrapper.set("States", states);
+
+        StateMachine sm = new StateMachine();
+        sm.setName("TestState");
+        sm.setDefinition(wrapper.toString());
+        sm.setRoleArn("arn:aws:iam::000000000000:role/test-state");
+        sm.setStateMachineArn(regionResolver.buildArn("states", regionResolver.getDefaultRegion(),
+                "stateMachine:TestState"));
+        sm.setType("EXPRESS");
+
+        Execution exec = new Execution();
+        exec.setName("test-state");
+        exec.setInput(input != null && !input.isBlank() ? input : "{}");
+        exec.setStateMachineArn(sm.getStateMachineArn());
+        exec.setExecutionArn(regionResolver.buildArn("states", regionResolver.getDefaultRegion(),
+                "express:TestState:test-state"));
+
+        List<HistoryEvent> history = new ArrayList<>();
+        aslExecutor.executeSync(sm, exec, history, (updated, ignored) -> {});
+        return new TestStateResult(exec.getStatus(), exec.getOutput(), exec.getError(), exec.getCause());
+    }
+
+    // ──────────────────────────── Map Runs ────────────────────────────
+
+    public MapRun startMapRun(String executionArn, String stateMachineName,
+                              String executionName, String region, int itemCount, int maxConcurrency) {
+        String uuid = UUID.randomUUID().toString();
+        String mapRunArn = regionResolver.buildArn("states", region,
+                "mapRun:" + stateMachineName + "/" + executionName + ":" + uuid);
+        MapRun run = new MapRun();
+        run.setMapRunArn(mapRunArn);
+        run.setExecutionArn(executionArn);
+        run.setStatus("RUNNING");
+        run.setTotal(itemCount);
+        run.setPending(itemCount);
+        run.setMaxConcurrency(maxConcurrency);
+        mapRunStore.put(mapRunArn, run);
+        return run;
+    }
+
+    public void completeMapRun(String mapRunArn, int succeeded, int failed) {
+        MapRun run = mapRunStore.get(mapRunArn);
+        if (run == null) {
+            return;
+        }
+        run.setStatus(failed > 0 ? "FAILED" : "SUCCEEDED");
+        run.setSucceeded(succeeded);
+        run.setFailed(failed);
+        run.setPending(0);
+        run.setRunning(0);
+        run.setStopDate(System.currentTimeMillis() / 1000.0);
+    }
+
+    public void failMapRun(String mapRunArn) {
+        MapRun run = mapRunStore.get(mapRunArn);
+        if (run == null) {
+            return;
+        }
+        run.setStatus("FAILED");
+        run.setStopDate(System.currentTimeMillis() / 1000.0);
+    }
+
+    public List<MapRun> listMapRuns(String executionArn) {
+        describeExecution(executionArn);
+        return mapRunStore.values().stream()
+                .filter(run -> executionArn.equals(run.getExecutionArn()))
+                .toList();
+    }
+
+    public MapRun describeMapRun(String mapRunArn) {
+        MapRun run = mapRunStore.get(mapRunArn);
+        if (run == null) {
+            throw new AwsException("ResourceNotFound", "Map Run does not exist: " + mapRunArn, 400);
+        }
+        return run;
+    }
+
+    public void updateMapRun(String mapRunArn, Integer maxConcurrency, Long toleratedFailureCount,
+                             Double toleratedFailurePercentage) {
+        MapRun run = describeMapRun(mapRunArn);
+        if (!"RUNNING".equals(run.getStatus())) {
+            throw new AwsException("ValidationException",
+                    "Map Run " + mapRunArn + " is not running and cannot be updated.", 400);
+        }
+        if (maxConcurrency != null) {
+            run.setMaxConcurrency(maxConcurrency);
+        }
+        if (toleratedFailureCount != null) {
+            run.setToleratedFailureCount(toleratedFailureCount);
+        }
+        if (toleratedFailurePercentage != null) {
+            run.setToleratedFailurePercentage(toleratedFailurePercentage);
+        }
     }
 
     // ──────────────────────────── Activities ────────────────────────────
@@ -361,6 +586,9 @@ public class StepFunctionsService implements Resettable {
     }
 
     public void sendTaskHeartbeat(String taskToken) {
+        if (taskToken == null || taskToken.isBlank() || !pendingTaskTokens.containsKey(taskToken)) {
+            throw new AwsException("InvalidToken", "Invalid token: '" + taskToken + "'", 400);
+        }
         LOG.debugv("Task heartbeat for token {0}", taskToken);
     }
 
@@ -538,7 +766,16 @@ public class StepFunctionsService implements Resettable {
         boolean topLevelJsonata = "JSONata".equals(topLevelQL);
         JsonNode states = def.path("States");
 
-        if (states.isObject()) {
+        if (!states.isObject() || states.isEmpty()) {
+            errors.add("The field 'States' is required and must be a non-empty object.");
+        } else {
+            String startAt = def.path("StartAt").asText(null);
+            if (startAt == null || startAt.isBlank()) {
+                errors.add("The field 'StartAt' is required.");
+            } else if (!states.has(startAt)) {
+                errors.add("The field 'StartAt' ('" + startAt
+                        + "') does not reference a state in 'States'.");
+            }
             var fields = states.fields();
             while (fields.hasNext()) {
                 var entry = fields.next();

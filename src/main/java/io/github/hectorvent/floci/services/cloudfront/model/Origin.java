@@ -14,6 +14,7 @@ public class Origin {
     private String originAccessControlId;
     private Map<String, String> s3OriginConfig;
     private Map<String, Object> customOriginConfig;
+    private Map<String, String> vpcOriginConfig;
     private int connectionAttempts = 3;
     private int connectionTimeout = 10;
     private List<Map<String, String>> customHeaders;
@@ -37,6 +38,9 @@ public class Origin {
 
     public Map<String, Object> getCustomOriginConfig() { return customOriginConfig; }
     public void setCustomOriginConfig(Map<String, Object> customOriginConfig) { this.customOriginConfig = customOriginConfig; }
+
+    public Map<String, String> getVpcOriginConfig() { return vpcOriginConfig; }
+    public void setVpcOriginConfig(Map<String, String> vpcOriginConfig) { this.vpcOriginConfig = vpcOriginConfig; }
 
     public int getConnectionAttempts() { return connectionAttempts; }
     public void setConnectionAttempts(int connectionAttempts) { this.connectionAttempts = connectionAttempts; }

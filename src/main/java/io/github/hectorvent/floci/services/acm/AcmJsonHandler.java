@@ -49,8 +49,13 @@ public class AcmJsonHandler {
             case "RemoveTagsFromCertificate" -> handleRemoveTagsFromCertificate(request, region);
             case "GetAccountConfiguration" -> handleGetAccountConfiguration(request, region);
             case "PutAccountConfiguration" -> handlePutAccountConfiguration(request, region);
+            case "UpdateCertificateOptions" -> handleUpdateCertificateOptions(request, region);
+            case "SearchCertificates" -> handleSearchCertificates(request, region);
+            case "RenewCertificate" -> handleRenewCertificate(request, region);
+            case "ResendValidationEmail" -> handleResendValidationEmail(request, region);
+            case "RevokeCertificate" -> handleRevokeCertificate(request, region);
             default -> Response.status(400)
-                .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
+                .entity(new AwsErrorResponse("UnknownOperationException", "Operation " + action + " is not supported."))
                 .build();
         };
     }
@@ -227,6 +232,57 @@ public class AcmJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    private Response handleUpdateCertificateOptions(JsonNode request, String region) {
+        String certificateArn = request.path("CertificateArn").asText();
+        CertificateOptions options = parseOptions(request.path("Options"));
+        service.updateCertificateOptions(certificateArn, options, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleSearchCertificates(JsonNode request, String region) {
+        int maxItems = request.path("MaxResults").asInt(100);
+        String nextToken = request.path("NextToken").asText(null);
+        JsonNode filterStatement = request.get("FilterStatement");
+
+        ListResult result = service.searchCertificates(
+            cert -> matchesFilterStatement(cert, filterStatement),
+            region, maxItems, nextToken);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode results = objectMapper.createArrayNode();
+        for (Certificate cert : result.certificates()) {
+            results.add(buildSearchResult(cert));
+        }
+        response.set("Results", results);
+        if (result.nextToken() != null) {
+            response.put("NextToken", result.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleRenewCertificate(JsonNode request, String region) {
+        String certificateArn = request.path("CertificateArn").asText();
+        service.renewCertificate(certificateArn, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleResendValidationEmail(JsonNode request, String region) {
+        String certificateArn = request.path("CertificateArn").asText();
+        String domain = request.path("Domain").asText(null);
+        String validationDomain = request.path("ValidationDomain").asText(null);
+        service.resendValidationEmail(certificateArn, domain, validationDomain, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleRevokeCertificate(JsonNode request, String region) {
+        String certificateArn = request.path("CertificateArn").asText();
+        String reason = request.path("RevocationReason").asText(null);
+        Certificate cert = service.revokeCertificate(certificateArn, reason, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("CertificateArn", cert.getArn());
+        return Response.ok(response).build();
+    }
+
     // ============ Helper Methods ============
 
     private ObjectNode buildCertificateDetail(Certificate cert) {
@@ -275,6 +331,9 @@ public class AcmJsonHandler {
         }
         if (cert.getNotAfter() != null) {
             node.put("NotAfter", cert.getNotAfter().toEpochMilli() / 1000.0);
+        }
+        if (cert.getRevokedAt() != null) {
+            node.put("RevokedAt", cert.getRevokedAt().toEpochMilli() / 1000.0);
         }
 
         ArrayNode inUseBy = objectMapper.createArrayNode();
@@ -325,13 +384,67 @@ public class AcmJsonHandler {
         extKeyUsages.add(eku2);
         node.set("ExtendedKeyUsages", extKeyUsages);
 
-        if (cert.getCertOptions() != null) {
-            ObjectNode opts = objectMapper.createObjectNode();
+        ObjectNode opts = objectMapper.createObjectNode();
+        CertificateOptions certOptions = cert.getCertOptions() != null
+            ? cert.getCertOptions()
+            : CertificateOptions.defaultOptions();
+        if (certOptions.certificateTransparencyLoggingPreference() != null) {
             opts.put("CertificateTransparencyLoggingPreference",
-                cert.getCertOptions().certificateTransparencyLoggingPreference());
-            node.set("Options", opts);
+                certOptions.certificateTransparencyLoggingPreference());
         }
+        if (certOptions.export() != null) {
+            opts.put("Export", certOptions.export());
+        }
+        node.set("Options", opts);
 
+        return node;
+    }
+
+    private ObjectNode buildSearchResult(Certificate cert) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("CertificateArn", cert.getArn());
+
+        ObjectNode metadata = objectMapper.createObjectNode();
+        metadata.put("Status", cert.getStatus().name());
+        metadata.put("Type", cert.getType().name());
+        metadata.put("Exported", cert.isExported());
+        metadata.put("InUse", cert.getInUseBy() != null && !cert.getInUseBy().isEmpty());
+        metadata.put("RenewalEligibility", "INELIGIBLE");
+        if (cert.getCertOptions() != null && cert.getCertOptions().export() != null) {
+            metadata.put("ExportOption", cert.getCertOptions().export());
+        }
+        if (cert.getValidationMethod() != null) {
+            metadata.put("ValidationMethod", cert.getValidationMethod().name());
+        }
+        if (cert.getCreatedAt() != null) {
+            metadata.put("CreatedAt", cert.getCreatedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getIssuedAt() != null) {
+            metadata.put("IssuedAt", cert.getIssuedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getImportedAt() != null) {
+            metadata.put("ImportedAt", cert.getImportedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getRevokedAt() != null) {
+            metadata.put("RevokedAt", cert.getRevokedAt().toEpochMilli() / 1000.0);
+        }
+        ObjectNode wrapper = objectMapper.createObjectNode();
+        wrapper.set("AcmCertificateMetadata", metadata);
+        node.set("CertificateMetadata", wrapper);
+
+        ObjectNode x509 = objectMapper.createObjectNode();
+        if (cert.getDomainName() != null) {
+            ObjectNode subject = objectMapper.createObjectNode();
+            subject.put("CommonName", cert.getDomainName());
+            x509.set("Subject", subject);
+        }
+        if (cert.getKeyAlgorithm() != null) {
+            x509.put("KeyAlgorithm", cert.getKeyAlgorithm().getAwsName());
+        }
+        if (cert.getSerial() != null) {
+            x509.put("SerialNumber", cert.getSerial());
+        }
+        node.set("X509Attributes", x509);
         return node;
     }
 
@@ -417,9 +530,109 @@ public class AcmJsonHandler {
     }
 
     private CertificateOptions parseOptions(JsonNode optionsNode) {
-        if (optionsNode.isMissingNode()) return null;
-        String ctPref = optionsNode.path("CertificateTransparencyLoggingPreference").asText("ENABLED");
-        return new CertificateOptions(ctPref, "DISABLED");
+        if (optionsNode == null || optionsNode.isMissingNode() || optionsNode.isNull()) {
+            return null;
+        }
+        String ctPref = optionsNode.hasNonNull("CertificateTransparencyLoggingPreference")
+            ? optionsNode.get("CertificateTransparencyLoggingPreference").asText()
+            : null;
+        String export = optionsNode.hasNonNull("Export")
+            ? optionsNode.get("Export").asText()
+            : null;
+        if (ctPref == null && export == null) {
+            return null;
+        }
+        return new CertificateOptions(ctPref, export);
+    }
+
+    private boolean matchesFilterStatement(Certificate cert, JsonNode statement) {
+        if (statement == null || statement.isMissingNode() || statement.isNull() || statement.isEmpty()) {
+            return true;
+        }
+        if (statement.has("And") && statement.get("And").isArray()) {
+            for (JsonNode child : statement.get("And")) {
+                if (!matchesFilterStatement(cert, child)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (statement.has("Or") && statement.get("Or").isArray()) {
+            if (statement.get("Or").isEmpty()) {
+                return true;
+            }
+            for (JsonNode child : statement.get("Or")) {
+                if (matchesFilterStatement(cert, child)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (statement.has("Not")) {
+            return !matchesFilterStatement(cert, statement.get("Not"));
+        }
+        if (statement.has("Filter")) {
+            return matchesFilter(cert, statement.get("Filter"));
+        }
+        return true;
+    }
+
+    private boolean matchesFilter(Certificate cert, JsonNode filter) {
+        if (filter == null || filter.isMissingNode() || filter.isNull()) {
+            return true;
+        }
+        if (filter.hasNonNull("CertificateArn")) {
+            return filter.get("CertificateArn").asText().equals(cert.getArn());
+        }
+        JsonNode metadata = filter.path("AcmCertificateMetadataFilter");
+        if (!metadata.isMissingNode() && !metadata.isNull() && metadata.isObject()) {
+            if (metadata.hasNonNull("Status")
+                && !metadata.get("Status").asText().equals(cert.getStatus().name())) {
+                return false;
+            }
+            if (metadata.hasNonNull("Type")
+                && !metadata.get("Type").asText().equals(cert.getType().name())) {
+                return false;
+            }
+            if (metadata.hasNonNull("Exported")
+                && metadata.get("Exported").asBoolean() != cert.isExported()) {
+                return false;
+            }
+            if (metadata.hasNonNull("ValidationMethod")
+                && cert.getValidationMethod() != null
+                && !metadata.get("ValidationMethod").asText().equals(cert.getValidationMethod().name())) {
+                return false;
+            }
+            if (metadata.hasNonNull("ExportOption")) {
+                String export = cert.getCertOptions() != null ? cert.getCertOptions().export() : "DISABLED";
+                if (!metadata.get("ExportOption").asText().equals(export)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        JsonNode x509 = filter.path("X509AttributeFilter");
+        if (!x509.isMissingNode() && !x509.isNull() && x509.isObject()) {
+            JsonNode commonName = x509.path("Subject").path("CommonName");
+            if (commonName.hasNonNull("Value")) {
+                String value = commonName.get("Value").asText();
+                String op = commonName.path("ComparisonOperator").asText("EQUALS");
+                String domain = cert.getDomainName() != null ? cert.getDomainName() : "";
+                if ("CONTAINS".equals(op)) {
+                    return domain.contains(value);
+                }
+                return domain.equalsIgnoreCase(value);
+            }
+            if (x509.hasNonNull("KeyAlgorithm") && cert.getKeyAlgorithm() != null) {
+                return x509.get("KeyAlgorithm").asText().equals(cert.getKeyAlgorithm().name())
+                    || x509.get("KeyAlgorithm").asText().equals(cert.getKeyAlgorithm().getAwsName());
+            }
+            if (x509.hasNonNull("SerialNumber") && cert.getSerial() != null) {
+                return x509.get("SerialNumber").asText().equals(cert.getSerial());
+            }
+            return true;
+        }
+        return true;
     }
 
     private List<CertificateStatus> parseCertificateStatuses(JsonNode node) {

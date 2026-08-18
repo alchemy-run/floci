@@ -22,6 +22,8 @@ public class TaskDefinition {
     private List<Volume> volumes;
     private List<String> requiresCompatibilities;
     private List<String> compatibilities;
+    private RuntimePlatform runtimePlatform;
+    private EphemeralStorage ephemeralStorage;
     private Map<String, String> tags = new HashMap<>();
 
     public String getTaskDefinitionArn() { return taskDefinitionArn; }
@@ -64,6 +66,12 @@ public class TaskDefinition {
 
     public List<String> getCompatibilities() { return compatibilities; }
     public void setCompatibilities(List<String> compatibilities) { this.compatibilities = compatibilities; }
+
+    public RuntimePlatform getRuntimePlatform() { return runtimePlatform; }
+    public void setRuntimePlatform(RuntimePlatform runtimePlatform) { this.runtimePlatform = runtimePlatform; }
+
+    public EphemeralStorage getEphemeralStorage() { return ephemeralStorage; }
+    public void setEphemeralStorage(EphemeralStorage ephemeralStorage) { this.ephemeralStorage = ephemeralStorage; }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }

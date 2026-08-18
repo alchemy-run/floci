@@ -407,9 +407,11 @@ public class EcsService implements ContainerTeardown {
     }
 
     public List<String> listTaskDefinitions(String familyPrefix, String status) {
+        // AWS defaults to ACTIVE when status is omitted.
+        String effectiveStatus = status == null ? "ACTIVE" : status;
         return taskDefinitions.values().stream()
                 .filter(td -> familyPrefix == null || td.getFamily().startsWith(familyPrefix))
-                .filter(td -> status == null || status.equals(td.getStatus()))
+                .filter(td -> effectiveStatus.equals(td.getStatus()))
                 .map(TaskDefinition::getTaskDefinitionArn)
                 .sorted()
                 .toList();
@@ -609,18 +611,53 @@ public class EcsService implements ContainerTeardown {
     }
 
     public List<EcsTask> describeTasks(String clusterRef, List<String> taskRefs, String region) {
+        return describeTasksDetailed(clusterRef, taskRefs, region).tasks();
+    }
+
+    /** The tasks that resolved, plus a {@code MISSING} failure for each reference that did not. */
+    public record DescribeTasksResult(List<EcsTask> tasks, List<Failure> failures) {}
+
+    /**
+     * Resolves each reference, reporting the ones that do not exist as {@code MISSING} failures
+     * rather than dropping them. Alchemy's DescribeTasks binding asserts
+     * {@code failures[].reason == "MISSING"} for an unknown task id.
+     */
+    public DescribeTasksResult describeTasksDetailed(String clusterRef, List<String> taskRefs, String region) {
+        EcsCluster cluster = clusterRef != null
+                ? resolveClusterOrDefault(clusterRef, region)
+                : getOrCreateDefaultCluster(region);
         List<EcsTask> result = new ArrayList<>();
+        List<Failure> failures = new ArrayList<>();
+        if (taskRefs == null) {
+            return new DescribeTasksResult(result, failures);
+        }
         for (String ref : taskRefs) {
             EcsTask task = resolveTask(ref, region);
             if (task != null) {
                 result.add(task);
+            } else {
+                failures.add(Failure.missing(missingTaskArn(cluster, ref, region)));
             }
         }
-        return result;
+        return new DescribeTasksResult(result, failures);
+    }
+
+    /** Echoes an ARN the caller supplied, otherwise builds the ARN the task would have had. */
+    private String missingTaskArn(EcsCluster cluster, String taskRef, String region) {
+        if (taskRef != null && taskRef.startsWith("arn:")) {
+            return taskRef;
+        }
+        return regionResolver.buildArn("ecs", region,
+                "task/" + cluster.getClusterName() + "/" + taskRef);
     }
 
     public List<String> listTasks(String clusterRef, String family, String desiredStatus,
                                    String serviceName, String region) {
+        return listTasks(clusterRef, family, desiredStatus, serviceName, null, region);
+    }
+
+    public List<String> listTasks(String clusterRef, String family, String desiredStatus,
+                                   String serviceName, String startedBy, String region) {
         String clusterArn = clusterRef != null
                 ? resolveClusterOrDefault(clusterRef, region).getClusterArn()
                 : null;
@@ -630,18 +667,38 @@ public class EcsService implements ContainerTeardown {
                 .filter(t -> family == null || t.getTaskDefinitionArn().contains("/" + family + ":"))
                 .filter(t -> desiredStatus == null || desiredStatus.equals(t.getDesiredStatus()))
                 .filter(t -> serviceName == null || serviceName.equals(t.getGroup()))
+                .filter(t -> startedBy == null || startedBy.equals(t.getStartedBy()))
                 .map(EcsTask::getTaskArn)
                 .toList();
     }
 
     // ── Task Protection ───────────────────────────────────────────────────────
 
+    public record TaskProtectionResult(List<ProtectedTask> protectedTasks, List<Failure> failures) {}
+
     public List<ProtectedTask> updateTaskProtection(String clusterRef, List<String> taskRefs,
                                                      boolean protectionEnabled, Integer expiresInMinutes,
                                                      String region) {
+        return updateTaskProtectionDetailed(clusterRef, taskRefs, protectionEnabled, expiresInMinutes, region)
+                .protectedTasks();
+    }
+
+    /**
+     * Scale-in protection is only valid for service-managed tasks. A standalone
+     * {@code RunTask} task is reported as {@code TASK_NOT_VALID}, matching AWS
+     * (Alchemy's TaskProtection binding asserts this).
+     */
+    public TaskProtectionResult updateTaskProtectionDetailed(String clusterRef, List<String> taskRefs,
+                                                             boolean protectionEnabled, Integer expiresInMinutes,
+                                                             String region) {
         List<ProtectedTask> result = new ArrayList<>();
+        List<Failure> failures = new ArrayList<>();
         for (String ref : taskRefs) {
             EcsTask task = resolveTaskOrThrow(ref, region);
+            if (!isServiceManagedTask(task)) {
+                failures.add(Failure.taskNotValid(task.getTaskArn()));
+                continue;
+            }
             task.setProtectionEnabled(protectionEnabled);
             Instant expiration = null;
             if (protectionEnabled && expiresInMinutes != null) {
@@ -652,16 +709,36 @@ public class EcsService implements ContainerTeardown {
             }
             result.add(new ProtectedTask(task.getTaskArn(), protectionEnabled, expiration));
         }
-        return result;
+        return new TaskProtectionResult(result, failures);
     }
 
     public List<ProtectedTask> getTaskProtection(String clusterRef, List<String> taskRefs, String region) {
+        return getTaskProtectionDetailed(clusterRef, taskRefs, region).protectedTasks();
+    }
+
+    public TaskProtectionResult getTaskProtectionDetailed(String clusterRef, List<String> taskRefs, String region) {
         List<ProtectedTask> result = new ArrayList<>();
+        List<Failure> failures = new ArrayList<>();
         for (String ref : taskRefs) {
             EcsTask task = resolveTaskOrThrow(ref, region);
+            if (!isServiceManagedTask(task)) {
+                failures.add(Failure.taskNotValid(task.getTaskArn()));
+                continue;
+            }
             result.add(new ProtectedTask(task.getTaskArn(), task.isProtectionEnabled(), task.getProtectedUntil()));
         }
-        return result;
+        return new TaskProtectionResult(result, failures);
+    }
+
+    /** Service reconciler launches with {@code group = serviceName} (or the service ARN). */
+    private boolean isServiceManagedTask(EcsTask task) {
+        String group = task.getGroup();
+        if (group == null || group.isBlank()) {
+            return false;
+        }
+        return services.values().stream()
+                .filter(s -> !"INACTIVE".equals(s.getStatus()))
+                .anyMatch(s -> group.equals(s.getServiceArn()) || group.equals(s.getServiceName()));
     }
 
     // ── Services ──────────────────────────────────────────────────────────────

@@ -857,6 +857,15 @@ public class ApiGatewayV2Service {
         return vpcLinkStore.scan(k -> k.startsWith(prefix));
     }
 
+    public VpcLink updateVpcLink(String region, String vpcLinkId, Map<String, Object> request) {
+        VpcLink link = getVpcLink(region, vpcLinkId);
+        if (request.containsKey("name") && request.get("name") != null) {
+            link.setName((String) request.get("name"));
+        }
+        vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
+        return link;
+    }
+
     public void deleteVpcLink(String region, String vpcLinkId) {
         getVpcLink(region, vpcLinkId);
         vpcLinkStore.delete(vpcLinkKey(region, vpcLinkId));

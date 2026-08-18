@@ -23,7 +23,7 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 |---|---|
 | `StartSchemaCreation` | Start schema creation — validates and parses SDL using graphql-java (invalid SDL returns 400) |
 | `GetSchemaCreationStatus` | Get schema creation status |
-| `GetIntrospectionSchema` | Get the introspection schema |
+| `GetIntrospectionSchema` | Get the introspection schema (HTTP payload is the raw SDL/JSON blob) |
 
 ### Data Sources
 
@@ -71,7 +71,7 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 
 | Operation | Description |
 |---|---|
-| `CreateApiKey` | Create an API key |
+| `CreateApiKey` | Create an API key (`id` is the `da2-` secret used as `x-api-key`) |
 | `GetApiKey` | Get an API key by ID |
 | `UpdateApiKey` | Update an API key |
 | `DeleteApiKey` | Delete an API key |
@@ -96,7 +96,7 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 
 | Operation | Description |
 |---|---|
-| `CreateDomainName` | Register a custom domain name |
+| `CreateDomainName` | Register a custom domain name (rejects a UUID ACM ARN that does not exist) |
 | `GetDomainName` | Get domain name configuration |
 | `UpdateDomainName` | Update domain name description |
 | `ListDomainNames` | List all domain names |
@@ -124,6 +124,29 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 | `GetApiAssociation` | Get a merged API association |
 | `DeleteApiAssociation` | Delete a merged API association |
 | `ListApiAssociations` | List all merged API associations |
+
+### API Cache
+
+| Operation | Description |
+|---|---|
+| `CreateApiCache` | Create the API cache (AVAILABLE immediately in the emulator) |
+| `GetApiCache` | Get the API cache; `NotFoundException` when none exists |
+| `UpdateApiCache` | Update TTL, behavior, type, and health metrics |
+| `DeleteApiCache` | Delete the API cache |
+| `FlushApiCache` | Flush the API cache; `NotFoundException` when none exists |
+
+### Evaluate
+
+| Operation | Description |
+|---|---|
+| `EvaluateCode` | Evaluate `APPSYNC_JS` `request` / `response` functions |
+| `EvaluateMappingTemplate` | Evaluate a VTL mapping template |
+
+### GraphQL data plane
+
+| Operation | Description |
+|---|---|
+| `GraphQL` | `POST /v1/apis/{apiId}/graphql` and `{apiId}.appsync-api.{region}.amazonaws.com/graphql` |
 
 ### Enhanced Metrics
 
@@ -213,18 +236,24 @@ Deleting a GraphQL API (`DeleteGraphqlApi`) automatically deletes all child reso
 
 This matches AWS behavior where deleting an API removes its entire configuration.
 
+`CreateGraphqlApi` advertises AWS-shaped URIs:
+
+```
+https://{apiId}.appsync-api.{region}.amazonaws.com/graphql
+```
+
+The gateway also accepts the path-style data-plane URL `POST /v1/apis/{apiId}/graphql`. Host headers matching `{apiId}.appsync-api.{region}.*` are rewritten onto that path. API_KEY APIs require `x-api-key`; AWS_IAM APIs accept a SigV4 `Authorization` header (and an additional API_KEY provider if configured).
+
+Resolvers run `APPSYNC_JS` (`request`/`response`) or VTL templates. `NONE` data sources use the request `payload` as `ctx.result`. `AWS_LAMBDA` data sources invoke the configured function with that payload. Pipeline resolvers chain AppSync Functions and expose `ctx.prev.result`.
+
 ## Not Implemented
 
 These AWS AppSync operations are not yet implemented and are tracked in future phases:
 
-- **Execution engine** (Phase 5): GraphQL query execution, resolver dispatch, VTL template evaluation
-- **Data source adapters** (Phase 7): DynamoDB, Lambda, HTTP, EventBridge, OpenSearch, RDS connectors
-- **Pipeline resolvers** (Phase 8): Function chaining with `$prev` and `$stash`
-- **Subscriptions** (Phase 9): WebSocket real-time subscriptions
-- **Caching** (Phase 10): API-level and per-resolver caching
-- **Authentication** (Phase 4): API key validation on the GraphQL endpoint
-- **Introspection** (Phase 6): `__schema` and `__type` queries
-- **Merged API source management**: `AssociateMergedGraphqlApi`, `AssociateSourceGraphqlApi`, `StartSchemaMerge`, `ListTypesByAssociation`
+- **Data source adapters** (beyond NONE + Lambda): DynamoDB, HTTP, EventBridge, OpenSearch, RDS connectors
+- **Subscriptions**: WebSocket real-time subscriptions
+- **Lambda authorizer data-plane**: AWS_LAMBDA primary auth is stored but not invoked on GraphQL requests
+- **Merged API source management**: `StartSchemaMerge`, `ListTypesByAssociation`
 - **Data source introspection**: `StartDataSourceIntrospection`, `GetDataSourceIntrospection`
 
 ## Configuration

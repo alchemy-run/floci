@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.scheduler.model.EventBridgeParameters;
 import io.github.hectorvent.floci.services.scheduler.model.EcsParameters;
+import io.github.hectorvent.floci.services.scheduler.model.Schedule;
 import io.github.hectorvent.floci.services.scheduler.model.Target;
 import io.github.hectorvent.floci.services.sns.SnsMessageAttributes;
 import io.github.hectorvent.floci.services.sns.SnsService;
@@ -20,17 +21,20 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Delivers an EventBridge Scheduler target invocation to the underlying service.
  * Supports templated SQS, Lambda, SNS, and EventBridge PutEvents targets, plus
  * universal targets ({@code arn:aws:scheduler:::aws-sdk:<service>:<action>}) for
- * {@code sns:publish} and {@code sqs:sendMessage}. Mirrors the subset handled by
- * {@code EventBridgeInvoker} but using Scheduler's {@link Target} model (raw
- * {@code input} string, no JSONPath/template).
+ * {@code sns:publish} and {@code sqs:sendMessage}. Substitutes the
+ * {@code <aws.scheduler.*>} context attributes AWS documents on
+ * {@code Target.Input} when invoked with a {@link Schedule}.
  */
 @ApplicationScoped
 public class ScheduleInvoker {
@@ -63,11 +67,45 @@ public class ScheduleInvoker {
     }
 
     public void invoke(Target target, String region) {
+        deliver(target, region, target != null && target.getInput() != null ? target.getInput() : "{}");
+    }
+
+    /**
+     * Fire {@code schedule}'s target, substituting AWS Scheduler context
+     * attributes into {@code Target.Input} the way live EventBridge Scheduler does.
+     */
+    public void invoke(Schedule schedule, Instant scheduledTime) {
+        if (schedule == null || schedule.getTarget() == null) {
+            return;
+        }
+        String region = extractRegion(schedule.getArn(), "us-east-1");
+        String payload = substituteContextAttributes(
+                schedule.getTarget().getInput() != null ? schedule.getTarget().getInput() : "{}",
+                schedule,
+                scheduledTime != null ? scheduledTime : Instant.now(),
+                1);
+        deliver(schedule.getTarget(), region, payload);
+    }
+
+    static String substituteContextAttributes(String input, Schedule schedule,
+                                              Instant scheduledTime, int attemptNumber) {
+        if (input == null || input.isEmpty() || !input.contains("<aws.scheduler.")) {
+            return input;
+        }
+        String executionId = UUID.randomUUID().toString();
+        String scheduled = DateTimeFormatter.ISO_INSTANT.format(scheduledTime);
+        return input
+                .replace("<aws.scheduler.schedule-arn>", schedule.getArn() != null ? schedule.getArn() : "")
+                .replace("<aws.scheduler.scheduled-time>", scheduled)
+                .replace("<aws.scheduler.execution-id>", executionId)
+                .replace("<aws.scheduler.attempt-number>", Integer.toString(attemptNumber));
+    }
+
+    private void deliver(Target target, String region, String payload) {
         if (target == null || target.getArn() == null) {
             return;
         }
         String arn = target.getArn();
-        String payload = target.getInput() != null ? target.getInput() : "{}";
 
         // Universal targets (arn:aws:scheduler:::aws-sdk:<service>:<action>) carry the
         // real resource identifiers inside Input, not in the target ARN. Detect and

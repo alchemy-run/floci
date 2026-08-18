@@ -24,6 +24,28 @@ Floci emulates Amazon Athena with **real SQL execution** powered by a [floci-duc
 | `ListTableMetadata` | - |
 | `GetTableMetadata` | - |
 | `DeleteWorkGroup` | Deletes a workgroup |
+| `UpdateWorkGroup` | Updates workgroup state, description, and configuration |
+| `CreateDataCatalog` | Creates a named data catalog |
+| `UpdateDataCatalog` | Updates a stored data catalog |
+| `DeleteDataCatalog` | Deletes a stored data catalog |
+| `GetDatabase` | Returns Glue database metadata |
+| `CreateNamedQuery` | Creates a named query (honors `ClientRequestToken`) |
+| `GetNamedQuery` | Returns a stored named query |
+| `ListNamedQueries` | Lists named query IDs for a workgroup |
+| `UpdateNamedQuery` | Updates name, description, or SQL |
+| `DeleteNamedQuery` | Deletes a named query |
+| `BatchGetNamedQuery` | Returns named queries by id |
+| `CreatePreparedStatement` | Creates a prepared statement in a workgroup |
+| `GetPreparedStatement` | Returns a stored prepared statement |
+| `ListPreparedStatements` | Lists prepared statements for a workgroup |
+| `UpdatePreparedStatement` | Updates statement text or description |
+| `DeletePreparedStatement` | Deletes a prepared statement |
+| `BatchGetPreparedStatement` | Returns prepared statements by name |
+| `BatchGetQueryExecution` | Returns query executions by id |
+| `GetQueryRuntimeStatistics` | Returns a stub timeline for a query |
+| `TagResource` | Tags a workgroup or data catalog |
+| `UntagResource` | Removes tags from a workgroup or data catalog |
+| `ListTagsForResource` | Lists tags on a workgroup or data catalog |
 <!-- floci:actions:end -->
 
 ## How it works

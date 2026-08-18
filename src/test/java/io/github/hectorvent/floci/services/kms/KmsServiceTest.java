@@ -18,10 +18,14 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.security.Security;
 import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.security.Signature;
+import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
+import javax.crypto.KeyAgreement;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -472,7 +476,8 @@ class KmsServiceTest {
         kmsService.cancelKeyDeletion(key.getKeyId(), REGION);
 
         KmsKey updated = kmsService.describeKey(key.getKeyId(), REGION);
-        assertEquals("Enabled", updated.getKeyState());
+        assertEquals("Disabled", updated.getKeyState());
+        assertFalse(updated.isEnabled());
         assertEquals(0, updated.getDeletionDate());
     }
 
@@ -1093,14 +1098,16 @@ class KmsServiceTest {
     @Test
     void getKeyRotationStatusDefaultFalse() {
         KmsKey key = kmsService.createKey(null, REGION);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     @Test
     void enableAndGetKeyRotationStatus() {
         KmsKey key = kmsService.createKey(null, REGION);
         kmsService.enableKeyRotation(key.getKeyId(), REGION);
-        assertTrue(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        KmsService.KeyRotationStatus status = kmsService.getKeyRotationStatus(key.getKeyId(), REGION);
+        assertTrue(status.keyRotationEnabled());
+        assertEquals(365, status.rotationPeriodInDays());
     }
 
     @Test
@@ -1108,7 +1115,9 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         kmsService.enableKeyRotation(key.getKeyId(), REGION);
         kmsService.disableKeyRotation(key.getKeyId(), REGION);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        KmsService.KeyRotationStatus status = kmsService.getKeyRotationStatus(key.getKeyId(), REGION);
+        assertFalse(status.keyRotationEnabled());
+        assertNull(status.rotationPeriodInDays());
     }
 
     @Test
@@ -1131,7 +1140,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         key.setKeySpec(KmsKeySpec.ECC_NIST_P256);
         key.setKeyUsage(KmsKeyUsage.SIGN_VERIFY);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     @Test
@@ -1139,7 +1148,7 @@ class KmsServiceTest {
         KmsKey key = kmsService.createKey(null, REGION);
         key.setKeySpec(KmsKeySpec.HMAC_256);
         key.setKeyUsage(KmsKeyUsage.GENERATE_VERIFY_MAC);
-        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION));
+        assertFalse(kmsService.getKeyRotationStatus(key.getKeyId(), REGION).keyRotationEnabled());
     }
 
     // ── Issue #911 — RotateKeyOnDemand ──────────────────────────────────────
@@ -1385,6 +1394,110 @@ class KmsServiceTest {
         String keyId = key.getKeyId();
         AwsException ex = assertThrows(AwsException.class, () ->
                 kmsService.generateMac(keyId, message, "HMAC_SHA_256", REGION));
+        assertEquals("InvalidKeyUsageException", ex.getErrorCode());
+    }
+
+    @Test
+    void createAliasDuplicateThrowsAlreadyExists() {
+        KmsKey key = kmsService.createKey(null, REGION);
+        kmsService.createAlias("alias/dup", key.getKeyId(), REGION);
+
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.createAlias("alias/dup", key.getKeyId(), REGION));
+        assertEquals("AlreadyExistsException", ex.getErrorCode());
+    }
+
+    @Test
+    void updateAliasRetargetsExistingAlias() {
+        KmsKey keyA = kmsService.createKey("a", REGION);
+        KmsKey keyB = kmsService.createKey("b", REGION);
+        kmsService.createAlias("alias/retarget", keyA.getKeyId(), REGION);
+
+        kmsService.updateAlias("alias/retarget", keyB.getKeyId(), REGION);
+
+        List<KmsAlias> aliases = kmsService.listAliases(keyB.getKeyId(), REGION);
+        assertEquals(1, aliases.size());
+        assertEquals(keyB.getKeyId(), aliases.getFirst().getTargetKeyId());
+        assertEquals(keyB.getKeyId(), kmsService.describeKey("alias/retarget", REGION).getKeyId());
+    }
+
+    @Test
+    void updateAliasMissingThrowsNotFound() {
+        KmsKey key = kmsService.createKey(null, REGION);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.updateAlias("alias/missing", key.getKeyId(), REGION));
+        assertEquals("NotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void enableKeyRotationStoresCustomPeriod() {
+        KmsKey key = kmsService.createKey(null, REGION);
+        kmsService.enableKeyRotation(key.getKeyId(), 90, REGION);
+
+        KmsService.KeyRotationStatus status = kmsService.getKeyRotationStatus(key.getKeyId(), REGION);
+        assertTrue(status.keyRotationEnabled());
+        assertEquals(90, status.rotationPeriodInDays());
+    }
+
+    @Test
+    void enableKeyRotationRejectsOutOfRangePeriod() {
+        KmsKey key = kmsService.createKey(null, REGION);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.enableKeyRotation(key.getKeyId(), 7, REGION));
+        assertEquals("ValidationException", ex.getErrorCode());
+    }
+
+    @Test
+    void generateDataKeyPairRoundTripsThroughDecrypt() {
+        KmsKey key = kmsService.createKey(null, REGION);
+        Map<String, Object> result = kmsService.generateDataKeyPair(
+                key.getKeyId(), "ECC_NIST_P256", Map.of(), REGION);
+
+        assertEquals("ECC_NIST_P256", result.get("KeyPairSpec"));
+        assertEquals(key.getArn(), result.get("KeyId"));
+        byte[] plaintext = (byte[]) result.get("PrivateKeyPlaintext");
+        byte[] ciphertext = (byte[]) result.get("PrivateKeyCiphertextBlob");
+        byte[] publicKey = (byte[]) result.get("PublicKey");
+        assertTrue(plaintext.length > 0);
+        assertTrue(publicKey.length > 0);
+        assertArrayEquals(plaintext, kmsService.decrypt(ciphertext, REGION));
+    }
+
+    @Test
+    void generateDataKeyPairOnAsymmetricKeyThrows() {
+        KmsKey key = kmsService.createKey("rsa", "SIGN_VERIFY", "RSA_2048", null, Map.of(), REGION);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.generateDataKeyPair(key.getKeyId(), "ECC_NIST_P256", Map.of(), REGION));
+        assertEquals("UnsupportedOperationException", ex.getErrorCode());
+    }
+
+    @Test
+    void deriveSharedSecretMatchesLocalEcdh() throws Exception {
+        KmsKey key = kmsService.createKey(
+                "agreement", "KEY_AGREEMENT", "ECC_NIST_P256", null, Map.of(), REGION);
+
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
+        generator.initialize(new ECGenParameterSpec("secp256r1"));
+        KeyPair local = generator.generateKeyPair();
+
+        KmsService.DeriveSharedSecretResult result = kmsService.deriveSharedSecret(
+                key.getKeyId(), local.getPublic().getEncoded(), "ECDH", REGION);
+        assertEquals(32, result.sharedSecret().length);
+        assertEquals(key.getArn(), result.keyArn());
+
+        PublicKey kmsPublic = KeyFactory.getInstance("EC").generatePublic(
+                new X509EncodedKeySpec(Base64.getDecoder().decode(key.getPublicKeyEncoded())));
+        KeyAgreement agreement = KeyAgreement.getInstance("ECDH");
+        agreement.init(local.getPrivate());
+        agreement.doPhase(kmsPublic, true);
+        assertArrayEquals(agreement.generateSecret(), result.sharedSecret());
+    }
+
+    @Test
+    void deriveSharedSecretOnSigningKeyThrows() {
+        KmsKey key = kmsService.createKey("sign", "SIGN_VERIFY", "ECC_NIST_P256", null, Map.of(), REGION);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.deriveSharedSecret(key.getKeyId(), new byte[]{1, 2, 3}, "ECDH", REGION));
         assertEquals("InvalidKeyUsageException", ex.getErrorCode());
     }
 }

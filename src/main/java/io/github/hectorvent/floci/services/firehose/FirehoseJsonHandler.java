@@ -56,7 +56,22 @@ public class FirehoseJsonHandler {
                 }
                 String deliveryStreamType = request.has("DeliveryStreamType")
                         ? request.get("DeliveryStreamType").asText() : null;
-                String arn = firehoseService.createDeliveryStream(name, s3, tags, deliveryStreamType);
+                io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.KinesisStreamSourceDescription kinesisSource = null;
+                if (request.has("KinesisStreamSourceConfiguration")
+                        && !request.get("KinesisStreamSourceConfiguration").isNull()) {
+                    kinesisSource = mapper.treeToValue(
+                            request.get("KinesisStreamSourceConfiguration"),
+                            io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.KinesisStreamSourceDescription.class);
+                }
+                io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption = null;
+                if (request.has("DeliveryStreamEncryptionConfigurationInput")
+                        && !request.get("DeliveryStreamEncryptionConfigurationInput").isNull()) {
+                    encryption = mapper.treeToValue(
+                            request.get("DeliveryStreamEncryptionConfigurationInput"),
+                            io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.class);
+                }
+                String arn = firehoseService.createDeliveryStream(
+                        name, s3, tags, deliveryStreamType, kinesisSource, encryption);
                 yield Response.ok(Map.of("DeliveryStreamARN", arn)).build();
             }
             case "UpdateDestination" -> {
@@ -78,9 +93,32 @@ public class FirehoseJsonHandler {
                 yield Response.ok(Map.of("DeliveryStreamDescription", desc)).build();
             }
             case "ListDeliveryStreams" -> {
+                String exclusiveStart = request != null && request.has("ExclusiveStartDeliveryStreamName")
+                        ? request.get("ExclusiveStartDeliveryStreamName").asText() : null;
+                Integer limit = request != null && request.has("Limit") ? request.get("Limit").asInt() : null;
+                String type = request != null && request.has("DeliveryStreamType")
+                        ? request.get("DeliveryStreamType").asText() : null;
+                var page = firehoseService.listDeliveryStreams(exclusiveStart, limit, type);
                 yield Response.ok(Map.of(
-                        "DeliveryStreamNames", firehoseService.listDeliveryStreams(),
-                        "HasMoreDeliveryStreams", false)).build();
+                        "DeliveryStreamNames", page.names(),
+                        "HasMoreDeliveryStreams", page.hasMore())).build();
+            }
+            case "StartDeliveryStreamEncryption" -> {
+                String name = getDeliveryStreamName(request);
+                io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption = null;
+                if (request.has("DeliveryStreamEncryptionConfigurationInput")
+                        && !request.get("DeliveryStreamEncryptionConfigurationInput").isNull()) {
+                    encryption = mapper.treeToValue(
+                            request.get("DeliveryStreamEncryptionConfigurationInput"),
+                            io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.class);
+                }
+                firehoseService.startDeliveryStreamEncryption(name, encryption);
+                yield Response.ok(Map.of()).build();
+            }
+            case "StopDeliveryStreamEncryption" -> {
+                String name = getDeliveryStreamName(request);
+                firehoseService.stopDeliveryStreamEncryption(name);
+                yield Response.ok(Map.of()).build();
             }
             case "DeleteDeliveryStream" -> {
                 String name = getDeliveryStreamName(request);

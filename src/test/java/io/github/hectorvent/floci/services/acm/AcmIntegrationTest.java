@@ -220,8 +220,9 @@ class AcmIntegrationTest {
             .statusCode(200)
             .body("Certificate.CertificateArn", equalTo(createdCertificateArn))
             .body("Certificate.DomainName", equalTo("example.com"))
-            .body("Certificate.Status", equalTo("ISSUED"))
+            .body("Certificate.Status", equalTo("PENDING_VALIDATION"))
             .body("Certificate.Type", equalTo("AMAZON_ISSUED"))
+            .body("Certificate.Options.Export", equalTo("DISABLED"))
             .body("Certificate.Serial", notNullValue())
             .body("Certificate.Subject", startsWith("CN="))
             .body("Certificate.Issuer", notNullValue())
@@ -261,6 +262,39 @@ class AcmIntegrationTest {
                     "CertificateArn": "%s"
                 }
                 """.formatted(createdCertificateArn))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("RequestInProgressException"));
+    }
+
+    @Test
+    @Order(16)
+    void getPrivateCertificate() {
+        String privateArn = given()
+            .header("X-Amz-Target", "CertificateManager.RequestCertificate")
+            .contentType(ACM_CONTENT_TYPE)
+            .body("""
+                {
+                    "DomainName": "internal.example.com",
+                    "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().jsonPath().getString("CertificateArn");
+
+        given()
+            .header("X-Amz-Target", "CertificateManager.GetCertificate")
+            .contentType(ACM_CONTENT_TYPE)
+            .body("""
+                {
+                    "CertificateArn": "%s"
+                }
+                """.formatted(privateArn))
         .when()
             .post("/")
         .then()
@@ -549,6 +583,6 @@ class AcmIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("UnsupportedOperation"));
+            .body("__type", equalTo("UnknownOperationException"));
     }
 }

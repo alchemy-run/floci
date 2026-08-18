@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -145,5 +146,74 @@ class SsmServiceTest {
         assertEquals(5, history.size());
         assertEquals("v3", history.get(0).getValue());
         assertEquals("v7", history.get(4).getValue());
+    }
+
+    @Test
+    void putParameterWithTagsPersistsTags() {
+        String region = "eu-west-1";
+        ssmService.putParameter("/app/tagged", "v1", "String", "desc", false, region,
+                Map.of("Environment", "test"), "Standard", null, null, null);
+
+        assertEquals("test", ssmService.listTagsForResource("/app/tagged", region).get("Environment"));
+        Parameter described = ssmService.describeParameters(List.of("/app/tagged"), region).getFirst();
+        assertEquals("desc", described.getDescription());
+        assertEquals("Standard", described.getTier());
+        assertTrue(described.getArn().contains(":parameter/app/tagged"));
+    }
+
+    @Test
+    void putParameterTagsWithOverwriteRejected() {
+        String region = "eu-west-1";
+        ssmService.putParameter("/app/tagged", "v1", "String", null, false, region);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                ssmService.putParameter("/app/tagged", "v2", "String", null, true, region,
+                        Map.of("k", "v"), null, null, null, null));
+        assertEquals("ValidationException", ex.getErrorCode());
+    }
+
+    @Test
+    void putParameterArnForUnprefixedName() {
+        String region = "eu-west-1";
+        ssmService.putParameter("MyParam", "v1", "String", null, false, region);
+        Parameter param = ssmService.getParameter("MyParam", region);
+        assertTrue(param.getArn().contains(":parameter/MyParam"), param.getArn());
+    }
+
+    @Test
+    void labelDefaultsToLatestAndUnlabelRemoves() {
+        String region = "eu-west-1";
+        ssmService.putParameter("/app/flag", "v1", "String", null, false, region);
+        ssmService.putParameter("/app/flag", "v2", "String", null, true, region);
+
+        long labeled = ssmService.labelParameterVersion("/app/flag", null, List.of("current"), region);
+        assertEquals(2, labeled);
+        List<ParameterHistory> afterLabel = ssmService.getParameterHistory("/app/flag", region);
+        assertTrue(afterLabel.get(1).getLabels().contains("current"));
+
+        SsmService.UnlabelResult result = ssmService.unlabelParameterVersion(
+                "/app/flag", 2, List.of("current", "missing"), region);
+        assertEquals(List.of("current"), result.removedLabels());
+        assertEquals(List.of("missing"), result.invalidLabels());
+    }
+
+    @Test
+    void labelMovesBetweenVersions() {
+        String region = "eu-west-1";
+        ssmService.putParameter("/app/flag", "v1", "String", null, false, region);
+        ssmService.labelParameterVersion("/app/flag", 1L, List.of("current"), region);
+        ssmService.putParameter("/app/flag", "v2", "String", null, true, region);
+        ssmService.labelParameterVersion("/app/flag", 2L, List.of("current"), region);
+
+        List<ParameterHistory> history = ssmService.getParameterHistory("/app/flag", region);
+        assertFalse(history.get(0).getLabels().contains("current"));
+        assertTrue(history.get(1).getLabels().contains("current"));
+    }
+
+    @Test
+    void secureStringDefaultsKeyId() {
+        String region = "eu-west-1";
+        ssmService.putParameter("/app/secret", "s", "SecureString", null, false, region);
+        Parameter param = ssmService.getParameter("/app/secret", region);
+        assertEquals("alias/aws/ssm", param.getKeyId());
     }
 }

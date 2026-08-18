@@ -49,6 +49,10 @@ public class UserPool {
     private String clientIdOverride = null;
     private String clientSecretOverride = null;
 
+    private List<IdentityProvider> identityProviders = new ArrayList<>();
+    private List<UserPoolDomain> domains = new ArrayList<>();
+    private Map<String, Map<String, Object>> riskConfigurations = new HashMap<>();
+
     public UserPool() {
         long now = System.currentTimeMillis() / 1000L;
         this.creationDate = now;
@@ -159,4 +163,34 @@ public class UserPool {
 
     public String getClientSecretOverride() { return clientSecretOverride; }
     public void setClientSecretOverride(String clientSecretOverride) { this.clientSecretOverride = clientSecretOverride; }
+
+    public List<IdentityProvider> getIdentityProviders() {
+        if (identityProviders == null) {
+            identityProviders = new ArrayList<>();
+        }
+        return identityProviders;
+    }
+    public void setIdentityProviders(List<IdentityProvider> identityProviders) {
+        this.identityProviders = identityProviders == null ? new ArrayList<>() : identityProviders;
+    }
+
+    public List<UserPoolDomain> getDomains() {
+        if (domains == null) {
+            domains = new ArrayList<>();
+        }
+        return domains;
+    }
+    public void setDomains(List<UserPoolDomain> domains) {
+        this.domains = domains == null ? new ArrayList<>() : domains;
+    }
+
+    public Map<String, Map<String, Object>> getRiskConfigurations() {
+        if (riskConfigurations == null) {
+            riskConfigurations = new HashMap<>();
+        }
+        return riskConfigurations;
+    }
+    public void setRiskConfigurations(Map<String, Map<String, Object>> riskConfigurations) {
+        this.riskConfigurations = riskConfigurations == null ? new HashMap<>() : riskConfigurations;
+    }
 }

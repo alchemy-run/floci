@@ -48,19 +48,33 @@ public class CloudMapHandler {
                         text(request, "Description"), parseTags(request), region));
                 case "CreatePublicDnsNamespace" -> opResponse(service.createPublicDnsNamespace(
                         text(request, "Name"), text(request, "CreatorRequestId"),
-                        text(request, "Description"), parseTags(request), region));
+                        text(request, "Description"), parseTags(request), region,
+                        soaTtl(request.path("Properties"))));
                 case "CreatePrivateDnsNamespace" -> opResponse(service.createPrivateDnsNamespace(
                         text(request, "Name"), text(request, "Vpc"), text(request, "CreatorRequestId"),
-                        text(request, "Description"), parseTags(request), region));
+                        text(request, "Description"), parseTags(request), region,
+                        soaTtl(request.path("Properties"))));
                 case "GetNamespace" -> handleGetNamespace(request);
-                case "ListNamespaces" -> handleListNamespaces(region);
+                case "ListNamespaces" -> handleListNamespaces(request, region);
                 case "DeleteNamespace" -> opResponse(service.deleteNamespace(text(request, "Id"), region));
+                case "UpdateHttpNamespace" -> opResponse(service.updateHttpNamespace(
+                        text(request, "Id"), text(request.path("Namespace"), "Description"), region));
+                case "UpdatePublicDnsNamespace" -> opResponse(service.updatePublicDnsNamespace(
+                        text(request, "Id"), text(request.path("Namespace"), "Description"),
+                        soaTtl(request.path("Namespace").path("Properties")), region));
+                case "UpdatePrivateDnsNamespace" -> opResponse(service.updatePrivateDnsNamespace(
+                        text(request, "Id"), text(request.path("Namespace"), "Description"),
+                        soaTtl(request.path("Namespace").path("Properties")), region));
                 case "GetOperation" -> handleGetOperation(request);
                 case "ListOperations" -> handleListOperations(request, region);
                 case "CreateService" -> handleCreateService(request, region);
                 case "GetService" -> handleGetService(request);
                 case "ListServices" -> handleListServices(request, region);
                 case "DeleteService" -> handleDeleteService(request);
+                case "UpdateService" -> handleUpdateService(request, region);
+                case "GetServiceAttributes" -> handleGetServiceAttributes(request);
+                case "UpdateServiceAttributes" -> handleUpdateServiceAttributes(request);
+                case "DeleteServiceAttributes" -> handleDeleteServiceAttributes(request);
                 case "RegisterInstance" -> opResponse(service.registerInstance(
                         text(request, "ServiceId"), text(request, "InstanceId"),
                         text(request, "CreatorRequestId"), parseAttributes(request.path("Attributes")), region));
@@ -69,6 +83,7 @@ public class CloudMapHandler {
                 case "GetInstance" -> handleGetInstance(request);
                 case "ListInstances" -> handleListInstances(request);
                 case "GetInstancesHealthStatus" -> handleGetInstancesHealthStatus(request);
+                case "UpdateInstanceCustomHealthStatus" -> handleUpdateInstanceCustomHealthStatus(request);
                 case "DiscoverInstances" -> handleDiscoverInstances(request, region);
                 case "DiscoverInstancesRevision" -> handleDiscoverInstancesRevision(request, region);
                 case "TagResource" -> handleTagResource(request);
@@ -100,10 +115,10 @@ public class CloudMapHandler {
         return Response.ok(response).build();
     }
 
-    private Response handleListNamespaces(String region) {
+    private Response handleListNamespaces(JsonNode request, String region) {
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode arr = response.putArray("Namespaces");
-        for (Namespace ns : service.listNamespaces(region)) {
+        for (Namespace ns : service.listNamespaces(region, parseFilters(request))) {
             arr.add(buildNamespaceNode(ns));
         }
         return Response.ok(response).build();
@@ -168,6 +183,38 @@ public class CloudMapHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    private Response handleUpdateService(JsonNode request, String region) {
+        JsonNode spec = request.path("Service");
+        Operation op = service.updateService(
+                text(request, "Id"),
+                text(spec, "Description"),
+                rawJson(spec.path("DnsConfig")),
+                spec.has("HealthCheckConfig") ? rawJson(spec.path("HealthCheckConfig")) : null,
+                region);
+        return opResponse(op);
+    }
+
+    private Response handleGetServiceAttributes(JsonNode request) {
+        Service s = service.getService(text(request, "ServiceId"));
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode attrs = response.putObject("ServiceAttributes");
+        attrs.put("ServiceArn", s.getArn());
+        attrs.set("Attributes", attributesNode(s.getAttributes()));
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateServiceAttributes(JsonNode request) {
+        service.updateServiceAttributes(text(request, "ServiceId"), parseAttributes(request.path("Attributes")));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleDeleteServiceAttributes(JsonNode request) {
+        List<String> keys = new ArrayList<>();
+        request.path("Attributes").forEach(n -> keys.add(n.asText()));
+        service.deleteServiceAttributes(text(request, "ServiceId"), keys);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     // ──────────────────────────── Instances ────────────────────────────
 
     private Response handleGetInstance(JsonNode request) {
@@ -193,6 +240,12 @@ public class CloudMapHandler {
             arr.add(node);
         }
         return Response.ok(response).build();
+    }
+
+    private Response handleUpdateInstanceCustomHealthStatus(JsonNode request) {
+        service.updateInstanceCustomHealthStatus(
+                text(request, "ServiceId"), text(request, "InstanceId"), text(request, "Status"));
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleGetInstancesHealthStatus(JsonNode request) {
@@ -298,7 +351,7 @@ public class CloudMapHandler {
             if (ns.getHostedZoneId() != null) {
                 dns.put("HostedZoneId", ns.getHostedZoneId());
             }
-            dns.putObject("SOA").put("TTL", 15);
+            dns.putObject("SOA").put("TTL", ns.getSoaTtl());
         }
         props.putObject("HttpProperties").put("HttpName", ns.getName());
         return props;
@@ -405,6 +458,11 @@ public class CloudMapHandler {
             }
         }
         return tags;
+    }
+
+    private Long soaTtl(JsonNode properties) {
+        JsonNode ttl = properties.path("DnsProperties").path("SOA").path("TTL");
+        return ttl.isMissingNode() || ttl.isNull() ? null : ttl.asLong();
     }
 
     private String text(JsonNode request, String field) {

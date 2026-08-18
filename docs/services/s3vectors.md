@@ -12,8 +12,10 @@ shape, so the AWS SDK and CLI `s3vectors` clients work without modification.
 | Category | Operations |
 |---|---|
 | **Vector buckets** | CreateVectorBucket, GetVectorBucket, ListVectorBuckets, DeleteVectorBucket |
+| **Bucket policy** | PutVectorBucketPolicy, GetVectorBucketPolicy, DeleteVectorBucketPolicy |
 | **Indexes** | CreateIndex, GetIndex, ListIndexes, DeleteIndex |
-| **Vectors** | PutVectors, GetVectors, DeleteVectors, QueryVectors |
+| **Vectors** | PutVectors, GetVectors, ListVectors, DeleteVectors, QueryVectors |
+| **Tags** | TagResource, UntagResource, ListTagsForResource (`GET/POST/DELETE /tags/{resourceArn}`) |
 
 ## Example
 

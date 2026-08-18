@@ -16,6 +16,7 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 | ModifyLoadBalancerAttributes | Updates persisted load balancer attributes. |
 | DescribeLoadBalancerAttributes | Returns attributes stored for a load balancer. |
 | DescribeCapacityReservation | Returns the stored capacity reservation fields for a load balancer. |
+| ModifyCapacityReservation | Stores or resets the requested minimum capacity. Reset of a never-set reservation is a no-op success. |
 | SetSecurityGroups | Replaces the security groups associated with a load balancer. |
 | SetSubnets | Replaces the subnets associated with a load balancer. |
 | SetIpAddressType | Updates the IP address type stored for a load balancer. |
@@ -78,6 +79,17 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 | DescribeSSLPolicies | Returns Floci's pre-seeded standard SSL policy list. |
 | DescribeAccountLimits | Returns standard default ELBv2 account limits. |
 
+### Trust Stores
+
+| Action | Description |
+|--------|-------------|
+| CreateTrustStore | Creates a trust store from an S3 CA certificate bundle (PEM). Missing bundle → `CaCertificatesBundleNotFound`; invalid PEM → `InvalidCaCertificatesBundle`. |
+| DescribeTrustStores | Lists or returns stored trust stores by ARN or name. |
+| ModifyTrustStore | Replaces the CA certificate bundle on an existing trust store. |
+| DeleteTrustStore | Deletes a trust store that is not referenced by a listener. |
+| GetTrustStoreCaCertificatesBundle | Returns an HTTPS `Location` for the stored CA bundle. |
+| GetTrustStoreRevocationContent | Returns an HTTPS `Location` for a stored revocation, or `RevocationIdNotFound`. |
+
 ## Behavior Notes
 
 - Load balancer, target group, listener, rule, and tag state is persisted through Floci storage and rebuilt on service startup.
@@ -92,6 +104,10 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 - `DescribeSSLPolicies` returns a pre-seeded list of standard AWS SSL policies (`ELBSecurityPolicy-*`).
 - `DescribeAccountLimits` returns standard default limits (e.g., 50 load balancers per region, 100 target groups, etc.).
 - `routing.http.preserve_host_header.enabled` (default `false`) controls whether the original client Host header is forwarded to targets unchanged, or replaced with the target's `host:port`.
+- Trust stores become `ACTIVE` as soon as the S3 CA bundle is readable and contains at least one `BEGIN CERTIFICATE` block. Floci does not asynchronously validate X.509 v3 constraints.
+- `GetTrustStoreCaCertificatesBundle` returns a synthetic `https://s3.{region}.amazonaws.com/{bucket}/{key}` location (Alchemy only asserts the `https://` prefix).
+- `ModifyCapacityReservation` persists `MinimumLoadBalancerCapacity` on the load balancer. `ResetCapacityReservation=true` clears it.
+- `authenticate-oidc` listener actions are stored and returned on describe. `ClientSecret` is accepted on create/modify and omitted from describe, matching AWS.
 
 ## ARN Format
 
@@ -100,6 +116,7 @@ arn:aws:elasticloadbalancing:{region}:{account-id}:loadbalancer/app/{name}/{hex1
 arn:aws:elasticloadbalancing:{region}:{account-id}:targetgroup/{name}/{hex16}
 arn:aws:elasticloadbalancing:{region}:{account-id}:listener/app/{lb-name}/{lb-id}/{hex16}
 arn:aws:elasticloadbalancing:{region}:{account-id}:listener-rule/app/{lb-name}/{lb-id}/{listener-id}/{hex16}
+arn:aws:elasticloadbalancing:{region}:{account-id}:truststore/{name}/{hex16}
 ```
 
 ## Examples

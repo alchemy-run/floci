@@ -205,4 +205,118 @@ class WafV2IntegrationTest {
                 .then().statusCode(404)
                 .body("__type", equalTo("WAFNonexistentItemException"));
     }
+
+    @Test
+    @Order(12)
+    void apiKeyLifecycle() {
+        Response created = call("CreateAPIKey",
+                "{\"Scope\":\"REGIONAL\",\"TokenDomains\":[\"example.com\"]}");
+        created.then().statusCode(200).body("APIKey", notNullValue());
+        String apiKey = created.jsonPath().getString("APIKey");
+
+        call("ListAPIKeys", "{\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("APIKeySummaries.find { it.APIKey == '" + apiKey + "' }.TokenDomains[0]",
+                        equalTo("example.com"));
+
+        call("GetDecryptedAPIKey",
+                "{\"Scope\":\"REGIONAL\",\"APIKey\":\"" + apiKey + "\"}")
+                .then().statusCode(200)
+                .body("TokenDomains[0]", equalTo("example.com"))
+                .body("CreationTimestamp", notNullValue());
+
+        call("DeleteAPIKey", "{\"Scope\":\"REGIONAL\",\"APIKey\":\"" + apiKey + "\"}")
+                .then().statusCode(200);
+
+        call("GetDecryptedAPIKey",
+                "{\"Scope\":\"REGIONAL\",\"APIKey\":\"" + apiKey + "\"}")
+                .then().statusCode(404)
+                .body("__type", equalTo("WAFNonexistentItemException"));
+    }
+
+    @Test
+    @Order(13)
+    void managedRuleCatalog() {
+        call("ListAvailableManagedRuleGroups", "{\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("ManagedRuleGroups.find { it.Name == 'AWSManagedRulesCommonRuleSet' }.VendorName",
+                        equalTo("AWS"));
+
+        call("DescribeManagedRuleGroup",
+                "{\"VendorName\":\"AWS\",\"Name\":\"AWSManagedRulesCommonRuleSet\",\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("Capacity", not(equalTo(0)))
+                .body("Rules", not(hasSize(0)));
+
+        call("ListAvailableManagedRuleGroupVersions",
+                "{\"VendorName\":\"AWS\",\"Name\":\"AWSManagedRulesCommonRuleSet\",\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("CurrentDefaultVersion", notNullValue());
+
+        call("DescribeAllManagedProducts", "{\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("ManagedProducts", not(hasSize(0)));
+
+        call("DescribeManagedProductsByVendor",
+                "{\"VendorName\":\"AWS\",\"Scope\":\"REGIONAL\"}")
+                .then().statusCode(200)
+                .body("ManagedProducts.find { it.ManagedRuleSetName == 'AWSManagedRulesCommonRuleSet' }.VendorName",
+                        equalTo("AWS"));
+    }
+
+    @Test
+    @Order(14)
+    void sampledRequestsAndRateKeysAndTopPaths() {
+        Response created = call("CreateWebACL",
+                "{\"Name\":\"floci-waf-analytics\",\"Scope\":\"REGIONAL\","
+                        + "\"DefaultAction\":{\"Allow\":{}},"
+                        + "\"VisibilityConfig\":{\"SampledRequestsEnabled\":true,"
+                        + "\"CloudWatchMetricsEnabled\":true,\"MetricName\":\"analytics\"},"
+                        + "\"Rules\":[{\"Name\":\"rate-limit\",\"Priority\":0,"
+                        + "\"Statement\":{\"RateBasedStatement\":{\"Limit\":100,\"AggregateKeyType\":\"IP\"}},"
+                        + "\"Action\":{\"Block\":{}},"
+                        + "\"VisibilityConfig\":{\"SampledRequestsEnabled\":true,"
+                        + "\"CloudWatchMetricsEnabled\":true,\"MetricName\":\"rate-limit\"}}]}");
+        created.then().statusCode(200);
+        String id = created.jsonPath().getString("Summary.Id");
+        String arn = created.jsonPath().getString("Summary.ARN");
+
+        call("GetSampledRequests",
+                "{\"WebAclArn\":\"" + arn + "\",\"RuleMetricName\":\"rate-limit\","
+                        + "\"Scope\":\"REGIONAL\",\"MaxItems\":100,"
+                        + "\"TimeWindow\":{\"StartTime\":1,\"EndTime\":2}}")
+                .then().statusCode(200)
+                .body("SampledRequests", hasSize(0))
+                .body("PopulationSize", equalTo(0));
+
+        call("GetRateBasedStatementManagedKeys",
+                "{\"Scope\":\"REGIONAL\",\"WebACLName\":\"floci-waf-analytics\","
+                        + "\"WebACLId\":\"" + id + "\",\"RuleName\":\"rate-limit\"}")
+                .then().statusCode(200)
+                .body("ManagedKeysIPV4.IPAddressVersion", equalTo("IPV4"))
+                .body("ManagedKeysIPV4.Addresses", hasSize(0));
+
+        call("GetTopPathStatisticsByTraffic",
+                "{\"WebAclArn\":\"" + arn + "\",\"Scope\":\"REGIONAL\","
+                        + "\"TimeWindow\":{\"StartTime\":1,\"EndTime\":2},"
+                        + "\"Limit\":10,\"NumberOfTopTrafficBotsPerPath\":3}")
+                .then().statusCode(200)
+                .body("PathStatistics", hasSize(0))
+                .body("TotalRequestCount", equalTo(0));
+
+        call("TagResource",
+                "{\"ResourceARN\":\"" + arn + "\",\"Tags\":[{\"Key\":\"Extra\",\"Value\":\"1\"}]}")
+                .then().statusCode(200);
+        call("ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}")
+                .then().statusCode(200)
+                .body("TagInfoForResource.TagList.find { it.Key == 'Extra' }.Value", equalTo("1"));
+
+        String lock = call("GetWebACL",
+                "{\"Name\":\"floci-waf-analytics\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id + "\"}")
+                .jsonPath().getString("LockToken");
+        call("DeleteWebACL",
+                "{\"Name\":\"floci-waf-analytics\",\"Scope\":\"REGIONAL\",\"Id\":\"" + id + "\","
+                        + "\"LockToken\":\"" + lock + "\"}")
+                .then().statusCode(200);
+    }
 }

@@ -35,6 +35,15 @@ public class Identity {
     @JsonProperty("DkimTokens")
     private List<String> dkimTokens;
 
+    @JsonProperty("NextSigningKeyLength")
+    private String nextSigningKeyLength;
+
+    @JsonProperty("CurrentSigningKeyLength")
+    private String currentSigningKeyLength;
+
+    @JsonProperty("SigningAttributesOrigin")
+    private String signingAttributesOrigin = "AWS_SES";
+
     @JsonProperty("NotificationAttributes")
     private Map<String, String> notificationAttributes = new HashMap<>();
 
@@ -94,6 +103,21 @@ public class Identity {
 
     public List<String> getDkimTokens() { return dkimTokens; }
     public void setDkimTokens(List<String> dkimTokens) { this.dkimTokens = dkimTokens; }
+
+    public String getNextSigningKeyLength() { return nextSigningKeyLength; }
+    public void setNextSigningKeyLength(String nextSigningKeyLength) {
+        this.nextSigningKeyLength = nextSigningKeyLength;
+    }
+
+    public String getCurrentSigningKeyLength() { return currentSigningKeyLength; }
+    public void setCurrentSigningKeyLength(String currentSigningKeyLength) {
+        this.currentSigningKeyLength = currentSigningKeyLength;
+    }
+
+    public String getSigningAttributesOrigin() { return signingAttributesOrigin; }
+    public void setSigningAttributesOrigin(String signingAttributesOrigin) {
+        this.signingAttributesOrigin = signingAttributesOrigin;
+    }
 
     public Map<String, String> getNotificationAttributes() { return notificationAttributes; }
     public void setNotificationAttributes(Map<String, String> notificationAttributes) { this.notificationAttributes = notificationAttributes; }

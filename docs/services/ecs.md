@@ -23,9 +23,9 @@ ECS emulates clusters, task definitions, tasks, and services. In the default con
 
 | Operation | Description |
 |---|---|
-| `RegisterTaskDefinition` | Register a new revision of a task definition |
-| `DescribeTaskDefinition` | Describe a task definition by family:revision or ARN |
-| `ListTaskDefinitions` | List task definition ARNs |
+| `RegisterTaskDefinition` | Register a new revision of a task definition. Stores `logConfiguration`, `command`, `dependsOn`, `environmentFiles`, `runtimePlatform`, `ephemeralStorage`, and tags. |
+| `DescribeTaskDefinition` | Describe a task definition by family:revision or ARN. `include: ["TAGS"]` returns top-level `tags`. Container `logConfiguration`, `command`, `dependsOn`, and `environmentFiles` round-trip, as do task-level `runtimePlatform` and `ephemeralStorage`. |
+| `ListTaskDefinitions` | List task definition ARNs (defaults to `ACTIVE`, matching AWS) |
 | `ListTaskDefinitionFamilies` | List task definition family names |
 | `DeregisterTaskDefinition` | Mark a revision INACTIVE |
 | `DeleteTaskDefinitions` | Delete one or more task definitions |
@@ -37,19 +37,19 @@ ECS emulates clusters, task definitions, tasks, and services. In the default con
 | `RunTask` | Launch one or more task instances |
 | `StartTask` | Start a task on specific container instances |
 | `StopTask` | Stop a running task |
-| `DescribeTasks` | Describe one or more tasks |
-| `ListTasks` | List task ARNs (filterable by cluster, family, service, status) |
-| `UpdateTaskProtection` | Set scale-in protection for tasks |
-| `GetTaskProtection` | Get current task protection state |
+| `DescribeTasks` | Describe one or more tasks. Unknown refs are returned in `failures` with `reason: MISSING` (not dropped). |
+| `ListTasks` | List task ARNs (filterable by cluster, family, service, status, `startedBy`) |
+| `UpdateTaskProtection` | Set scale-in protection for **service-managed** tasks. A standalone `RunTask` task is `TASK_NOT_VALID`. |
+| `GetTaskProtection` | Get current task protection state (same `TASK_NOT_VALID` rule) |
 
 ### Services
 
 | Operation | Description |
 |---|---|
-| `CreateService` | Create a long-running service |
-| `UpdateService` | Update desired count, task definition, or deployment config |
+| `CreateService` | Create a long-running service. Persists `deploymentConfiguration` (including circuit breaker), `healthCheckGracePeriodSeconds`, and `capacityProviderStrategy`. |
+| `UpdateService` | Update desired count, task definition, network, deployment config, grace period, or capacity-provider strategy |
 | `DeleteService` | Delete a service (supports `force`) |
-| `DescribeServices` | Describe one or more services (includes `deployments`, see below) |
+| `DescribeServices` | Describe one or more services (includes `deployments`, see below). Returns the stored circuit breaker, grace period, and capacity-provider strategy. |
 | `ListServices` | List service ARNs in a cluster |
 | `ListServicesByNamespace` | List services filtered by Cloud Map namespace |
 

@@ -61,11 +61,13 @@ public class PipesController {
             JsonNode sourceParameters = request.path("SourceParameters").isMissingNode() ? null : request.get("SourceParameters");
             JsonNode targetParameters = request.path("TargetParameters").isMissingNode() ? null : request.get("TargetParameters");
             JsonNode enrichmentParameters = request.path("EnrichmentParameters").isMissingNode() ? null : request.get("EnrichmentParameters");
+            JsonNode logConfiguration = request.path("LogConfiguration").isMissingNode() ? null : request.get("LogConfiguration");
+            String kmsKeyIdentifier = textOrNull(request, "KmsKeyIdentifier");
             Map<String, String> tags = parseTags(request.get("Tags"));
 
             Pipe pipe = pipesService.createPipe(name, source, target, roleArn, description,
                     desiredState, enrichment, sourceParameters, targetParameters,
-                    enrichmentParameters, tags, region);
+                    enrichmentParameters, tags, logConfiguration, kmsKeyIdentifier, region);
 
             return Response.ok(buildPipeResponse(pipe)).build();
         } catch (AwsException e) {
@@ -87,7 +89,7 @@ public class PipesController {
         String region = regionResolver.resolveRegion(headers);
         try {
             Pipe pipe = pipesService.describePipe(name, region);
-            return Response.ok(pipe).build();
+            return Response.ok(buildPipeResponse(pipe)).build();
         } catch (AwsException e) {
             return Response.status(e.getHttpStatus())
                     .entity(new AwsErrorResponse(e.getErrorCode(), e.getMessage()))
@@ -111,10 +113,12 @@ public class PipesController {
             JsonNode sourceParameters = request.path("SourceParameters").isMissingNode() ? null : request.get("SourceParameters");
             JsonNode targetParameters = request.path("TargetParameters").isMissingNode() ? null : request.get("TargetParameters");
             JsonNode enrichmentParameters = request.path("EnrichmentParameters").isMissingNode() ? null : request.get("EnrichmentParameters");
+            JsonNode logConfiguration = request.path("LogConfiguration").isMissingNode() ? null : request.get("LogConfiguration");
+            String kmsKeyIdentifier = textOrNull(request, "KmsKeyIdentifier");
 
             Pipe pipe = pipesService.updatePipe(name, target, roleArn, description,
                     desiredState, enrichment, sourceParameters, targetParameters,
-                    enrichmentParameters, region);
+                    enrichmentParameters, logConfiguration, kmsKeyIdentifier, region);
 
             return Response.ok(buildPipeResponse(pipe)).build();
         } catch (AwsException e) {
@@ -226,6 +230,12 @@ public class PipesController {
         }
         if (pipe.getTags() != null && !pipe.getTags().isEmpty()) {
             node.set("Tags", objectMapper.valueToTree(pipe.getTags()));
+        }
+        if (pipe.getLogConfiguration() != null) {
+            node.set("LogConfiguration", pipe.getLogConfiguration());
+        }
+        if (pipe.getKmsKeyIdentifier() != null) {
+            node.put("KmsKeyIdentifier", pipe.getKmsKeyIdentifier());
         }
         if (pipe.getCreationTime() != null) node.put("CreationTime", pipe.getCreationTime().getEpochSecond());
         if (pipe.getLastModifiedTime() != null) node.put("LastModifiedTime", pipe.getLastModifiedTime().getEpochSecond());

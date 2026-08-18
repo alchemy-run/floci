@@ -20,7 +20,6 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -43,7 +42,8 @@ public class S3VectorsController {
     @RegisterForReflection
     public record CreateVectorBucketRequest(
             String vectorBucketName,
-            Object encryptionConfiguration
+            Object encryptionConfiguration,
+            Map<String, String> tags
     ) {}
 
     @RegisterForReflection
@@ -67,6 +67,7 @@ public class S3VectorsController {
     public record VectorBucketRepresentation(
             String vectorBucketName,
             String vectorBucketArn,
+            Long creationTime,
             Object encryptionConfiguration
     ) {}
 
@@ -99,7 +100,8 @@ public class S3VectorsController {
             int dimension,
             String distanceMetric,
             Object metadataConfiguration,
-            Object encryptionConfiguration
+            Object encryptionConfiguration,
+            Map<String, String> tags
     ) {}
 
     @RegisterForReflection
@@ -125,6 +127,7 @@ public class S3VectorsController {
             String vectorBucketName,
             String indexName,
             String indexArn,
+            Long creationTime,
             String dataType,
             int dimension,
             String distanceMetric,
@@ -238,7 +241,8 @@ public class S3VectorsController {
     @Path("/CreateVectorBucket")
     public Response createVectorBucket(@Context HttpHeaders headers, CreateVectorBucketRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        VectorBucket bucket = service.createVectorBucket(request.vectorBucketName(), request.encryptionConfiguration(), region);
+        VectorBucket bucket = service.createVectorBucket(
+                request.vectorBucketName(), request.encryptionConfiguration(), request.tags(), region);
         return Response.ok(new CreateVectorBucketResponse(bucket.getVectorBucketArn())).build();
     }
 
@@ -246,8 +250,10 @@ public class S3VectorsController {
     @Path("/GetVectorBucket")
     public Response getVectorBucket(@Context HttpHeaders headers, GetVectorBucketRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        VectorBucket bucket = service.getVectorBucket(request.vectorBucketName(), region);
-        VectorBucketRepresentation rep = new VectorBucketRepresentation(bucket.getVectorBucketName(), bucket.getVectorBucketArn(), bucket.getEncryptionConfiguration());
+        VectorBucket bucket = service.getVectorBucket(request.vectorBucketName(), request.vectorBucketArn(), region);
+        VectorBucketRepresentation rep = new VectorBucketRepresentation(
+                bucket.getVectorBucketName(), bucket.getVectorBucketArn(),
+                bucket.getCreationTime(), bucket.getEncryptionConfiguration());
         return Response.ok(new GetVectorBucketResponse(rep)).build();
     }
 
@@ -257,7 +263,9 @@ public class S3VectorsController {
         String region = regionResolver.resolveRegion(headers);
         List<VectorBucket> buckets = service.listVectorBuckets(region);
         List<VectorBucketRepresentation> reps = buckets.stream()
-                .map(b -> new VectorBucketRepresentation(b.getVectorBucketName(), b.getVectorBucketArn(), b.getEncryptionConfiguration()))
+                .map(b -> new VectorBucketRepresentation(
+                        b.getVectorBucketName(), b.getVectorBucketArn(),
+                        b.getCreationTime(), b.getEncryptionConfiguration()))
                 .toList();
         return Response.ok(new ListVectorBucketsResponse(reps, null)).build();
     }
@@ -266,7 +274,31 @@ public class S3VectorsController {
     @Path("/DeleteVectorBucket")
     public Response deleteVectorBucket(@Context HttpHeaders headers, DeleteVectorBucketRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        service.deleteVectorBucket(request.vectorBucketName(), region);
+        service.deleteVectorBucket(request.vectorBucketName(), request.vectorBucketArn(), region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/PutVectorBucketPolicy")
+    public Response putVectorBucketPolicy(@Context HttpHeaders headers, PutVectorBucketPolicyRequest request) {
+        String region = regionResolver.resolveRegion(headers);
+        service.putVectorBucketPolicy(request.vectorBucketName(), request.vectorBucketArn(), request.policy(), region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/GetVectorBucketPolicy")
+    public Response getVectorBucketPolicy(@Context HttpHeaders headers, GetVectorBucketPolicyRequest request) {
+        String region = regionResolver.resolveRegion(headers);
+        String policy = service.getVectorBucketPolicy(request.vectorBucketName(), request.vectorBucketArn(), region);
+        return Response.ok(new GetVectorBucketPolicyResponse(policy)).build();
+    }
+
+    @POST
+    @Path("/DeleteVectorBucketPolicy")
+    public Response deleteVectorBucketPolicy(@Context HttpHeaders headers, DeleteVectorBucketPolicyRequest request) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteVectorBucketPolicy(request.vectorBucketName(), request.vectorBucketArn(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -276,11 +308,13 @@ public class S3VectorsController {
         String region = regionResolver.resolveRegion(headers);
         VectorIndex index = service.createIndex(
                 request.vectorBucketName(),
+                request.vectorBucketArn(),
                 request.indexName(),
                 request.dimension(),
                 request.dataType() != null ? request.dataType() : "float32",
                 request.distanceMetric() != null ? request.distanceMetric() : "cosine",
-                List.of(),
+                request.metadataConfiguration(),
+                request.tags(),
                 region
         );
         return Response.ok(new CreateIndexResponse(index.getIndexArn())).build();
@@ -290,36 +324,17 @@ public class S3VectorsController {
     @Path("/GetIndex")
     public Response getIndex(@Context HttpHeaders headers, GetIndexRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        VectorIndex index = service.getIndex(request.vectorBucketName(), request.indexName(), region);
-        IndexRepresentation rep = new IndexRepresentation(
-                index.getVectorBucketName(),
-                index.getIndexName(),
-                index.getIndexArn(),
-                index.getDataType(),
-                index.getDimension(),
-                index.getDistanceMetric(),
-                null,
-                null
-        );
-        return Response.ok(new GetIndexResponse(rep)).build();
+        VectorIndex index = service.getIndex(request.vectorBucketName(), request.indexName(), request.indexArn(), region);
+        return Response.ok(new GetIndexResponse(toIndexRepresentation(index))).build();
     }
 
     @POST
     @Path("/ListIndexes")
     public Response listIndexes(@Context HttpHeaders headers, ListIndexesRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        List<VectorIndex> indexes = service.listIndexes(request.vectorBucketName(), region);
+        List<VectorIndex> indexes = service.listIndexes(request.vectorBucketName(), request.vectorBucketArn(), region);
         List<IndexRepresentation> reps = indexes.stream()
-                .map(i -> new IndexRepresentation(
-                        i.getVectorBucketName(),
-                        i.getIndexName(),
-                        i.getIndexArn(),
-                        i.getDataType(),
-                        i.getDimension(),
-                        i.getDistanceMetric(),
-                        null,
-                        null
-                ))
+                .map(this::toIndexRepresentation)
                 .toList();
         return Response.ok(new ListIndexesResponse(reps, null)).build();
     }
@@ -328,7 +343,7 @@ public class S3VectorsController {
     @Path("/DeleteIndex")
     public Response deleteIndex(@Context HttpHeaders headers, DeleteIndexRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        service.deleteIndex(request.vectorBucketName(), request.indexName(), region);
+        service.deleteIndex(request.vectorBucketName(), request.indexName(), request.indexArn(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -346,7 +361,7 @@ public class S3VectorsController {
                 vectors.add(new VectorData(vRep.key(), floatList, metadata));
             }
         }
-        service.putVectors(request.vectorBucketName(), request.indexName(), vectors, region);
+        service.putVectors(request.vectorBucketName(), request.indexName(), request.indexArn(), vectors, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -354,7 +369,8 @@ public class S3VectorsController {
     @Path("/GetVectors")
     public Response getVectors(@Context HttpHeaders headers, GetVectorsRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        List<VectorData> vectors = service.getVectors(request.vectorBucketName(), request.indexName(), request.keys(), region);
+        List<VectorData> vectors = service.getVectors(
+                request.vectorBucketName(), request.indexName(), request.indexArn(), request.keys(), region);
 
         boolean returnData = request.returnData() != null && request.returnData();
         boolean returnMetadata = request.returnMetadata() != null && request.returnMetadata();
@@ -374,8 +390,28 @@ public class S3VectorsController {
     @Path("/DeleteVectors")
     public Response deleteVectors(@Context HttpHeaders headers, DeleteVectorsRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        service.deleteVectors(request.vectorBucketName(), request.indexName(), request.keys(), region);
+        service.deleteVectors(request.vectorBucketName(), request.indexName(), request.indexArn(), request.keys(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/ListVectors")
+    public Response listVectors(@Context HttpHeaders headers, ListVectorsRequest request) {
+        String region = regionResolver.resolveRegion(headers);
+        List<VectorData> vectors = service.listVectors(
+                request.vectorBucketName(), request.indexName(), request.indexArn(), region);
+
+        boolean returnData = request.returnData() != null && request.returnData();
+        boolean returnMetadata = request.returnMetadata() != null && request.returnMetadata();
+
+        List<VectorGetResponseRepresentation> reps = vectors.stream()
+                .map(v -> new VectorGetResponseRepresentation(
+                        v.getKey(),
+                        returnData ? new VectorDataRepresentation(v.getData()) : null,
+                        returnMetadata ? v.getMetadata() : null
+                ))
+                .toList();
+        return Response.ok(new ListVectorsResponse(reps, null)).build();
     }
 
     @POST
@@ -388,6 +424,7 @@ public class S3VectorsController {
         List<S3VectorsService.QueryResult> results = service.queryVectors(
                 request.vectorBucketName(),
                 request.indexName(),
+                request.indexArn(),
                 queryVector,
                 request.topK() > 0 ? request.topK() : 10,
                 region
@@ -402,7 +439,65 @@ public class S3VectorsController {
                 })
                 .toList();
 
-        VectorIndex index = service.getIndex(request.vectorBucketName(), request.indexName(), region);
+        VectorIndex index = service.getIndex(
+                request.vectorBucketName(), request.indexName(), request.indexArn(), region);
         return Response.ok(new QueryVectorsResponse(reps, index.getDistanceMetric())).build();
     }
+
+    private IndexRepresentation toIndexRepresentation(VectorIndex index) {
+        return new IndexRepresentation(
+                index.getVectorBucketName(),
+                index.getIndexName(),
+                index.getIndexArn(),
+                index.getCreationTime(),
+                index.getDataType(),
+                index.getDimension(),
+                index.getDistanceMetric(),
+                index.getMetadataConfiguration(),
+                null
+        );
+    }
+
+    @RegisterForReflection
+    public record PutVectorBucketPolicyRequest(
+            String vectorBucketName,
+            String vectorBucketArn,
+            String policy
+    ) {}
+
+    @RegisterForReflection
+    public record GetVectorBucketPolicyRequest(
+            String vectorBucketName,
+            String vectorBucketArn
+    ) {}
+
+    @RegisterForReflection
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record GetVectorBucketPolicyResponse(
+            String policy
+    ) {}
+
+    @RegisterForReflection
+    public record DeleteVectorBucketPolicyRequest(
+            String vectorBucketName,
+            String vectorBucketArn
+    ) {}
+
+    @RegisterForReflection
+    public record ListVectorsRequest(
+            String vectorBucketName,
+            String indexName,
+            String indexArn,
+            Integer maxResults,
+            String nextToken,
+            Boolean returnData,
+            Boolean returnMetadata
+    ) {}
+
+    @RegisterForReflection
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record ListVectorsResponse(
+            List<VectorGetResponseRepresentation> vectors,
+            String nextToken
+    ) {}
 }

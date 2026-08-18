@@ -19,6 +19,16 @@ Floci Batch implements the AWS Batch control plane for local integration tests. 
 | `SubmitJob` | `POST /v1/submitjob` | Submit a local Batch job |
 | `DescribeJobs` | `POST /v1/describejobs` | Describe jobs by job ID |
 | `ListJobs` | `POST /v1/listjobs` | List jobs by queue, status, AWS `filters`, and pagination |
+| `UpdateComputeEnvironment` | `POST /v1/updatecomputeenvironment` | Update compute environment state, resources, or service role |
+| `DeleteComputeEnvironment` | `POST /v1/deletecomputeenvironment` | Delete a disabled compute environment |
+| `UpdateJobQueue` | `POST /v1/updatejobqueue` | Update queue state, priority, or compute environment order |
+| `DeleteJobQueue` | `POST /v1/deletejobqueue` | Delete a disabled job queue |
+| `CancelJob` | `POST /v1/canceljob` | Fail a non-terminal job as cancelled |
+| `TerminateJob` | `POST /v1/terminatejob` | Fail a non-terminal job as terminated |
+| `GetJobQueueSnapshot` | `POST /v1/getjobqueuesnapshot` | Return the `RUNNABLE` front of a queue |
+| `TagResource` | `POST /v1/tagresource` | Tag a compute environment, queue, or job definition |
+| `UntagResource` | `POST /v1/untagresource` | Remove tags from a Batch resource |
+| `ListTagsForResource` | `POST /v1/listtagsforresource` | List tags on a Batch resource |
 
 ## Runner Modes
 
@@ -100,5 +110,5 @@ IAM roles, VPC fields, Fargate declarations, log configuration, storage, and res
 - No VPC/subnet/security-group simulation.
 - No AWS-faithful capacity scheduling.
 - No array job fan-out or multi-node jobs.
-- `CancelJob` and `TerminateJob` are not implemented.
+- `CancelJob` / `TerminateJob` fail already-terminal (`SUCCEEDED`/`FAILED`) jobs and do not interrupt an in-flight Docker attempt.
 - EventBridge input transformers work through the existing EventBridge target input path; full Batch-specific input-transformer parity is not implemented.

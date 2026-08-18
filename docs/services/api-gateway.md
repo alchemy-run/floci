@@ -49,31 +49,30 @@ duplicate override IDs.
 | **Method Responses** | PutMethodResponse, GetMethodResponse |
 | **Integrations** | PutIntegration, GetIntegration, UpdateIntegration, DeleteIntegration |
 | **Integration Responses** | PutIntegrationResponse, GetIntegrationResponse |
-| **Deployments** | CreateDeployment, GetDeployments |
-| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage |
-| **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers |
-| **API Keys** | CreateApiKey, GetApiKeys |
-| **Usage Plans** | CreateUsagePlan, GetUsagePlans, DeleteUsagePlan |
+| **Deployments** | CreateDeployment, GetDeployment, GetDeployments, UpdateDeployment, DeleteDeployment |
+| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, FlushStageCache, FlushStageAuthorizersCache |
+| **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers, UpdateAuthorizer, DeleteAuthorizer |
+| **API Keys** | CreateApiKey, GetApiKey, GetApiKeys, UpdateApiKey, DeleteApiKey |
+| **Usage Plans** | CreateUsagePlan, GetUsagePlan, GetUsagePlans, UpdateUsagePlan, DeleteUsagePlan |
 | **Usage Plan Keys** | CreateUsagePlanKey, GetUsagePlanKey, GetUsagePlanKeys, DeleteUsagePlanKey |
 | **Request Validators** | CreateRequestValidator, GetRequestValidator, GetRequestValidators, DeleteRequestValidator |
 | **Models** | CreateModel, GetModel, GetModels, DeleteModel |
-| **Domain Names** | CreateDomainName, GetDomainName, GetDomainNames, DeleteDomainName |
-| **Base Path Mappings** | CreateBasePathMapping, GetBasePathMapping, GetBasePathMappings, DeleteBasePathMapping |
+| **Domain Names** | CreateDomainName, GetDomainName, GetDomainNames, UpdateDomainName, DeleteDomainName |
+| **Base Path Mappings** | CreateBasePathMapping, GetBasePathMapping, GetBasePathMappings, UpdateBasePathMapping, DeleteBasePathMapping |
+| **Gateway Responses** | PutGatewayResponse, GetGatewayResponse, GetGatewayResponses, DeleteGatewayResponse |
+| **VPC Links** | CreateVpcLink, GetVpcLink, GetVpcLinks, UpdateVpcLink, DeleteVpcLink |
 | **Account** | GetAccount, UpdateAccount |
 | **Tags** | TagResource, UntagResource, GetTags (ListTagsForResource) |
+
+`CreateRestApi` / `UpdateRestApi` persist `binaryMediaTypes` (JSON Pointer `/binaryMediaTypes/{type}`). Usage plans persist `throttle` and `quota`. Flush-cache operations are no-ops after the stage is confirmed to exist.
 
 ### Not Implemented
 
 These management-plane operations have no handler in v1. Calls will return `404` or an error:
 
-- Deployment detail and lifecycle: `GetDeployment`, `UpdateDeployment`, `DeleteDeployment`
-- Authorizer lifecycle: `UpdateAuthorizer`, `DeleteAuthorizer`, `TestInvokeAuthorizer`
-- API key detail: `GetApiKey`, `UpdateApiKey`, `DeleteApiKey`, `ImportApiKeys`
-- Usage plan detail: `GetUsagePlan`, `UpdateUsagePlan`
+- `TestInvokeAuthorizer`, `ImportApiKeys`
 - Model updates and templates: `UpdateModel`, `GetModelTemplate`
-- Gateway Responses (the entire family: `PutGatewayResponse`, `GetGatewayResponse`, etc.)
 - Documentation parts and versions (the entire family, 10 operations)
-- VPC Links (5 operations)
 - Client Certificates (5 operations)
 - `GetExport` / `ImportDocumentationParts`
 
@@ -158,9 +157,13 @@ Both HTTP and WebSocket protocol types are fully supported, including the WebSoc
 | **Integrations** | CreateIntegration, GetIntegration, GetIntegrations, UpdateIntegration, DeleteIntegration |
 | **Integration Responses** | CreateIntegrationResponse, GetIntegrationResponse, GetIntegrationResponses, UpdateIntegrationResponse, DeleteIntegrationResponse |
 | **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers, UpdateAuthorizer, DeleteAuthorizer |
-| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage |
+| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, ResetAuthorizersCache |
 | **Deployments** | CreateDeployment, GetDeployment, GetDeployments, UpdateDeployment, DeleteDeployment |
 | **Models** | CreateModel, GetModel, GetModels, UpdateModel, DeleteModel |
+| **VPC Links** | CreateVpcLink, GetVpcLink, GetVpcLinks, UpdateVpcLink, DeleteVpcLink |
+| **Domain Names** | CreateDomainName, GetDomainName, GetDomainNames, UpdateDomainName, DeleteDomainName |
+| **CORS** | DeleteCorsConfiguration |
+| **Export** | ExportApi (OAS30 JSON) |
 | **Tags** | TagResource, UntagResource, GetTags |
 
 ### WebSocket Data-Plane {#websocket-data-plane}
@@ -217,9 +220,9 @@ DELETE /execute-api/{apiId}/{stageName}/@connections/{connectionId}  — Disconn
 
 ### Not Implemented
 
-- `ReimportApi`, `ExportApi`, `GetApiMapping`, `CreateApiMapping`, `DeleteApiMapping`
-- `GetDomainName`, `CreateDomainName`, `DeleteDomainName`
-- `CreateVpcLink`, `GetVpcLink`, `GetVpcLinks`, `UpdateVpcLink`, `DeleteVpcLink`
+- `ReimportApi`, `GetApiMapping`, `CreateApiMapping`, `DeleteApiMapping`
+- Domain-name routing rules
+- Real VPC connectivity behind a VPC link (control-plane CRUD is emulated; links become `AVAILABLE` immediately)
 
 ### Examples
 

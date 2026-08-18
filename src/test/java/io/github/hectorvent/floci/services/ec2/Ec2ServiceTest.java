@@ -561,6 +561,39 @@ class Ec2ServiceTest {
         assertEquals("available", detached.getState());
     }
 
+    @Test
+    void describeByIdThrowsAwsNotFoundInsteadOfEmptyList() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+
+        assertEquals("InvalidSubnetID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeSubnets("us-east-1", List.of("subnet-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidInternetGatewayID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeInternetGateways("us-east-1", List.of("igw-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidRouteTableID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeRouteTables("us-east-1", List.of("rtb-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidGroup.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeSecurityGroups("us-east-1", List.of("sg-missing"), List.of(), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidAllocationID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeAddresses("us-east-1", List.of("eipalloc-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidNetworkAclID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeNetworkAcls("us-east-1", List.of("acl-missing"), Map.of()))
+                        .getErrorCode());
+    }
+
     private static EmulatorConfig mockConfig(boolean ec2Mock) {
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);

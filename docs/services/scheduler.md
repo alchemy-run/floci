@@ -37,6 +37,11 @@ window are skipped. The dispatcher ticks every
 
 Supported target types: SQS, Lambda, SNS, EventBridge `PutEvents`.
 
+`Target.Input` substitutes the AWS Scheduler context attributes
+`<aws.scheduler.schedule-arn>`, `<aws.scheduler.scheduled-time>`,
+`<aws.scheduler.execution-id>`, and `<aws.scheduler.attempt-number>` at
+fire time (the same placeholders live EventBridge Scheduler replaces).
+
 ## Configuration
 
 | Variable | Default | Description |

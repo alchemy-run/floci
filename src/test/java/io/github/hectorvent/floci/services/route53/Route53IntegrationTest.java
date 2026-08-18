@@ -475,6 +475,92 @@ class Route53IntegrationTest {
 
     @Test
     @Order(20)
+    void privateZone_vpcAssociateAndQueryLogging() {
+        String createBody = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                  <Name>private.internal</Name>
+                  <CallerReference>ref-private</CallerReference>
+                  <HostedZoneConfig>
+                    <PrivateZone>true</PrivateZone>
+                  </HostedZoneConfig>
+                  <VPC>
+                    <VPCId>vpc-aaaa1111</VPCId>
+                    <VPCRegion>us-west-2</VPCRegion>
+                  </VPC>
+                </CreateHostedZoneRequest>
+                """;
+        String loc = given()
+                .contentType(XML).body(createBody)
+                .when().post("/2013-04-01/hostedzone")
+                .then().statusCode(201)
+                .extract().header("Location");
+        String privateId = loc.substring(loc.lastIndexOf('/') + 1);
+
+        given().when().get("/2013-04-01/hostedzone/" + privateId)
+                .then().statusCode(200)
+                .body(containsString("vpc-aaaa1111"));
+
+        given().contentType(XML).body("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <AssociateVPCWithHostedZoneRequest>
+                  <VPC><VPCId>vpc-bbbb2222</VPCId><VPCRegion>us-west-2</VPCRegion></VPC>
+                </AssociateVPCWithHostedZoneRequest>
+                """)
+                .when().post("/2013-04-01/hostedzone/" + privateId + "/associatevpc")
+                .then().statusCode(200);
+
+        given().when().get("/2013-04-01/hostedzone/" + privateId)
+                .then().statusCode(200)
+                .body(containsString("vpc-bbbb2222"));
+
+        given().when()
+                .queryParam("vpcid", "vpc-aaaa1111")
+                .queryParam("vpcregion", "us-west-2")
+                .get("/2013-04-01/hostedzonesbyvpc")
+                .then().statusCode(200)
+                .body(containsString(privateId));
+
+        given().contentType(XML).body("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <UpdateHostedZoneCommentRequest>
+                  <Comment>updated comment</Comment>
+                </UpdateHostedZoneCommentRequest>
+                """)
+                .when().post("/2013-04-01/hostedzone/" + privateId)
+                .then().statusCode(200)
+                .body(containsString("updated comment"));
+
+        String qlcId = given().contentType(XML).body("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <CreateQueryLoggingConfigRequest>
+                  <HostedZoneId>%s</HostedZoneId>
+                  <CloudWatchLogsLogGroupArn>arn:aws:logs:us-east-1:000000000000:log-group:r53</CloudWatchLogsLogGroupArn>
+                </CreateQueryLoggingConfigRequest>
+                """.formatted(privateId))
+                .when().post("/2013-04-01/queryloggingconfig")
+                .then().statusCode(201)
+                .extract().xmlPath()
+                .getString("CreateQueryLoggingConfigResponse.QueryLoggingConfig.Id");
+
+        given().when().get("/2013-04-01/queryloggingconfig")
+                .then().statusCode(200)
+                .body(containsString(qlcId));
+
+        given().when()
+                .queryParam("hostedzoneid", privateId)
+                .queryParam("recordname", "private.internal.")
+                .queryParam("recordtype", "NS")
+                .get("/2013-04-01/testdnsanswer")
+                .then().statusCode(200)
+                .body("TestDNSAnswerResponse.ResponseCode", equalTo("NOERROR"));
+
+        given().delete("/2013-04-01/queryloggingconfig/" + qlcId).then().statusCode(200);
+        given().delete("/2013-04-01/hostedzone/" + privateId).then().statusCode(200);
+    }
+
+    @Test
+    @Order(21)
     void getAccountLimit_returnsValue() {
         given()
                 .when().get("/2013-04-01/accountlimit/MAX_HOSTED_ZONES_BY_OWNER")

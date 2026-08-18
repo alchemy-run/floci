@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.ecr.model.Image;
 import io.github.hectorvent.floci.services.ecr.model.ImageDetail;
 import io.github.hectorvent.floci.services.ecr.model.ImageIdentifier;
 import io.github.hectorvent.floci.services.ecr.model.AuthorizationData;
@@ -135,6 +136,17 @@ class EcrServiceTest {
     }
 
     @Test
+    void describeRepositories_findsRepoCreatedUnderDifferentRegistryId() {
+        service.createRepository(REPO, "391965393224", null, null, null, null, null, REGION);
+        List<Repository> repos = service.describeRepositories(List.of(REPO), "000000000000", REGION);
+        assertEquals(1, repos.size());
+        assertEquals(REPO, repos.get(0).getRepositoryName());
+        assertEquals("391965393224", repos.get(0).getRegistryId());
+        List<Repository> all = service.describeRepositories(null, "000000000000", REGION);
+        assertTrue(all.stream().anyMatch(r -> REPO.equals(r.getRepositoryName())));
+    }
+
+    @Test
     void describeRepositories_missing_throwsNotFound() {
         AwsException ex = assertThrows(AwsException.class,
                 () -> service.describeRepositories(List.of("does-not-exist"), null, REGION));
@@ -169,6 +181,8 @@ class EcrServiceTest {
     void getAuthorizationToken_decodesToAwsPrefix() {
         AuthorizationData data = service.getAuthorizationToken();
         assertNotNull(data.getAuthorizationToken());
+        assertTrue(data.getAuthorizationToken().length() > 100,
+                "authorization token must be longer than 100 chars (AWS-shaped)");
         assertTrue(data.getProxyEndpoint().startsWith("http"));
         assertNotNull(data.getExpiresAt());
         String decoded = new String(Base64.getDecoder().decode(data.getAuthorizationToken()));
@@ -317,6 +331,106 @@ class EcrServiceTest {
     // ------------------------------------------------------------
     // Reconcile
     // ------------------------------------------------------------
+
+    @Test
+    void putImageScanningConfiguration_roundTrips() {
+        service.createRepository(REPO, null, null, false, null, null, null, REGION);
+        Repository updated = service.putImageScanningConfiguration(REPO, null, true, REGION);
+        assertTrue(updated.isScanOnPush());
+        Repository fetched = service.describeRepositories(List.of(REPO), null, REGION).get(0);
+        assertTrue(fetched.isScanOnPush());
+    }
+
+    @Test
+    void registryPolicy_roundTrip() {
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
+        EcrService.RegistryPolicyResult put = service.putRegistryPolicy(policy, REGION);
+        assertEquals(ACCOUNT, put.registryId());
+        assertEquals(policy, put.policyText());
+        EcrService.RegistryPolicyResult got = service.getRegistryPolicy(REGION);
+        assertEquals(policy, got.policyText());
+        service.deleteRegistryPolicy(REGION);
+        AwsException ex = assertThrows(AwsException.class, () -> service.getRegistryPolicy(REGION));
+        assertEquals("RegistryPolicyNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void layerUpload_putImage_describe_download_check_scan() {
+        service.createRepository(REPO, null, null, null, null, null, null, REGION);
+        byte[] layer = "alchemy ecr layer blob for 1.0.0\n".repeat(8).getBytes();
+        String layerDigest = sha256(layer);
+        byte[] config = "{\"architecture\":\"amd64\"}".getBytes();
+        String configDigest = sha256(config);
+
+        EcrService.InitiateLayerUploadResult init = service.initiateLayerUpload(REPO, null, REGION);
+        assertNotNull(init.uploadId());
+        assertTrue(init.partSize() > 0);
+        service.uploadLayerPart(REPO, null, REGION, init.uploadId(), 0, layer.length - 1, layer);
+        EcrService.CompleteLayerUploadResult completed =
+                service.completeLayerUpload(REPO, null, REGION, init.uploadId(), List.of(layerDigest));
+        assertEquals(layerDigest, completed.layerDigest());
+
+        EcrService.InitiateLayerUploadResult initCfg = service.initiateLayerUpload(REPO, null, REGION);
+        service.uploadLayerPart(REPO, null, REGION, initCfg.uploadId(), 0, config.length - 1, config);
+        service.completeLayerUpload(REPO, null, REGION, initCfg.uploadId(), List.of(configDigest));
+
+        AwsException already = assertThrows(AwsException.class,
+                () -> {
+                    EcrService.InitiateLayerUploadResult again = service.initiateLayerUpload(REPO, null, REGION);
+                    service.uploadLayerPart(REPO, null, REGION, again.uploadId(), 0, layer.length - 1, layer);
+                    service.completeLayerUpload(REPO, null, REGION, again.uploadId(), List.of(layerDigest));
+                });
+        assertEquals("LayerAlreadyExistsException", already.getErrorCode());
+
+        String manifest = """
+                {"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json",\
+                "config":{"mediaType":"application/vnd.docker.container.image.v1+json","size":%d,"digest":"%s"},\
+                "layers":[{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","size":%d,"digest":"%s"}]}
+                """.formatted(config.length, configDigest, layer.length, layerDigest);
+        Image image = service.putImage(REPO, null, REGION, manifest,
+                "application/vnd.docker.distribution.manifest.v2+json", "1.0.0", null);
+        assertEquals("1.0.0", image.getImageId().getImageTag());
+        assertTrue(image.getImageId().getImageDigest().startsWith("sha256:"));
+
+        AwsException exists = assertThrows(AwsException.class,
+                () -> service.putImage(REPO, null, REGION, manifest,
+                        "application/vnd.docker.distribution.manifest.v2+json", "1.0.0",
+                        image.getImageId().getImageDigest()));
+        assertEquals("ImageAlreadyExistsException", exists.getErrorCode());
+
+        List<ImageIdentifier> ids = service.listImages(REPO, null, REGION);
+        assertTrue(ids.stream().anyMatch(id -> "1.0.0".equals(id.getImageTag())));
+
+        EcrService.DescribeImagesResult described = service.describeImages(
+                REPO, List.of(new ImageIdentifier("1.0.0", null)), null, REGION);
+        assertEquals(1, described.imageDetails().size());
+        assertEquals(image.getImageId().getImageDigest(), described.imageDetails().get(0).getImageDigest());
+
+        EcrService.DownloadUrl url = service.getDownloadUrlForLayer(REPO, null, REGION, layerDigest);
+        assertTrue(url.downloadUrl().startsWith("https://"));
+        assertEquals(layerDigest, url.layerDigest());
+
+        EcrService.LayerAvailabilityResult availability =
+                service.batchCheckLayerAvailability(REPO, null, REGION, List.of(layerDigest));
+        assertEquals("AVAILABLE", availability.layers().get(0).layerAvailability());
+
+        AwsException scan = assertThrows(AwsException.class,
+                () -> service.startImageScan(REPO, null, REGION, new ImageIdentifier("1.0.0", null)));
+        assertEquals("UnsupportedImageTypeException", scan.getErrorCode());
+
+        AwsException findings = assertThrows(AwsException.class,
+                () -> service.describeImageScanFindings(REPO, null, REGION, new ImageIdentifier("1.0.0", null)));
+        assertEquals("ScanNotFoundException", findings.getErrorCode());
+    }
+
+    private static String sha256(byte[] data) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(data);
+            return "sha256:" + java.util.HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     @Test
     void reconcileFromCatalog_recreatesMissingMetadata() {

@@ -1481,6 +1481,9 @@ public class AslExecutor {
         JsonNode iterator = stateDef.has("ItemProcessor") ? stateDef.get("ItemProcessor") : stateDef.path("Iterator");
         String startAt = iterator.path("StartAt").asText();
         JsonNode iteratorStates = iterator.path("States");
+        String processorMode = iterator.path("ProcessorConfig").path("Mode").asText("INLINE");
+        boolean distributed = "DISTRIBUTED".equals(processorMode);
+        String mapRunArn = startDistributedMapRun(distributed, stateDef, items, sm, context);
 
         // Determine which transformation field is present (ItemSelector is current; Parameters is legacy)
         JsonNode itemTransform = stateDef.has("ItemSelector") ? stateDef.get("ItemSelector")
@@ -1491,30 +1494,36 @@ public class AslExecutor {
 
         ArrayNode results = objectMapper.createArrayNode();
         int index = 0;
-        for (JsonNode item : items) {
-            ObjectNode iterContext = ((ObjectNode) context).deepCopy();
-            ObjectNode mapCtx = objectMapper.createObjectNode();
-            ObjectNode mapItem = objectMapper.createObjectNode();
-            mapItem.put("Index", index);
-            if (resolvedItems.source() == MapItemsSource.ITEM_READER_OBJECT) {
-                mapItem.put("Key", item.path("Key").asText());
-                mapItem.set("Value", item.get("Value"));
-            } else {
-                mapItem.set("Value", item);
-            }
-            mapCtx.set("Item", mapItem);
-            iterContext.set("Map", mapCtx);
+        try {
+            for (JsonNode item : items) {
+                ObjectNode iterContext = ((ObjectNode) context).deepCopy();
+                ObjectNode mapCtx = objectMapper.createObjectNode();
+                ObjectNode mapItem = objectMapper.createObjectNode();
+                mapItem.put("Index", index);
+                if (resolvedItems.source() == MapItemsSource.ITEM_READER_OBJECT) {
+                    mapItem.put("Key", item.path("Key").asText());
+                    mapItem.set("Value", item.get("Value"));
+                } else {
+                    mapItem.set("Value", item);
+                }
+                mapCtx.set("Item", mapItem);
+                iterContext.set("Map", mapCtx);
 
-            JsonNode iterInput = item;
-            if (itemTransform != null) {
-                // $ in ItemSelector resolves against the Map state's effective input, not the item.
-                iterInput = resolveParameters(itemTransform, mapInput, iterContext);
+                JsonNode iterInput = item;
+                if (itemTransform != null) {
+                    // $ in ItemSelector resolves against the Map state's effective input, not the item.
+                    iterInput = resolveParameters(itemTransform, mapInput, iterContext);
+                }
+                // Each iteration gets an isolated copy of the current variables; assignments inside an
+                // iteration are scoped to that iteration and do not leak back to the parent scope.
+                results.add(executeBranch(startAt, iteratorStates, iterInput, sm, topLevelQueryLanguage, iterContext,
+                        variables.deepCopy()));
+                index++;
             }
-            // Each iteration gets an isolated copy of the current variables; assignments inside an
-            // iteration are scoped to that iteration and do not leak back to the parent scope.
-            results.add(executeBranch(startAt, iteratorStates, iterInput, sm, topLevelQueryLanguage, iterContext,
-                    variables.deepCopy()));
-            index++;
+            completeDistributedMapRun(mapRunArn, items.size(), 0);
+        } catch (Exception e) {
+            failDistributedMapRun(mapRunArn);
+            throw e;
         }
 
         if (jsonata) {
@@ -2646,6 +2655,37 @@ public class AslExecutor {
         } catch (Exception e) {
             return objectMapper.createObjectNode();
         }
+    }
+
+    private String startDistributedMapRun(boolean distributed, JsonNode stateDef, JsonNode items,
+                                          StateMachine sm, JsonNode context) {
+        if (!distributed || sfnService == null || sfnService.isUnsatisfied()) {
+            return null;
+        }
+        String executionArn = context.path("Execution").path("Id").asText(null);
+        String executionName = context.path("Execution").path("Name").asText("execution");
+        if (executionArn == null || executionArn.isBlank()) {
+            return null;
+        }
+        int maxConcurrency = stateDef.path("MaxConcurrency").asInt(0);
+        String region = extractRegionFromArn(sm.getStateMachineArn());
+        return sfnService.get().startMapRun(
+                executionArn, sm.getName(), executionName,
+                region, items.size(), maxConcurrency).getMapRunArn();
+    }
+
+    private void completeDistributedMapRun(String mapRunArn, int succeeded, int failed) {
+        if (mapRunArn == null || sfnService == null || sfnService.isUnsatisfied()) {
+            return;
+        }
+        sfnService.get().completeMapRun(mapRunArn, succeeded, failed);
+    }
+
+    private void failDistributedMapRun(String mapRunArn) {
+        if (mapRunArn == null || sfnService == null || sfnService.isUnsatisfied()) {
+            return;
+        }
+        sfnService.get().failMapRun(mapRunArn);
     }
 
     private String extractRegionFromArn(String arn) {

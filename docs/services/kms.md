@@ -23,11 +23,15 @@
 | `ReEncrypt` | Re-encrypt under a different key |
 | `GenerateDataKey` | Generate a data key (plaintext + encrypted) |
 | `GenerateDataKeyWithoutPlaintext` | Generate only the encrypted data key |
+| `GenerateDataKeyPair` | Generate an asymmetric data key pair (plaintext + encrypted private key) |
+| `GenerateDataKeyPairWithoutPlaintext` | Generate a data key pair without returning the plaintext private key |
+| `DeriveSharedSecret` | Derive a shared secret via ECDH with a KEY_AGREEMENT key |
 | `Sign` | Sign a message with an asymmetric key |
 | `Verify` | Verify a signature |
 | `GenerateMac` | Generate a MAC with an HMAC key |
 | `VerifyMac` | Verify a MAC with an HMAC key |
 | `CreateAlias` | Create a friendly name for a key |
+| `UpdateAlias` | Retarget an alias to a different key |
 | `DeleteAlias` | Remove an alias |
 | `ListAliases` | List all aliases |
 | `ScheduleKeyDeletion` | Mark a key for deletion |
@@ -50,6 +54,8 @@
 ## Grant Support Scope
 
 Grant lifecycle operations (`CreateGrant`, `ListGrants`, `ListRetirableGrants`, `RevokeGrant`, `RetireGrant`) are supported. However, grant lifecycle support **does not** imply grant-based authorization enforcement on cryptographic operations (`Encrypt`, `Decrypt`, `Sign`, `Verify`, `GenerateDataKey`, etc.). Grants are stored and queryable but are not evaluated during crypto operations.
+
+`EnableKeyRotation` accepts `RotationPeriodInDays` (90–2560, default 365) and `GetKeyRotationStatus` returns it while rotation is enabled. `CancelKeyDeletion` leaves the key `Disabled` (AWS-shaped). Invalid `Verify` calls raise `KMSInvalidSignatureException` rather than `SignatureValid=false`.
 
 ## Configuration
 

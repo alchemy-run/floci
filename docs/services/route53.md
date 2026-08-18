@@ -8,6 +8,7 @@ Route53 management-plane emulation. Supports hosted zones, resource record sets,
 |---|---|---|
 | CreateHostedZone | POST | `/2013-04-01/hostedzone` |
 | GetHostedZone | GET | `/2013-04-01/hostedzone/{Id}` |
+| UpdateHostedZoneComment | POST | `/2013-04-01/hostedzone/{Id}` |
 | DeleteHostedZone | DELETE | `/2013-04-01/hostedzone/{Id}` |
 | ListHostedZones | GET | `/2013-04-01/hostedzone` |
 | ListHostedZonesByName | GET | `/2013-04-01/hostedzonesbyname` |
@@ -23,6 +24,21 @@ Route53 management-plane emulation. Supports hosted zones, resource record sets,
 | ListTagsForResource | GET | `/2013-04-01/tags/{ResourceType}/{ResourceId}` |
 | ChangeTagsForResource | POST | `/2013-04-01/tags/{ResourceType}/{ResourceId}` |
 | GetAccountLimit | GET | `/2013-04-01/accountlimit/{Type}` |
+| GetDNSSEC | GET | `/2013-04-01/hostedzone/{Id}/dnssec` |
+| GetHostedZoneLimit | GET | `/2013-04-01/hostedzonelimit/{HostedZoneId}/{Type}` |
+| AssociateVPCWithHostedZone | POST | `/2013-04-01/hostedzone/{Id}/associatevpc` |
+| DisassociateVPCFromHostedZone | POST | `/2013-04-01/hostedzone/{Id}/disassociatevpc` |
+| CreateVPCAssociationAuthorization | POST | `/2013-04-01/hostedzone/{Id}/authorizevpcassociation` |
+| DeleteVPCAssociationAuthorization | POST | `/2013-04-01/hostedzone/{Id}/deauthorizevpcassociation` |
+| ListVPCAssociationAuthorizations | GET | `/2013-04-01/hostedzone/{Id}/authorizevpcassociation` |
+| ListHostedZonesByVPC | GET | `/2013-04-01/hostedzonesbyvpc` |
+| CreateQueryLoggingConfig | POST | `/2013-04-01/queryloggingconfig` |
+| GetQueryLoggingConfig | GET | `/2013-04-01/queryloggingconfig/{Id}` |
+| DeleteQueryLoggingConfig | DELETE | `/2013-04-01/queryloggingconfig/{Id}` |
+| ListQueryLoggingConfigs | GET | `/2013-04-01/queryloggingconfig` |
+| TestDNSAnswer | GET | `/2013-04-01/testdnsanswer` |
+| GetHealthCheckStatus | GET | `/2013-04-01/healthcheck/{HealthCheckId}/status` |
+| GetHealthCheckLastFailureReason | GET | `/2013-04-01/healthcheck/{HealthCheckId}/lastfailurereason` |
 
 ## Behavior
 
@@ -34,6 +50,9 @@ Route53 management-plane emulation. Supports hosted zones, resource record sets,
 - Hosted zone IDs are returned with the `/hostedzone/` prefix in XML responses (e.g. `/hostedzone/Z1PA6795UKMFR9`). The AWS SDK strips this prefix client-side.
 - Health check IDs are plain UUIDs without a prefix.
 - Tags are supported for both `hostedzone` and `healthcheck` resource types.
+- Private hosted zones store associated VPCs. `CreateHostedZone` with a `VPC` block marks the zone private and attaches that VPC. Same-account `AssociateVPCWithHostedZone` is allowed without a prior authorization.
+- `TestDNSAnswer` resolves against stored record sets (management-plane only — no real DNS).
+- Routing records persist `Weight`, `Failover`, `Region`, alias targets, `GeoLocation`, `GeoProximityLocation`, and `CidrRoutingConfig`.
 
 ## Default Nameservers
 
@@ -108,8 +127,5 @@ aws route53 delete-hosted-zone --id Z1PA6795UKMFR9
 
 - Reusable delegation sets
 - Traffic policies and traffic policy instances
-- VPC association (private hosted zones)
-- Query logging configs
-- DNSSEC (key signing keys, enabling/disabling)
-- `TestDNSAnswer`
-- Actual DNS resolution
+- DNSSEC key signing (GetDNSSEC reports `NOT_SIGNING`)
+- Actual DNS resolution outside `TestDNSAnswer`

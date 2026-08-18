@@ -50,6 +50,13 @@ public class FirehoseService {
 
     public String createDeliveryStream(String name, S3Destination s3Config, List<DeliveryStreamDescription.Tag> tags,
                                        String deliveryStreamType) {
+        return createDeliveryStream(name, s3Config, tags, deliveryStreamType, null, null);
+    }
+
+    public String createDeliveryStream(String name, S3Destination s3Config, List<DeliveryStreamDescription.Tag> tags,
+                                       String deliveryStreamType,
+                                       DeliveryStreamDescription.KinesisStreamSourceDescription kinesisSource,
+                                       DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
         if (name == null || name.isEmpty() || name.length() > 64 || !name.matches("[a-zA-Z0-9_.-]+")) {
             throw new AwsException("InvalidArgumentException",
                     "Delivery stream name must be between 1 and 64 characters and contain only letters, numbers, underscores, hyphens, or periods.", 400);
@@ -61,12 +68,46 @@ public class FirehoseService {
         }
 
         validateBufferingHints(s3Config);
+        boolean hasKinesisSource = kinesisSource != null
+                && kinesisSource.getKinesisStreamArn() != null
+                && !kinesisSource.getKinesisStreamArn().isBlank();
+        if ("KinesisStreamAsSource".equals(deliveryStreamType) && !hasKinesisSource) {
+            throw new AwsException("InvalidArgumentException",
+                    "KinesisStreamSourceConfiguration is required when DeliveryStreamType is KinesisStreamAsSource.", 400);
+        }
+        if (hasKinesisSource && "DirectPut".equals(deliveryStreamType)) {
+            throw new AwsException("InvalidArgumentException",
+                    "KinesisStreamSourceConfiguration cannot be set when DeliveryStreamType is DirectPut.", 400);
+        }
+        if (hasKinesisSource && (kinesisSource.getRoleArn() == null || kinesisSource.getRoleArn().isBlank())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KinesisStreamSourceConfiguration.RoleARN must not be null or empty.", 400);
+        }
+
+        String resolvedType = hasKinesisSource
+                ? "KinesisStreamAsSource"
+                : (deliveryStreamType != null && !deliveryStreamType.isBlank() ? deliveryStreamType : "DirectPut");
+        if (encryption != null && "KinesisStreamAsSource".equals(resolvedType)) {
+            throw new AwsException("InvalidArgumentException",
+                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
+        }
+
         String arn = AwsArnUtils.Arn.of("firehose", regionResolver.getDefaultRegion(), regionResolver.getAccountId(), "deliverystream/" + name).toString();
         DeliveryStreamDescription description = new DeliveryStreamDescription(name, arn, s3Config);
         description.setAccountId(regionResolver.getAccountId());
         description.setTags(tags);
-        if (deliveryStreamType != null && !deliveryStreamType.isBlank()) {
-            description.setDeliveryStreamType(deliveryStreamType);
+        description.setDeliveryStreamType(resolvedType);
+        if (hasKinesisSource) {
+            if (kinesisSource.getDeliveryStartTimestamp() == null) {
+                kinesisSource.setDeliveryStartTimestamp(java.time.Instant.now());
+            }
+            description.setSource(new DeliveryStreamDescription.Source(kinesisSource));
+        }
+        if (encryption != null) {
+            applyEncryptionInput(description, encryption);
+        } else {
+            description.setDeliveryStreamEncryptionConfiguration(
+                    DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.disabled());
         }
         streamStore.put(name, description);
         buffers.put(name, Collections.synchronizedList(new ArrayList<>()));
@@ -203,7 +244,54 @@ public class FirehoseService {
         if (stream.s3Destination() != null) {
             stream.s3Destination().applyDefaults();
         }
+        if (stream.getDeliveryStreamEncryptionConfiguration() == null) {
+            stream.setDeliveryStreamEncryptionConfiguration(
+                    DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.disabled());
+        }
         return stream;
+    }
+
+    public void startDeliveryStreamEncryption(String name,
+                                              DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
+        DeliveryStreamDescription stream = describeDeliveryStream(name);
+        if ("KinesisStreamAsSource".equals(stream.getDeliveryStreamType())) {
+            throw new AwsException("InvalidArgumentException",
+                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
+        }
+        applyEncryptionInput(stream, encryption);
+        stream.setLastUpdateTimestamp(java.time.Instant.now());
+        streamStore.put(name, stream);
+        LOG.infov("Enabled SSE on Firehose delivery stream {0}", name);
+    }
+
+    public void stopDeliveryStreamEncryption(String name) {
+        DeliveryStreamDescription stream = describeDeliveryStream(name);
+        stream.setDeliveryStreamEncryptionConfiguration(
+                DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.disabled());
+        stream.setLastUpdateTimestamp(java.time.Instant.now());
+        streamStore.put(name, stream);
+        LOG.infov("Disabled SSE on Firehose delivery stream {0}", name);
+    }
+
+    private static void applyEncryptionInput(DeliveryStreamDescription stream,
+                                             DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
+        if (encryption == null || encryption.getKeyType() == null || encryption.getKeyType().isBlank()) {
+            throw new AwsException("InvalidArgumentException",
+                    "DeliveryStreamEncryptionConfigurationInput.KeyType is required.", 400);
+        }
+        String keyType = encryption.getKeyType();
+        if (!"AWS_OWNED_CMK".equals(keyType) && !"CUSTOMER_MANAGED_CMK".equals(keyType)) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyType must be AWS_OWNED_CMK or CUSTOMER_MANAGED_CMK.", 400);
+        }
+        if ("CUSTOMER_MANAGED_CMK".equals(keyType)
+                && (encryption.getKeyArn() == null || encryption.getKeyArn().isBlank())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyARN is required when KeyType is CUSTOMER_MANAGED_CMK.", 400);
+        }
+        stream.setDeliveryStreamEncryptionConfiguration(
+                DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.enabled(
+                        keyType, encryption.getKeyArn()));
     }
 
     public void deleteDeliveryStream(String name) {
@@ -214,9 +302,34 @@ public class FirehoseService {
     }
 
     public List<String> listDeliveryStreams() {
-        return streamStore.scan(k -> true).stream()
-                .map(DeliveryStreamDescription::getDeliveryStreamName).toList();
+        return listDeliveryStreams(null, Integer.MAX_VALUE, null).names();
     }
+
+    /**
+     * AWS-shaped list: names are alphabetical and {@code ExclusiveStartDeliveryStreamName}
+     * is exclusive. When {@code Limit} is set, the page is capped (AWS max 10000).
+     * When omitted, every matching name is returned — AWS defaults to 10, but
+     * callers that do not paginate (SDK compat + Alchemy bindings) expect a
+     * complete list on a shared emulator.
+     */
+    public DeliveryStreamList listDeliveryStreams(String exclusiveStart, Integer limit, String type) {
+        List<String> names = streamStore.scan(k -> true).stream()
+                .filter(s -> type == null || type.isBlank() || type.equals(s.getDeliveryStreamType()))
+                .map(DeliveryStreamDescription::getDeliveryStreamName)
+                .sorted()
+                .toList();
+        int start = 0;
+        if (exclusiveStart != null && !exclusiveStart.isEmpty()) {
+            while (start < names.size() && names.get(start).compareTo(exclusiveStart) <= 0) {
+                start++;
+            }
+        }
+        int effectiveLimit = (limit == null || limit < 1) ? Integer.MAX_VALUE : Math.min(limit, 10_000);
+        int end = Math.min(start + effectiveLimit, names.size());
+        return new DeliveryStreamList(new ArrayList<>(names.subList(start, end)), end < names.size());
+    }
+
+    public record DeliveryStreamList(List<String> names, boolean hasMore) {}
 
     public void putRecord(String streamName, Record record) {
         DeliveryStreamDescription stream = describeDeliveryStream(streamName);

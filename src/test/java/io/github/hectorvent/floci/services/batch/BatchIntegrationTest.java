@@ -448,6 +448,68 @@ class BatchIntegrationTest {
     }
 
     @Test
+    void updateDeleteAndTagComputeEnvironmentAndQueue() {
+        String suffix = uniqueSuffix();
+        String envName = "batch-upd-ce-" + suffix;
+        String queueName = "batch-upd-queue-" + suffix;
+        String envArn = createComputeEnvironment(envName);
+        String queueArn = createQueue(queueName, envArn);
+
+        givenJson("""
+                {"resourceArn":"%s","tags":{"Environment":"test"}}
+                """.formatted(queueArn))
+        .when()
+            .post("/v1/tagresource")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"resourceArn\":\"%s\"}".formatted(queueArn))
+        .when()
+            .post("/v1/listtagsforresource")
+        .then()
+            .statusCode(200)
+            .body("tags.Environment", equalTo("test"));
+
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueArn))
+        .when()
+            .post("/v1/getjobqueuesnapshot")
+        .then()
+            .statusCode(200)
+            .body("frontOfQueue.jobs", hasSize(0));
+
+        givenJson("{\"jobQueue\":\"%s\",\"state\":\"DISABLED\"}".formatted(queueName))
+        .when()
+            .post("/v1/updatejobqueue")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueName))
+        .when()
+            .post("/v1/deletejobqueue")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironment\":\"%s\",\"state\":\"DISABLED\"}".formatted(envName))
+        .when()
+            .post("/v1/updatecomputeenvironment")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironment\":\"%s\"}".formatted(envName))
+        .when()
+            .post("/v1/deletecomputeenvironment")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironments\":[\"%s\"]}".formatted(envName))
+        .when()
+            .post("/v1/describecomputeenvironments")
+        .then()
+            .statusCode(200)
+            .body("computeEnvironments", hasSize(0));
+    }
+
+    @Test
     void describeUnknownJobsReturnsEmptyList() {
         givenJson("{\"jobs\":[\"does-not-exist\"]}")
         .when()

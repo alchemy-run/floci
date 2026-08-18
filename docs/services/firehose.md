@@ -11,15 +11,17 @@ Floci emulates Amazon Data Firehose for streaming data ingestion and delivery to
 | Action | Description |
 | --- | --- |
 | `CreateDeliveryStream` | Creates a new delivery stream |
-| `UpdateDestination` | - |
+| `UpdateDestination` | Updates S3 / extended-S3 destination settings in place |
 | `DescribeDeliveryStream` | Returns metadata about a stream |
 | `ListDeliveryStreams` | Lists all delivery streams |
+| `StartDeliveryStreamEncryption` | Enables stream-level SSE (`AWS_OWNED_CMK` or `CUSTOMER_MANAGED_CMK`) |
+| `StopDeliveryStreamEncryption` | Disables stream-level SSE |
 | `DeleteDeliveryStream` | Deletes a delivery stream |
 | `PutRecord` | Writes a single data record to the stream |
 | `PutRecordBatch` | Writes multiple data records to the stream |
-| `TagDeliveryStream` | - |
-| `UntagDeliveryStream` | - |
-| `ListTagsForDeliveryStream` | - |
+| `TagDeliveryStream` | Adds or overwrites tags |
+| `UntagDeliveryStream` | Removes tags by key |
+| `ListTagsForDeliveryStream` | Lists tags on a stream |
 <!-- floci:actions:end -->
 
 ## How it works
@@ -27,6 +29,14 @@ Floci emulates Amazon Data Firehose for streaming data ingestion and delivery to
 1. **Buffering**: Incoming records are buffered in memory.
 2. **Automatic Flush**: Floci automatically flushes the buffer to S3 after every 5 records for immediate local feedback.
 3. **Format**: Records are flushed as raw NDJSON (newline-delimited JSON) to the `floci-firehose-results` bucket.
+
+## Server-side encryption
+
+`CreateDeliveryStream` accepts `DeliveryStreamEncryptionConfigurationInput`. `StartDeliveryStreamEncryption` / `StopDeliveryStreamEncryption` converge the same state later. Describe reports `DeliveryStreamEncryptionConfiguration.Status` as `ENABLED` or `DISABLED` immediately (no async `ENABLING` / `DISABLING` window). `AWS_OWNED_CMK` omits `KeyARN`; `CUSTOMER_MANAGED_CMK` requires it. Kinesis-sourced streams reject SSE — AWS inherits encryption from the source stream.
+
+## Kinesis as source
+
+Set `DeliveryStreamType` to `KinesisStreamAsSource` and pass `KinesisStreamSourceConfiguration` (`KinesisStreamARN` + `RoleARN`). Describe returns `Source.KinesisStreamSourceDescription` with those fields plus `DeliveryStartTimestamp`.
 
 ## Configuration
 

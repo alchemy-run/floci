@@ -19,6 +19,9 @@ public class ContainerDefinition {
     private List<String> command;
     private List<String> entryPoint;
     private List<MountPoint> mountPoints;
+    private LogConfiguration logConfiguration;
+    private List<ContainerDependency> dependsOn;
+    private List<EnvironmentFile> environmentFiles;
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
@@ -55,4 +58,13 @@ public class ContainerDefinition {
 
     public List<MountPoint> getMountPoints() { return mountPoints; }
     public void setMountPoints(List<MountPoint> mountPoints) { this.mountPoints = mountPoints; }
+
+    public LogConfiguration getLogConfiguration() { return logConfiguration; }
+    public void setLogConfiguration(LogConfiguration logConfiguration) { this.logConfiguration = logConfiguration; }
+
+    public List<ContainerDependency> getDependsOn() { return dependsOn; }
+    public void setDependsOn(List<ContainerDependency> dependsOn) { this.dependsOn = dependsOn; }
+
+    public List<EnvironmentFile> getEnvironmentFiles() { return environmentFiles; }
+    public void setEnvironmentFiles(List<EnvironmentFile> environmentFiles) { this.environmentFiles = environmentFiles; }
 }

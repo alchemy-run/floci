@@ -9,8 +9,9 @@ Floci implements the EC2 Auto Scaling API — stored-state management for launch
 - `arn:aws:autoscaling:<region>:<account>:autoScalingGroup:<uuid>:autoScalingGroupName/<name>`
 - `arn:aws:autoscaling:<region>:<account>:launchConfiguration:<uuid>:launchConfigurationName/<name>`
 - `arn:aws:autoscaling:<region>:<account>:scalingPolicy:<uuid>:autoScalingGroupName/<group>/policyName/<name>`
+- `arn:aws:autoscaling:<region>:<account>:scheduledUpdateGroupAction:<uuid>:autoScalingGroupName/<group>:scheduledActionName/<name>`
 
-## Supported Operations (33 total)
+## Supported Operations (47 total)
 
 ### Launch Configurations
 
@@ -38,6 +39,19 @@ Floci implements the EC2 Auto Scaling API — stored-state management for launch
 | `AttachInstances` | Attaches existing EC2 instances to a group; sets lifecycle state to `InService` |
 | `DetachInstances` | Detaches instances from a group; optionally decrements desired capacity |
 | `TerminateInstanceInAutoScalingGroup` | Terminates a specific instance; optionally decrements desired capacity |
+| `SetInstanceProtection` | Sets `ProtectedFromScaleIn` on named instances; `ValidationError` if an instance is not in the group |
+| `SetInstanceHealth` | Sets `Healthy` / `Unhealthy` on an ASG-tracked instance |
+| `EnterStandby` | Moves instances to `Standby`; optionally decrements desired capacity |
+| `ExitStandby` | Returns standby instances to `InService` |
+
+### Instance Refresh
+
+| Operation | Notes |
+|---|---|
+| `StartInstanceRefresh` | Starts a rolling refresh; empty fleets complete immediately as `Successful` |
+| `DescribeInstanceRefreshes` | Lists refreshes for a group, newest first |
+| `CancelInstanceRefresh` | Cancels an in-progress refresh; `ActiveInstanceRefreshNotFound` when none is active |
+| `RollbackInstanceRefresh` | Marks an active refresh `RollbackSuccessful`; same not-found when none is active |
 
 ### Load Balancer Attachment
 
@@ -67,6 +81,15 @@ Floci implements the EC2 Auto Scaling API — stored-state management for launch
 | `PutScalingPolicy` | Creates or updates a policy: `SimpleScaling` fields or `TargetTrackingScaling` with predefined metric, target value, and estimated warmup |
 | `DescribePolicies` | Lists policies filtered by group or policy name, including stored target tracking configuration |
 | `DeletePolicy` | Removes a scaling policy |
+| `ExecutePolicy` | Records an activity for an existing policy; `ValidationError` if the policy is missing |
+
+### Scheduled Actions
+
+| Operation | Notes |
+|---|---|
+| `PutScheduledUpdateGroupAction` | Creates or updates a cron/one-time action; ARN is stable across upsert |
+| `DescribeScheduledActions` | Lists actions; missing group is `ValidationError` (`AutoScalingGroup ... not found`) |
+| `DeleteScheduledAction` | Idempotent when the action is already gone; missing group is `ValidationError` |
 
 ### Activities
 

@@ -160,4 +160,18 @@ class SesDedicatedIpPoolV2IntegrationTest {
             .body("__type", equalTo("BadRequestException"))
             .body("message", equalTo("The ScalingMode parameter is invalid."));
     }
+
+    @Test
+    @Order(13)
+    void putDedicatedIpPoolScalingAttributes_standardToManaged() {
+        given().contentType("application/json").header("Authorization", AUTH_HEADER)
+            .body("{\"ScalingMode\": \"MANAGED\"}")
+        .when().put("/v2/email/dedicated-ip-pools/v2-pool-alpha/scaling")
+        .then().statusCode(200);
+
+        given().header("Authorization", AUTH_HEADER)
+        .when().get("/v2/email/dedicated-ip-pools/v2-pool-alpha")
+        .then().statusCode(200)
+            .body("DedicatedIpPool.ScalingMode", equalTo("MANAGED"));
+    }
 }

@@ -865,4 +865,61 @@ class SecretsManagerServiceTest {
         assertEquals("InvalidRequestException", ex.getErrorCode());
         latch.countDown();
     }
+
+    @Test
+    void resourcePolicyRoundTripAndDelete() {
+        service.createSecret("policy-secret", "value", null, null, null, null, REGION);
+        String policy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"secretsmanager:GetSecretValue","Resource":"*"}]}
+                """;
+
+        Secret attached = service.putResourcePolicy("policy-secret", policy, null, REGION);
+        assertEquals(policy, attached.getResourcePolicy());
+        assertEquals(policy, service.getResourcePolicy("policy-secret", REGION).getResourcePolicy());
+
+        service.deleteResourcePolicy("policy-secret", REGION);
+        assertNull(service.getResourcePolicy("policy-secret", REGION).getResourcePolicy());
+
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.deleteResourcePolicy("policy-secret", REGION));
+        assertEquals("ResourceNotFoundException", missing.getErrorCode());
+    }
+
+    @Test
+    void putResourcePolicyRejectsPublicPrincipalByDefault() {
+        service.createSecret("public-policy-secret", "value", null, null, null, null, REGION);
+        String publicPolicy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"secretsmanager:GetSecretValue","Resource":"*"}]}
+                """;
+
+        AwsException blocked = assertThrows(AwsException.class,
+                () -> service.putResourcePolicy("public-policy-secret", publicPolicy, null, REGION));
+        assertEquals("MalformedPolicyDocumentException", blocked.getErrorCode());
+
+        Secret allowed = service.putResourcePolicy("public-policy-secret", publicPolicy, false, REGION);
+        assertEquals(publicPolicy, allowed.getResourcePolicy());
+    }
+
+    @Test
+    void cancelRotateSecretDisablesRotation() throws Exception {
+        io.github.hectorvent.floci.services.lambda.LambdaService mockLambda =
+                org.mockito.Mockito.mock(io.github.hectorvent.floci.services.lambda.LambdaService.class);
+        SecretsManagerService svc = new SecretsManagerService(
+                new InMemoryStorage<String, Secret>(), 30,
+                new io.github.hectorvent.floci.core.common.RegionResolver("us-east-1", "000000000000"),
+                mockLambda, new com.fasterxml.jackson.databind.ObjectMapper());
+
+        svc.createSecret("rotate-cancel", "value", null, null, null, null, REGION);
+        String lambdaArn = "arn:aws:lambda:us-east-1:000000000000:function:rotate";
+        svc.rotateSecret("rotate-cancel", "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                lambdaArn, new Secret.RotationRules(30, null, null), false, REGION);
+
+        Secret cancelled = svc.cancelRotateSecret("rotate-cancel", REGION);
+        assertFalse(cancelled.isRotationEnabled());
+        assertEquals(lambdaArn, cancelled.getRotationLambdaArn());
+
+        AwsException again = assertThrows(AwsException.class,
+                () -> svc.cancelRotateSecret("rotate-cancel", REGION));
+        assertEquals("InvalidRequestException", again.getErrorCode());
+    }
 }

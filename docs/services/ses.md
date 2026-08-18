@@ -60,12 +60,21 @@ Floci exposes the classic Amazon SES Query API used by `aws ses ...` commands an
 | `DeleteConfigurationSetTrackingOptions`  | Remove the custom tracking redirect domain |
 | `UpdateConfigurationSetReputationMetricsEnabled` | Enable or disable reputation metrics for a configuration set |
 | `PutConfigurationSetDeliveryOptions` | Set the TLS policy (delivery options) for a configuration set |
-| `CreateReceiptRuleSet`              | Create a receipt rule set (stored inertly)                |
-| `DescribeReceiptRuleSet`            | Read a receipt rule set (Rules always empty)              |
+| `CreateReceiptRuleSet`              | Create a receipt rule set                                 |
+| `DescribeReceiptRuleSet`            | Read a receipt rule set and its rules                     |
 | `ListReceiptRuleSets`               | List receipt rule sets                                    |
 | `DeleteReceiptRuleSet`              | Delete a receipt rule set (idempotent)                    |
 | `SetActiveReceiptRuleSet`           | Mark a rule set active, or clear the active one           |
 | `DescribeActiveReceiptRuleSet`      | Read the active receipt rule set                          |
+| `CreateReceiptRule`                 | Add a receipt rule (matcher + actions) to a rule set      |
+| `DescribeReceiptRule`               | Read a receipt rule                                       |
+| `UpdateReceiptRule`                 | Replace a receipt rule's matcher and actions              |
+| `DeleteReceiptRule`                 | Delete a receipt rule (idempotent for a missing rule)     |
+| `SetReceiptRulePosition`            | Move a rule after another, or to the top                  |
+| `CreateReceiptFilter`               | Create an IP allow/block receipt filter                   |
+| `ListReceiptFilters`                | List receipt filters                                      |
+| `DeleteReceiptFilter`               | Delete a receipt filter (idempotent)                      |
+| `SendBounce`                        | Bounce a stored mailbox message; unverified sender or unknown `OriginalMessageId` → `MessageRejected` |
 
 ## Configuration
 
@@ -168,12 +177,14 @@ curl $AWS_ENDPOINT_URL/_aws/ses
 
 ## Current Behavior
 
-- Identity verification succeeds immediately; no real DNS or inbox verification flow is required.
+- Identity verification succeeds immediately for v1 `VerifyEmailIdentity` / email-address `CreateEmailIdentity`; domain identities stay `PENDING` until matching Route53 DKIM CNAMEs exist.
+- `SendEmail` / `SendRawEmail` reject an unverified From identity with `MessageRejected` ("Email address is not verified").
 - `SendEmail` stores the text body or the HTML body as the captured message body.
+- `GetBlacklistReports` returns an empty report per requested IP. `GetMessageInsights` and `BatchGetMetricData` require account VDM (`PutAccountVdmAttributes`); without it they return `NotFoundException` / `BadRequestException`. `GetDomainStatisticsReport` returns an empty volume series for a known identity and `NotFoundException` otherwise.
 - `SetIdentityNotificationTopic` publishes to the configured topic on a Bounce/Complaint/Delivery event (triggered via the mailbox simulator addresses or the suppression list), independent of any configuration set. The payload uses the legacy format (`notificationType`, no `mail.tags`, headers only when `SetIdentityHeadersInNotificationsEnabled` is on).
 - Identity (sending authorization) policies are stored and returned as metadata: the policy document, the per-identity limit of 20, and the create/update/delete error shapes match AWS, but Floci does not evaluate policy authorization (Principal-account existence, Resource-ARN match) or gate sending on it.
-- Receipt rule sets are stored inertly: Floci has no inbound-mail endpoint, so a rule set never holds any receipt rules and routes no mail. `CreateReceiptRuleSet` / `DescribeReceiptRuleSet` (Rules always empty) / `ListReceiptRuleSets` / `DeleteReceiptRuleSet` (idempotent) and `SetActiveReceiptRuleSet` / `DescribeActiveReceiptRuleSet` round-trip so tools like Terraform (`aws_ses_receipt_rule_set`, `aws_ses_active_receipt_rule_set`) can declare a rule set during bootstrap. Individual receipt rules and receipt filters are not implemented.
-- Custom verification email templates are stored and returned; `Create`/`Update` require the `FromEmailAddress` to be a verified identity (or a verified domain) and reject an invalid redirection URL, matching AWS. `SendCustomVerificationEmail` is not yet implemented.
+- Receipt rule sets store rules in evaluation order. Floci has no inbound-mail endpoint, so rules and filters never evaluate incoming mail — they exist so the management API (`Create`/`Describe`/`Update`/`DeleteReceiptRule`, `SetReceiptRulePosition`, `Create`/`List`/`DeleteReceiptFilter`) round-trips. A `BounceAction` whose `Sender` is not a verified identity is rejected with `InvalidParameterValue` ("Identity is not verified").
+- Custom verification email templates are stored and returned; `Create`/`Update` require the `FromEmailAddress` to be a verified identity (or a verified domain) and reject an invalid redirection URL, matching AWS. `SendCustomVerificationEmail` (v2) mints a message id and marks the address as a pending email identity.
 - For the REST JSON API see [SES v2](#v2) below.
 
 ## SES v2 (REST JSON) {#v2}
@@ -192,6 +203,7 @@ Alongside the classic Query API, Floci implements a subset of the SES v2 REST JS
 | `GET` | `/v2/email/identities/{emailIdentity}` | `GetEmailIdentity` |
 | `DELETE` | `/v2/email/identities/{emailIdentity}` | `DeleteEmailIdentity` |
 | `PUT` | `/v2/email/identities/{emailIdentity}/dkim` | `PutEmailIdentityDkimAttributes` |
+| `PUT` | `/v2/email/identities/{emailIdentity}/dkim/signing` | `PutEmailIdentityDkimSigningAttributes` |
 | `PUT` | `/v2/email/identities/{emailIdentity}/feedback` | `PutEmailIdentityFeedbackAttributes` |
 | `PUT` | `/v2/email/identities/{emailIdentity}/mail-from` | `PutEmailIdentityMailFromAttributes` |
 | `PUT` | `/v2/email/identities/{emailIdentity}/configuration-set` | `PutEmailIdentityConfigurationSetAttributes` |
@@ -203,6 +215,7 @@ Alongside the classic Query API, Floci implements a subset of the SES v2 REST JS
 | `POST` | `/v2/email/outbound-bulk-emails` | `SendBulkEmail` (templated, multiple destinations) |
 | `GET` | `/v2/email/account` | `GetAccount` |
 | `PUT` | `/v2/email/account/sending` | `PutAccountSendingAttributes` |
+| `PUT` | `/v2/email/account/vdm` | `PutAccountVdmAttributes` |
 | `PUT` | `/v2/email/account/suppression` | `PutAccountSuppressionAttributes` |
 | `POST` | `/v2/email/templates` | `CreateEmailTemplate` |
 | `GET` | `/v2/email/templates` | `ListEmailTemplates` |
@@ -234,6 +247,24 @@ Alongside the classic Query API, Floci implements a subset of the SES v2 REST JS
 | `GET` | `/v2/email/dedicated-ip-pools` | `ListDedicatedIpPools` |
 | `GET` | `/v2/email/dedicated-ip-pools/{PoolName}` | `GetDedicatedIpPool` |
 | `DELETE` | `/v2/email/dedicated-ip-pools/{PoolName}` | `DeleteDedicatedIpPool` |
+| `PUT` | `/v2/email/dedicated-ip-pools/{PoolName}/scaling` | `PutDedicatedIpPoolScalingAttributes` |
+| `POST` | `/v2/email/tenants` | `CreateTenant` |
+| `POST` | `/v2/email/tenants/get` | `GetTenant` |
+| `POST` | `/v2/email/tenants/list` | `ListTenants` |
+| `POST` | `/v2/email/tenants/delete` | `DeleteTenant` |
+| `PUT` | `/v2/email/tenant/suppression` | `PutTenantSuppressionAttributes` |
+| `POST` | `/v2/email/tenants/resources` | `CreateTenantResourceAssociation` |
+| `POST` | `/v2/email/tenants/resources/delete` | `DeleteTenantResourceAssociation` |
+| `POST` | `/v2/email/tenants/resources/list` | `ListTenantResources` |
+| `POST` | `/v2/email/multi-region-endpoints` | `CreateMultiRegionEndpoint` |
+| `GET` | `/v2/email/multi-region-endpoints` | `ListMultiRegionEndpoints` |
+| `GET` | `/v2/email/multi-region-endpoints/{EndpointName}` | `GetMultiRegionEndpoint` |
+| `DELETE` | `/v2/email/multi-region-endpoints/{EndpointName}` | `DeleteMultiRegionEndpoint` |
+| `POST` | `/v2/email/outbound-custom-verification-emails` | `SendCustomVerificationEmail` |
+| `GET` | `/v2/email/deliverability-dashboard/blacklist-report` | `GetBlacklistReports` |
+| `GET` | `/v2/email/insights/{MessageId}` | `GetMessageInsights` |
+| `POST` | `/v2/email/metrics/batch` | `BatchGetMetricData` |
+| `GET` | `/v2/email/deliverability-dashboard/statistics-report/{Domain}` | `GetDomainStatisticsReport` |
 | `POST` | `/v2/email/contact-lists` | `CreateContactList` |
 | `GET` | `/v2/email/contact-lists` | `ListContactLists` |
 | `GET` | `/v2/email/contact-lists/{ContactListName}` | `GetContactList` |
@@ -275,6 +306,10 @@ Suppressed recipients are filtered out of the SMTP relay step (non-suppressed re
 
 For a **single-recipient** list-managed send, Floci injects a functional unsubscribe link (matching AWS, which only does this for one recipient): the `{{amazonSESUnsubscribeUrl}}` body placeholder is replaced (up to twice) and a `List-Unsubscribe` header plus `List-Unsubscribe-Post: List-Unsubscribe=One-Click` are added (applied to the relayed message and shown under `Headers` at `GET /_aws/ses`; a caller-supplied `List-Unsubscribe` is overridden, matching AWS). The `{{amazonSESUnsubscribeUrl}}` placeholder is also preserved through template rendering so a templated body can carry it. On a send without `ListManagementOptions`, the placeholder is left in the body verbatim (neither replaced nor stripped) — this specific behavior is Floci's choice and is not verified against real SES. Unlike AWS's opaque hosted URL, the link points at Floci's own `/_aws/ses/unsubscribe?region=…&contactList=…&address=…&topic=…` endpoint. `GET` (a browser click) only renders a confirmation page and changes nothing — matching AWS's landing-page behavior and avoiding the RFC 8058 hazard where a client or bot that prefetches the link would silently unsubscribe the contact — while `POST` (the one-click request the confirmation form submits) applies the opt-out (a topic → `OPT_OUT` for that topic; no topic → `UnsubscribeAll`), auto-creating the contact if needed. Two deviations from AWS here: the link is carried as readable query parameters rather than an opaque token (so, like the rest of Floci, the endpoint is unauthenticated and only safe on a trusted dev/test network — a `POST` can opt out any contact), and only the one-click URL entry is emitted — its scheme follows Floci's base URL (`http` unless TLS is enabled) — whereas AWS also includes a `mailto:` entry, which Floci can't service since it has no inbound mail endpoint. Raw (MIME) sends do not get link injection yet.
 
-Tag operations support these ARN forms: `arn:aws:ses:<region>:<account>:configuration-set/<name>`, `arn:aws:ses:<region>:<account>:template/<name>`, and `arn:aws:ses:<region>:<account>:identity/<email-or-domain>`. Tags supplied to `CreateConfigurationSet`, `CreateEmailTemplate`, and `CreateEmailIdentity` are reachable through `ListTagsForResource`; `UpdateEmailTemplate` does not modify tags. Other resource types return `NotFoundException`.
+Tag operations support these ARN forms: `arn:aws:ses:<region>:<account>:configuration-set/<name>`, `arn:aws:ses:<region>:<account>:template/<name>`, `arn:aws:ses:<region>:<account>:identity/<email-or-domain>`, `arn:aws:ses:<region>:<account>:dedicated-ip-pool/<name>`, `arn:aws:ses:<region>:<account>:contact-list/<name>`, `arn:aws:ses:<region>:<account>:custom-verification-email-template/<name>`, `arn:aws:ses:<region>:<account>:tenant/<name>`, and `arn:aws:ses:<region>:<account>:multi-region-endpoint/<name>`. Tags supplied to `CreateConfigurationSet`, `CreateEmailTemplate`, `CreateEmailIdentity`, `CreateDedicatedIpPool`, `CreateContactList`, `CreateTenant`, and `CreateMultiRegionEndpoint` are reachable through `ListTagsForResource`; `UpdateEmailTemplate` does not modify tags. Other resource types return `NotFoundException`.
+
+Tenants are stored as named isolation containers with optional suppression attributes. Associating a resource records the ARN; deleting the tenant drops associations but not the resources. Deleting a configuration set that still has tenant associations is rejected.
+
+Multi-region endpoints are stored with the requested route regions. Create returns `CREATING`; the next `GetMultiRegionEndpoint` reports `READY`. There is no cross-region data plane.
 
 Identity, identity-policy, template, custom-verification-template, configuration-set, and sent-message state is shared between the v1 Query API and the v2 REST JSON API, so a template created with `CreateTemplate` resolves through `SendEmail` on v2 (and vice versa), a policy written with `PutIdentityPolicy` (v1) is returned by `GetEmailIdentityPolicies` (v2), a custom verification email template created with `CreateCustomVerificationEmailTemplate` (v1) is returned by `GetCustomVerificationEmailTemplate` (v2), a configuration set created with `CreateConfigurationSet` is visible to both `DescribeConfigurationSet` (v1) and `GetConfigurationSet` (v2), and every send appears in the same `GET /_aws/ses` inspection mailbox.
