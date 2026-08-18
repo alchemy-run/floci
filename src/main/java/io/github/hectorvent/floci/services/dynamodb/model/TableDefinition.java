@@ -47,6 +47,9 @@ public class TableDefinition {
     private String tableClass; // "STANDARD" or "STANDARD_INFREQUENT_ACCESS"
     private Integer onDemandMaxReadRequestUnits;
     private Integer onDemandMaxWriteRequestUnits;
+    private String resourcePolicy;
+    private String contributorInsightsStatus;
+    private Map<String, String> indexContributorInsightsStatus;
 
     public TableDefinition() {
         this.keySchema = new ArrayList<>();
@@ -56,6 +59,8 @@ public class TableDefinition {
         this.localSecondaryIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
+        this.contributorInsightsStatus = "DISABLED";
+        this.indexContributorInsightsStatus = new HashMap<>();
     }
 
     public TableDefinition(String tableName,
@@ -83,6 +88,8 @@ public class TableDefinition {
         this.localSecondaryIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
+        this.contributorInsightsStatus = "DISABLED";
+        this.indexContributorInsightsStatus = new HashMap<>();
     }
 
     public String getTableName() { return tableName; }
@@ -193,6 +200,42 @@ public class TableDefinition {
 
     public Integer getOnDemandMaxWriteRequestUnits() { return onDemandMaxWriteRequestUnits; }
     public void setOnDemandMaxWriteRequestUnits(Integer v) { this.onDemandMaxWriteRequestUnits = v; }
+
+    public String getResourcePolicy() { return resourcePolicy; }
+    public void setResourcePolicy(String resourcePolicy) { this.resourcePolicy = resourcePolicy; }
+
+    public String getContributorInsightsStatus() {
+        return contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
+    }
+    public void setContributorInsightsStatus(String contributorInsightsStatus) {
+        this.contributorInsightsStatus = contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
+    }
+
+    public Map<String, String> getIndexContributorInsightsStatus() {
+        if (indexContributorInsightsStatus == null) {
+            indexContributorInsightsStatus = new HashMap<>();
+        }
+        return indexContributorInsightsStatus;
+    }
+    public void setIndexContributorInsightsStatus(Map<String, String> status) {
+        this.indexContributorInsightsStatus = status != null ? status : new HashMap<>();
+    }
+
+    public String contributorInsightsStatusFor(String indexName) {
+        if (indexName == null || indexName.isBlank()) {
+            return getContributorInsightsStatus();
+        }
+        return getIndexContributorInsightsStatus().getOrDefault(indexName, "DISABLED");
+    }
+
+    public void setContributorInsightsStatusFor(String indexName, String status) {
+        String resolved = status != null ? status : "DISABLED";
+        if (indexName == null || indexName.isBlank()) {
+            setContributorInsightsStatus(resolved);
+            return;
+        }
+        getIndexContributorInsightsStatus().put(indexName, resolved);
+    }
 
     public String getPartitionKeyName() {
         return keySchema.stream()

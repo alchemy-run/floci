@@ -21,6 +21,12 @@
 | `AddTagsToStream` | Tag a stream |
 | `RemoveTagsFromStream` | Remove tags |
 | `ListTagsForStream` | List tags |
+| `ListTagsForResource` | List tags by stream ARN |
+| `TagResource` | Tag a stream by ARN |
+| `UntagResource` | Remove tags by stream ARN |
+| `GetResourcePolicy` | Get a stream resource policy |
+| `PutResourcePolicy` | Attach a resource policy to a stream |
+| `DeleteResourcePolicy` | Remove a stream resource policy |
 | `StartStreamEncryption` | Enable KMS encryption |
 | `StopStreamEncryption` | Disable encryption |
 | `SplitShard` | Split a shard into two |

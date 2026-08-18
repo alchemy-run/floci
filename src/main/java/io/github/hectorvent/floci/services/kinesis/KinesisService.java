@@ -176,6 +176,31 @@ public class KinesisService {
         return resolveStream(streamName, region).getTags();
     }
 
+    public String getResourcePolicy(String streamName, String region) {
+        KinesisStream stream = resolveStream(streamName, region);
+        if (stream.getResourcePolicy() == null || stream.getResourcePolicy().isBlank()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "No resource policy found for stream " + streamName, 400);
+        }
+        return stream.getResourcePolicy();
+    }
+
+    public void putResourcePolicy(String streamName, String policy, String region) {
+        KinesisStream stream = resolveStream(streamName, region);
+        stream.setResourcePolicy(policy);
+        store.put(regionKey(region, streamName), stream);
+    }
+
+    public void deleteResourcePolicy(String streamName, String region) {
+        KinesisStream stream = resolveStream(streamName, region);
+        if (stream.getResourcePolicy() == null || stream.getResourcePolicy().isBlank()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "No resource policy found for stream " + streamName, 400);
+        }
+        stream.setResourcePolicy(null);
+        store.put(regionKey(region, streamName), stream);
+    }
+
     public void startStreamEncryption(String streamName, String encryptionType, String keyId, String region) {
         KinesisStream stream = resolveStream(streamName, region);
         stream.setEncryptionType(encryptionType);

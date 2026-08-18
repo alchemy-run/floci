@@ -1413,6 +1413,56 @@ public class DynamoDbService {
         return table.getTags() != null ? table.getTags() : Map.of();
     }
 
+    public void putResourcePolicy(String resourceArn, String policy, String region) {
+        TableDefinition table = findTableByArn(resourceArn, region);
+        table.setResourcePolicy(policy);
+        persistTable(table.getTableName(), table, region);
+    }
+
+    public String getResourcePolicy(String resourceArn, String region) {
+        TableDefinition table = findTableByArn(resourceArn, region);
+        String policy = table.getResourcePolicy();
+        if (policy == null || policy.isBlank()) {
+            throw new AwsException("PolicyNotFoundException",
+                    "No resource policy is attached to resource: " + resourceArn, 400);
+        }
+        return policy;
+    }
+
+    public void deleteResourcePolicy(String resourceArn, String region) {
+        TableDefinition table = findTableByArn(resourceArn, region);
+        if (table.getResourcePolicy() == null || table.getResourcePolicy().isBlank()) {
+            throw new AwsException("PolicyNotFoundException",
+                    "No resource policy is attached to resource: " + resourceArn, 400);
+        }
+        table.setResourcePolicy(null);
+        persistTable(table.getTableName(), table, region);
+    }
+
+    public String updateContributorInsights(String tableName, String indexName, String action, String region) {
+        TableDefinition table = describeTable(tableName, region);
+        if (!"ENABLE".equals(action) && !"DISABLE".equals(action)) {
+            throw new AwsException("ValidationException",
+                    "ContributorInsightsAction must be ENABLE or DISABLE", 400);
+        }
+        String status = "ENABLE".equals(action) ? "ENABLED" : "DISABLED";
+        table.setContributorInsightsStatusFor(indexName, status);
+        persistTable(table.getTableName(), table, region);
+        return status;
+    }
+
+    public String describeContributorInsights(String tableName, String indexName, String region) {
+        TableDefinition table = describeTable(tableName, region);
+        return table.contributorInsightsStatusFor(indexName);
+    }
+
+    public List<TableDefinition> listTableDefinitions(String region) {
+        String prefix = region + "::";
+        return tableStore.scan(k -> k.startsWith(prefix)).stream()
+                .sorted(Comparator.comparing(TableDefinition::getTableName))
+                .toList();
+    }
+
     private TableDefinition findTableByArn(String arn, String region) {
         String prefix = region + "::";
         return tableStore.scan(k -> k.startsWith(prefix)).stream()

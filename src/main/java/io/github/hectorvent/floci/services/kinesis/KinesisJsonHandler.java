@@ -50,6 +50,12 @@ public class KinesisJsonHandler {
             case "AddTagsToStream" -> handleAddTagsToStream(request, region);
             case "RemoveTagsFromStream" -> handleRemoveTagsFromStream(request, region);
             case "ListTagsForStream" -> handleListTagsForStream(request, region);
+            case "ListTagsForResource" -> handleListTagsForResource(request, region);
+            case "TagResource" -> handleTagResource(request, region);
+            case "UntagResource" -> handleUntagResource(request, region);
+            case "GetResourcePolicy" -> handleGetResourcePolicy(request, region);
+            case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
+            case "DeleteResourcePolicy" -> handleDeleteResourcePolicy(request, region);
             case "StartStreamEncryption" -> handleStartStreamEncryption(request, region);
             case "StopStreamEncryption" -> handleStopStreamEncryption(request, region);
             case "SplitShard" -> handleSplitShard(request, region);
@@ -374,6 +380,76 @@ public class KinesisJsonHandler {
         });
         response.put("HasMoreTags", false);
         return Response.ok(response).build();
+    }
+
+    private String resolveStreamNameFromResourceArn(JsonNode request) {
+        String resourceArn = request.path("ResourceARN").asText(null);
+        if (resourceArn == null || resourceArn.isBlank()) {
+            resourceArn = request.path("ResourceArn").asText(null);
+        }
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ResourceARN is required", 400);
+        }
+        return extractStreamNameFromArn(resourceArn);
+    }
+
+    private Response handleListTagsForResource(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        Map<String, String> tags = service.listTagsForStream(streamName, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode tagsArray = response.putArray("Tags");
+        tags.forEach((k, v) -> {
+            ObjectNode tagNode = tagsArray.addObject();
+            tagNode.put("Key", k);
+            tagNode.put("Value", v);
+        });
+        return Response.ok(response).build();
+    }
+
+    private Response handleTagResource(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        Map<String, String> tags = new HashMap<>();
+        JsonNode tagsNode = request.path("Tags");
+        if (tagsNode.isArray()) {
+            tagsNode.forEach(tag -> tags.put(tag.path("Key").asText(), tag.path("Value").asText()));
+        } else if (tagsNode.isObject()) {
+            tagsNode.fields().forEachRemaining(entry -> tags.put(entry.getKey(), entry.getValue().asText()));
+        }
+        service.addTagsToStream(streamName, tags, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleUntagResource(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        List<String> tagKeys = new ArrayList<>();
+        request.path("TagKeys").forEach(node -> tagKeys.add(node.asText()));
+        service.removeTagsFromStream(streamName, tagKeys, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetResourcePolicy(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        String policy = service.getResourcePolicy(streamName, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("Policy", policy);
+        return Response.ok(response).build();
+    }
+
+    private Response handlePutResourcePolicy(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        JsonNode policyNode = request.get("Policy");
+        if (policyNode == null || policyNode.isNull() || policyNode.isMissingNode()) {
+            throw new AwsException("InvalidArgumentException", "Policy is required", 400);
+        }
+        String policy = policyNode.isTextual() ? policyNode.asText() : policyNode.toString();
+        service.putResourcePolicy(streamName, policy, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleDeleteResourcePolicy(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        service.deleteResourcePolicy(streamName, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleStartStreamEncryption(JsonNode request, String region) {

@@ -26,6 +26,7 @@ public class KinesisStream {
     private String keyId;
     private String streamMode = "PROVISIONED";
     private Set<String> enhancedMonitoringMetrics = new HashSet<>();
+    private String resourcePolicy;
 
     public KinesisStream() {}
 
@@ -71,4 +72,7 @@ public class KinesisStream {
 
     public Set<String> getEnhancedMonitoringMetrics() { return enhancedMonitoringMetrics; }
     public void setEnhancedMonitoringMetrics(Set<String> enhancedMonitoringMetrics) { this.enhancedMonitoringMetrics = enhancedMonitoringMetrics; }
+
+    public String getResourcePolicy() { return resourcePolicy; }
+    public void setResourcePolicy(String resourcePolicy) { this.resourcePolicy = resourcePolicy; }
 }

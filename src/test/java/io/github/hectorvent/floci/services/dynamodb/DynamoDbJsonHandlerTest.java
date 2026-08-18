@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.dynamodb.model.AttributeDefinition;
 import io.github.hectorvent.floci.services.dynamodb.model.KeySchemaElement;
@@ -24,9 +25,11 @@ class DynamoDbJsonHandlerTest {
 
     @BeforeEach
     void setUp() {
-        service = new DynamoDbService(new InMemoryStorage<>());
+        InMemoryStorage<String, TableDefinition> storage = new InMemoryStorage<>();
+        service = new DynamoDbService(storage);
         mapper = new ObjectMapper();
-        handler = new DynamoDbJsonHandler(service, null, null, mapper);
+        DynamoDbStreamService streamService = new DynamoDbStreamService(mapper, storage);
+        handler = new DynamoDbJsonHandler(service, streamService, null, mapper);
     }
 
     private TableDefinition createUsersTable(String region) {
@@ -332,5 +335,118 @@ class DynamoDbJsonHandlerTest {
 
         assertEquals("None", reasons.get(0).get("Code").asText());
         assertNull(reasons.get(0).get("Message"), "non failed item must not have a Message field");
+    }
+
+    @Test
+    void describeTableOmitsStreamSpecificationWhenDisabled() throws Exception {
+        ObjectNode create = mapper.createObjectNode();
+        create.put("TableName", "Users");
+        create.putArray("KeySchema").addObject()
+                .put("AttributeName", "userId").put("KeyType", "HASH");
+        create.putArray("AttributeDefinitions").addObject()
+                .put("AttributeName", "userId").put("AttributeType", "S");
+        create.putObject("StreamSpecification")
+                .put("StreamEnabled", true)
+                .put("StreamViewType", "KEYS_ONLY");
+        assertEquals(200, handler.handle("CreateTable", create, "us-east-1").getStatus());
+
+        ObjectNode describe = mapper.createObjectNode();
+        describe.put("TableName", "Users");
+        JsonNode enabled = mapper.convertValue(
+                handler.handle("DescribeTable", describe, "us-east-1").getEntity(), JsonNode.class);
+        assertTrue(enabled.path("Table").has("StreamSpecification"));
+        assertEquals(true, enabled.path("Table").path("StreamSpecification").path("StreamEnabled").asBoolean());
+        assertEquals("KEYS_ONLY", enabled.path("Table").path("StreamSpecification").path("StreamViewType").asText());
+
+        ObjectNode disable = mapper.createObjectNode();
+        disable.put("TableName", "Users");
+        disable.putObject("StreamSpecification").put("StreamEnabled", false);
+        JsonNode afterDisable = mapper.convertValue(
+                handler.handle("UpdateTable", disable, "us-east-1").getEntity(), JsonNode.class);
+        assertFalse(afterDisable.path("TableDescription").has("StreamSpecification"),
+                "AWS omits StreamSpecification when streams are disabled");
+
+        JsonNode described = mapper.convertValue(
+                handler.handle("DescribeTable", describe, "us-east-1").getEntity(), JsonNode.class);
+        assertFalse(described.path("Table").has("StreamSpecification"),
+                "DescribeTable must omit StreamSpecification after disable");
+        assertFalse(described.path("Table").path("StreamSpecification").has("StreamViewType"));
+    }
+
+    @Test
+    void resourcePolicyRoundTripAndMissingPolicy() throws Exception {
+        TableDefinition table = createUsersTable("us-east-1");
+        String arn = table.getTableArn();
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"AllowDescribe\",\"Effect\":\"Allow\"}]}";
+
+        ObjectNode getMissing = mapper.createObjectNode();
+        getMissing.put("ResourceArn", arn);
+        AwsException missing = assertThrows(AwsException.class,
+                () -> handler.handle("GetResourcePolicy", getMissing, "us-east-1"));
+        assertEquals("PolicyNotFoundException", missing.getErrorCode());
+
+        ObjectNode put = mapper.createObjectNode();
+        put.put("ResourceArn", arn);
+        put.put("Policy", policy);
+        assertEquals(200, handler.handle("PutResourcePolicy", put, "us-east-1").getStatus());
+
+        JsonNode got = mapper.convertValue(
+                handler.handle("GetResourcePolicy", getMissing, "us-east-1").getEntity(), JsonNode.class);
+        assertTrue(got.path("Policy").asText().contains("AllowDescribe"));
+
+        ObjectNode putUpdated = mapper.createObjectNode();
+        putUpdated.put("ResourceArn", arn);
+        putUpdated.put("Policy", policy.replace("AllowDescribe", "AllowGet"));
+        handler.handle("PutResourcePolicy", putUpdated, "us-east-1");
+        JsonNode updated = mapper.convertValue(
+                handler.handle("GetResourcePolicy", getMissing, "us-east-1").getEntity(), JsonNode.class);
+        assertTrue(updated.path("Policy").asText().contains("AllowGet"));
+        assertFalse(updated.path("Policy").asText().contains("AllowDescribe"));
+
+        ObjectNode delete = mapper.createObjectNode();
+        delete.put("ResourceArn", arn);
+        assertEquals(200, handler.handle("DeleteResourcePolicy", delete, "us-east-1").getStatus());
+        AwsException afterDelete = assertThrows(AwsException.class,
+                () -> handler.handle("GetResourcePolicy", getMissing, "us-east-1"));
+        assertEquals("PolicyNotFoundException", afterDelete.getErrorCode());
+    }
+
+    @Test
+    void contributorInsightsEnableDisableAndDescribe() throws Exception {
+        createUsersTable("us-east-1");
+
+        ObjectNode describe = mapper.createObjectNode();
+        describe.put("TableName", "Users");
+        JsonNode initial = mapper.convertValue(
+                handler.handle("DescribeContributorInsights", describe, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals("DISABLED", initial.path("ContributorInsightsStatus").asText());
+        assertTrue(initial.path("ContributorInsightsRuleList").isArray());
+        assertEquals(0, initial.path("ContributorInsightsRuleList").size());
+
+        ObjectNode enable = mapper.createObjectNode();
+        enable.put("TableName", "Users");
+        enable.put("ContributorInsightsAction", "ENABLE");
+        JsonNode enabled = mapper.convertValue(
+                handler.handle("UpdateContributorInsights", enable, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals("ENABLED", enabled.path("ContributorInsightsStatus").asText());
+
+        JsonNode described = mapper.convertValue(
+                handler.handle("DescribeContributorInsights", describe, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals("ENABLED", described.path("ContributorInsightsStatus").asText());
+        assertEquals("Users", described.path("TableName").asText());
+
+        ObjectNode disable = mapper.createObjectNode();
+        disable.put("TableName", "Users");
+        disable.put("ContributorInsightsAction", "DISABLE");
+        JsonNode disabled = mapper.convertValue(
+                handler.handle("UpdateContributorInsights", disable, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals("DISABLED", disabled.path("ContributorInsightsStatus").asText());
+
+        JsonNode listed = mapper.convertValue(
+                handler.handle("ListContributorInsights", mapper.createObjectNode(), "us-east-1").getEntity(),
+                JsonNode.class);
+        assertEquals(1, listed.path("ContributorInsightsSummaries").size());
+        assertEquals("DISABLED", listed.path("ContributorInsightsSummaries").get(0)
+                .path("ContributorInsightsStatus").asText());
     }
 }

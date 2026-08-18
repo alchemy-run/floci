@@ -13,6 +13,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KinesisJsonHandlerTest {
 
@@ -340,6 +341,78 @@ class KinesisJsonHandlerTest {
         updateReq.putObject("StreamModeDetails").put("StreamMode", "ON_DEMAND");
         AwsException ex = assertThrows(AwsException.class,
                 () -> handler.handle("UpdateStreamMode", updateReq, REGION));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void listTagsForResourceUsesStreamArn() {
+        createStream("test-stream");
+
+        ObjectNode add = MAPPER.createObjectNode();
+        add.put("StreamName", "test-stream");
+        add.putObject("Tags").put("Environment", "test");
+        assertThat(handler.handle("AddTagsToStream", add, REGION).getStatus(), is(200));
+
+        ObjectNode list = MAPPER.createObjectNode();
+        list.put("ResourceARN", STREAM_ARN);
+        Response resp = handler.handle("ListTagsForResource", list, REGION);
+        assertThat(resp.getStatus(), is(200));
+        assertEquals("Environment", responseEntity(resp).get("Tags").get(0).get("Key").asText());
+        assertEquals("test", responseEntity(resp).get("Tags").get(0).get("Value").asText());
+    }
+
+    @Test
+    void tagResourceAndUntagResourceOnStreamArn() {
+        createStream("test-stream");
+
+        ObjectNode tag = MAPPER.createObjectNode();
+        tag.put("ResourceARN", STREAM_ARN);
+        tag.putArray("Tags").addObject().put("Key", "Owner").put("Value", "platform");
+        assertThat(handler.handle("TagResource", tag, REGION).getStatus(), is(200));
+
+        ObjectNode list = MAPPER.createObjectNode();
+        list.put("ResourceARN", STREAM_ARN);
+        assertEquals("Owner", responseEntity(handler.handle("ListTagsForResource", list, REGION))
+                .get("Tags").get(0).get("Key").asText());
+
+        ObjectNode untag = MAPPER.createObjectNode();
+        untag.put("ResourceARN", STREAM_ARN);
+        untag.putArray("TagKeys").add("Owner");
+        assertThat(handler.handle("UntagResource", untag, REGION).getStatus(), is(200));
+        assertEquals(0, responseEntity(handler.handle("ListTagsForResource", list, REGION)).get("Tags").size());
+    }
+
+    @Test
+    void getResourcePolicyOnStreamWithoutPolicyIsNotFound() {
+        createStream("test-stream");
+
+        ObjectNode req = MAPPER.createObjectNode();
+        req.put("ResourceARN", STREAM_ARN);
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("GetResourcePolicy", req, REGION));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void putGetDeleteResourcePolicyOnStreamArn() {
+        createStream("test-stream");
+
+        ObjectNode put = MAPPER.createObjectNode();
+        put.put("ResourceARN", STREAM_ARN);
+        put.put("Policy", "{\"Version\":\"2012-10-17\",\"Statement\":[]}");
+        assertThat(handler.handle("PutResourcePolicy", put, REGION).getStatus(), is(200));
+
+        ObjectNode get = MAPPER.createObjectNode();
+        get.put("ResourceARN", STREAM_ARN);
+        Response got = handler.handle("GetResourcePolicy", get, REGION);
+        assertThat(got.getStatus(), is(200));
+        assertTrue(responseEntity(got).get("Policy").asText().contains("2012-10-17"));
+
+        ObjectNode delete = MAPPER.createObjectNode();
+        delete.put("ResourceARN", STREAM_ARN);
+        assertThat(handler.handle("DeleteResourcePolicy", delete, REGION).getStatus(), is(200));
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("GetResourcePolicy", get, REGION));
         assertEquals("ResourceNotFoundException", ex.getErrorCode());
     }
 }

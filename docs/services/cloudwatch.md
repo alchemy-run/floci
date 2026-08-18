@@ -161,6 +161,7 @@ aws logs put-retention-policy \
 | `DescribeAlarms` | List alarms |
 | `DeleteAlarms` | Delete alarms |
 | `SetAlarmState` | Manually set alarm state |
+| `DescribeInsightRules` | List Contributor Insights rules (empty in the emulator) |
 
 ### Examples
 

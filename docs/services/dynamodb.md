@@ -35,6 +35,12 @@
 | `ExportTableToPointInTime` | Export table data to S3 as gzip NDJSON |
 | `DescribeExport` | Get export status and metadata |
 | `ListExports` | List exports, optionally filtered by table ARN |
+| `PutResourcePolicy` | Attach a resource-based policy to a table |
+| `GetResourcePolicy` | Get a table resource policy |
+| `DeleteResourcePolicy` | Remove a table resource policy |
+| `UpdateContributorInsights` | Enable or disable Contributor Insights |
+| `DescribeContributorInsights` | Get Contributor Insights status |
+| `ListContributorInsights` | List Contributor Insights summaries |
 
 ## Streams {#streams}
 

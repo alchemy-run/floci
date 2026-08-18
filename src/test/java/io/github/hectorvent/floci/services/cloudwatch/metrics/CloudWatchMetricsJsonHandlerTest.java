@@ -166,4 +166,14 @@ class CloudWatchMetricsJsonHandlerTest {
         assertEquals(0, oldResult.get("Datapoints").size(),
                 "metric from 24h ago must not be returned for a 20-second window around now");
     }
+
+    @Test
+    void describeInsightRulesReturnsEmptyList() {
+        ObjectNode req = MAPPER.createObjectNode();
+        Response resp = handler.handle("DescribeInsightRules", req, REGION);
+        assertEquals(200, resp.getStatus());
+        ObjectNode body = (ObjectNode) resp.getEntity();
+        assertTrue(body.path("InsightRules").isArray());
+        assertEquals(0, body.path("InsightRules").size());
+    }
 }

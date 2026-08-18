@@ -101,10 +101,10 @@ Map `ServicePhase2Config`.
 
 ## DynamoDB
 
-| Gap | Evidence | Notes |
-|---|---|---|
-| Disable stream leaves `StreamViewType` | `Table.test.ts` stream-binding case: after `StreamEnabled=false`, describe still returns `KEYS_ONLY` | AWS describe after disable omits the view type (alchemy expects `undefined`). |
-| `DescribeContributorInsights` / `UpdateContributorInsights` | `UnknownOperationException` | Not in the DynamoDB action table. CloudWatch `DescribeInsightRules` is also missing (`UnsupportedOperation`). |
+Patched in this tree (stream spec omitted when disabled, resource policy,
+Contributor Insights, Kinesis `ListTagsForResource`, CloudWatch
+`DescribeInsightRules`). Remaining after the image rebuild: none for
+`Table.test.ts`.
 
 ## Lambda
 
@@ -193,9 +193,11 @@ record fields. Remaining:
 
 ## CloudWatch / CloudWatch Logs
 
+Patched in this tree: `DescribeInsightRules` returns an empty
+`InsightRules` list so DynamoDB Contributor Insights teardown can finish.
+
 | Gap | Evidence | Notes |
 |---|---|---|
-| `DescribeInsightRules` | DynamoDB Contributor Insights teardown | Returns `UnsupportedOperation`. |
 | Log group lifecycle used by Lambda delete | Destroy hang before alchemy skip | Need cheap no-op or fast not-found for `/aws/lambda/*`. |
 
 ## ELBv2

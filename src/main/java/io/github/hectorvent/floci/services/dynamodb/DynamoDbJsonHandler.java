@@ -75,6 +75,12 @@ public class DynamoDbJsonHandler {
             case "ExecuteStatement" -> handleExecuteStatement(request, region);
             case "ExecuteTransaction" -> handleExecuteTransaction(request, region);
             case "BatchExecuteStatement" -> handleBatchExecuteStatement(request, region);
+            case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
+            case "GetResourcePolicy" -> handleGetResourcePolicy(request, region);
+            case "DeleteResourcePolicy" -> handleDeleteResourcePolicy(request, region);
+            case "UpdateContributorInsights" -> handleUpdateContributorInsights(request, region);
+            case "DescribeContributorInsights" -> handleDescribeContributorInsights(request, region);
+            case "ListContributorInsights" -> handleListContributorInsights(request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException", "Operation " + action + " is not supported."))
                     .build();
@@ -204,6 +210,7 @@ public class DynamoDbJsonHandler {
             table.setStreamEnabled(true);
             table.setStreamArn(sd.getStreamArn());
             table.setStreamViewType(viewType);
+            dynamoDbService.persistTable(tableName, table, region);
         }
 
         JsonNode sseSpec = request.path("SSESpecification");
@@ -1244,6 +1251,7 @@ public class DynamoDbJsonHandler {
                 dynamoDbStreamService.disableStream(table.getTableName(), region);
                 table.setStreamEnabled(false);
             }
+            dynamoDbService.persistTable(table.getTableName(), table, region);
         }
 
         ObjectNode response = objectMapper.createObjectNode();
@@ -1554,6 +1562,107 @@ public class DynamoDbJsonHandler {
             tagsArray.add(tagNode);
         }
         response.set("Tags", tagsArray);
+        return Response.ok(response).build();
+    }
+
+    private String requireResourceArn(JsonNode request) {
+        String resourceArn = request.path("ResourceArn").asText(null);
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("ValidationException", "ResourceArn is required", 400);
+        }
+        return resourceArn;
+    }
+
+    private String readPolicyDocument(JsonNode request) {
+        JsonNode policy = request.get("Policy");
+        if (policy == null || policy.isNull() || policy.isMissingNode()) {
+            throw new AwsException("ValidationException", "Policy is required", 400);
+        }
+        return policy.isTextual() ? policy.asText() : policy.toString();
+    }
+
+    private Response handlePutResourcePolicy(JsonNode request, String region) {
+        String resourceArn = requireResourceArn(request);
+        dynamoDbService.putResourcePolicy(resourceArn, readPolicyDocument(request), region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("RevisionId", "1");
+        return Response.ok(response).build();
+    }
+
+    private Response handleGetResourcePolicy(JsonNode request, String region) {
+        String resourceArn = requireResourceArn(request);
+        String policy = dynamoDbService.getResourcePolicy(resourceArn, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("Policy", policy);
+        response.put("RevisionId", "1");
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteResourcePolicy(JsonNode request, String region) {
+        String resourceArn = requireResourceArn(request);
+        dynamoDbService.deleteResourcePolicy(resourceArn, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("RevisionId", "1");
+        return Response.ok(response).build();
+    }
+
+    private String optionalIndexName(JsonNode request) {
+        String indexName = request.path("IndexName").asText(null);
+        return (indexName == null || indexName.isBlank()) ? null : indexName;
+    }
+
+    private Response handleUpdateContributorInsights(JsonNode request, String region) {
+        String tableName = request.path("TableName").asText();
+        String indexName = optionalIndexName(request);
+        String action = request.path("ContributorInsightsAction").asText(null);
+        String status = dynamoDbService.updateContributorInsights(tableName, indexName, action, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("TableName", tableName);
+        if (indexName != null) {
+            response.put("IndexName", indexName);
+        }
+        response.put("ContributorInsightsStatus", status);
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeContributorInsights(JsonNode request, String region) {
+        String tableName = request.path("TableName").asText();
+        String indexName = optionalIndexName(request);
+        String status = dynamoDbService.describeContributorInsights(tableName, indexName, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("TableName", tableName);
+        if (indexName != null) {
+            response.put("IndexName", indexName);
+        }
+        response.put("ContributorInsightsStatus", status);
+        response.putArray("ContributorInsightsRuleList");
+        return Response.ok(response).build();
+    }
+
+    private Response handleListContributorInsights(JsonNode request, String region) {
+        String tableNameFilter = request.path("TableName").asText(null);
+        if (tableNameFilter != null && tableNameFilter.isBlank()) {
+            tableNameFilter = null;
+        }
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode summaries = response.putArray("ContributorInsightsSummaries");
+        for (TableDefinition table : dynamoDbService.listTableDefinitions(region)) {
+            if (tableNameFilter != null && !tableNameFilter.equals(table.getTableName())) {
+                continue;
+            }
+            ObjectNode tableSummary = summaries.addObject();
+            tableSummary.put("TableName", table.getTableName());
+            tableSummary.put("ContributorInsightsStatus", table.getContributorInsightsStatus());
+            for (Map.Entry<String, String> entry : table.getIndexContributorInsightsStatus().entrySet()) {
+                ObjectNode indexSummary = summaries.addObject();
+                indexSummary.put("TableName", table.getTableName());
+                indexSummary.put("IndexName", entry.getKey());
+                indexSummary.put("ContributorInsightsStatus", entry.getValue());
+            }
+        }
         return Response.ok(response).build();
     }
 
@@ -2020,11 +2129,15 @@ public class DynamoDbJsonHandler {
             node.set("LocalSecondaryIndexes", lsiArray);
         }
 
-        if (table.getStreamArn() != null) {
+        if (table.isStreamEnabled()) {
             ObjectNode streamSpecNode = objectMapper.createObjectNode();
-            streamSpecNode.put("StreamEnabled", table.isStreamEnabled());
-            streamSpecNode.put("StreamViewType", table.getStreamViewType());
+            streamSpecNode.put("StreamEnabled", true);
+            if (table.getStreamViewType() != null && !table.getStreamViewType().isBlank()) {
+                streamSpecNode.put("StreamViewType", table.getStreamViewType());
+            }
             node.set("StreamSpecification", streamSpecNode);
+        }
+        if (table.getStreamArn() != null) {
             node.put("LatestStreamArn", table.getStreamArn());
             String label = table.getStreamArn().contains("/stream/")
                     ? table.getStreamArn().substring(table.getStreamArn().lastIndexOf("/stream/") + 8)
