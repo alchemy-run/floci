@@ -32,6 +32,7 @@
 | `DescribeKinesisStreamingDestination` | List Kinesis streaming destinations |
 | `EnableKinesisStreamingDestination` | Enable Kinesis streaming for a table |
 | `DisableKinesisStreamingDestination` | Disable Kinesis streaming for a table |
+| `UpdateKinesisStreamingDestination` | Update destination timestamp precision |
 | `ExportTableToPointInTime` | Export table data to S3 as gzip NDJSON |
 | `DescribeExport` | Get export status and metadata |
 | `ListExports` | List exports, optionally filtered by table ARN |

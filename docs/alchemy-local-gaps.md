@@ -102,9 +102,9 @@ Map `ServicePhase2Config`.
 ## DynamoDB
 
 Patched in this tree (stream spec omitted when disabled, resource policy,
-Contributor Insights, Kinesis `ListTagsForResource`, CloudWatch
-`DescribeInsightRules`). Remaining after the image rebuild: none for
-`Table.test.ts`.
+Contributor Insights, Kinesis destination precision, Kinesis
+`ListTagsForResource`, CloudWatch `DescribeInsightRules`). Remaining
+after the image rebuild: none for `Table.test.ts`.
 
 ## Lambda
 

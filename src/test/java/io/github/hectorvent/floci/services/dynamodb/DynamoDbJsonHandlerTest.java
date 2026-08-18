@@ -449,4 +449,46 @@ class DynamoDbJsonHandlerTest {
         assertEquals("DISABLED", listed.path("ContributorInsightsSummaries").get(0)
                 .path("ContributorInsightsStatus").asText());
     }
+
+    @Test
+    void kinesisStreamingDestinationHonorsApproximateCreationDateTimePrecision() throws Exception {
+        createUsersTable("us-east-1");
+        String streamArn = "arn:aws:kinesis:us-east-1:000000000000:stream/cdc";
+
+        ObjectNode enable = mapper.createObjectNode();
+        enable.put("TableName", "Users");
+        enable.put("StreamArn", streamArn);
+        enable.putObject("EnableKinesisStreamingConfiguration")
+                .put("ApproximateCreationDateTimePrecision", "MICROSECOND");
+        JsonNode enabled = mapper.convertValue(
+                handler.handle("EnableKinesisStreamingDestination", enable, "us-east-1").getEntity(),
+                JsonNode.class);
+        assertEquals("MICROSECOND", enabled.path("EnableKinesisStreamingConfiguration")
+                .path("ApproximateCreationDateTimePrecision").asText());
+
+        ObjectNode describe = mapper.createObjectNode();
+        describe.put("TableName", "Users");
+        JsonNode described = mapper.convertValue(
+                handler.handle("DescribeKinesisStreamingDestination", describe, "us-east-1").getEntity(),
+                JsonNode.class);
+        assertEquals("MICROSECOND", described.path("KinesisDataStreamDestinations").get(0)
+                .path("ApproximateCreationDateTimePrecision").asText());
+
+        ObjectNode update = mapper.createObjectNode();
+        update.put("TableName", "Users");
+        update.put("StreamArn", streamArn);
+        update.putObject("UpdateKinesisStreamingConfiguration")
+                .put("ApproximateCreationDateTimePrecision", "MILLISECOND");
+        JsonNode updated = mapper.convertValue(
+                handler.handle("UpdateKinesisStreamingDestination", update, "us-east-1").getEntity(),
+                JsonNode.class);
+        assertEquals("MILLISECOND", updated.path("UpdateKinesisStreamingConfiguration")
+                .path("ApproximateCreationDateTimePrecision").asText());
+
+        JsonNode afterUpdate = mapper.convertValue(
+                handler.handle("DescribeKinesisStreamingDestination", describe, "us-east-1").getEntity(),
+                JsonNode.class);
+        assertEquals("MILLISECOND", afterUpdate.path("KinesisDataStreamDestinations").get(0)
+                .path("ApproximateCreationDateTimePrecision").asText());
+    }
 }

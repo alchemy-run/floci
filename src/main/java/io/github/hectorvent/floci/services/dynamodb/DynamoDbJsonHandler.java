@@ -69,6 +69,7 @@ public class DynamoDbJsonHandler {
             case "EnableKinesisStreamingDestination" -> handleEnableKinesisStreamingDestination(request, region);
             case "DisableKinesisStreamingDestination" -> handleDisableKinesisStreamingDestination(request, region);
             case "DescribeKinesisStreamingDestination" -> handleDescribeKinesisStreamingDestination(request, region);
+            case "UpdateKinesisStreamingDestination" -> handleUpdateKinesisStreamingDestination(request, region);
             case "ExportTableToPointInTime" -> handleExportTable(request, region);
             case "DescribeExport" -> handleDescribeExport(request, region);
             case "ListExports" -> handleListExports(request, region);
@@ -1674,12 +1675,17 @@ public class DynamoDbJsonHandler {
         String resolvedTableName = table.getTableName();
 
         String streamName = streamArn.substring(streamArn.lastIndexOf('/') + 1);
-        try {
-            kinesisService.describeStream(streamName, region);
-        } catch (AwsException e) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Kinesis stream not found: " + streamArn, 400);
+        if (kinesisService != null) {
+            try {
+                kinesisService.describeStream(streamName, region);
+            } catch (AwsException e) {
+                throw new AwsException("ResourceNotFoundException",
+                        "Kinesis stream not found: " + streamArn, 400);
+            }
         }
+
+        String precision = readApproximateCreationDateTimePrecision(
+                request.path("EnableKinesisStreamingConfiguration"));
 
         Optional<KinesisStreamingDestination> existing = table.findKinesisStreamingDestination(streamArn);
         if (existing.isPresent() && "ACTIVE".equals(existing.get().getDestinationStatus())) {
@@ -1690,8 +1696,11 @@ public class DynamoDbJsonHandler {
         if (existing.isPresent()) {
             existing.get().setDestinationStatus("ACTIVE");
             existing.get().setDestinationStatusDescription("Kinesis streaming is enabled for this table");
+            existing.get().setApproximateCreationDateTimePrecision(precision);
         } else {
-            table.getKinesisStreamingDestinations().add(new KinesisStreamingDestination(streamArn));
+            KinesisStreamingDestination destination = new KinesisStreamingDestination(streamArn);
+            destination.setApproximateCreationDateTimePrecision(precision);
+            table.getKinesisStreamingDestinations().add(destination);
         }
 
         if (!table.isStreamEnabled()) {
@@ -1709,7 +1718,46 @@ public class DynamoDbJsonHandler {
         response.put("StreamArn", streamArn);
         response.put("DestinationStatus", "ACTIVE");
         response.put("DestinationStatusDescription", "Kinesis streaming is enabled for this table");
+        ObjectNode enableConfig = response.putObject("EnableKinesisStreamingConfiguration");
+        enableConfig.put("ApproximateCreationDateTimePrecision", precision);
         return Response.ok(response).build();
+    }
+
+    private Response handleUpdateKinesisStreamingDestination(JsonNode request, String region) {
+        String tableName = request.path("TableName").asText();
+        String streamArn = request.path("StreamArn").asText();
+        String precision = readApproximateCreationDateTimePrecision(
+                request.path("UpdateKinesisStreamingConfiguration"));
+
+        TableDefinition table = dynamoDbService.describeTable(tableName, region);
+        Optional<KinesisStreamingDestination> existing = table.findKinesisStreamingDestination(streamArn);
+        if (existing.isEmpty()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Kinesis streaming destination not found for stream: " + streamArn, 400);
+        }
+
+        existing.get().setApproximateCreationDateTimePrecision(precision);
+        dynamoDbService.persistTable(table.getTableName(), table, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("TableName", table.getTableName());
+        response.put("StreamArn", streamArn);
+        response.put("DestinationStatus", existing.get().getDestinationStatus());
+        ObjectNode updateConfig = response.putObject("UpdateKinesisStreamingConfiguration");
+        updateConfig.put("ApproximateCreationDateTimePrecision", precision);
+        return Response.ok(response).build();
+    }
+
+    private String readApproximateCreationDateTimePrecision(JsonNode config) {
+        String precision = config.path("ApproximateCreationDateTimePrecision").asText(null);
+        if (precision == null || precision.isBlank()) {
+            return "MILLISECOND";
+        }
+        if (!"MILLISECOND".equals(precision) && !"MICROSECOND".equals(precision)) {
+            throw new AwsException("ValidationException",
+                    "ApproximateCreationDateTimePrecision must be MILLISECOND or MICROSECOND", 400);
+        }
+        return precision;
     }
 
     private Response handleDisableKinesisStreamingDestination(JsonNode request, String region) {
