@@ -5,8 +5,12 @@ Alchemy runs its live AWS suites against Floci with `ALCHEMY_TEST_DEV=1`
 book for emulator gaps those suites surface. Control-plane CRUD that already
 works is not listed.
 
-Services with **no Floci implementation** stay remote-only in alchemy
-(`Alchemy.remote()` / live provider). Do not invent stubs here.
+## Policy
+
+- **`UnknownOperationException` / CloudWatch `UnsupportedOperation` = implement the operation.** These are missing handler cases, not environment problems. Add the action to the service handler, store enough in-memory state to satisfy AWS-shaped describe/list/update, write a Floci integration test, and update `docs/services/{service}.md` plus the count in `docs/services/index.md`. Do **not** paper them over with `isLocalEmulator` skips in Alchemy.
+- **Wrong-shape responses** (extra fields, dropped `Condition`, leftover `StreamViewType`) are also patches — match live AWS.
+- **Services with no Floci implementation at all** stay remote-only in Alchemy (`Alchemy.remote()` / live provider). Do not invent a new service here.
+- Alchemy `isLocalEmulator` skips stay only for host/environment issues (port 80, advertised Function URL hostname) until the data plane is actually reachable.
 
 ## S3
 
