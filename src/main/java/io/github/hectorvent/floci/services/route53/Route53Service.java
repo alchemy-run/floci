@@ -20,8 +20,10 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -217,8 +219,8 @@ public class Route53Service {
         HostedZone zone = getHostedZone(hostedZoneId);
         for (QueryLoggingConfig existing : queryLogStore.scan(k -> true)) {
             if (zone.getId().equals(existing.getHostedZoneId())) {
-                throw new AwsException("InvalidInput",
-                        "A query logging config already exists for this hosted zone.", 400);
+                throw new AwsException("QueryLoggingConfigAlreadyExists",
+                        "A query logging config already exists for this hosted zone.", 409);
             }
         }
         String id = UUID.randomUUID().toString();
@@ -291,17 +293,42 @@ public class Route53Service {
     }
 
     public List<HostedZone> listHostedZonesByName(String dnsName, int maxItems) {
+        return listHostedZonesByName(dnsName, null, maxItems);
+    }
+
+    /**
+     * AWS {@code ListHostedZonesByName} order: labels reversed, then
+     * lexicographic (so {@code example.com.} sorts as {@code com.example}).
+     * Pagination starts at {@code dnsName} (inclusive). Same-name public zones
+     * sort before private so {@code MaxItems=1} exact lookups used by Alchemy
+     * ECS domain wiring and HostedZone adoption return the public zone.
+     */
+    public List<HostedZone> listHostedZonesByName(String dnsName, String hostedZoneId, int maxItems) {
         List<HostedZone> all = new ArrayList<>(zoneStore.scan(k -> true));
-        all.sort((a, b) -> a.getName().compareTo(b.getName()));
         for (HostedZone zone : all) {
+            zone.setName(normalizeName(zone.getName()));
             zone.setResourceRecordSetCount(recordCount(zone.getId()));
         }
+        all.sort(hostedZoneByNameOrder());
+
         if (dnsName != null && !dnsName.isEmpty()) {
             String normalized = normalizeName(dnsName);
-            all = all.stream()
-                    .filter(z -> z.getName().compareTo(normalized) >= 0)
-                    .toList();
-            all = new ArrayList<>(all);
+            int start = 0;
+            while (start < all.size() && compareDnsNames(all.get(start).getName(), normalized) < 0) {
+                start++;
+            }
+            all = new ArrayList<>(all.subList(start, all.size()));
+        }
+        if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
+            String id = normalizeZoneId(hostedZoneId);
+            int idx = 0;
+            for (int i = 0; i < all.size(); i++) {
+                if (id.equals(all.get(i).getId())) {
+                    idx = i;
+                    break;
+                }
+            }
+            all = new ArrayList<>(all.subList(idx, all.size()));
         }
         if (maxItems > 0 && all.size() > maxItems) {
             return all.subList(0, maxItems);
@@ -380,9 +407,10 @@ public class Route53Service {
     // ── Changes ───────────────────────────────────────────────────────────────
 
     public ChangeInfo getChange(String changeId) {
-        return changeStore.get(changeId).orElseThrow(() ->
+        String id = normalizeChangeId(changeId);
+        return changeStore.get(id).orElseThrow(() ->
                 new AwsException("NoSuchChange",
-                        "No change found with ID: " + changeId, 404));
+                        "No change found with ID: " + id, 404));
     }
 
     // ── Health Checks ─────────────────────────────────────────────────────────
@@ -483,6 +511,60 @@ public class Route53Service {
         return trimmed;
     }
 
+    static String normalizeChangeId(String id) {
+        if (id == null) return null;
+        if (id.startsWith("/change/")) {
+            return id.substring("/change/".length());
+        }
+        if (id.startsWith("change/")) {
+            return id.substring("change/".length());
+        }
+        return id;
+    }
+
+    static int compareDnsNames(String left, String right) {
+        String[] a = dnsLabels(left);
+        String[] b = dnsLabels(right);
+        int n = Math.min(a.length, b.length);
+        for (int i = 0; i < n; i++) {
+            int cmp = a[i].compareTo(b[i]);
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+        return Integer.compare(a.length, b.length);
+    }
+
+    private static String[] dnsLabels(String name) {
+        String normalized = normalizeName(name).toLowerCase(Locale.ROOT);
+        if (normalized.endsWith(".")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (normalized.isEmpty()) {
+            return new String[0];
+        }
+        String[] labels = normalized.split("\\.");
+        for (int i = 0, j = labels.length - 1; i < j; i++, j--) {
+            String tmp = labels[i];
+            labels[i] = labels[j];
+            labels[j] = tmp;
+        }
+        return labels;
+    }
+
+    private static Comparator<HostedZone> hostedZoneByNameOrder() {
+        return (a, b) -> {
+            int cmp = compareDnsNames(a.getName(), b.getName());
+            if (cmp != 0) {
+                return cmp;
+            }
+            if (a.isPrivateZone() != b.isPrivateZone()) {
+                return a.isPrivateZone() ? 1 : -1;
+            }
+            return a.getId().compareTo(b.getId());
+        };
+    }
+
     private static String generateZoneId() {
         StringBuilder sb = new StringBuilder("Z");
         for (int i = 0; i < 14; i++) {
@@ -557,7 +639,9 @@ public class Route53Service {
         }
         if ("DELETE".equals(action)) {
             boolean found = current.stream().anyMatch(r ->
-                    r.getName().equals(rrs.getName()) && r.getType().equals(rrs.getType()));
+                    r.getName().equals(rrs.getName()) &&
+                    r.getType().equals(rrs.getType()) &&
+                    equalOrNull(r.getSetIdentifier(), rrs.getSetIdentifier()));
             if (!found) {
                 throw new AwsException("InvalidChangeBatch",
                         "Tried to delete resource record set [name='" + rrs.getName() +

@@ -22,7 +22,10 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
@@ -173,12 +176,14 @@ public class Route53Controller {
 
     @GET
     @Path("/hostedzonesbyname")
-    public Response listHostedZonesByName(@QueryParam("dnsname") String dnsName,
-                                           @QueryParam("maxitems") @DefaultValue("100") int maxItems) {
+    public Response listHostedZonesByName(@Context UriInfo uriInfo) {
         try {
-            List<HostedZone> zones = service.listHostedZonesByName(dnsName, maxItems);
-            long total = service.getHostedZoneCount();
-            boolean truncated = zones.size() == maxItems && zones.size() < total;
+            String dnsName = queryParam(uriInfo, "dnsname", "DNSName", "dnsName");
+            String hostedZoneId = queryParam(uriInfo, "hostedzoneid", "HostedZoneId", "hostedZoneId");
+            int maxItems = queryInt(uriInfo, 100, "maxitems", "MaxItems", "maxItems");
+            List<HostedZone> fetched = service.listHostedZonesByName(dnsName, hostedZoneId, maxItems + 1);
+            boolean truncated = fetched.size() > maxItems;
+            List<HostedZone> zones = truncated ? fetched.subList(0, maxItems) : fetched;
 
             XmlBuilder xml = new XmlBuilder()
                     .start("ListHostedZonesByNameResponse", NS)
@@ -191,6 +196,14 @@ public class Route53Controller {
                .elem("MaxItems", String.valueOf(maxItems));
             if (dnsName != null && !dnsName.isEmpty()) {
                 xml.elem("DNSName", dnsName);
+            }
+            if (hostedZoneId != null && !hostedZoneId.isEmpty()) {
+                xml.elem("HostedZoneId", hostedZoneId);
+            }
+            if (truncated && !zones.isEmpty()) {
+                HostedZone next = fetched.get(maxItems);
+                xml.elem("NextDNSName", next.getName())
+                   .elem("NextHostedZoneId", next.getId());
             }
             xml.end("ListHostedZonesByNameResponse");
 
@@ -707,6 +720,8 @@ public class Route53Controller {
     public Response getHealthCheckLastFailureReason(@PathParam("HealthCheckId") String id) {
         try {
             service.getHealthCheck(id);
+            // A never-failed check has no observations. Distilled still requires
+            // the HealthCheckObservations wrapper so `.length` is 0, not missing.
             String xml = new XmlBuilder()
                     .start("GetHealthCheckLastFailureReasonResponse", NS)
                     .start("HealthCheckObservations")
@@ -902,6 +917,39 @@ public class Route53Controller {
                 .end("ErrorResponse")
                 .build();
         return Response.status(e.getHttpStatus()).type(XML).entity(xml).build();
+    }
+
+    private static String queryParam(UriInfo uriInfo, String... names) {
+        MultivaluedMap<String, String> params = uriInfo.getQueryParameters();
+        for (String name : names) {
+            String value = params.getFirst(name);
+            if (value != null && !value.isEmpty()) {
+                return value;
+            }
+        }
+        for (String key : params.keySet()) {
+            for (String name : names) {
+                if (key != null && key.equalsIgnoreCase(name)) {
+                    String value = params.getFirst(key);
+                    if (value != null && !value.isEmpty()) {
+                        return value;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static int queryInt(UriInfo uriInfo, int fallback, String... names) {
+        String raw = queryParam(uriInfo, names);
+        if (raw == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     // ── Request parsers ───────────────────────────────────────────────────────

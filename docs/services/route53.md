@@ -52,7 +52,11 @@ Route53 management-plane emulation. Supports hosted zones, resource record sets,
 - Tags are supported for both `hostedzone` and `healthcheck` resource types.
 - Private hosted zones store associated VPCs. `CreateHostedZone` with a `VPC` block marks the zone private and attaches that VPC. Same-account `AssociateVPCWithHostedZone` is allowed without a prior authorization.
 - `TestDNSAnswer` resolves against stored record sets (management-plane only — no real DNS).
-- Routing records persist `Weight`, `Failover`, `Region`, alias targets, `GeoLocation`, `GeoProximityLocation`, and `CidrRoutingConfig`.
+- Routing records persist `Weight`, `Failover`, `Region`, alias targets, `GeoLocation`, `GeoProximityLocation`, and `CidrRoutingConfig`. `DELETE` matches `SetIdentifier` so weighted/failover pairs can be removed independently.
+- `ListHostedZonesByName` uses AWS DNS order (reversed labels), starts at `dnsname` (case-insensitive query param), and sorts public zones before private for the same name. `MaxItems=1` exact-name lookups therefore return the zone that was just created — required by Alchemy ECS `domain:` hosted-zone discovery.
+- `CreateQueryLoggingConfig` rejects a second config on the same zone with `QueryLoggingConfigAlreadyExists` (409). `HostedZoneId` is stored/returned as the bare zone id.
+- `GetChange` accepts both `C…` and `/change/C…` ids.
+- `GetHealthCheckLastFailureReason` returns an empty `HealthCheckObservations` list for a never-failed check.
 
 ## Default Nameservers
 
