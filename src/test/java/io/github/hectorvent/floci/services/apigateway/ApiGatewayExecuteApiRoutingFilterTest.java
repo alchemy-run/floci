@@ -39,7 +39,7 @@ class ApiGatewayExecuteApiRoutingFilterTest {
 
         assertEquals("echo", ApiGatewayExecuteApiRoutingFilter.remainingAfterStage(
                 "/echo", "$default", "HTTP"));
-        assertEquals("items", ApiGatewayExecuteApiRoutingFilter.remainingAfterStage(
+        assertEquals("/items", ApiGatewayExecuteApiRoutingFilter.remainingAfterStage(
                 "/prod/items", "prod", "HTTP"));
     }
 
