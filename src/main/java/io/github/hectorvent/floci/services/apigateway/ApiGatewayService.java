@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.apigateway;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -899,6 +900,38 @@ public class ApiGatewayService {
     public void deleteUsagePlanKey(String region, String usagePlanId, String keyId) {
         getUsagePlanKey(region, usagePlanId, keyId);
         usagePlanKeyStore.delete(usagePlanKeyPathKey(region, usagePlanId, keyId));
+    }
+
+    public record UsageSnapshot(
+            String usagePlanId,
+            String startDate,
+            String endDate,
+            Map<String, List<List<Integer>>> values
+    ) {}
+
+    public UsageSnapshot getUsage(String region, String usagePlanId, String keyId,
+                                  String startDate, String endDate) {
+        UsagePlan plan = getUsagePlan(region, usagePlanId);
+        if (startDate == null || startDate.isBlank() || endDate == null || endDate.isBlank()) {
+            throw new AwsException("BadRequestException",
+                    "startDate and endDate are required", 400);
+        }
+        Map<String, List<List<Integer>>> values = new LinkedHashMap<>();
+        if (keyId != null && !keyId.isBlank()) {
+            values.put(keyId, List.of(List.of(0, 0)));
+        }
+        return new UsageSnapshot(plan.getId(), startDate, endDate, values);
+    }
+
+    public UsageSnapshot updateUsage(String region, String usagePlanId, String keyId,
+                                     List<Map<String, String>> patchOperations) {
+        UsagePlan plan = getUsagePlan(region, usagePlanId);
+        getUsagePlanKey(region, usagePlanId, keyId);
+        if (plan.getQuota() == null || plan.getQuota().getLimit() == null) {
+            throw new AwsException("BadRequestException",
+                    "Usage plan does not have a quota limit", 400);
+        }
+        return new UsageSnapshot(plan.getId(), null, null, Map.of(keyId, List.of(List.of(0, 0))));
     }
 
     // ──────────────────────────── Request Validators ────────────────────────────

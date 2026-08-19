@@ -328,12 +328,15 @@ public class ApiGatewayController {
 
     @GET
     @Path("/restapis/{apiId}/resources")
-    public Response getResources(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
+    public Response getResources(@Context HttpHeaders headers,
+                                 @PathParam("apiId") String apiId,
+                                 @QueryParam("embed") List<String> embed) {
         String region = regionResolver.resolveRegion(headers);
         List<ApiGatewayResource> resources = service.getResources(region, apiId);
+        boolean embedMethods = embedsMethods(embed);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("item");
-        resources.forEach(r -> items.add(toResourceNode(r)));
+        resources.forEach(r -> items.add(toResourceNode(r, embedMethods)));
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -341,9 +344,10 @@ public class ApiGatewayController {
     @Path("/restapis/{apiId}/resources/{resourceId}")
     public Response getResource(@Context HttpHeaders headers,
                                 @PathParam("apiId") String apiId,
-                                @PathParam("resourceId") String resourceId) {
+                                @PathParam("resourceId") String resourceId,
+                                @QueryParam("embed") List<String> embed) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toResourceNode(service.getResource(region, apiId, resourceId))).build();
+        return Response.ok(toResourceNode(service.getResource(region, apiId, resourceId), embedsMethods(embed))).build();
     }
 
     @PATCH
@@ -782,6 +786,29 @@ public class ApiGatewayController {
         String region = regionResolver.resolveRegion(headers);
         service.deleteUsagePlanKey(region, usagePlanId, keyId);
         return Response.accepted().build();
+    }
+
+    @GET
+    @Path("/usageplans/{usagePlanId}/usage")
+    public Response getUsage(@Context HttpHeaders headers,
+                             @PathParam("usagePlanId") String usagePlanId,
+                             @QueryParam("keyId") String keyId,
+                             @QueryParam("startDate") String startDate,
+                             @QueryParam("endDate") String endDate) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(toUsageNode(service.getUsage(region, usagePlanId, keyId, startDate, endDate)).toString())
+                .type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @PATCH
+    @Path("/usageplans/{usagePlanId}/keys/{keyId}/usage")
+    public Response updateUsage(@Context HttpHeaders headers,
+                                @PathParam("usagePlanId") String usagePlanId,
+                                @PathParam("keyId") String keyId,
+                                String body) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(toUsageNode(service.updateUsage(region, usagePlanId, keyId, parsePatchOperations(body))).toString())
+                .type(MediaType.APPLICATION_JSON).build();
     }
 
     // ──────────────────────────── Request Validators (v1) ────────────────────────────
@@ -1873,12 +1900,63 @@ public class ApiGatewayController {
         return node;
     }
 
+    private static boolean embedsMethods(List<String> embed) {
+        if (embed == null) {
+            return false;
+        }
+        return embed.stream().anyMatch(value ->
+                value != null && (value.equalsIgnoreCase("methods")
+                        || value.contains("resourceMethods")
+                        || value.equalsIgnoreCase("item")));
+    }
+
     private ObjectNode toResourceNode(ApiGatewayResource r) {
+        return toResourceNode(r, false);
+    }
+
+    private ObjectNode toResourceNode(ApiGatewayResource r, boolean embedMethods) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("id", r.getId());
         if (r.getParentId() != null) node.put("parentId", r.getParentId());
         if (r.getPathPart() != null) node.put("pathPart", r.getPathPart());
         node.put("path", r.getPath());
+        Map<String, MethodConfig> methods = r.getResourceMethods();
+        if (methods != null && !methods.isEmpty()) {
+            ObjectNode methodsNode = node.putObject("resourceMethods");
+            methods.forEach((verb, method) -> {
+                if (embedMethods && method != null) {
+                    methodsNode.set(verb, toMethodNode(method));
+                } else {
+                    methodsNode.set(verb, objectMapper.createObjectNode());
+                }
+            });
+        }
+        return node;
+    }
+
+    private ObjectNode toUsageNode(ApiGatewayService.UsageSnapshot usage) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("usagePlanId", usage.usagePlanId());
+        if (usage.startDate() != null) {
+            node.put("startDate", usage.startDate());
+        }
+        if (usage.endDate() != null) {
+            node.put("endDate", usage.endDate());
+        }
+        ObjectNode values = node.putObject("values");
+        if (usage.values() != null) {
+            usage.values().forEach((keyId, series) -> {
+                ArrayNode keyValues = values.putArray(keyId);
+                if (series != null) {
+                    series.forEach(point -> {
+                        ArrayNode pair = keyValues.addArray();
+                        if (point != null) {
+                            point.forEach(pair::add);
+                        }
+                    });
+                }
+            });
+        }
         return node;
     }
 
@@ -2210,11 +2288,16 @@ public class ApiGatewayController {
         node.put("stageName", s.getStageName());
         if (s.getDeploymentId() != null) node.put("deploymentId", s.getDeploymentId());
         node.put("autoDeploy", s.isAutoDeploy());
+        if (s.getDescription() != null) node.put("description", s.getDescription());
         node.put("createdDate", java.time.Instant.ofEpochMilli(s.getCreatedDate()).toString());
         node.put("lastUpdatedDate", java.time.Instant.ofEpochMilli(s.getLastUpdatedDate()).toString());
         if (s.getStageVariables() != null) {
             ObjectNode stageVariables = node.putObject("stageVariables");
             s.getStageVariables().forEach(stageVariables::put);
+        }
+        if (s.getTags() != null && !s.getTags().isEmpty()) {
+            ObjectNode tagsNode = node.putObject("tags");
+            s.getTags().forEach(tagsNode::put);
         }
         return node;
     }

@@ -53,7 +53,7 @@ duplicate override IDs.
 | **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, FlushStageCache, FlushStageAuthorizersCache |
 | **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers, UpdateAuthorizer, DeleteAuthorizer |
 | **API Keys** | CreateApiKey, GetApiKey, GetApiKeys, UpdateApiKey, DeleteApiKey |
-| **Usage Plans** | CreateUsagePlan, GetUsagePlan, GetUsagePlans, UpdateUsagePlan, DeleteUsagePlan |
+| **Usage Plans** | CreateUsagePlan, GetUsagePlan, GetUsagePlans, UpdateUsagePlan, DeleteUsagePlan, GetUsage, UpdateUsage |
 | **Usage Plan Keys** | CreateUsagePlanKey, GetUsagePlanKey, GetUsagePlanKeys, DeleteUsagePlanKey |
 | **Request Validators** | CreateRequestValidator, GetRequestValidator, GetRequestValidators, DeleteRequestValidator |
 | **Models** | CreateModel, GetModel, GetModels, DeleteModel |
@@ -64,7 +64,27 @@ duplicate override IDs.
 | **Account** | GetAccount, UpdateAccount |
 | **Tags** | TagResource, UntagResource, GetTags (ListTagsForResource) |
 
-`CreateRestApi` / `UpdateRestApi` persist `binaryMediaTypes` (JSON Pointer `/binaryMediaTypes/{type}`). Usage plans persist `throttle` and `quota`. Flush-cache operations are no-ops after the stage is confirmed to exist.
+`CreateRestApi` / `UpdateRestApi` persist `binaryMediaTypes` (JSON Pointer `/binaryMediaTypes/{type}`). Usage plans persist `throttle` and `quota`. `GetResources` / `GetResource` return `resourceMethods` (empty objects, or full method snapshots when `embed=methods`). `GetUsage` returns an AWS-shaped empty `values` map; `UpdateUsage` is `BadRequestException` when the plan has no quota. Flush-cache operations are no-ops after the stage is confirmed to exist.
+
+### Execute-API virtual host {#execute-api-virtual-host}
+
+Alchemy tests (and real AWS clients) invoke deployed APIs at
+`https://{apiId}.execute-api.{region}.amazonaws.com/{stage}/{path}` (REST) or
+`https://{apiId}.execute-api.{region}.amazonaws.com/{path}` (HTTP `$default`).
+The gateway accepts those Host headers on `:4566` and rewrites them to
+`/execute-api/{apiId}/{stage}/{path}`, the same path-style dispatcher used by
+`/_user_request_` and `/_aws/execute-api/`. HTTP `$default` omits the stage from
+the URL; a first-segment match against an existing named stage wins.
+
+WebSocket clients still connect at `ws://localhost:4566/ws/{apiId}/{stage}`.
+`wss://{apiId}.execute-api.{region}.amazonaws.com/{stage}` is the advertised
+AWS shape. Alchemy's test HttpClient rewrite does not apply to the `ws`
+package, so host-side `wss://*.execute-api.*.amazonaws.com` connections never
+reach the gateway (platform / test-harness, not a missing control-plane op).
+
+v2 stages persist `description` and `tags`. `TagResource` / `GetTags` /
+`UntagResource` accept stage ARNs (`…/apis/{apiId}/stages/{stageName}`) as
+well as API ARNs.
 
 ### Not Implemented
 

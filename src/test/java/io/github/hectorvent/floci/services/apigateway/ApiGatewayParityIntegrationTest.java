@@ -218,7 +218,7 @@ class ApiGatewayParityIntegrationTest {
                 .then()
                 .statusCode(200)
                 .body("openapi", equalTo("3.0.1"))
-                .body("paths./ping.get.operationId", notNullValue());
+                .body("paths.'/ping'.get.operationId", notNullValue());
 
         given().contentType(ContentType.JSON)
                 .body("{\"stageName\":\"$default\",\"autoDeploy\":true}")
@@ -253,6 +253,119 @@ class ApiGatewayParityIntegrationTest {
                 .body("items.domainName", hasItem("parity.example.com"));
 
         given().when().delete("/v2/domainnames/parity.example.com").then().statusCode(204);
+        given().when().delete("/v2/apis/" + apiId).then().statusCode(204);
+    }
+
+    @Test
+    void getResourcesEmbedsMethodsAndUsageRoundTrip() {
+        String apiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"parity-embed-api\"}")
+                .when().post("/restapis")
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        String rootId = given()
+                .when().get("/restapis/" + apiId + "/resources")
+                .then()
+                .statusCode(200)
+                .extract().path("item[0].id");
+
+        given().contentType(ContentType.JSON)
+                .body("{\"authorizationType\":\"NONE\"}")
+                .when().put("/restapis/" + apiId + "/resources/" + rootId + "/methods/GET")
+                .then()
+                .statusCode(201);
+
+        given().when().get("/restapis/" + apiId + "/resources")
+                .then()
+                .statusCode(200)
+                .body("item[0].resourceMethods.GET", notNullValue());
+
+        given().when().get("/restapis/" + apiId + "/resources?embed=methods")
+                .then()
+                .statusCode(200)
+                .body("item[0].resourceMethods.GET.httpMethod", equalTo("GET"))
+                .body("item[0].resourceMethods.GET.authorizationType", equalTo("NONE"));
+
+        String planId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"parity-usage-plan\"}")
+                .when().post("/usageplans")
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        String keyId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"parity-usage-key\",\"enabled\":true}")
+                .when().post("/apikeys")
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        given().contentType(ContentType.JSON)
+                .body("{\"keyId\":\"" + keyId + "\",\"keyType\":\"API_KEY\"}")
+                .when().post("/usageplans/" + planId + "/keys")
+                .then()
+                .statusCode(201);
+
+        given().when().get("/usageplans/" + planId + "/usage?startDate=2026-08-19&endDate=2026-08-19")
+                .then()
+                .statusCode(200)
+                .body("usagePlanId", equalTo(planId))
+                .body("values", notNullValue());
+
+        given().contentType(ContentType.JSON)
+                .body("{\"patchOperations\":[{\"op\":\"replace\",\"path\":\"/remaining\",\"value\":\"100\"}]}")
+                .when().patch("/usageplans/" + planId + "/keys/" + keyId + "/usage")
+                .then()
+                .statusCode(400);
+
+        given().when().delete("/usageplans/" + planId).then().statusCode(202);
+        given().when().delete("/apikeys/" + keyId).then().statusCode(202);
+        given().when().delete("/restapis/" + apiId).then().statusCode(202);
+    }
+
+    @Test
+    void v2StagePersistsDescription() {
+        String apiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"parity-stage-desc\",\"protocolType\":\"HTTP\"}")
+                .when().post("/v2/apis")
+                .then()
+                .statusCode(201)
+                .extract().path("apiId");
+
+        given().contentType(ContentType.JSON)
+                .body("{\"stageName\":\"$default\",\"autoDeploy\":true,\"description\":\"primitives\",\"tags\":{\"owner\":\"alchemy\"}}")
+                .when().post("/v2/apis/" + apiId + "/stages")
+                .then()
+                .statusCode(201)
+                .body("description", equalTo("primitives"))
+                .body("tags.owner", equalTo("alchemy"));
+
+        given().when().get("/v2/apis/" + apiId + "/stages/$default")
+                .then()
+                .statusCode(200)
+                .body("autoDeploy", equalTo(true))
+                .body("description", equalTo("primitives"))
+                .body("tags.owner", equalTo("alchemy"));
+
+        String stageArn = "arn:aws:apigateway:us-east-1::/apis/" + apiId + "/stages/$default";
+        given().contentType(ContentType.JSON)
+                .body("{\"tags\":{\"env\":\"test\"}}")
+                .when().post("/v2/tags/" + stageArn)
+                .then()
+                .statusCode(201);
+
+        given().when().get("/v2/tags/" + stageArn)
+                .then()
+                .statusCode(200)
+                .body("tags.owner", equalTo("alchemy"))
+                .body("tags.env", equalTo("test"));
+
         given().when().delete("/v2/apis/" + apiId).then().statusCode(204);
     }
 }
