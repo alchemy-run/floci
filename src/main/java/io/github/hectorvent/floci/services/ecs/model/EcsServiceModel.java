@@ -31,6 +31,7 @@ public class EcsServiceModel {
     private DeploymentConfiguration deploymentConfiguration;
     private Integer healthCheckGracePeriodSeconds;
     private List<CapacityProviderStrategyItem> capacityProviderStrategy;
+    private List<ServiceRegistry> serviceRegistries;
 
     public String getServiceArn() { return serviceArn; }
     public void setServiceArn(String serviceArn) { this.serviceArn = serviceArn; }
@@ -96,5 +97,10 @@ public class EcsServiceModel {
     public List<CapacityProviderStrategyItem> getCapacityProviderStrategy() { return capacityProviderStrategy; }
     public void setCapacityProviderStrategy(List<CapacityProviderStrategyItem> capacityProviderStrategy) {
         this.capacityProviderStrategy = capacityProviderStrategy;
+    }
+
+    public List<ServiceRegistry> getServiceRegistries() { return serviceRegistries; }
+    public void setServiceRegistries(List<ServiceRegistry> serviceRegistries) {
+        this.serviceRegistries = serviceRegistries;
     }
 }

@@ -135,10 +135,14 @@ action notifications and docker-push to `amazonaws.com` URIs remain.
 ## ECS
 
 No missing operations. Source now round-trips task-def/service fields
-(logConfiguration, dependsOn, circuit breaker, FARGATE_SPOT, …). Cluster,
-Service, Task, TaskDefinition already dual; CapacityProvider now dual.
-Remaining: EC2 `SubnetNotFound`, Route53 `elb.localhost.floci.io`, Cloud
-Map `ServicePhase2Config`.
+(logConfiguration, dependsOn, circuit breaker, FARGATE_SPOT, container
+`healthCheck`, `serviceRegistries`, …). Cluster, Service, Task,
+TaskDefinition already dual; CapacityProvider now dual.
+Remaining: EC2 `InvalidVpcID.NotFound` / hung subnet create (Bindings),
+Route53 hosted-zone lookup (`ServiceHostedZoneNotFound` after local
+`CreateHostedZone`), ELBv2 Listener `InternalFailure`, Cloud Map + EFS
+on `ServicePhase2Config`, AAS unstamped-row delete, stale live-AWS
+`delete (remote)` / `ServiceNotActiveException`, ECR repo-name pattern.
 
 ## DynamoDB
 

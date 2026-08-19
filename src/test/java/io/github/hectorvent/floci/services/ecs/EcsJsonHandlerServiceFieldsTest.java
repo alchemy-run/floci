@@ -18,7 +18,8 @@ import static org.mockito.Mockito.when;
 /**
  * Create/UpdateService must persist and return the control-plane fields Alchemy
  * asserts: {@code deploymentConfiguration.deploymentCircuitBreaker},
- * {@code healthCheckGracePeriodSeconds}, and {@code capacityProviderStrategy}.
+ * {@code healthCheckGracePeriodSeconds}, {@code capacityProviderStrategy},
+ * and {@code serviceRegistries}.
  */
 class EcsJsonHandlerServiceFieldsTest {
 
@@ -61,6 +62,13 @@ class EcsJsonHandlerServiceFieldsTest {
                   "healthCheckGracePeriodSeconds": 45,
                   "capacityProviderStrategy": [
                     {"capacityProvider": "FARGATE_SPOT", "weight": 1, "base": 0}
+                  ],
+                  "serviceRegistries": [
+                    {
+                      "registryArn": "arn:aws:servicediscovery:us-east-1:000000000000:service/srv-phase2",
+                      "containerName": "app",
+                      "containerPort": 8080
+                    }
                   ]
                 }
                 """);
@@ -73,6 +81,10 @@ class EcsJsonHandlerServiceFieldsTest {
         assertEquals("FARGATE_SPOT",
                 svc.path("capacityProviderStrategy").get(0).path("capacityProvider").asText());
         assertEquals(1, svc.path("capacityProviderStrategy").get(0).path("weight").asInt());
+        assertEquals("arn:aws:servicediscovery:us-east-1:000000000000:service/srv-phase2",
+                svc.path("serviceRegistries").get(0).path("registryArn").asText());
+        assertEquals("app", svc.path("serviceRegistries").get(0).path("containerName").asText());
+        assertEquals(8080, svc.path("serviceRegistries").get(0).path("containerPort").asInt());
     }
 
     @Test

@@ -22,6 +22,7 @@ public class ContainerDefinition {
     private LogConfiguration logConfiguration;
     private List<ContainerDependency> dependsOn;
     private List<EnvironmentFile> environmentFiles;
+    private HealthCheck healthCheck;
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
@@ -67,4 +68,7 @@ public class ContainerDefinition {
 
     public List<EnvironmentFile> getEnvironmentFiles() { return environmentFiles; }
     public void setEnvironmentFiles(List<EnvironmentFile> environmentFiles) { this.environmentFiles = environmentFiles; }
+
+    public HealthCheck getHealthCheck() { return healthCheck; }
+    public void setHealthCheck(HealthCheck healthCheck) { this.healthCheck = healthCheck; }
 }

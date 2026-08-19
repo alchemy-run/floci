@@ -18,10 +18,11 @@ import static org.mockito.Mockito.when;
 
 /**
  * Register/DescribeTaskDefinition must round-trip the control-plane fields
- * Alchemy's Task / TaskDefinition suite asserts: {@code logConfiguration},
- * {@code command}, {@code dependsOn}, {@code environmentFiles},
- * {@code runtimePlatform}, {@code ephemeralStorage}, and top-level {@code tags}
- * when {@code include} contains {@code TAGS}.
+ * Alchemy's Task / TaskDefinition / ServicePhase2Config suites assert:
+ * {@code logConfiguration}, {@code command}, {@code dependsOn},
+ * {@code environmentFiles}, {@code healthCheck}, {@code runtimePlatform},
+ * {@code ephemeralStorage}, and top-level {@code tags} when {@code include}
+ * contains {@code TAGS}.
  */
 class EcsJsonHandlerTaskDefinitionFieldsTest {
 
@@ -68,7 +69,14 @@ class EcsJsonHandlerTaskDefinitionFieldsTest {
                         }
                       },
                       "dependsOn": [{"containerName": "sidecar", "condition": "START"}],
-                      "environmentFiles": [{"value": "arn:aws:s3:::bucket/app.env", "type": "s3"}]
+                      "environmentFiles": [{"value": "arn:aws:s3:::bucket/app.env", "type": "s3"}],
+                      "healthCheck": {
+                        "command": ["CMD-SHELL", "exit 0"],
+                        "interval": 30,
+                        "timeout": 5,
+                        "retries": 3,
+                        "startPeriod": 10
+                      }
                     },
                     {
                       "name": "sidecar",
@@ -96,6 +104,12 @@ class EcsJsonHandlerTaskDefinitionFieldsTest {
         assertEquals("arn:aws:s3:::bucket/app.env",
                 app.path("environmentFiles").get(0).path("value").asText());
         assertEquals("s3", app.path("environmentFiles").get(0).path("type").asText());
+        assertEquals("CMD-SHELL", app.path("healthCheck").path("command").get(0).asText());
+        assertEquals("exit 0", app.path("healthCheck").path("command").get(1).asText());
+        assertEquals(30, app.path("healthCheck").path("interval").asInt());
+        assertEquals(5, app.path("healthCheck").path("timeout").asInt());
+        assertEquals(3, app.path("healthCheck").path("retries").asInt());
+        assertEquals(10, app.path("healthCheck").path("startPeriod").asInt());
 
         JsonNode sidecar = td.path("containerDefinitions").get(1);
         assertEquals("sidecar", sidecar.path("name").asText());

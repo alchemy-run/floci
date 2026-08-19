@@ -15,6 +15,7 @@ import io.github.hectorvent.floci.services.ecs.model.DeploymentConfiguration;
 import io.github.hectorvent.floci.services.ecs.model.EnvironmentFile;
 import io.github.hectorvent.floci.services.ecs.model.EphemeralStorage;
 import io.github.hectorvent.floci.services.ecs.model.Failure;
+import io.github.hectorvent.floci.services.ecs.model.HealthCheck;
 import io.github.hectorvent.floci.services.ecs.model.ContainerOverride;
 import io.github.hectorvent.floci.services.ecs.model.EcsCluster;
 import io.github.hectorvent.floci.services.ecs.model.EcsLoadBalancer;
@@ -31,6 +32,7 @@ import io.github.hectorvent.floci.services.ecs.model.PortMapping;
 import io.github.hectorvent.floci.services.ecs.model.ProtectedTask;
 import io.github.hectorvent.floci.services.ecs.model.RuntimePlatform;
 import io.github.hectorvent.floci.services.ecs.model.ServiceDeployment;
+import io.github.hectorvent.floci.services.ecs.model.ServiceRegistry;
 import io.github.hectorvent.floci.services.ecs.model.ServiceRevision;
 import io.github.hectorvent.floci.services.ecs.model.Secret;
 import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
@@ -1126,6 +1128,9 @@ public class EcsJsonHandler {
             }
             n.set("environmentFiles", files);
         }
+        if (def.getHealthCheck() != null && def.getHealthCheck().command() != null) {
+            n.set("healthCheck", healthCheckNode(def.getHealthCheck()));
+        }
 
         return n;
     }
@@ -1245,6 +1250,18 @@ public class EcsJsonHandler {
                 strategy.add(i);
             }
             n.set("capacityProviderStrategy", strategy);
+        }
+        if (s.getServiceRegistries() != null && !s.getServiceRegistries().isEmpty()) {
+            ArrayNode registries = objectMapper.createArrayNode();
+            for (ServiceRegistry registry : s.getServiceRegistries()) {
+                ObjectNode r = objectMapper.createObjectNode();
+                if (registry.registryArn() != null) { r.put("registryArn", registry.registryArn()); }
+                if (registry.port() != null) { r.put("port", registry.port()); }
+                if (registry.containerName() != null) { r.put("containerName", registry.containerName()); }
+                if (registry.containerPort() != null) { r.put("containerPort", registry.containerPort()); }
+                registries.add(r);
+            }
+            n.set("serviceRegistries", registries);
         }
         ArrayNode deployments = objectMapper.createArrayNode();
         service.deploymentsFor(s).forEach(d -> deployments.add(deploymentNode(d)));
@@ -1444,8 +1461,53 @@ public class EcsJsonHandler {
                         f.path("type").asText(null))));
                 def.setEnvironmentFiles(files);
             }
+            if (item.has("healthCheck")) {
+                def.setHealthCheck(parseHealthCheck(item.path("healthCheck")));
+            }
 
             result.add(def);
+        }
+        return result;
+    }
+
+    private HealthCheck parseHealthCheck(JsonNode node) {
+        if (node == null || !node.isObject() || !node.has("command") || !node.path("command").isArray()) {
+            return null;
+        }
+        List<String> command = new ArrayList<>();
+        node.path("command").forEach(c -> command.add(c.asText()));
+        Integer interval = node.has("interval") ? node.path("interval").asInt() : null;
+        Integer timeout = node.has("timeout") ? node.path("timeout").asInt() : null;
+        Integer retries = node.has("retries") ? node.path("retries").asInt() : null;
+        Integer startPeriod = node.has("startPeriod") ? node.path("startPeriod").asInt() : null;
+        return new HealthCheck(command, interval, timeout, retries, startPeriod);
+    }
+
+    private ObjectNode healthCheckNode(HealthCheck check) {
+        ObjectNode n = objectMapper.createObjectNode();
+        ArrayNode command = objectMapper.createArrayNode();
+        if (check.command() != null) {
+            check.command().forEach(command::add);
+        }
+        n.set("command", command);
+        if (check.interval() != null) { n.put("interval", check.interval()); }
+        if (check.timeout() != null) { n.put("timeout", check.timeout()); }
+        if (check.retries() != null) { n.put("retries", check.retries()); }
+        if (check.startPeriod() != null) { n.put("startPeriod", check.startPeriod()); }
+        return n;
+    }
+
+    private List<ServiceRegistry> parseServiceRegistries(JsonNode node) {
+        List<ServiceRegistry> result = new ArrayList<>();
+        if (node == null || !node.isArray()) {
+            return result;
+        }
+        for (JsonNode item : node) {
+            result.add(new ServiceRegistry(
+                    item.hasNonNull("registryArn") ? item.path("registryArn").asText() : null,
+                    item.hasNonNull("port") ? item.path("port").asInt() : null,
+                    item.hasNonNull("containerName") ? item.path("containerName").asText() : null,
+                    item.hasNonNull("containerPort") ? item.path("containerPort").asInt() : null));
         }
         return result;
     }
@@ -1517,6 +1579,9 @@ public class EcsJsonHandler {
         }
         if (req.has("capacityProviderStrategy") && req.path("capacityProviderStrategy").isArray()) {
             svc.setCapacityProviderStrategy(parseCapacityProviderStrategy(req.path("capacityProviderStrategy")));
+        }
+        if (req.has("serviceRegistries") && req.path("serviceRegistries").isArray()) {
+            svc.setServiceRegistries(parseServiceRegistries(req.path("serviceRegistries")));
         }
     }
 
