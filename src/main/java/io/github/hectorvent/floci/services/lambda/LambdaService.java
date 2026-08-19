@@ -586,6 +586,29 @@ public class LambdaService {
         return fn;
     }
 
+    /**
+     * DeleteFunction with a numeric Qualifier removes ONLY that published
+     * version (AWS semantics); the unqualified form deletes the function and
+     * every version. Deleting {@code $LATEST} by qualifier is invalid on AWS.
+     */
+    public void deleteFunction(String region, String functionName, String qualifier) {
+        if (qualifier == null || qualifier.isBlank()) {
+            deleteFunction(region, functionName);
+            return;
+        }
+        if ("$LATEST".equals(qualifier)) {
+            throw new AwsException("InvalidParameterValueException",
+                    "$LATEST version cannot be deleted without deleting the function.", 400);
+        }
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(functionName);
+        enforceRegion(region, ref);
+        LambdaFunction version = functionStore.get(region, ref.name(), qualifier)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Function version not found: " + ref.name() + ":" + qualifier, 404));
+        functionStore.deleteVersion(region, ref.name(), version.getVersion());
+        LOG.infov("Deleted Lambda function version: {0}:{1}", ref.name(), qualifier);
+    }
+
     public void deleteFunction(String region, String functionName) {
         LambdaFunction fn = getFunction(region, functionName); // throws 404 if not found
         functionName = fn.getFunctionName();
@@ -633,6 +656,24 @@ public class LambdaService {
         InvokeResult result = executorService.invoke(fn, payload, type);
         result.setExecutedVersion(fn.getVersion());
         return result;
+    }
+
+    /**
+     * Qualifier-aware read used by GetFunction / GetFunctionConfiguration:
+     * a numeric qualifier resolves the published version snapshot (whose
+     * FunctionArn carries the {@code :N} suffix), an alias name resolves
+     * through the alias, and null/$LATEST reads the unqualified function.
+     */
+    public LambdaFunction getFunction(String region, String functionName, String qualifier) {
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(functionName);
+        String effectiveQualifier = qualifier != null && !qualifier.isBlank()
+                ? qualifier
+                : ref.qualifier();
+        if (effectiveQualifier == null || effectiveQualifier.equals("$LATEST")) {
+            return getFunction(region, functionName);
+        }
+        enforceRegion(region, ref);
+        return resolveInvokeTarget(region, ref.name(), effectiveQualifier);
     }
 
     private LambdaFunction resolveInvokeTarget(String region, String name, String qualifier) {
