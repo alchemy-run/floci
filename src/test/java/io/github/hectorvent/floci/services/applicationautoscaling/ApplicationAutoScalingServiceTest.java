@@ -472,6 +472,22 @@ class ApplicationAutoScalingServiceTest {
         assertEquals(RESOURCE_ID, found.get(0).getResourceId());
     }
 
+    @Test
+    void describeScalingPoliciesByNameAllowsDimensionWithoutResourceId() {
+        register();
+        service.putScalingPolicy("cpu", "TargetTrackingScaling", NAMESPACE, RESOURCE_ID, DIMENSION,
+                targetTracking(65.0, "ECSServiceAverageCPUUtilization", null), null, REGION);
+
+        List<ScalingPolicy> found = service.describeScalingPolicies(
+                NAMESPACE, null, DIMENSION, List.of("cpu"), REGION);
+        assertEquals(1, found.size());
+        assertEquals("cpu", found.get(0).getPolicyName());
+
+        List<ScalingPolicy> missing = service.describeScalingPolicies(
+                NAMESPACE, null, DIMENSION, List.of("no-such-policy"), REGION);
+        assertEquals(0, missing.size());
+    }
+
     private TargetTrackingConfiguration withCooldowns(TargetTrackingConfiguration config) {
         config.setScaleInCooldown(240);
         config.setScaleOutCooldown(60);

@@ -283,7 +283,12 @@ public class ApplicationAutoScalingService {
                                                        String scalableDimension, List<String> policyNames,
                                                        String region) {
         requireNamespace(serviceNamespace);
-        if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
+        // AWS rejects ScalableDimension without ResourceId on a namespace listing.
+        // Lookup by PolicyNames is already unique; Alchemy's ScalingPolicy.read of a
+        // creating-state row (Output-valued ResourceId not yet persisted) sends
+        // PolicyNames + ScalableDimension with ResourceId omitted.
+        if (scalableDimension != null && (resourceId == null || resourceId.isBlank())
+                && (policyNames == null || policyNames.isEmpty())) {
             throw new AwsException("ValidationException",
                     "Scalable dimension cannot be provided without a resource ID.", 400);
         }
