@@ -158,8 +158,7 @@ public class SsmService {
     }
 
     public Parameter getParameter(String name, String region) {
-        String storageKey = regionKey(region, name);
-        return parameterStore.get(storageKey)
+        return findParameter(name, region)
                 .orElseThrow(() -> new AwsException("ParameterNotFound",
                         "Parameter " + name + " not found.", 400));
     }
@@ -167,7 +166,7 @@ public class SsmService {
     public List<Parameter> getParameters(List<String> names, String region) {
         List<Parameter> result = new ArrayList<>();
         for (String name : names) {
-            parameterStore.get(regionKey(region, name)).ifPresent(result::add);
+            findParameter(name, region).ifPresent(result::add);
         }
         return result;
     }
@@ -493,6 +492,27 @@ public class SsmService {
 
     private static String regionKey(String region, String name) {
         return region + "::" + name;
+    }
+
+    /**
+     * AWS GetParameter treats {@code MyParam} and {@code /MyParam} as the same
+     * name. ECS secret {@code valueFrom} ARNs always extract a leading slash
+     * ({@code arn:...:parameter/MyParam} → {@code /MyParam}), so a PutParameter
+     * of the unrooted name must still resolve.
+     */
+    private Optional<Parameter> findParameter(String name, String region) {
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        Optional<Parameter> found = parameterStore.get(regionKey(region, name));
+        if (found.isPresent()) {
+            return found;
+        }
+        String aliased = name.startsWith("/") ? name.substring(1) : "/" + name;
+        if (aliased.isBlank() || aliased.equals(name)) {
+            return Optional.empty();
+        }
+        return parameterStore.get(regionKey(region, aliased));
     }
 
     /** AWS ARN resource is always {@code parameter/<name-without-leading-slash>}. */

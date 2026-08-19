@@ -65,6 +65,16 @@ class SsmServiceTest {
     }
 
     @Test
+    void getParameterResolvesLeadingSlashAlias() {
+        String region = "eu-west-1";
+        ssmService.putParameter("MyParam", "flat", "String", null, false, region);
+        assertEquals("flat", ssmService.getParameter("/MyParam", region).getValue());
+
+        ssmService.putParameter("/app/db", "path", "String", null, false, region);
+        assertEquals("path", ssmService.getParameter("app/db", region).getValue());
+    }
+
+    @Test
     void getParameters() {
         String region = "eu-west-1";
         ssmService.putParameter("/a", "1", "String", null, false, region);
