@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
+import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lambda.LambdaLayerService;
 import io.github.hectorvent.floci.services.lambda.model.ContainerState;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
@@ -81,6 +82,7 @@ public class ContainerLauncher {
     private final EcrRegistryManager ecrRegistryManager;
     private final LambdaLayerService layerService;
     private final LaunchedContainerAwsEnv awsEnv;
+    private final IamService iamService;
 
     /** Matches an AWS-shaped ECR image URI: {@code <account>.dkr.ecr.<region>.amazonaws.com/<repo>[:tag]}. */
     private static final java.util.regex.Pattern AWS_ECR_URI =
@@ -96,7 +98,8 @@ public class ContainerLauncher {
                              EmulatorConfig config,
                              EcrRegistryManager ecrRegistryManager,
                              LambdaLayerService layerService,
-                             LaunchedContainerAwsEnv awsEnv) {
+                             LaunchedContainerAwsEnv awsEnv,
+                             IamService iamService) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.logStreamer = logStreamer;
@@ -107,6 +110,7 @@ public class ContainerLauncher {
         this.ecrRegistryManager = ecrRegistryManager;
         this.layerService = layerService;
         this.awsEnv = awsEnv;
+        this.iamService = iamService;
     }
 
     /**
@@ -181,6 +185,12 @@ public class ContainerLauncher {
         String cwLogGroup  = "/aws/lambda/" + fn.getFunctionName();
         String cwLogStream = LOG_STREAM_DATE_FMT.format(LocalDate.now()) + "/[$LATEST]" + shortId;
         String lambdaRegion = extractRegionFromArn(fn.getFunctionArn(), config.defaultRegion());
+        // Internal extensions register as soon as the runtime boots (container start
+        // below). Create the stream and attach the platform-log sink first so the
+        // EXTENSION Name: … line is not dropped.
+        logStreamer.ensureLogGroupAndStream(cwLogGroup, cwLogStream, lambdaRegion);
+        runtimeApiServer.setPlatformLogSink(line ->
+                logStreamer.streamToCloudWatchLogs(cwLogGroup, cwLogStream, lambdaRegion, line));
 
         // When TLS is on, the container must trust Floci's self-signed cert so HTTPS callbacks
         // to Floci succeed (e.g. a CDK custom resource's cfn-response, which hardcodes https://).
@@ -207,10 +217,20 @@ public class ContainerLauncher {
         Optional<String> awsConfigPath = config.services().lambda().awsConfigPath()
                 .filter(s -> !s.isBlank());
         env.addAll(awsEnv.sdkBaselineEnv(lambdaRegion,
-                awsConfigPath.isPresent() ? Optional.of("/opt/aws-config") : Optional.empty()));
+                awsConfigPath.isPresent() ? Optional.of("/opt/aws-config") : Optional.empty(),
+                mintExecutionRoleCredentials(fn)));
         env.addAll(flociCaEnv(flociCaCert));
         if (fn.getEnvironment() != null) {
-            fn.getEnvironment().forEach((k, v) -> env.add(k + "=" + v));
+            fn.getEnvironment().forEach((k, v) -> {
+                // Function env must not clobber the execution-role session
+                // (or the host/placeholder fallback). Last-wins Docker env
+                // would otherwise restore the {@code test} root bypass.
+                if (isReservedAwsCredentialEnv(k)) {
+                    LOG.debugv("Ignoring function env override of reserved credential key {0}", k);
+                    return;
+                }
+                env.add(k + "=" + v);
+            });
         }
 
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
@@ -837,6 +857,12 @@ public class ContainerLauncher {
      * which breaks every external HTTPS call (curl, openssl, requests/botocore) the Lambda makes.
      * Returns an empty list when no CA cert is available (TLS off).
      */
+    static boolean isReservedAwsCredentialEnv(String key) {
+        return "AWS_ACCESS_KEY_ID".equals(key)
+                || "AWS_SECRET_ACCESS_KEY".equals(key)
+                || "AWS_SESSION_TOKEN".equals(key);
+    }
+
     static List<String> flociCaEnv(Optional<Path> caCert) {
         if (caCert.isEmpty()) {
             return List.of();
@@ -844,6 +870,28 @@ public class ContainerLauncher {
         return List.of(
                 "NODE_EXTRA_CA_CERTS=" + FLOCI_CA_CONTAINER_PATH,
                 "AWS_CA_BUNDLE=" + FLOCI_CA_CONTAINER_PATH);
+    }
+
+    /**
+     * Mints temporary credentials mapped to the function's execution role so
+     * in-container SDK calls are evaluated as that role, not the {@code test}
+     * root bypass. Falls back to empty (placeholder / host creds) when the
+     * function has no role or minting fails — launch must not die on IAM.
+     */
+    private Optional<LaunchedContainerAwsEnv.SdkCredentials> mintExecutionRoleCredentials(LambdaFunction fn) {
+        String role = fn.getRole();
+        if (role == null || role.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            IamService.RoleSessionCredentials minted = iamService.mintRoleSession(role);
+            return Optional.of(new LaunchedContainerAwsEnv.SdkCredentials(
+                    minted.accessKeyId(), minted.secretAccessKey(), minted.sessionToken()));
+        } catch (RuntimeException e) {
+            LOG.warnv(e, "Could not mint execution-role credentials for function {0}; "
+                    + "using placeholder credentials", fn.getFunctionName());
+            return Optional.empty();
+        }
     }
 
     private static String extractRegionFromArn(String arn, String defaultRegion) {

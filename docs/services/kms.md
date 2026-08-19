@@ -57,6 +57,8 @@ Grant lifecycle operations (`CreateGrant`, `ListGrants`, `ListRetirableGrants`, 
 
 `EnableKeyRotation` accepts `RotationPeriodInDays` (90–2560, default 365) and `GetKeyRotationStatus` returns it while rotation is enabled. `CancelKeyDeletion` leaves the key `Disabled` (AWS-shaped). Invalid `Verify` calls raise `KMSInvalidSignatureException` rather than `SignatureValid=false`.
 
+Lambda execution-role sessions evaluate `kms:GetKeyRotationStatus` against the role's identity policies even while global IAM enforcement is off (so an unbound GetKeyRotationStatus is `AccessDeniedException`). Other KMS actions stay permissive in that mode — `kms:RequestAlias` condition keys are not modeled yet.
+
 ## Configuration
 
 | Variable | Default | Description |

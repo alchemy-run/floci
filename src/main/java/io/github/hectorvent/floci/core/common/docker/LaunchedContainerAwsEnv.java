@@ -14,8 +14,9 @@ import java.util.Optional;
  * whether the container is a Lambda function or an ECS task.
  *
  * <p>Emulator-style, matching how a local AWS emulator satisfies the SDK credential-provider
- * chain: the SDK is pointed at Floci via {@code AWS_ENDPOINT_URL} and given placeholder
- * credentials (Floci does not verify request signatures). This mirrors how AWS itself supplies
+ * chain: the SDK is pointed at Floci via {@code AWS_ENDPOINT_URL} and given credentials.
+ * Lambda launchers pass execution-role sessions minted by IAM; other launchers (ECS, MWAA)
+ * still inject host/{@code test} placeholders. This mirrors how AWS itself supplies
  * credentials to a launched workload — Lambda via its execution role, an ECS task via its task
  * role — so that in either case the container starts with usable credentials rather than an
  * empty provider chain ({@code Could not load credentials from any providers}).
@@ -31,25 +32,58 @@ public class LaunchedContainerAwsEnv {
     }
 
     /**
+     * Credentials to inject when no {@code ~/.aws} mount is present. Used for
+     * execution-role sessions minted by IAM so the container signs as that role
+     * instead of the {@code test} root bypass.
+     */
+    public record SdkCredentials(String accessKeyId, String secretAccessKey, String sessionToken) {
+        public SdkCredentials {
+            if (accessKeyId == null || accessKeyId.isBlank()) {
+                throw new IllegalArgumentException("accessKeyId is required");
+            }
+            if (secretAccessKey == null || secretAccessKey.isBlank()) {
+                throw new IllegalArgumentException("secretAccessKey is required");
+            }
+        }
+    }
+
+    /**
      * The baseline {@code "KEY=value"} AWS SDK environment entries for a launched container:
      * region, credentials, and the Floci endpoint the SDK should target.
      *
      * @param region            the AWS region the container should use
      * @param awsConfigMountDir  in-container directory of a mounted AWS config/credentials
      *                           directory (as in {@code ~/.aws}); when present the SDK discovers
-     *                           credentials from there. Empty = inject placeholder credentials.
+     *                           credentials from there. Empty = inject credentials.
      */
     public List<String> sdkBaselineEnv(String region, Optional<String> awsConfigMountDir) {
+        return sdkBaselineEnv(region, awsConfigMountDir, Optional.empty());
+    }
+
+    /**
+     * @param injectedCredentials when present these credentials are always injected
+     *                            (execution-role sessions). A mounted {@code ~/.aws}
+     *                            is still pointed at for hybrid real-AWS discovery,
+     *                            but env vars win in the SDK chain so the container
+     *                            signs as the role, not the host {@code test} root.
+     */
+    public List<String> sdkBaselineEnv(String region, Optional<String> awsConfigMountDir,
+                                       Optional<SdkCredentials> injectedCredentials) {
         List<String> env = new ArrayList<>();
         env.add("AWS_DEFAULT_REGION=" + region);
         env.add("AWS_REGION=" + region);
         if (awsConfigMountDir.isPresent() && !awsConfigMountDir.get().isBlank()) {
-            // ~/.aws is mounted — don't inject credentials, let the SDK discover them.
             // Set explicit file paths so discovery works regardless of container HOME.
             String dir = awsConfigMountDir.get();
             env.add("AWS_SHARED_CREDENTIALS_FILE=" + dir + "/credentials");
             env.add("AWS_CONFIG_FILE=" + dir + "/config");
-        } else {
+        }
+        if (injectedCredentials.isPresent()) {
+            SdkCredentials creds = injectedCredentials.get();
+            env.add("AWS_ACCESS_KEY_ID=" + creds.accessKeyId());
+            env.add("AWS_SECRET_ACCESS_KEY=" + creds.secretAccessKey());
+            env.add("AWS_SESSION_TOKEN=" + (creds.sessionToken() != null ? creds.sessionToken() : ""));
+        } else if (awsConfigMountDir.isEmpty() || awsConfigMountDir.get().isBlank()) {
             // Use Floci's own env vars, falling back to placeholder credentials.
             String ak = System.getenv("AWS_ACCESS_KEY_ID");
             String sk = System.getenv("AWS_SECRET_ACCESS_KEY");

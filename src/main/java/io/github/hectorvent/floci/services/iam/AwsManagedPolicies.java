@@ -4,8 +4,13 @@ import java.util.List;
 
 /**
  * Catalog of commonly-used AWS managed policies seeded at startup.
- * Policy documents use a permissive wildcard because floci does not
- * enforce IAM policy evaluation.
+ *
+ * <p>Most documents stay a permissive wildcard — Floci does not model every
+ * AWS managed-policy statement, and global IAM enforcement is off. Lambda
+ * execution-role policies are the exception: Alchemy attaches
+ * {@code AWSLambdaBasicExecutionRole} (and peers) to every function, and a
+ * {@code Action:*, Resource:*} document would make role-session evaluation
+ * of {@code ses:SendEmail} / {@code kms:GetKeyRotationStatus} always ALLOW.
  */
 final class AwsManagedPolicies {
 
@@ -15,10 +20,35 @@ final class AwsManagedPolicies {
             "{\"Version\":\"2012-10-17\",\"Statement\":"
             + "[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}";
 
-    record ManagedPolicyDef(String name, String path, String description) {
+    /** AWS {@code AWSLambdaBasicExecutionRole} — CloudWatch Logs write only. */
+    static final String LAMBDA_BASIC_EXECUTION_DOCUMENT =
+            "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+            + "\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],"
+            + "\"Resource\":\"arn:aws:logs:*:*:*\"}]}";
+
+    /** AWS {@code AWSXRayDaemonWriteAccess} — X-Ray put/sampling only. */
+    static final String XRAY_DAEMON_WRITE_DOCUMENT =
+            "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+            + "\"Action\":[\"xray:PutTraceSegments\",\"xray:PutTelemetryRecords\","
+            + "\"xray:GetSamplingRules\",\"xray:GetSamplingTargets\","
+            + "\"xray:GetSamplingStatisticSummaries\"],\"Resource\":\"*\"}]}";
+
+    record ManagedPolicyDef(String name, String path, String description, String document) {
+        ManagedPolicyDef(String name, String path, String description) {
+            this(name, path, description, PERMISSIVE_DOCUMENT);
+        }
+
         String arn() {
             return ARN_PREFIX + path + name;
         }
+    }
+
+    static String documentFor(String name) {
+        return POLICIES.stream()
+                .filter(def -> def.name().equals(name))
+                .map(ManagedPolicyDef::document)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unknown managed policy: " + name));
     }
 
     static final List<ManagedPolicyDef> POLICIES = List.of(
@@ -61,7 +91,8 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AWSCloudFormationFullAccess", "/",
                 "Provides full access to AWS CloudFormation."),
         new ManagedPolicyDef("AWSXRayDaemonWriteAccess", "/",
-                "Allows write permissions to the AWS X-Ray daemon."),
+                "Allows write permissions to the AWS X-Ray daemon.",
+                XRAY_DAEMON_WRITE_DOCUMENT),
         new ManagedPolicyDef("AmazonElasticFileSystemClientFullAccess", "/",
                 "Provides root client access to an Amazon EFS file system."),
         // Attached by the roles `cdk bootstrap` creates, so without it the CDKToolkit stack
@@ -80,9 +111,11 @@ final class AwsManagedPolicies {
 
         // Lambda execution role policies
         new ManagedPolicyDef("AWSLambdaBasicExecutionRole", "/service-role/",
-                "Provides write permissions to CloudWatch Logs."),
+                "Provides write permissions to CloudWatch Logs.",
+                LAMBDA_BASIC_EXECUTION_DOCUMENT),
         new ManagedPolicyDef("AWSLambdaBasicDurableExecutionRolePolicy", "/service-role/",
-                "Provides write permissions to CloudWatch Logs and read/write permissions to durable execution APIs for Lambda durable functions."),
+                "Provides write permissions to CloudWatch Logs and read/write permissions to durable execution APIs for Lambda durable functions.",
+                LAMBDA_BASIC_EXECUTION_DOCUMENT),
         new ManagedPolicyDef("AWSLambdaDynamoDBExecutionRole", "/service-role/",
                 "Provides list and read access to DynamoDB streams and write permissions to CloudWatch Logs."),
         new ManagedPolicyDef("AWSLambdaKinesisExecutionRole", "/service-role/",

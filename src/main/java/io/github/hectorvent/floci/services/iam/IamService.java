@@ -158,7 +158,7 @@ public class IamService implements SessionAccountLookup {
         for (AwsManagedPolicies.ManagedPolicyDef def : AwsManagedPolicies.POLICIES) {
             String arn = def.arn();
             catalog.put(arn, new IamPolicy("ANPA" + randomId(16), def.name(), def.path(), arn,
-                    def.description(), AwsManagedPolicies.PERMISSIVE_DOCUMENT));
+                    def.description(), def.document()));
         }
         return catalog;
     }
@@ -1181,6 +1181,45 @@ public class IamService implements SessionAccountLookup {
     // =========================================================================
     // IAM Enforcement — session tracking and policy collection
     // =========================================================================
+
+    /**
+     * Temporary credentials minted for a Lambda (or other) execution role so the
+     * container signs as that role principal instead of the {@code test} root bypass.
+     */
+    public record RoleSessionCredentials(String accessKeyId, String secretAccessKey, String sessionToken) {}
+
+    /**
+     * Mints a non-expiring assumed-role session mapped to {@code roleArn}. The role
+     * need not exist yet — policy collection happens at evaluation time — so a
+     * subsequent {@code PutRolePolicy} is visible to the same credentials.
+     */
+    public RoleSessionCredentials mintRoleSession(String roleArn) {
+        if (roleArn == null || roleArn.isBlank()) {
+            throw new IllegalArgumentException("roleArn is required");
+        }
+        String accessKeyId = TEMPORARY_ACCESS_KEY_PREFIX + randomId(16);
+        String secretKey = randomSecret(40);
+        String sessionToken = randomSecret(200);
+        registerSession(accessKeyId, secretKey, roleArn, null, null);
+        LOG.infov("Minted execution-role session {0} for {1}", accessKeyId, roleArn);
+        return new RoleSessionCredentials(accessKeyId, secretKey, sessionToken);
+    }
+
+    /**
+     * {@code true} when {@code accessKeyId} is a live assumed-role session (has a
+     * role ARN and has not expired). User access keys and unknown keys are {@code false}.
+     */
+    public boolean isAssumedRoleSession(String accessKeyId) {
+        Optional<SessionCredential> sessionOpt = findSessionForCallerContext(accessKeyId);
+        if (sessionOpt.isEmpty()) {
+            return false;
+        }
+        SessionCredential session = sessionOpt.get();
+        if (session.getExpiration() != null && session.getExpiration().isBefore(Instant.now())) {
+            return false;
+        }
+        return session.getRoleArn() != null && !session.getRoleArn().isBlank();
+    }
 
     /**
      * Stores an assumed-role session so the enforcement filter can resolve its policies.

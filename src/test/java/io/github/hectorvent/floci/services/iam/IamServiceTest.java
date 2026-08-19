@@ -458,6 +458,36 @@ class IamServiceTest {
 
         assertNull(iamService.resolveCallerContext("ASIAIOSFODNN7EXAMPLE"));
         assertNull(iamService.resolveCallerPolicies("ASIAIOSFODNN7EXAMPLE"));
+        assertFalse(iamService.isAssumedRoleSession("ASIAIOSFODNN7EXAMPLE"));
+    }
+
+    @Test
+    void mintRoleSessionMapsKeyToRolePrincipal() {
+        iamService.createRole("exec", "/", "{\"Version\":\"2012-10-17\"}", null, 0, null);
+        iamService.putRolePolicy("exec", "inline", """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"ses:SendEmail","Resource":"*"}
+                ]}""");
+
+        IamService.RoleSessionCredentials creds =
+                iamService.mintRoleSession("arn:aws:iam::000000000000:role/exec");
+
+        assertTrue(creds.accessKeyId().startsWith("ASIA"));
+        assertNotNull(creds.secretAccessKey());
+        assertNotNull(creds.sessionToken());
+        assertTrue(iamService.isAssumedRoleSession(creds.accessKeyId()));
+        assertNotNull(iamService.resolveCallerContext(creds.accessKeyId()));
+        assertEquals(1, iamService.resolveCallerPolicies(creds.accessKeyId()).size());
+    }
+
+    @Test
+    void isAssumedRoleSessionIsFalseForUserAccessKeyAndUnknownKey() {
+        iamService.createUser("alice", "/");
+        AccessKey key = iamService.createAccessKey("alice");
+
+        assertFalse(iamService.isAssumedRoleSession(key.getAccessKeyId()));
+        assertFalse(iamService.isAssumedRoleSession("test"));
+        assertFalse(iamService.isAssumedRoleSession("AKIAUNKNOWN"));
     }
 
     // =========================================================================

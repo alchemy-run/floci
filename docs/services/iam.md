@@ -185,6 +185,10 @@ By default Floci accepts any credentials without enforcing IAM policies — all 
 
 Setting `enforcement-enabled: true` activates the policy evaluator as a JAX-RS request filter. Every inbound request is then evaluated against the identity-based policies of the calling IAM user or assumed role before it reaches the service handler.
 
+Even with the global flag off, **assumed-role sessions** (the `ASIA…` keys Lambda containers receive from their execution role) are evaluated for a small allowlist of actions: `ses:SendEmail` / `ses:SendRawEmail` / `ses:SendBulkEmail` and `kms:GetKeyRotationStatus`. JSON 1.1 and Query operations auto-resolve every action, so evaluating those under a role would deny suites whose resource ARNs or condition keys Floci does not model. Everything else stays permissive.
+
+`AWSLambdaBasicExecutionRole` and `AWSXRayDaemonWriteAccess` are seeded with their real AWS documents (CloudWatch Logs / X-Ray only). A leftover `Action:*, Resource:*` placeholder on those policies would make every allowlisted action ALLOW.
+
 ### Enable enforcement
 
 **Environment variable:**
@@ -218,6 +222,7 @@ These identities always bypass enforcement (backward-compatible defaults):
 | Unknown access key (not in IAM store) | Always allowed — backward-compatible with pre-existing keys |
 | No `Authorization` header | Allowed — unauthenticated path (e.g. health checks) |
 | Unresolvable IAM action for the request | Allowed — unknown mappings are permissive |
+| Assumed-role session + action not in the role-enforced allowlist, global flag off | Allowed — JSON 1.1 / Query auto-resolve must not deny unmapped services |
 
 ### Supported policy features
 

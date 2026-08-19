@@ -24,16 +24,22 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * JAX-RS filter that enforces IAM policies on every incoming request when
- * {@code floci.iam.enforcement-enabled = true}.
+ * JAX-RS filter that enforces IAM policies on incoming requests.
  *
  * <p>Bypass rules (request is always allowed through):
  * <ul>
- *   <li>Enforcement is disabled (default)</li>
  *   <li>Access key is {@code "test"} (root/admin stand-in)</li>
  *   <li>Access key is not found in the IAM store (backward-compatible with pre-existing credentials)</li>
  *   <li>The action cannot be resolved (unknown mapping → permissive)</li>
+ *   <li>Global enforcement is off <em>and</em> the caller is not an assumed-role
+ *       session calling an action in {@link IamActionRegistry#isRoleEnforcedAction}</li>
  * </ul>
+ *
+ * <p>Global {@code floci.services.iam.enforcement-enabled} stays off by default.
+ * Assumed-role sessions (Lambda execution-role credentials) are still evaluated
+ * for the small {@code ROLE_ENFORCED_ACTIONS} set (SES send + {@code kms:GetKeyRotationStatus})
+ * so scoped-IAM denial tests can observe {@code AccessDenied} without turning on
+ * evaluation for every JSON 1.1 / Query operation.
  *
  * <p>Evaluates the caller's identity policies, optional session policy, and optional
  * permissions boundary. Resource-based policies (S3 bucket policy, Lambda resource
@@ -45,9 +51,19 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
 
     private static final Logger LOG = Logger.getLogger(IamEnforcementFilter.class);
 
-    /** Extracts the credential-scope service name (e.g. "s3", "lambda"). */
-    private static final Pattern SERVICE_PATTERN =
-            Pattern.compile("Credential=\\S+/\\d{8}/[^/]+/([^/]+)/");
+    /**
+     * SigV4 credential scope: {@code KEY/YYYYMMDD/REGION/SERVICE/aws4_request}.
+     * Captures SERVICE.
+     */
+    private static final Pattern SIGV4_SCOPE =
+            Pattern.compile("Credential=\\S+/\\d{8}/[^/]+/([^/]+)/aws4_request");
+
+    /**
+     * SigV4a (asymmetric) credential scope: {@code KEY/YYYYMMDD/SERVICE/aws4_request}
+     * — no region. SES v2 and a few other SDKs sign this way.
+     */
+    private static final Pattern SIGV4A_SCOPE =
+            Pattern.compile("Credential=\\S+/\\d{8}/([^/]+)/aws4_request");
 
     private final EmulatorConfig config;
     private final AccountResolver accountResolver;
@@ -88,10 +104,6 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext ctx) {
-        if (!config.services().iam().enforcementEnabled()) {
-            return;
-        }
-
         String auth = ctx.getHeaderString("Authorization");
         if (auth == null) {
             return;
@@ -104,6 +116,7 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
 
         String rawScope = extractCredentialScope(auth);
         if (rawScope == null) {
+            LOG.infov("IAM skip: no credential scope akid={0} auth={1}", akid, abbreviateAuth(auth));
             return;
         }
         // Normalise signing aliases (s3express → s3) before anything keyed by scope runs:
@@ -113,12 +126,27 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
 
         String action = actionRegistry.resolve(credentialScope, ctx);
         if (action == null) {
+            LOG.debugv("IAM skip: unmapped action scope={0} {1} {2} akid={3}",
+                    credentialScope, ctx.getMethod(), ctx.getUriInfo().getPath(), akid);
             return; // unknown action → ALLOW (permissive)
         }
 
         CallerContext caller = iamService.resolveCallerContext(akid);
         if (caller == null) {
+            LOG.infov("IAM skip: unknown key akid={0} action={1}", akid, action);
             return; // unknown access key → bypass (backward-compat)
+        }
+
+        boolean roleSession = iamService.isAssumedRoleSession(akid);
+        boolean roleEnforced = actionRegistry.isRoleEnforcedAction(action);
+        // Global enforcement stays off by default. The Lambda execution-role path
+        // still evaluates, but only for explicitly role-enforced actions — JSON 1.1
+        // and Query auto-resolve every operation, and evaluating those would deny
+        // suites whose resource ARNs / condition keys we do not model.
+        if (!config.services().iam().enforcementEnabled() && !(roleSession && roleEnforced)) {
+            LOG.debugv("IAM skip: global off roleSession={0} enforced={1} action={2} akid={3}",
+                    roleSession, roleEnforced, action, akid);
+            return;
         }
 
         String region = requestContext.getRegion() == null ? config.defaultRegion() : requestContext.getRegion();
@@ -240,9 +268,24 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
         return new String[] { bucket, key.isEmpty() ? null : key };
     }
 
-    private String extractCredentialScope(String auth) {
-        Matcher m = SERVICE_PATTERN.matcher(auth);
-        return m.find() ? m.group(1) : null;
+    private static String abbreviateAuth(String auth) {
+        if (auth == null) {
+            return "null";
+        }
+        return auth.length() <= 96 ? auth : auth.substring(0, 96) + "…";
+    }
+
+    // Package-private for unit testing.
+    static String extractCredentialScope(String auth) {
+        if (auth == null) {
+            return null;
+        }
+        Matcher v4 = SIGV4_SCOPE.matcher(auth);
+        if (v4.find()) {
+            return v4.group(1);
+        }
+        Matcher v4a = SIGV4A_SCOPE.matcher(auth);
+        return v4a.find() ? v4a.group(1) : null;
     }
 
     /**

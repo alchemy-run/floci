@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
+import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServer;
 import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServerFactory;
@@ -71,6 +72,7 @@ class ContainerLauncherTest {
     @Mock EmbeddedDnsServer embeddedDnsServer;
     @Mock RuntimeApiServer runtimeApiServer;
     @Mock DockerClient dockerClient;
+    @Mock IamService iamService;
 
     @TempDir
     Path tempDir;
@@ -108,7 +110,7 @@ class ContainerLauncherTest {
         LaunchedContainerAwsEnv awsEnv = new LaunchedContainerAwsEnv(reachableEndpoint);
         launcher = new ContainerLauncher(containerBuilder, lifecycleManager, logStreamer, imageResolver,
                 runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
-                mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv);
+                mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv, iamService);
 
         when(runtimeApiServerFactory.create()).thenReturn(runtimeApiServer);
         when(runtimeApiServer.getPort()).thenReturn(9000);
@@ -291,6 +293,54 @@ class ContainerLauncherTest {
         assertEquals("AWS_ACCESS_KEY_ID=" + expectedAk, accessKey);
         assertEquals("AWS_SECRET_ACCESS_KEY=" + expectedSk, secretKey);
         assertEquals("AWS_SESSION_TOKEN=" + expectedSt, sessionToken);
+    }
+
+    @Test
+    void launchFunction_injectsMintedExecutionRoleCredentials() throws Exception {
+        Path codePath = Files.createDirectory(tempDir.resolve("creds-role"));
+        when(iamService.mintRoleSession("arn:aws:iam::000000000000:role/exec"))
+                .thenReturn(new IamService.RoleSessionCredentials("ASIAEXAMPLEKEY0001", "role-secret", "role-token"));
+
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("role-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+        fn.setRole("arn:aws:iam::000000000000:role/exec");
+
+        launcher.launch(fn);
+
+        List<String> env = captureRealContainerSpec().env();
+        assertTrue(env.contains("AWS_ACCESS_KEY_ID=ASIAEXAMPLEKEY0001"));
+        assertTrue(env.contains("AWS_SECRET_ACCESS_KEY=role-secret"));
+        assertTrue(env.contains("AWS_SESSION_TOKEN=role-token"));
+        verify(iamService).mintRoleSession("arn:aws:iam::000000000000:role/exec");
+    }
+
+    @Test
+    void launchFunction_functionEnvCannotOverrideExecutionRoleCredentials() throws Exception {
+        Path codePath = Files.createDirectory(tempDir.resolve("creds-role-override"));
+        when(iamService.mintRoleSession("arn:aws:iam::000000000000:role/exec"))
+                .thenReturn(new IamService.RoleSessionCredentials("ASIAEXAMPLEKEY0001", "role-secret", "role-token"));
+
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("role-override-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+        fn.setRole("arn:aws:iam::000000000000:role/exec");
+        fn.setEnvironment(java.util.Map.of(
+                "AWS_ACCESS_KEY_ID", "test",
+                "AWS_SECRET_ACCESS_KEY", "test",
+                "AWS_SESSION_TOKEN", "test",
+                "ALCHEMY_STAGE", "test"));
+
+        launcher.launch(fn);
+
+        List<String> env = captureRealContainerSpec().env();
+        assertTrue(env.contains("AWS_ACCESS_KEY_ID=ASIAEXAMPLEKEY0001"));
+        assertTrue(env.stream().noneMatch(e -> e.equals("AWS_ACCESS_KEY_ID=test")));
+        assertTrue(env.contains("ALCHEMY_STAGE=test"));
     }
 
     @Test
@@ -482,13 +532,39 @@ class ContainerLauncherTest {
         assertTrue(env.contains("AWS_CONFIG_FILE=/opt/aws-config/config"),
                 "AWS_CONFIG_FILE should point to mounted path");
 
-        // Should NOT inject credential env vars
+        // No execution role → no credential env vars (SDK discovers ~/.aws)
         assertTrue(env.stream().noneMatch(e -> e.startsWith("AWS_ACCESS_KEY_ID=")),
-                "AWS_ACCESS_KEY_ID should not be injected when awsConfigPath is set");
+                "AWS_ACCESS_KEY_ID should not be injected when awsConfigPath is set and no role");
         assertTrue(env.stream().noneMatch(e -> e.startsWith("AWS_SECRET_ACCESS_KEY=")),
-                "AWS_SECRET_ACCESS_KEY should not be injected when awsConfigPath is set");
+                "AWS_SECRET_ACCESS_KEY should not be injected when awsConfigPath is set and no role");
         assertTrue(env.stream().noneMatch(e -> e.startsWith("AWS_SESSION_TOKEN=")),
-                "AWS_SESSION_TOKEN should not be injected when awsConfigPath is set");
+                "AWS_SESSION_TOKEN should not be injected when awsConfigPath is set and no role");
+    }
+
+    @Test
+    void launchFunction_awsConfigPath_stillInjectsExecutionRoleCredentials() throws Exception {
+        EmulatorConfig.LambdaServiceConfig lambda = config.services().lambda();
+        when(lambda.awsConfigPath()).thenReturn(Optional.of("/home/user/.aws"));
+        when(iamService.mintRoleSession("arn:aws:iam::000000000000:role/exec"))
+                .thenReturn(new IamService.RoleSessionCredentials("ASIAEXAMPLEKEY0001", "role-secret", "role-token"));
+
+        Path codePath = Files.createDirectory(tempDir.resolve("creds-mount-role"));
+
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("mount-role-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+        fn.setRole("arn:aws:iam::000000000000:role/exec");
+
+        launcher.launch(fn);
+
+        List<String> env = captureRealContainerSpec().env();
+        assertTrue(env.contains("AWS_SHARED_CREDENTIALS_FILE=/opt/aws-config/credentials"));
+        assertTrue(env.contains("AWS_ACCESS_KEY_ID=ASIAEXAMPLEKEY0001"),
+                "execution-role session must win over the ~/.aws mount");
+        assertTrue(env.contains("AWS_SECRET_ACCESS_KEY=role-secret"));
+        assertTrue(env.contains("AWS_SESSION_TOKEN=role-token"));
     }
 
     @Test
@@ -781,7 +857,8 @@ class ContainerLauncherTest {
                 imageResolver, runtimeApiServerFactory, dockerHostResolver, config,
                 ecrRegistryManager,
                 mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class),
-                new LaunchedContainerAwsEnv(reachableEndpoint));
+                new LaunchedContainerAwsEnv(reachableEndpoint),
+                iamService);
 
         stubExtensionDiscovery("otel-collector");
         // Feed a real stdout frame through whatever callback the launcher hands to execStartCmd.

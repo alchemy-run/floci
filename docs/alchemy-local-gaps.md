@@ -92,8 +92,13 @@ TestInvokeAuthorizer, docs parts, client certificates. WebSocket
 ## AppSync
 
 Patched in this tree (API cache, EvaluateCode/MappingTemplate, GraphQL
-data plane, AWS-shaped URLs, ACM cert check). Alchemy now `flociDual`s
-GraphqlApi and related resources. Test HTTP rewrite now maps
+data plane, AWS-shaped URLs, ACM cert check). Embedded DNS now resolves
+`{apiId}.appsync-api.{region}.amazonaws.com` and `appsync.{region}.amazonaws.com`
+to Floci so in-Lambda GraphQL `fetch()` / distilled clients reach the
+emulator; TLS SAN `*.appsync-api.us-east-1.amazonaws.com` covers HTTPS:443
+(the single-label `*.us-east-1.amazonaws.com` wildcard does not).
+`EvaluateCode` `outErrors` is the AWS JSON string. Alchemy `flociDual`s
+GraphqlApi and related resources. Test-process HTTP rewrite still maps
 `*.appsync-api.*.amazonaws.com` onto the gateway (same as S3 website).
 Still missing DynamoDB/HTTP/OpenSearch/RDS adapters, subscriptions, and
 Lambda-authorizer data-plane.
@@ -200,13 +205,38 @@ service.
 
 ## Lambda
 
+Patched in this tree (`AddPermission`/`GetPolicy` keep
+`lambda:InvokedViaFunctionUrl` and `lambda:FunctionUrlAuthType`
+Conditions; `UpdateFunctionCode` persists `Architectures`;
+`GetAccountSettings`; `InvokeWithResponseStream` event-stream;
+VPC Hyperplane ENIs on create/delete; Extensions API writes
+`EXTENSION Name: "…" ` to CloudWatch; `GetLayerVersionByArn`;
+`UpdateFunctionUrlConfig` Cors MaxAge is null-safe).
+
+Alchemy `Version`, `Alias`, and `LayerVersion` are **not** `flociDual`'d
+(`Providers.ts` registers live-only providers). Those suites deploy
+without `(local)` and distilled clients then read Floci — split-brain,
+not a handler gap. `EventInvokeConfig` and `DurableFunction` tests
+depend on `Version`.
+
+Lambda containers now receive `ASIA…` credentials minted from the
+function's execution role (see IAM). The `test` root bypass is only used
+when the function has no role.
+
 | Gap | Evidence | Notes |
 |---|---|---|
-| Function URL HTTP from the host | `Function.test.ts` `create, update, delete function` hangs on `GET functionUrl` | Create/delete work. Invoke via SDK timeout test is fine. Data-plane URL may not be reachable at the advertised hostname/port. |
-| IAM inline policy `Condition` | Same test: `GetRolePolicy` omits `lambda:InvokedViaFunctionUrl` | Alchemy asserts the Function URL invoke condition. |
+| `Version` / `Alias` / `LayerVersion` not dualized | `391965393224` / `us-west-2` ARNs; no `(local)` on create | Coordinator dualize, then re-run. Floci already implements publish/list/alias/layer CRUD. |
+| Durable execution checkpoint APIs | `DurableFunction.test.ts` | Needs Version dualize first; may also need checkpoint/replay ops. |
+| OTLP export from Lambda to a Cloudflare collector | `Telemetry.test.ts` `/probe` status 0 | Platform: collector reachability from the Lambda container, not a missing Lambda op. |
 | CloudWatch Logs log-group reap | Prior destroy hangs | Logs describe/delete is slow or unimplemented enough that alchemy now skips reap on the emulator account. |
 
 ## IAM
+
+Lambda execution-role sessions (`ASIA…` minted at container launch) are
+evaluated for `ses:SendEmail` / `ses:SendRawEmail` / `ses:SendBulkEmail`
+and `kms:GetKeyRotationStatus` even while
+`floci.services.iam.enforcement-enabled` is off. `test` keys, unknown
+keys, unmapped actions, and all other role-issued calls stay permissive.
 
 | Gap | Evidence | Notes |
 |---|---|---|
@@ -262,8 +292,11 @@ Remaining after rebuild:
 
 Patched in this tree: custom cluster endpoints, instance/cluster snapshots
 (create/copy/delete + not-found), `ResetDBParameterGroup`, `DescribeEvents`,
-`DescribePendingMaintenanceActions`, start/stop/failover no-ops, parameter-group
-ARNs + `Source=user` on describe. Remaining:
+`DescribePendingMaintenanceActions`, `ApplyPendingMaintenanceAction`
+(`ResourceNotFoundFault` on a missing ARN), start/stop/failover no-ops,
+parameter-group ARNs + `Source=user` on describe, distilled Query list keys
+(`Parameters.Parameter.N`), and create-time `MasterUserPassword` /
+`BackupRetentionPeriod` validation (`InvalidParameterValue`). Remaining:
 
 | Gap | Evidence | Notes |
 |---|---|---|
@@ -344,9 +377,14 @@ Lambda target batch shape is patched in this tree and needs the image rebuild.
 
 Patched in this tree (`UpdateAlias`, `GenerateDataKeyPair*`,
 `DeriveSharedSecret`, rotation period, Verify/CancelKeyDeletion shapes).
-Against current `floci:dev`: 12/20 (bindings already green). Alchemy now
-`flociDual`s `Key` and `Alias`. Still missing `alias/aws/ssm` for SSM
-SecureString `keyArn`.
+Alchemy now `flociDual`s `Key` and `Alias`. SSM lazily seeds
+`alias/aws/ssm` on the first SecureString so `DescribeKey` can resolve
+`keyArn`.
+
+`kms:GetKeyRotationStatus` is in the Lambda-role IAM allowlist, so the
+bindings least-privilege test (`the role only receives the bound actions`)
+can observe `AccessDeniedException`. Other KMS actions stay permissive
+while global enforcement is off (alias condition keys are not modeled).
 
 ## CloudFront
 
@@ -414,7 +452,7 @@ Contact/ContactList tests collide).
 
 | Gap | Evidence | Notes |
 |---|---|---|
-| Bindings IAM outsider From is `MessageRejected`, not `AccessDeniedException` | `SendEmail > a sender outside the bound identity is denied by the scoped IAM policy` | Needs Lambda execution-role credentials (today `test`/`test` bypass) plus `FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED` and SES send action/ARN mapping. Not a SES handler bug — IAM fires before SES on AWS. |
+| ~~Bindings IAM outsider From is `MessageRejected`, not `AccessDeniedException`~~ | `SendEmail > a sender outside the bound identity is denied by the scoped IAM policy` | **Fixed:** Lambda containers sign as an `ASIA` session mapped to the execution role. `IamEnforcementFilter` evaluates `ses:SendEmail` (global enforcement stays off) against `arn:aws:ses:…:identity/<from>`. `AWSLambdaBasicExecutionRole` is seeded as CloudWatch Logs only so its old `*/*` placeholder cannot grant the send. |
 
 ## Secrets Manager
 
@@ -435,14 +473,23 @@ protocol).
 ## SSM
 
 Patched in this tree (`UnlabelParameterVersion`; PutParameter tags/metadata;
-label defaults to latest). Against current `floci:dev` (pre-rebuild): 9/13.
+label defaults to latest; first SecureString seeds KMS `alias/aws/ssm`).
+Needs image rebuild for the alias seed.
 
 | Gap | Evidence | Notes |
 |---|---|---|
-| `UnlabelParameterVersion` not in running image | Label/Unlabel binding test 5xx | Source is patched; needs `pnpm floci:build`. |
-| `DescribeKey(alias/aws/ssm)` | SecureString `keyArn` stays undefined | KMS: seed the AWS-managed SSM key alias. |
-| `ListRuleNamesByTarget` | `consumeParameterEvents` out-of-band check | Implemented in EventBridge source; needs image rebuild. |
 | SSMContacts / SSMIncidents | no Floci service | Remote-only. |
+
+## SNS
+
+Patched in this tree (`AddPermission` / `RemovePermission` persist topic
+policy Sids; GCM/FCM `CreatePlatformApplication` rejects fake credentials
+with `InvalidParameter`; SMS sandbox / attributes / opt-out / origination
+list ops). Needs image rebuild.
+
+| Gap | Evidence | Notes |
+|---|---|---|
+| Real APNS / FCM delivery | Mobile push is captured in-memory | Unchanged mock. |
 
 ## Glue
 
@@ -460,13 +507,13 @@ ComputeEnvironment/JobDefinition/JobQueue.
 
 ## Athena
 
-Implemented in this tree: workgroup update/tags, data catalogs, named queries, prepared statements, batch-get, runtime stats stub. Remaining:
+Implemented in this tree: workgroup update/tags, data catalogs, named queries, prepared statements, batch-get, runtime stats stub, Glue-qualified DuckDB views + headerless CSV, EventBridge `Athena Query State Change` on every execution transition, `NamedQuery` not-found message matching distilled `NamedQueryNotFound`, in-process `SELECT <n>` (no DuckDB). Remaining:
 
 | Gap | Evidence | Notes |
 |---|---|---|
 | Runtime statistics are a stub | `GetQueryRuntimeStatistics` | Timeline fields exist; no real engine counters. |
-| Query data plane still needs DuckDB | `StartQueryExecution` | Unchanged; mock mode skips execution. |
-| `StopQueryExecution` on a terminal query | Alchemy `StopQueryExecution` binding | AWS is a no-op (stays `SUCCEEDED`). Source now matches; needs image rebuild. |
+| Query data plane still needs DuckDB | `StartQueryExecution` | Unchanged; mock mode skips execution but still emits state-change events. |
+| `StopQueryExecution` on a terminal query | Alchemy `StopQueryExecution` binding | AWS is a no-op (stays `SUCCEEDED`). Source now matches. |
 
 ## Batch
 

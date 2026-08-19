@@ -44,7 +44,9 @@ public class ResolvedServiceCatalog {
     private static final java.util.Map<String, String> CREDENTIAL_SCOPE_ALIASES =
             java.util.Map.of(
                     "s3express", "s3",
-                    "iot-jobs-data", "iot");
+                    "iot-jobs-data", "iot",
+                    "email", "ses",
+                    "sesv2", "ses");
 
     private final ServiceCatalog catalog;
 
