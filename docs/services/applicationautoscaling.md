@@ -78,6 +78,15 @@ AWS shape, since the provider treats the attribute as computed:
 arn:aws:iam::<account>:role/aws-service-role/<namespace>.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_<Suffix>
 ```
 
+## Local resource IDs
+
+`RegisterScalableTarget` does **not** probe the backing service. A DynamoDB
+`table/{name}` or ECS `service/{cluster}/{service}` identifier is stored as
+given, so Alchemy's local DynamoDB tables and emulated ECS services can
+register `dynamodb:table:ReadCapacityUnits` / `ecs:service:DesiredCount`
+targets. AWS would reject a missing cloud resource; Floci accepts the
+identity so the control-plane round-trip works in `alchemy dev`.
+
 ## Limitations
 
 - **Scaling policies are stored but inert.** Nothing evaluates them, no alarm ever fires,
@@ -86,8 +95,9 @@ arn:aws:iam::<account>:role/aws-service-role/<namespace>.application-autoscaling
   Scaling's `PutScalingPolicy` in Floci. The control plane is faithful; the control loop
   is not emulated.
 - `GetPredictiveScalingForecast` for ECS returns empty load/capacity series. Non-ECS
-  namespaces match AWS: `AccessDeniedException` with "GetPredictiveScalingForecast is not
-  supported."
+  namespaces match AWS: `AccessDeniedException` (HTTP 400) with
+  "GetPredictiveScalingForecast is not supported." Distilled maps that wire
+  error to `PredictiveScalingForecastNotSupported`.
 - `PredictiveScalingPolicyConfiguration` is accepted only insofar as `PolicyType` is
   validated; the configuration block is not stored.
 - Pagination is not implemented — describe APIs return all matching results and never

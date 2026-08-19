@@ -369,4 +369,56 @@ class ApplicationAutoScalingIntegrationTest {
                 """.formatted(RESOURCE_ID, DIMENSION))
         .when().post("/").then().statusCode(200);
     }
+
+    @Test
+    @Order(14)
+    void dynamodbTableResourceIdRegistersWithoutALiveCloudTable() {
+        String tableResourceId = "table/alchemy-local-aas-table";
+        call("RegisterScalableTarget")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits",
+                  "MinCapacity": 1,
+                  "MaxCapacity": 5
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200)
+            .body("ScalableTargetARN", containsString("scalable-target/"));
+
+        call("DescribeScalableTargets")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceIds": ["%s"],
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits"
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200)
+            .body("ScalableTargets", hasSize(1))
+            .body("ScalableTargets[0].ResourceId", equalTo(tableResourceId))
+            .body("ScalableTargets[0].MinCapacity", equalTo(1));
+
+        call("DescribeScalingActivities")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits"
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200)
+            .body("ScalingActivities", hasSize(0));
+
+        call("DeregisterScalableTarget")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits"
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200);
+    }
 }

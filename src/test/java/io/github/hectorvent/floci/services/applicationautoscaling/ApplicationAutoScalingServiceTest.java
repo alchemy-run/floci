@@ -354,7 +354,94 @@ class ApplicationAutoScalingServiceTest {
                 "dynamodb", "table/alchemy-probe-nonexistent",
                 "dynamodb:table:ReadCapacityUnits", "alchemy-probe-nonexistent", REGION));
         assertEquals("AccessDeniedException", e.getErrorCode());
+        assertEquals(400, e.getHttpStatus());
         assertTrue(e.getMessage().contains("GetPredictiveScalingForecast is not supported"));
+    }
+
+    @Test
+    void registerAcceptsLocalDynamoDbTableResourceIds() {
+        String resourceId = "table/alchemy-local-aas-table";
+        ScalableTarget target = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 5, null, null, Map.of("env", "test"), REGION);
+
+        assertTrue(target.getScalableTargetArn().contains("scalable-target/"));
+        assertEquals("table/alchemy-local-aas-table", target.getResourceId());
+        assertEquals(1, target.getMinCapacity());
+        assertEquals(5, target.getMaxCapacity());
+        assertTrue(target.getRoleArn().contains("AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"));
+        assertEquals(1, service.describeScalableTargets("dynamodb", List.of(resourceId),
+                "dynamodb:table:ReadCapacityUnits", REGION).size());
+    }
+
+    @Test
+    void dynamodbTargetUpdatesInPlaceAndReplacesOnDimensionChange() {
+        String resourceId = "table/alchemy-local-aas-table";
+        String originalArn = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 5, null, null, Map.of("keep", "v1"), REGION).getScalableTargetArn();
+
+        ScalableTarget updated = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 6, null, null, null, REGION);
+        assertEquals(originalArn, updated.getScalableTargetArn());
+        assertEquals(6, updated.getMaxCapacity());
+
+        ScalableTarget write = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:WriteCapacityUnits",
+                1, 6, null, null, null, REGION);
+        assertTrue(!originalArn.equals(write.getScalableTargetArn()));
+        assertEquals(1, service.describeScalableTargets("dynamodb", List.of(resourceId),
+                "dynamodb:table:ReadCapacityUnits", REGION).size());
+        assertEquals(1, service.describeScalableTargets("dynamodb", List.of(resourceId),
+                "dynamodb:table:WriteCapacityUnits", REGION).size());
+    }
+
+    @Test
+    void dynamodbTargetTrackingPolicyAndScheduledActionRoundTrip() {
+        String resourceId = "table/alchemy-local-aas-table";
+        service.registerScalableTarget("dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 5, null, null, null, REGION);
+
+        ScalingPolicy policy = service.putScalingPolicy("read-util", "TargetTrackingScaling",
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                targetTracking(70.0, "DynamoDBReadCapacityUtilization", null), null, REGION);
+        assertEquals("TargetTrackingScaling", policy.getPolicyType());
+        assertTrue(policy.getPolicyArn().contains("scalingPolicy"));
+        assertEquals(2, policy.getAlarms().size());
+        assertEquals(1, service.describeScalingPolicies("dynamodb", null, null,
+                List.of("read-util"), REGION).size());
+
+        var action = service.putScheduledAction("far-future", "dynamodb", resourceId,
+                "dynamodb:table:ReadCapacityUnits", "at(2030-01-01T00:00:00)", "UTC",
+                null, null, capacity(2, null), REGION);
+        assertTrue(action.getScheduledActionArn().contains("scheduledAction"));
+        assertEquals(2, action.getScalableTargetAction().getMinCapacity());
+        assertEquals(1, service.describeScheduledActions("dynamodb", null, null,
+                List.of("far-future"), REGION).size());
+        assertEquals(0, service.describeScalingActivities("dynamodb", resourceId,
+                "dynamodb:table:ReadCapacityUnits", REGION).size());
+    }
+
+    @Test
+    void dynamodbDeregisterDeletesPolicySoDestroySeesObjectNotFound() {
+        String resourceId = "table/alchemy-local-aas-table";
+        service.registerScalableTarget("dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 3, null, null, null, REGION);
+        service.putScalingPolicy("orphan", "TargetTrackingScaling",
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                targetTracking(70.0, "DynamoDBReadCapacityUtilization", null), null, REGION);
+
+        service.deregisterScalableTarget("dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits", REGION);
+
+        assertEquals(0, service.describeScalingPolicies("dynamodb", null, null,
+                List.of("orphan"), REGION).size());
+        AwsException missingPolicy = assertThrows(AwsException.class, () -> service.deleteScalingPolicy(
+                "orphan", "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits", REGION));
+        assertEquals("ObjectNotFoundException", missingPolicy.getErrorCode());
+        AwsException missingTarget = assertThrows(AwsException.class, () -> service.deregisterScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits", REGION));
+        assertEquals("ObjectNotFoundException", missingTarget.getErrorCode());
     }
 
     private static ScalableTargetAction capacity(Integer min, Integer max) {
