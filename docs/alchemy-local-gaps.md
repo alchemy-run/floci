@@ -214,20 +214,34 @@ VPC Hyperplane ENIs on create/delete; Extensions API writes
 `UpdateFunctionUrlConfig` Cors MaxAge is null-safe;
 unsigned AWS_IAM Function URLs return 403).
 
-Alchemy `Version`, `Alias`, and `LayerVersion` are **not** `flociDual`'d
-(`Providers.ts` registers live-only providers). Those suites deploy
-without `(local)` and distilled clients then read Floci — split-brain,
-not a handler gap. `EventInvokeConfig` and `DurableFunction` tests
-depend on `Version`.
+`Version` and `Alias` now deploy locally (the `DurableFunction` suite
+publishes a version and creates a `live` alias against Floci,
+2026-08-19 — account `000000000000`, `PublishVersion`/`CreateAlias` in
+the emulator log). The `LayerVersion` dualization status is unverified.
 
 Lambda containers now receive `ASIA…` credentials minted from the
 function's execution role (see IAM). The `test` root bypass is only used
 when the function has no role.
 
+**Durable Functions** are emulated (`services/lambda/durable/`, see
+[docs/services/lambda.md](services/lambda.md#durable-executions)):
+durable `Invoke` (`X-Amz-Durable-Execution-Name` → 202 +
+`X-Amz-Durable-Execution-Arn`, idempotent reattach by name),
+the checkpoint data plane the Durable Execution SDK speaks from inside
+the function (`CheckpointDurableExecution`, `GetDurableExecutionState`),
+real suspend/resume (a durable wait arms a Vert.x timer and the function
+is re-invoked with `UpdatedOperationIds`; no container is held during the
+wait), callbacks, `Stop`, `List`, `Get`, and synthesized `History`.
+`timeout 900 pnpm test:aws:floci test/AWS/Lambda/DurableFunction.test.ts
+--retry 0` is green (2026-08-19): typed-error probe + the full 2-step +
+5s-sleep suspend/resume lifecycle.
+
 | Gap | Evidence | Notes |
 |---|---|---|
-| `Version` / `Alias` / `LayerVersion` not dualized | `391965393224` / `us-west-2` ARNs; no `(local)` on create | Coordinator dualize, then re-run. Floci already implements publish/list/alias/layer CRUD. |
-| Durable execution checkpoint APIs | `DurableFunction.test.ts` | Needs Version dualize first; may also need checkpoint/replay ops. |
+| `LayerVersion` dualization unverified | historical `391965393224` / `us-west-2` ARNs | `Version`/`Alias` verified local via `DurableFunction.test.ts`; re-run the layer suites to confirm. Floci implements layer CRUD. |
+| Durable chained invokes | `CHAINED_INVOKE` checkpoint op | Fails the operation with a typed `ChainedInvokeNotSupported` error instead of invoking the child durable function. |
+| Durable execution timeout / retention not enforced | `DurableConfig.ExecutionTimeout` / `RetentionPeriodInDays` accepted at CreateFunction | Executions never TIMED_OUT server-side and are retained until function delete or emulator restart. |
+| Suspended durable executions don't survive restart | In-memory Vert.x timers | Timers are not re-armed from persisted state after an emulator restart; a suspended execution stays RUNNING forever. |
 | OTLP export from Lambda to a Cloudflare collector | `Telemetry.test.ts` `/probe` status 0 | Platform: collector reachability from the Lambda container, not a missing Lambda op. |
 | CloudWatch Logs log-group reap | Prior destroy hangs | Logs describe/delete is slow or unimplemented enough that alchemy now skips reap on the emulator account. |
 

@@ -47,6 +47,9 @@ Floci Lambda runs your function code locally inside real Docker containers - clo
 | `InvokeWithResponseStream` | Invoke and return an AWS event-stream of `PayloadChunk` + `InvokeComplete` |
 | `PublishLayerVersion` / `GetLayerVersion` / `GetLayerVersionByArn` / `ListLayers` / `ListLayerVersions` / `DeleteLayerVersion` | In-memory layer store |
 | `PutFunctionEventInvokeConfig` / `GetFunctionEventInvokeConfig` / `UpdateFunctionEventInvokeConfig` / `DeleteFunctionEventInvokeConfig` / `ListFunctionEventInvokeConfigs` | Per-function and per-qualifier async invoke config |
+| `GetDurableExecution` / `ListDurableExecutionsByFunction` / `GetDurableExecutionHistory` / `StopDurableExecution` | Durable execution management plane (see [Durable Executions](#durable-executions)) |
+| `CheckpointDurableExecution` / `GetDurableExecutionState` | Durable execution checkpoint data plane spoken by the Durable Execution SDK from inside the function |
+| `SendDurableExecutionCallbackSuccess` / `SendDurableExecutionCallbackFailure` / `SendDurableExecutionCallbackHeartbeat` | Complete or heart-beat a `waitForCallback` operation |
 
 ## Hot-Reloading via Reactive S3 Sync
 
@@ -202,7 +205,77 @@ These AWS Lambda operations have no handler in Floci. Calls will return `404` or
 - Layer resource policies (`AddLayerVersionPermission`, `RemoveLayerVersionPermission`, `GetLayerVersionPolicy`)
 - Provisioned concurrency (`PutProvisionedConcurrencyConfig`, `GetProvisionedConcurrencyConfig`, `ListProvisionedConcurrencyConfigs`, `DeleteProvisionedConcurrencyConfig`)
 - Code signing management (only `GetFunctionCodeSigningConfig` is wired; there is no `PutFunctionCodeSigningConfig` or `CreateCodeSigningConfig`)
-- Durable-function checkpoint / replay APIs
+- Durable chained invokes (`CHAINED_INVOKE` checkpoint operations fail with `ChainedInvokeNotSupported`)
+
+## Durable Executions
+
+Floci emulates AWS Lambda Durable Functions (API version `2025-12-01`):
+checkpointed orchestrations that suspend on durable waits and resume in a
+fresh invocation. The implementation lives in
+`services/lambda/durable/` and targets the runtime protocol spoken by
+`@aws/durable-execution-sdk-js` (`withDurableExecution`).
+
+### Lifecycle
+
+1. **Start** — an `Invoke` carrying the `X-Amz-Durable-Execution-Name` header
+   registers a durable execution instead of invoking directly. The response is
+   `202` with the new (or existing, see idempotency below) execution ARN in
+   the `X-Amz-Durable-Execution-Arn` header. The operation log opens with an
+   `EXECUTION` operation whose `ExecutionDetails.InputPayload` carries the raw
+   request payload, and the function is invoked asynchronously with the
+   durable invocation envelope: `{ DurableExecutionArn, CheckpointToken,
+   UpdatedOperationIds, InitialExecutionState: { Operations } }`. The full log
+   is always inlined (no `NextMarker` pagination), so the SDK never needs the
+   paginated `GetDurableExecutionState` at init.
+2. **Checkpoint** — from inside the invocation the SDK records operation
+   transitions with `CheckpointDurableExecution` (`STEP` `START`/`SUCCEED`/
+   `FAIL`/`RETRY`, `WAIT` `START`, `CALLBACK` `START`, `CONTEXT` ops, and
+   `EXECUTION SUCCEED` for oversized results). Each update is applied to the
+   log and the response returns the full refreshed state, which the SDK merges
+   into its replay map. The `CheckpointToken` is minted per invocation and
+   validated on every data-plane call — a stale token is rejected with `400`.
+3. **Suspend** — a `WAIT START` update stamps
+   `WaitDetails.ScheduledEndTimestamp = now + WaitSeconds` and arms a Vert.x
+   one-shot timer. When only timed operations remain, the SDK returns a
+   `PENDING` invocation envelope and the invocation ends; no container is held
+   during the wait.
+4. **Resume** — when the timer fires, the wait flips to `SUCCEEDED` (a step
+   retry flips `PENDING → READY`, a callback completion/timeout flips to
+   `SUCCEEDED`/`FAILED`/`TIMED_OUT`) and the function is re-invoked with the
+   full log plus `UpdatedOperationIds`, so the SDK replays memoized results
+   and continues. If a timer fires while an invocation is in flight, the
+   resume is queued and dispatched when the invocation returns; there is never
+   more than one invocation in flight per execution.
+5. **Finish** — a `SUCCEEDED`/`FAILED` invocation envelope finalizes the
+   execution's status, `Result`, or `Error`. Invocation-level failures
+   (function error payloads, container crashes) are retried up to 3 attempts
+   with a 1s delay before the execution is failed with
+   `Lambda.InvocationError`.
+
+### Idempotency
+
+Execution names are unique per function: re-invoking with the same
+`X-Amz-Durable-Execution-Name` and the same payload reattaches to the existing
+execution (`202` with the same ARN, no new invocation); a different payload is
+rejected with `DurableExecutionAlreadyStartedException` (`409`). Executions
+are function-scoped — deleting the function (via the `DeleteFunction` API)
+drops its executions, so a recreated function starts fresh.
+
+### Emulation notes
+
+- Execution ARNs are minted as
+  `arn:aws:lambda:{region}:{account}:durable-execution:{function}:{name}:{suffix}`.
+- Timestamps are serialized as epoch seconds, matching the AWS wire format.
+- `ExecutionTimeout` / `RetentionPeriodInDays` from `DurableConfig` are
+  accepted but not enforced: executions never time out and are retained until
+  the function is deleted or the emulator restarts.
+- Suspended executions do not survive an emulator restart (timers are not
+  re-armed from persisted state).
+- `GetDurableExecutionHistory` synthesizes events from the operation log
+  (`ExecutionStarted`, `StepSucceeded`, `WaitStarted`, ...) rather than
+  keeping a separate event journal.
+- Durable executions started through CloudFormation-driven function deletes
+  are not purged (only the `DeleteFunction` API path is hooked).
 
 ## Configuration
 
