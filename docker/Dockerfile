@@ -4,11 +4,25 @@ WORKDIR /build
 
 RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
 
+# Mirror Maven Central through Google's GCS replica: repo.maven.apache.org
+# rate-limits (HTTP 429) under repeated local image builds and fails them.
+RUN mkdir -p /root/.m2 && printf '%s' \
+    '<settings><mirrors><mirror>' \
+    '<id>gcs-central</id><mirrorOf>central</mirrorOf>' \
+    '<url>https://maven-central.storage-download.googleapis.com/maven2/</url>' \
+    '</mirror></mirrors></settings>' > /root/.m2/settings.xml
+
 COPY pom.xml .
-RUN mvn dependency:go-offline -q
+# resolve-plugins caches build plugins (surefire, jar, resources, ...) in
+# this pom.xml-keyed layer; without it every image build re-fetches them
+# on every build.
+RUN mvn dependency:go-offline dependency:resolve-plugins -q
 
 COPY src/ src/
-RUN mvn clean package -DskipTests -q
+# No `clean`: the build stage is fresh (no target/ to clean), and resolving
+# the clean-plugin pulls from Maven Central on every image build — which
+# rate-limits (HTTP 429) under repeated local builds.
+RUN mvn package -DskipTests -q
 
 # Stage 2: Runtime
 FROM eclipse-temurin:25-jre-noble

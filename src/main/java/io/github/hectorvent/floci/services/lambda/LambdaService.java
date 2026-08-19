@@ -968,6 +968,14 @@ public class LambdaService {
         snapshot.setState(fn.getState());
         snapshot.setCodeSizeBytes(fn.getCodeSizeBytes());
         snapshot.setEnvironment(fn.getEnvironment());
+        // Versions are immutable code snapshots on AWS: carry the code
+        // identity and location so the version's configuration is complete
+        // and version-qualified invokes can run the same code.
+        snapshot.setCodeSha256(fn.getCodeSha256());
+        snapshot.setCodeLocalPath(fn.getCodeLocalPath());
+        snapshot.setHotReloadHostPath(fn.getHotReloadHostPath());
+        snapshot.setS3Bucket(fn.getS3Bucket());
+        snapshot.setS3Key(fn.getS3Key());
         snapshot.setLastModified(System.currentTimeMillis());
         snapshot.setRevisionId(UUID.randomUUID().toString());
 
@@ -1413,7 +1421,18 @@ public class LambdaService {
         fn.setS3Bucket(null);
         fn.setS3Key(null);
         fn.setCodeSizeBytes(0);
-        fn.setCodeSha256("");
+        // AWS always returns a non-empty CodeSha256 and version publishers
+        // (Alchemy's Lambda.Version) require one. Hot-reload code lives on a
+        // bind mount with no fixed artifact, so hash the mount path — stable,
+        // deterministic, and non-empty.
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(hostPath.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            fn.setCodeSha256(Base64.getEncoder().encodeToString(digest));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            fn.setCodeSha256(Base64.getEncoder().encodeToString(hostPath.getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8)));
+        }
         LOG.infov("Hot-reload configured for function {0}: bind-mounting {1}", fn.getFunctionName(), hostPath);
     }
 
