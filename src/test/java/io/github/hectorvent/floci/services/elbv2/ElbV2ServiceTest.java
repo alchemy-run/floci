@@ -141,6 +141,26 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void describeRulesRequiresListenerAndThrowsAfterDelete() {
+        String lbArn = service.createLoadBalancer(
+                REGION, "rules-listener-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        String tgArn = createTargetGroup("rules-listener-tg");
+        String listenerArn = service.createListener(
+                REGION, lbArn, "HTTP", 80, null, List.of(),
+                List.of(forwardAction(tgArn)), List.of(), Map.of()).getListenerArn();
+
+        assertFalse(service.describeRules(REGION, listenerArn, null).isEmpty());
+
+        service.deleteListener(REGION, listenerArn);
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.describeRules(REGION, listenerArn, null));
+        assertEquals("ListenerNotFound", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
     void createLoadBalancerAcceptsSubnetsEc2StoreCannotSee() {
         when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
 

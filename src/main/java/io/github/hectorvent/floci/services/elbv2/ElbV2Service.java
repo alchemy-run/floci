@@ -719,6 +719,13 @@ public class ElbV2Service {
     }
 
     public List<Rule> describeRules(String region, String listenerArn, List<String> ruleArns) {
+        // AWS DescribeRules with ListenerArn throws ListenerNotFound when the
+        // listener is gone — returning an empty list made Alchemy's
+        // post-destroy orphan check (`catchTag ListenerNotFoundException`)
+        // treat a deleted shared-ALB listener as still present.
+        if (listenerArn != null && !listenerArn.isEmpty()) {
+            requireListener(region, listenerArn);
+        }
         Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
 
         if (ruleArns != null && !ruleArns.isEmpty()) {
