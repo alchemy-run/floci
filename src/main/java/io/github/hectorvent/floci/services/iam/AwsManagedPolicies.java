@@ -121,6 +121,10 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AWSGlueServiceRole", "/service-role/",
                 "Policy for AWS Glue service role."),
 
+        // Batch unmanaged CE service role — Alchemy Batch Bindings attach this ARN.
+        new ManagedPolicyDef("AWSBatchServiceRole", "/service-role/",
+                "Provides access to AWS Batch resources to create and manage compute environments and job queues."),
+
         // S3 Object Lambda execution role policy
         new ManagedPolicyDef("AmazonS3ObjectLambdaExecutionRolePolicy", "/service-role/",
                 "Provides write permissions to CloudWatch Logs for S3 Object Lambda access points."),
