@@ -3126,6 +3126,72 @@ class Ec2IntegrationTest {
     }
 
     @Test
+    @Order(314)
+    void replaceNetworkAclAssociationReturnsAwsShapedIds() {
+        String vpc = newVpc("10.34.0.0/16");
+        String subnetId = given()
+            .formParam("Action", "CreateSubnet")
+            .formParam("VpcId", vpc)
+            .formParam("CidrBlock", "10.34.1.0/24")
+            .header("Authorization", AUTH_HEADER)
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().path("CreateSubnetResponse.subnet.subnetId");
+
+        // CreateSubnet must emit a fully-populated association on the default NACL
+        // (networkAclAssociationId / networkAclId / subnetId) — distilled + Alchemy
+        // persist these; a missing field becomes undefined and later read() fails
+        // encoding Filters[0].Values[0].
+        String associationId = given()
+            .formParam("Action", "DescribeNetworkAcls")
+            .formParam("Filter.1.Name", "association.subnet-id")
+            .formParam("Filter.1.Value.1", subnetId)
+            .header("Authorization", AUTH_HEADER)
+        .when().post("/")
+        .then().statusCode(200)
+            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclAssociationId",
+                    startsWith("aclassoc-"))
+            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclId",
+                    startsWith("acl-"))
+            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.subnetId",
+                    equalTo(subnetId))
+            .extract().path("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclAssociationId");
+
+        String aclId = given()
+            .formParam("Action", "CreateNetworkAcl")
+            .formParam("VpcId", vpc)
+            .header("Authorization", AUTH_HEADER)
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().path("CreateNetworkAclResponse.networkAcl.networkAclId");
+
+        String newAssociationId = given()
+            .formParam("Action", "ReplaceNetworkAclAssociation")
+            .formParam("AssociationId", associationId)
+            .formParam("NetworkAclId", aclId)
+            .header("Authorization", AUTH_HEADER)
+        .when().post("/")
+        .then().statusCode(200)
+            .body("ReplaceNetworkAclAssociationResponse.newAssociationId", startsWith("aclassoc-"))
+            .extract().path("ReplaceNetworkAclAssociationResponse.newAssociationId");
+
+        given()
+            .formParam("Action", "DescribeNetworkAcls")
+            .formParam("Filter.1.Name", "association.subnet-id")
+            .formParam("Filter.1.Value.1", subnetId)
+            .header("Authorization", AUTH_HEADER)
+        .when().post("/")
+        .then().statusCode(200)
+            .body("DescribeNetworkAclsResponse.networkAclSet.item.networkAclId", equalTo(aclId))
+            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclAssociationId",
+                    equalTo(newAssociationId))
+            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.networkAclId",
+                    equalTo(aclId))
+            .body("DescribeNetworkAclsResponse.networkAclSet.item.associationSet.item.subnetId",
+                    equalTo(subnetId));
+    }
+
+    @Test
     @Order(315)
     void describePrefixListsReturnsManagedS3() {
         String prefixListId = given()

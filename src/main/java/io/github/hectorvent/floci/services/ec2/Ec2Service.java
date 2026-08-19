@@ -1472,7 +1472,15 @@ public class Ec2Service implements ContainerTeardown {
             throw new AwsException("MissingParameter", "The request must contain the parameter VpcId", 400);
         }
         ensureDefaultResources(region);
-        resolveVpcForCreate(region, vpcId);
+        // Create-path lookup may substitute the emulator default VPC when Alchemy
+        // hands us a foreign (live-AWS) vpc id. The subnet still records the
+        // caller-supplied id, but the default-NACL association must use the
+        // resolved VPC — otherwise findDefaultNetworkAcl misses and the subnet
+        // is born with no association. XmlBuilder omits null fields, so a later
+        // DescribeNetworkAcls / ReplaceNetworkAclAssociation response drops
+        // subnetId / networkAclAssociationId and Alchemy persists undefined
+        // attributes that crash read() encoding Filters[0].Values[0].
+        Vpc resolved = resolveVpcForCreate(region, vpcId);
 
         String subnetId = "subnet-" + randomHex(8);
         Subnet subnet = new Subnet();
@@ -1488,17 +1496,19 @@ public class Ec2Service implements ContainerTeardown {
         subnet.setSubnetArn(AwsArnUtils.Arn.of("ec2", region, accountId, "subnet/" + subnetId).toString());
         subnets.put(key(region, subnetId), subnet);
 
-        // Every subnet starts associated with its VPC's default NACL. ReplaceNetworkAclAssociation
-        // later moves it onto a custom NACL, so this association must exist for that lookup to work.
-        NetworkAcl defaultAcl = findDefaultNetworkAcl(region, vpcId);
-        if (defaultAcl != null) {
-            NetworkAclAssociation assoc = new NetworkAclAssociation();
-            assoc.setNetworkAclAssociationId("aclassoc-" + randomHex(17));
-            assoc.setNetworkAclId(defaultAcl.getNetworkAclId());
-            assoc.setSubnetId(subnetId);
-            defaultAcl.getAssociations().add(assoc);
-            networkAcls.put(key(region, defaultAcl.getNetworkAclId()), defaultAcl);
+        // Every AWS subnet starts associated with its VPC's default NACL.
+        // ReplaceNetworkAclAssociation later moves it onto a custom NACL.
+        NetworkAcl defaultAcl = findDefaultNetworkAcl(region, resolved.getVpcId());
+        if (defaultAcl == null) {
+            throw new AwsException("InvalidNetworkAclID.NotFound",
+                    "The VPC '" + resolved.getVpcId() + "' has no default network ACL", 400);
         }
+        NetworkAclAssociation assoc = new NetworkAclAssociation();
+        assoc.setNetworkAclAssociationId("aclassoc-" + randomHex(17));
+        assoc.setNetworkAclId(defaultAcl.getNetworkAclId());
+        assoc.setSubnetId(subnetId);
+        defaultAcl.getAssociations().add(assoc);
+        networkAcls.put(key(region, defaultAcl.getNetworkAclId()), defaultAcl);
         return subnet;
     }
 
@@ -1520,6 +1530,19 @@ public class Ec2Service implements ContainerTeardown {
         ensureDefaultResources(region);
         if (subnets.get(key(region, subnetId)).isEmpty()) {
             throw new AwsException("InvalidSubnetID.NotFound", "The subnet ID '" + subnetId + "' does not exist", 400);
+        }
+        // AWS DeleteSubnet drops the subnet's NACL association so DescribeNetworkAcls
+        // never returns an association whose subnetId points at a gone subnet.
+        for (NetworkAcl acl : new ArrayList<>(networkAcls.scan(k -> true))) {
+            if (!region.equals(acl.getRegion())) {
+                continue;
+            }
+            List<NetworkAclAssociation> remaining = new ArrayList<>(acl.getAssociations());
+            if (!remaining.removeIf(a -> subnetId.equals(a.getSubnetId()))) {
+                continue;
+            }
+            acl.setAssociations(remaining);
+            networkAcls.put(key(region, acl.getNetworkAclId()), acl);
         }
         subnets.delete(key(region, subnetId));
     }

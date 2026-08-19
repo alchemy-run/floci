@@ -12,6 +12,8 @@ import io.github.hectorvent.floci.services.ec2.model.EbsBlockDevice;
 import io.github.hectorvent.floci.services.ec2.model.GroupIdentifier;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
+import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
+import io.github.hectorvent.floci.services.ec2.model.NetworkAclAssociation;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
@@ -762,6 +764,95 @@ class Ec2ServiceTest {
         var subnet = service.createSubnet("us-east-1", "vpc-0abcdef1234567890", "172.31.96.0/20", "us-east-1a");
         assertEquals("vpc-0abcdef1234567890", subnet.getVpcId());
         assertEquals("available", subnet.getState());
+        // Foreign vpc ids still get a fully-populated default-NACL association
+        // (the 0dfca94 create-path substitution must not skip this).
+        assertCompleteAssociation(associationForSubnet(service, "us-east-1", subnet.getSubnetId()),
+                subnet.getSubnetId());
+    }
+
+    @Test
+    void createSubnetAssociatesWithDefaultNetworkAcl() {
+        Ec2Service service = newService();
+        var subnet = service.createSubnet("us-east-1", "vpc-default", "172.31.112.0/20", "us-east-1a");
+
+        NetworkAclAssociation assoc = associationForSubnet(service, "us-east-1", subnet.getSubnetId());
+        assertCompleteAssociation(assoc, subnet.getSubnetId());
+        assertEquals("acl-default", assoc.getNetworkAclId());
+
+        List<NetworkAcl> filtered = service.describeNetworkAcls("us-east-1", List.of(),
+                Map.of("association.subnet-id", List.of(subnet.getSubnetId())));
+        assertEquals(1, filtered.size());
+        assertEquals("acl-default", filtered.getFirst().getNetworkAclId());
+        NetworkAclAssociation described = filtered.getFirst().getAssociations().stream()
+                .filter(a -> subnet.getSubnetId().equals(a.getSubnetId()))
+                .findFirst()
+                .orElseThrow();
+        assertCompleteAssociation(described, subnet.getSubnetId());
+    }
+
+    @Test
+    void replaceNetworkAclAssociationReturnsNewIdAndMovesSubnet() {
+        Ec2Service service = newService();
+        var subnet = service.createSubnet("us-east-1", "vpc-default", "172.31.128.0/20", "us-east-1a");
+        NetworkAcl custom = service.createNetworkAcl("us-east-1", "vpc-default");
+        NetworkAclAssociation current = associationForSubnet(service, "us-east-1", subnet.getSubnetId());
+
+        NetworkAclAssociation moved = service.replaceNetworkAclAssociation(
+                "us-east-1", current.getNetworkAclAssociationId(), custom.getNetworkAclId());
+
+        assertCompleteAssociation(moved, subnet.getSubnetId());
+        assertEquals(custom.getNetworkAclId(), moved.getNetworkAclId());
+        assertTrue(moved.getNetworkAclAssociationId().startsWith("aclassoc-"));
+        assertFalse(moved.getNetworkAclAssociationId().equals(current.getNetworkAclAssociationId()));
+
+        List<NetworkAcl> onCustom = service.describeNetworkAcls("us-east-1", List.of(),
+                Map.of("association.subnet-id", List.of(subnet.getSubnetId())));
+        assertEquals(1, onCustom.size());
+        assertEquals(custom.getNetworkAclId(), onCustom.getFirst().getNetworkAclId());
+        NetworkAclAssociation described = onCustom.getFirst().getAssociations().stream()
+                .filter(a -> subnet.getSubnetId().equals(a.getSubnetId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(moved.getNetworkAclAssociationId(), described.getNetworkAclAssociationId());
+        assertCompleteAssociation(described, subnet.getSubnetId());
+    }
+
+    @Test
+    void deleteSubnetRemovesNetworkAclAssociation() {
+        Ec2Service service = newService();
+        var subnet = service.createSubnet("us-east-1", "vpc-default", "172.31.144.0/20", "us-east-1a");
+        assertNotNull(associationForSubnet(service, "us-east-1", subnet.getSubnetId()));
+
+        service.deleteSubnet("us-east-1", subnet.getSubnetId());
+
+        assertTrue(service.describeNetworkAcls("us-east-1", List.of(),
+                Map.of("association.subnet-id", List.of(subnet.getSubnetId()))).isEmpty());
+    }
+
+    private static Ec2Service newService() {
+        return new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+    }
+
+    private static NetworkAclAssociation associationForSubnet(Ec2Service service, String region, String subnetId) {
+        return service.describeNetworkAcls(region, List.of(),
+                        Map.of("association.subnet-id", List.of(subnetId)))
+                .stream()
+                .flatMap(acl -> acl.getAssociations().stream())
+                .filter(a -> subnetId.equals(a.getSubnetId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static void assertCompleteAssociation(NetworkAclAssociation assoc, String subnetId) {
+        assertNotNull(assoc, "subnet " + subnetId + " must have a network ACL association");
+        assertNotNull(assoc.getNetworkAclAssociationId());
+        assertTrue(assoc.getNetworkAclAssociationId().startsWith("aclassoc-"));
+        assertNotNull(assoc.getNetworkAclId());
+        assertTrue(assoc.getNetworkAclId().startsWith("acl-"));
+        assertEquals(subnetId, assoc.getSubnetId());
     }
 
     private static EmulatorConfig mockConfig(boolean ec2Mock) {
