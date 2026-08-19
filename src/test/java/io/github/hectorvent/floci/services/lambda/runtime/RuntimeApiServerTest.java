@@ -194,6 +194,9 @@ class RuntimeApiServerTest {
     @Test
     @Timeout(15)
     void responseEndpoint_returns202WithStatusOkBody() throws Exception {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        server.setPlatformLogSink(lines::add);
+
         PendingInvocation invocation = new PendingInvocation(
                 "req-response", "{}".getBytes(), System.currentTimeMillis() + 60_000,
                 "arn:aws:lambda:us-east-1:000000000000:function:test",
@@ -216,6 +219,8 @@ class RuntimeApiServerTest {
         assertEquals("application/json",
                 response.headers().firstValue("Content-Type").orElse(""));
         assertEquals("OK", new JsonObject(response.body()).getString("status"));
+        assertTrue(lines.stream().anyMatch(line -> line.contains("\"ALCHEMY_REQUEST_FINALIZED\"")),
+                "response must emit a quoted request-finalized line: " + lines);
     }
 
     @Test
@@ -396,6 +401,24 @@ class RuntimeApiServerTest {
         assertEquals("my-real-function", body.getString("functionName"));
         assertEquals("3", body.getString("functionVersion"));
         assertEquals("index.handler", body.getString("handler"));
+    }
+
+    @Test
+    @Timeout(10)
+    void extensionRegister_emitsPlatformLogLine() throws Exception {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        server.setPlatformLogSink(lines::add);
+
+        HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/2020-01-01/extension/register"))
+                        .header("Lambda-Extension-Name", "alchemy-graceful-shutdown")
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"events\":[]}"))
+                        .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode());
+        assertTrue(lines.stream().anyMatch(line -> line.contains("\"alchemy-graceful-shutdown\"")),
+                "register must emit a quoted EXTENSION name for CloudWatch phrase filters: " + lines);
     }
 
     /**

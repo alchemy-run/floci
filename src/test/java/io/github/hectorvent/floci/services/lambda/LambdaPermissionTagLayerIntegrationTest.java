@@ -287,6 +287,58 @@ class LambdaPermissionTagLayerIntegrationTest {
     }
 
     @Test
+    @Order(19)
+    void addPermission_functionUrlCondition_roundTripsOnGetPolicy() throws Exception {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "StatementId": "FunctionURLAllowPublicInvoke",
+                    "Action": "lambda:InvokeFunction",
+                    "Principal": "*",
+                    "InvokedViaFunctionUrl": true
+                }
+                """)
+        .when()
+            .post("/2015-03-31/functions/" + FN + "/policy")
+        .then()
+            .statusCode(201);
+
+        String response = given()
+        .when()
+            .get("/2015-03-31/functions/" + FN + "/policy")
+        .then()
+            .statusCode(200)
+            .extract().body().asString();
+
+        ObjectMapper om = new ObjectMapper();
+        String policyJson = om.readTree(response).get("Policy").asText();
+        var policy = om.readTree(policyJson);
+        var match = policy.get("Statement").elements();
+        com.fasterxml.jackson.databind.JsonNode found = null;
+        while (match.hasNext()) {
+            var node = match.next();
+            if ("FunctionURLAllowPublicInvoke".equals(node.path("Sid").asText())) {
+                found = node;
+            }
+        }
+        assert found != null;
+        assert found.path("Condition").path("Bool").path("lambda:InvokedViaFunctionUrl").asText().equals("true");
+    }
+
+    @Test
+    @Order(19)
+    void getAccountSettings_returnsLimits() {
+        given()
+        .when()
+            .get("/2016-08-19/account-settings")
+        .then()
+            .statusCode(200)
+            .body("AccountLimit.ConcurrentExecutions", greaterThan(0))
+            .body("AccountUsage.FunctionCount", greaterThanOrEqualTo(1));
+    }
+
+    @Test
     @Order(18)
     void listLayerVersions_returnsEmptyList() {
         given()

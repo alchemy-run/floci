@@ -1,10 +1,13 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
+import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
 import io.github.hectorvent.floci.services.lambda.zip.CodeStore;
 import io.github.hectorvent.floci.services.lambda.zip.ZipExtractor;
 import org.junit.jupiter.api.BeforeEach;
@@ -655,5 +658,121 @@ class LambdaServiceTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    @Test
+    void addPermission_storesInvokedViaFunctionUrlCondition() {
+        service.createFunction(REGION, baseRequest("url-perm-fn"));
+        service.addPermission(REGION, "url-perm-fn", Map.of(
+                "StatementId", "FunctionURLAllowPublicInvoke",
+                "Action", "lambda:InvokeFunction",
+                "Principal", "*",
+                "InvokedViaFunctionUrl", true
+        ));
+
+        Map<String, Object> data = service.getPolicy(REGION, "url-perm-fn");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> policy = (Map<String, Object>) data.get("policy");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> statements = (List<Map<String, Object>>) policy.get("Statement");
+        assertEquals(1, statements.size());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> condition = (Map<String, Object>) statements.get(0).get("Condition");
+        assertEquals(Map.of("Bool", Map.of("lambda:InvokedViaFunctionUrl", "true")), condition);
+    }
+
+    @Test
+    void removePermission_concurrentRemovesBothStatements() throws Exception {
+        service.createFunction(REGION, baseRequest("race-perm-fn"));
+        service.addPermission(REGION, "race-perm-fn", Map.of(
+                "StatementId", "FunctionURLAllowPublicAccess",
+                "Action", "lambda:InvokeFunctionUrl",
+                "Principal", "*"
+        ));
+        service.addPermission(REGION, "race-perm-fn", Map.of(
+                "StatementId", "FunctionURLAllowPublicInvoke",
+                "Action", "lambda:InvokeFunction",
+                "Principal", "*"
+        ));
+
+        var a = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var first = a.submit(() -> service.removePermission(REGION, "race-perm-fn", "FunctionURLAllowPublicAccess"));
+            var second = a.submit(() -> service.removePermission(REGION, "race-perm-fn", "FunctionURLAllowPublicInvoke"));
+            first.get();
+            second.get();
+        } finally {
+            a.shutdownNow();
+        }
+
+        AwsException ex = assertThrows(AwsException.class, () -> service.getPolicy(REGION, "race-perm-fn"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void addPermission_storesFunctionUrlAuthTypeCondition() {
+        Map<String, Object> condition = LambdaService.buildPermissionCondition(Map.of(
+                "FunctionUrlAuthType", "NONE",
+                "InvokedViaFunctionUrl", true
+        ));
+        assertEquals("NONE", ((Map<?, ?>) condition.get("StringEquals")).get("lambda:FunctionUrlAuthType"));
+        assertEquals("true", ((Map<?, ?>) condition.get("Bool")).get("lambda:InvokedViaFunctionUrl"));
+    }
+
+    @Test
+    void updateFunctionCode_persistsArchitectures() {
+        service.createFunction(REGION, new java.util.HashMap<>(Map.of(
+                "FunctionName", "arch-fn",
+                "Runtime", "nodejs20.x",
+                "Role", "arn:aws:iam::000000000000:role/test-role",
+                "Handler", "index.handler",
+                "Architectures", List.of("arm64")
+        )));
+        assertEquals(List.of("arm64"), service.getFunction(REGION, "arch-fn").getArchitectures());
+
+        service.updateFunctionCode(REGION, "arch-fn", Map.of("Architectures", List.of("x86_64")));
+        assertEquals(List.of("x86_64"), service.getFunction(REGION, "arch-fn").getArchitectures());
+    }
+
+    @Test
+    void updateFunctionUrlConfig_corsWithoutMaxAge_doesNotNpe() {
+        EmulatorConfig cfg = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig svcCfg = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.LambdaServiceConfig lambdaCfg = mock(EmulatorConfig.LambdaServiceConfig.class);
+        when(cfg.effectiveBaseUrl()).thenReturn("http://localhost:4566");
+        when(cfg.services()).thenReturn(svcCfg);
+        when(svcCfg.lambda()).thenReturn(lambdaCfg);
+        when(lambdaCfg.defaultTimeoutSeconds()).thenReturn(3);
+        when(lambdaCfg.defaultMemoryMb()).thenReturn(128);
+        LambdaFunctionStore store = new LambdaFunctionStore(new InMemoryStorage<String, LambdaFunction>());
+        LambdaService svc = new LambdaService(store, new WarmPool(),
+                new CodeStore(Path.of("target/test-data/lambda-code")),
+                new ZipExtractor(), cfg, new RegionResolver(REGION, "000000000000"));
+        svc.createFunction(REGION, baseRequest("url-fn"));
+        svc.createFunctionUrlConfig(REGION, "url-fn", null, Map.of("AuthType", "NONE"));
+
+        LambdaUrlConfig updated = svc.updateFunctionUrlConfig(REGION, "url-fn", null, Map.of(
+                "AuthType", "AWS_IAM",
+                "Cors", Map.of("AllowOrigins", List.of("*"))
+        ));
+
+        assertEquals("AWS_IAM", updated.getAuthType());
+        assertNotNull(updated.getCors());
+        assertEquals(0, updated.getCors().getMaxAge());
+        JsonNode corsJson = new ObjectMapper().valueToTree(updated.getCors());
+        assertFalse(corsJson.has("AllowCredentials"),
+                "AWS omits AllowCredentials when false: " + corsJson);
+    }
+
+    @Test
+    void getAccountSettings_returnsLimitsAndUsage() {
+        service.createFunction(REGION, baseRequest("settings-fn"));
+        Map<String, Object> settings = service.getAccountSettings(REGION);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> limit = (Map<String, Object>) settings.get("AccountLimit");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> usage = (Map<String, Object>) settings.get("AccountUsage");
+        assertTrue(((Number) limit.get("ConcurrentExecutions")).intValue() > 0);
+        assertTrue(((Number) usage.get("FunctionCount")).intValue() >= 1);
     }
 }

@@ -211,7 +211,8 @@ Conditions; `UpdateFunctionCode` persists `Architectures`;
 `GetAccountSettings`; `InvokeWithResponseStream` event-stream;
 VPC Hyperplane ENIs on create/delete; Extensions API writes
 `EXTENSION Name: "…" ` to CloudWatch; `GetLayerVersionByArn`;
-`UpdateFunctionUrlConfig` Cors MaxAge is null-safe).
+`UpdateFunctionUrlConfig` Cors MaxAge is null-safe;
+unsigned AWS_IAM Function URLs return 403).
 
 Alchemy `Version`, `Alias`, and `LayerVersion` are **not** `flociDual`'d
 (`Providers.ts` registers live-only providers). Those suites deploy

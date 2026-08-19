@@ -141,6 +141,20 @@ class LambdaLayerIntegrationTest {
     // ── ListLayerVersions ────────────────────────────────────────────────────
 
     @Test
+    @Order(5)
+    void getLayerVersionByArn_returnsVersion1() {
+        given()
+            .queryParam("find", "LayerVersion")
+            .queryParam("Arn", "arn:aws:lambda:us-east-1:000000000000:layer:" + LAYER_NAME + ":1")
+        .when()
+            .get("/2018-10-31/layers")
+        .then()
+            .statusCode(200)
+            .body("Version", equalTo(1))
+            .body("LayerVersionArn", containsString(":layer:" + LAYER_NAME + ":1"));
+    }
+
+    @Test
     @Order(6)
     void listLayerVersions_returnsBothVersions() {
         given()

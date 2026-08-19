@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.lambda;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.lambda.model.LambdaLayerVersion;
 import jakarta.inject.Inject;
@@ -13,6 +14,7 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
@@ -94,7 +96,20 @@ public class LambdaLayerController {
 
     @GET
     @Path("/layers")
-    public Response listLayers(@Context HttpHeaders headers) {
+    public Response listLayers(@Context HttpHeaders headers,
+                               @QueryParam("find") String find,
+                               @QueryParam("Arn") String arn) {
+        if ("LayerVersion".equals(find)) {
+            if (arn == null || arn.isBlank()) {
+                throw new AwsException("InvalidParameterValueException", "Arn is required", 400);
+            }
+            LambdaLayerVersion lv = layerService.resolveLayerByArn(arn);
+            if (lv == null) {
+                throw new AwsException("ResourceNotFoundException",
+                        "Layer version " + arn + " does not exist.", 404);
+            }
+            return Response.ok(buildLayerVersionResponse(lv)).build();
+        }
         String region = regionResolver.resolveRegion(headers);
         List<LambdaLayerVersion> layers = layerService.listLayers(region);
         ObjectNode root = objectMapper.createObjectNode();

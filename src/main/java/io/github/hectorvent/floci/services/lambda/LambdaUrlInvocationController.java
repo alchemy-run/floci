@@ -140,6 +140,18 @@ public class LambdaUrlInvocationController {
 
         LOG.infov("Lambda URL invocation: {0} {1} -> {2} (region: {3})", method, urlId, functionName, region);
 
+        // AWS_IAM Function URLs reject unsigned requests at the URL edge
+        // (HTTP 403) without invoking the function. Unsigned GET against a
+        // RESPONSE_STREAM URL would otherwise hang the caller on a container.
+        if (urlConfig != null && "AWS_IAM".equals(urlConfig.getAuthType())
+                && !hasSigV4(headers, uriInfo)) {
+            return CompletableFuture.completedFuture(
+                    Response.status(403)
+                            .entity("{\"Message\":\"Forbidden\"}")
+                            .type(MediaType.APPLICATION_JSON)
+                            .build());
+        }
+
         boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
         byte[] eventBytes = event.getBytes();
         return CompletableFuture.supplyAsync(() -> {
@@ -153,6 +165,20 @@ public class LambdaUrlInvocationController {
                 return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
             }
         }, INVOKE_POOL);
+    }
+
+    /** Visible for tests: AWS SigV4 via Authorization header or query-string signing. */
+    static boolean hasSigV4(HttpHeaders headers, UriInfo uriInfo) {
+        String authorization = headers != null ? headers.getHeaderString("Authorization") : null;
+        String algorithm = uriInfo != null ? uriInfo.getQueryParameters().getFirst("X-Amz-Algorithm") : null;
+        return hasSigV4(authorization, algorithm);
+    }
+
+    static boolean hasSigV4(String authorization, String amzAlgorithmQuery) {
+        if (authorization != null && authorization.contains("AWS4-HMAC-SHA256")) {
+            return true;
+        }
+        return "AWS4-HMAC-SHA256".equals(amzAlgorithmQuery);
     }
 
     private String buildEvent(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body, String requestId, String region) {

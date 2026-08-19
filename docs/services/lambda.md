@@ -181,7 +181,12 @@ A function with `VpcConfig` creates one Hyperplane ENI per subnet
 those ENIs on `DeleteFunction`.
 
 `UpdateFunctionUrlConfig` Cors `MaxAge` is optional — a missing value
-defaults to `0` instead of unboxing a null `Integer`.
+defaults to `0` instead of unboxing a null `Integer`. Cors
+`AllowCredentials` is omitted from the JSON when false (AWS shape).
+
+Function URLs with `AuthType=AWS_IAM` return HTTP 403 for unsigned
+requests at the URL edge (no container invoke). Unsigned
+`RESPONSE_STREAM` GETs would otherwise hang waiting on the runtime.
 
 Internal Extensions API registrations emit an AWS-shaped
 `EXTENSION Name: "…" State: Ready` line onto the function's CloudWatch

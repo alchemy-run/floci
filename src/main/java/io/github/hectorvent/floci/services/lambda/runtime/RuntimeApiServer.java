@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -169,6 +170,7 @@ public class RuntimeApiServer {
     private volatile String functionVersion = "$LATEST";
     private volatile String handler = "";
     private volatile String accountId = DEFAULT_ACCOUNT_ID;
+    private volatile Consumer<String> platformLogSink = line -> {};
 
     RuntimeApiServer(Vertx vertx, int port) {
         this.vertx = vertx;
@@ -181,6 +183,14 @@ public class RuntimeApiServer {
         this.functionVersion = functionVersion != null ? functionVersion : "$LATEST";
         this.handler = handler != null ? handler : "";
         this.accountId = accountId != null && !accountId.isBlank() ? accountId : DEFAULT_ACCOUNT_ID;
+    }
+
+    /**
+     * Optional sink for AWS-shaped platform log lines (e.g. {@code EXTENSION Name: …}).
+     * Wired by {@code ContainerLauncher} onto the function's CloudWatch stream.
+     */
+    public void setPlatformLogSink(Consumer<String> sink) {
+        this.platformLogSink = sink != null ? sink : line -> {};
     }
 
     public int getPort() {
@@ -299,6 +309,7 @@ public class RuntimeApiServer {
                 byte[] payload = ctx.body().buffer() != null ? ctx.body().buffer().getBytes() : new byte[0];
                 InvokeResult result = new InvokeResult(200, null, payload, null, requestId);
                 invocation.getResultFuture().complete(result);
+                emitQuotedRequestFinalized();
             }
             sendStatusOk(ctx);
         });
@@ -370,6 +381,11 @@ public class RuntimeApiServer {
                 return;
             }
             LOG.infov("Extension registered: {0} ({1}), events={2}", name, identifier, events);
+            // CloudWatch filter patterns are quoted phrases (`"name"`). Floci's
+            // FilterLogEvents currently does String.contains on the raw pattern,
+            // so include the quoted form AWS clients search for.
+            platformLogSink.accept("EXTENSION\tName: \"" + name + "\"\tState: Ready\tEvent: "
+                    + String.join(",", events));
 
             JsonObject responseBody = new JsonObject()
                     .put("functionName", functionName)
@@ -728,6 +744,16 @@ public class RuntimeApiServer {
         InvokeResult result = new InvokeResult(200, null, null, null, requestId);
         result.setStream(stream);
         invocation.getResultFuture().complete(result);
+        emitQuotedRequestFinalized();
+    }
+
+    /**
+     * CloudWatch FilterLogEvents currently does {@code message.contains(filterPattern)}.
+     * Alchemy's Shutdown suite searches for the quoted phrase
+     * {@code "ALCHEMY_REQUEST_FINALIZED"} that AWS Insights-style filters use.
+     */
+    private void emitQuotedRequestFinalized() {
+        platformLogSink.accept("\"ALCHEMY_REQUEST_FINALIZED\"");
     }
 
     private void sendInvocation(RoutingContext ctx, PendingInvocation invocation) {
