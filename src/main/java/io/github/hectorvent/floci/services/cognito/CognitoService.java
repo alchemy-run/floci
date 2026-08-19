@@ -1112,11 +1112,15 @@ public class CognitoService {
             user.getAttributes().put("sub", UUID.randomUUID().toString());
         }
 
-        if (temporaryPassword != null && !temporaryPassword.isEmpty()) {
-            updateUserPassword(user, temporaryPassword);
-            user.setTemporaryPassword(true);
-            user.setUserStatus("FORCE_CHANGE_PASSWORD");
-        }
+        // AWS always creates admin-created users in FORCE_CHANGE_PASSWORD,
+        // generating a temporary password when the caller omits one.
+        String effectiveTemporaryPassword =
+                temporaryPassword != null && !temporaryPassword.isEmpty()
+                        ? temporaryPassword
+                        : "Temp-" + UUID.randomUUID() + "1!";
+        updateUserPassword(user, effectiveTemporaryPassword);
+        user.setTemporaryPassword(true);
+        user.setUserStatus("FORCE_CHANGE_PASSWORD");
 
         userStore.put(key, user);
         LOG.infov("Created user {0} in pool {1}", username, userPoolId);
