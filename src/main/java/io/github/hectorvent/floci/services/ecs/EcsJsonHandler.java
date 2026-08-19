@@ -427,6 +427,7 @@ public class EcsJsonHandler {
         EcsServiceModel svc = service.createService(cluster, serviceName, taskDefinition,
                 desiredCount, launchType, loadBalancers, networkConfiguration, tags, region);
         applyServiceControlPlaneFields(req, svc);
+        service.persistService(svc, region);
 
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("service", serviceNode(svc));
@@ -505,6 +506,7 @@ public class EcsJsonHandler {
         EcsServiceModel svc = service.updateService(cluster, serviceName, taskDefinition, desiredCount,
                 networkConfiguration, region);
         applyServiceControlPlaneFields(req, svc);
+        service.persistService(svc, region);
 
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("service", serviceNode(svc));
@@ -1245,8 +1247,9 @@ public class EcsJsonHandler {
             for (CapacityProviderStrategyItem item : s.getCapacityProviderStrategy()) {
                 ObjectNode i = objectMapper.createObjectNode();
                 i.put("capacityProvider", item.capacityProvider());
-                if (item.weight() != null) { i.put("weight", item.weight()); }
-                if (item.base() != null) { i.put("base", item.base()); }
+                i.put("weight", item.weight() != null ? item.weight() : 1);
+                // AWS defaults omitted base to 0 and always echoes it.
+                i.put("base", item.base() != null ? item.base() : 0);
                 strategy.add(i);
             }
             n.set("capacityProviderStrategy", strategy);
@@ -1583,6 +1586,11 @@ public class EcsJsonHandler {
         if (req.has("serviceRegistries") && req.path("serviceRegistries").isArray()) {
             svc.setServiceRegistries(parseServiceRegistries(req.path("serviceRegistries")));
         }
+        // launchType and capacityProviderStrategy are mutually exclusive on AWS;
+        // a strategy-backed service must not echo a defaulted FARGATE launch type.
+        if (svc.getCapacityProviderStrategy() != null && !svc.getCapacityProviderStrategy().isEmpty()) {
+            svc.setLaunchType(null);
+        }
     }
 
     private DeploymentConfiguration parseDeploymentConfiguration(JsonNode node) {
@@ -1630,8 +1638,8 @@ public class EcsJsonHandler {
         for (JsonNode item : node) {
             result.add(new CapacityProviderStrategyItem(
                     item.path("capacityProvider").asText(null),
-                    item.has("weight") ? item.path("weight").asInt() : null,
-                    item.has("base") ? item.path("base").asInt() : null));
+                    item.has("weight") ? item.path("weight").asInt() : 1,
+                    item.has("base") ? item.path("base").asInt() : 0));
         }
         return result;
     }

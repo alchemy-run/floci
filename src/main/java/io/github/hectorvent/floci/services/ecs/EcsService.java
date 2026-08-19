@@ -797,6 +797,16 @@ public class EcsService implements ContainerTeardown {
         return svc;
     }
 
+    /** Re-persist after the handler applies control-plane fields (strategy, etc.). */
+    public void persistService(EcsServiceModel svc, String region) {
+        if (svc == null || svc.getServiceName() == null || svc.getClusterArn() == null) {
+            return;
+        }
+        String clusterArn = svc.getClusterArn();
+        String clusterName = clusterArn.substring(clusterArn.lastIndexOf('/') + 1);
+        services.put(serviceKey(region, clusterName, svc.getServiceName()), svc);
+    }
+
     public EcsServiceModel updateService(String clusterRef, String serviceName, String taskDefinition,
                                           Integer desiredCount, NetworkConfiguration networkConfiguration,
                                           String region) {

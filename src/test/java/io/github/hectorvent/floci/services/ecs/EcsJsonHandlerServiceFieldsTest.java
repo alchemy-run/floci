@@ -81,10 +81,37 @@ class EcsJsonHandlerServiceFieldsTest {
         assertEquals("FARGATE_SPOT",
                 svc.path("capacityProviderStrategy").get(0).path("capacityProvider").asText());
         assertEquals(1, svc.path("capacityProviderStrategy").get(0).path("weight").asInt());
+        assertEquals(0, svc.path("capacityProviderStrategy").get(0).path("base").asInt());
+        assertTrue(svc.path("capacityProviderStrategy").get(0).has("base"));
         assertEquals("arn:aws:servicediscovery:us-east-1:000000000000:service/srv-phase2",
                 svc.path("serviceRegistries").get(0).path("registryArn").asText());
         assertEquals("app", svc.path("serviceRegistries").get(0).path("containerName").asText());
         assertEquals(8080, svc.path("serviceRegistries").get(0).path("containerPort").asInt());
+    }
+
+    @Test
+    void createServiceDefaultsOmittedBaseToZeroAndOmitsLaunchType() throws Exception {
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "cluster": "cluster",
+                  "serviceName": "svc",
+                  "taskDefinition": "family:1",
+                  "desiredCount": 0,
+                  "capacityProviderStrategy": [
+                    {"capacityProvider": "FARGATE_SPOT", "weight": 1}
+                  ]
+                }
+                """);
+
+        Response response = handler.handle("CreateService", request, "us-east-1");
+        JsonNode svc = objectMapper.valueToTree(response.getEntity()).path("service");
+
+        assertEquals("FARGATE_SPOT",
+                svc.path("capacityProviderStrategy").get(0).path("capacityProvider").asText());
+        assertEquals(1, svc.path("capacityProviderStrategy").get(0).path("weight").asInt());
+        assertTrue(svc.path("capacityProviderStrategy").get(0).has("base"));
+        assertEquals(0, svc.path("capacityProviderStrategy").get(0).path("base").asInt());
+        assertTrue(svc.path("launchType").isMissingNode());
     }
 
     @Test
