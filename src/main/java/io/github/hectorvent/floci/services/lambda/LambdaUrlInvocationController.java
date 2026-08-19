@@ -104,8 +104,9 @@ public class LambdaUrlInvocationController {
     @DELETE
     @Path("/{proxy: .*}")
     public CompletionStage<Response> handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
-                                 @Context HttpHeaders headers, @Context UriInfo uriInfo) {
-        return invoke("DELETE", urlId, proxy, headers, uriInfo, null);
+                                 @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
+        // AWS Function URLs forward DELETE request bodies to the event.
+        return invoke("DELETE", urlId, proxy, headers, uriInfo, body);
     }
 
     @PATCH
