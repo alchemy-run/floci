@@ -36,7 +36,7 @@ Batch uses `floci.services.batch.runner-mode`.
 
 | Value | Behavior |
 |---|---|
-| `immediate` | Default. `SubmitJob` persists the job, records lifecycle timestamps, creates one successful attempt, and returns after the job is `SUCCEEDED`. |
+| `immediate` | Default. `SubmitJob` persists the job and records lifecycle timestamps. When `immediate-complete` is `true` (Floci's own tests), it creates one successful attempt and returns after the job is `SUCCEEDED`. When `false` (Alchemy Docker image), the job is left `RUNNABLE` so `CancelJob` / `TerminateJob` can still fail it after submit returns. |
 | `docker` | Starts one Docker container per attempt from the job-definition image, passes resolved command and environment values, applies `MEMORY` resource requirements as Docker memory limits, captures a CloudWatch Logs stream name, and sets `SUCCEEDED` or `FAILED` from the container exit code. Timed-out jobs fail without retry, matching AWS Batch timeout behavior. |
 
 `process` mode is not implemented.
@@ -100,6 +100,7 @@ IAM roles, VPC fields, Fargate declarations, log configuration, storage, and res
 |---|---|---|
 | `FLOCI_SERVICES_BATCH_ENABLED` | `true` | Enable or disable Batch |
 | `FLOCI_SERVICES_BATCH_RUNNER_MODE` | `immediate` | `immediate` or `docker` |
+| `FLOCI_SERVICES_BATCH_IMMEDIATE_COMPLETE` | `true` (tests) / `false` (image) | When `immediate`, finish jobs to `SUCCEEDED` before `SubmitJob` returns |
 | `FLOCI_SERVICES_BATCH_DOCKER_NETWORK` | *(unset)* | Docker network for Batch containers |
 | `FLOCI_STORAGE_SERVICES_BATCH_MODE` | *(inherits global)* | Optional storage mode override |
 | `FLOCI_STORAGE_SERVICES_BATCH_FLUSH_INTERVAL_MS` | `5000` | Persistent storage flush interval |
@@ -110,5 +111,5 @@ IAM roles, VPC fields, Fargate declarations, log configuration, storage, and res
 - No VPC/subnet/security-group simulation.
 - No AWS-faithful capacity scheduling.
 - No array job fan-out or multi-node jobs.
-- `CancelJob` / `TerminateJob` fail already-terminal (`SUCCEEDED`/`FAILED`) jobs and do not interrupt an in-flight Docker attempt.
+- `CancelJob` / `TerminateJob` are no-ops on already-terminal (`SUCCEEDED`/`FAILED`) jobs and do not interrupt an in-flight Docker attempt.
 - EventBridge input transformers work through the existing EventBridge target input path; full Batch-specific input-transformer parity is not implemented.

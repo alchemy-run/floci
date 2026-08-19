@@ -244,6 +244,7 @@ floci:
     batch:
       enabled: true
       runner-mode: immediate
+      immediate-complete: true
     codedeploy:
       enabled: true
     codepipeline:

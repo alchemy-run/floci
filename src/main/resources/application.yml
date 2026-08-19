@@ -420,6 +420,8 @@ floci:
     batch:
       enabled: true
       runner-mode: immediate
+      # Leave jobs RUNNABLE so CancelJob/TerminateJob can still act after SubmitJob.
+      immediate-complete: false
       # docker-network: floci-network
     codedeploy:
       enabled: true

@@ -719,6 +719,15 @@ public interface EmulatorConfig {
         @WithDefault("immediate")
         String runnerMode();
 
+        /**
+         * When runner-mode is {@code immediate}, complete submitted jobs to
+         * {@code SUCCEEDED} before {@code SubmitJob} returns. Alchemy's binding
+         * tests cancel/terminate after submit, so the Docker image sets this
+         * {@code false} and leaves jobs {@code RUNNABLE}.
+         */
+        @WithDefault("true")
+        boolean immediateComplete();
+
         Optional<String> dockerNetwork();
     }
 
