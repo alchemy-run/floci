@@ -626,6 +626,39 @@ class Ec2ServiceTest {
     }
 
     @Test
+    void describeSubnetsHonorsDefaultForAzFilter() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        service.createSubnet("us-east-1", "vpc-default", "172.31.64.0/20", "us-east-1a");
+
+        var defaults = service.describeSubnets("us-east-1", List.of(),
+                Map.of("vpc-id", List.of("vpc-default"), "default-for-az", List.of("true")));
+        assertEquals(3, defaults.size());
+        assertTrue(defaults.stream().allMatch(s -> s.getSubnetId().startsWith("subnet-default-")));
+
+        var custom = service.describeSubnets("us-east-1", List.of(),
+                Map.of("vpc-id", List.of("vpc-default"), "default-for-az", List.of("false")));
+        assertEquals(1, custom.size());
+        assertFalse(custom.getFirst().isDefaultForAz());
+    }
+
+    @Test
+    void findSubnetByIdSeesSubnetStoredUnderAnotherRegionKey() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        var created = service.createSubnet("us-west-2", "vpc-default", "172.31.80.0/20", "us-west-2a");
+
+        var found = service.findSubnetById("us-east-1", created.getSubnetId());
+        assertTrue(found.isPresent());
+        assertEquals(created.getSubnetId(), found.get().getSubnetId());
+        assertEquals("us-west-2", found.get().getRegion());
+    }
+
+    @Test
     void describeByIdThrowsAwsNotFoundInsteadOfEmptyList() {
         Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
                 mock(Ec2PortForwardManager.class),

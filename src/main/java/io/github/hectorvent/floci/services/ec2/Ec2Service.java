@@ -28,6 +28,7 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.model.Address;
@@ -250,17 +251,21 @@ public class Ec2Service implements ContainerTeardown {
     // ─── Default resource seeding ──────────────────────────────────────────────
 
     public void ensureDefaultResources(String region) {
-        if (!seededRegions.add(region)) {
-            return;
-        }
-        // Already provisioned in a previous run and reloaded from persistent storage: the default
-        // VPC (and everything else) is present, so don't re-seed and create duplicates (#1297).
-        // Check vpc-default specifically — leftover custom VPCs must not skip the seed
-        // (Alchemy getDefaultVpc / ASG TestNetwork expect subnet-default-a).
+        // vpc-default presence is account-scoped (AccountAwareStorageBackend prefixes
+        // every key). A process-wide seededRegions set is not — after the first
+        // account seeded a region, every later account skipped seeding and ELBv2
+        // (and anyone else) looking up default subnets under a different
+        // RequestContext saw an empty store.
         if (vpcs.get(key(region, "vpc-default")).isPresent()) {
+            seededRegions.add(region);
             return;
         }
-        LOG.debugv("Seeding default EC2 resources for region {0}", region);
+        synchronized (seededRegions) {
+            if (vpcs.get(key(region, "vpc-default")).isPresent()) {
+                seededRegions.add(region);
+                return;
+            }
+            LOG.debugv("Seeding default EC2 resources for region {0}", region);
 
         // Default VPC
         String vpcId = "vpc-default";
@@ -326,6 +331,8 @@ public class Ec2Service implements ContainerTeardown {
         RouteTable mainRt = routeTables.get(key(region, rtId)).orElse(null);
         if (mainRt != null) {
             mainRt.getRoutes().add(new Route("0.0.0.0/0", igwId, "CreateRoute"));
+        }
+        seededRegions.add(region);
         }
     }
 
@@ -840,6 +847,38 @@ public class Ec2Service implements ContainerTeardown {
             throw new AwsException("InvalidSubnetID.NotFound", "The subnet ID '" + subnetId + "' does not exist", 400);
 
         return subnet;
+    }
+
+    /**
+     * Resolves a subnet by ID. Tries the caller's region first, then any region
+     * in the current account, then every account. Cross-service callers (ELBv2,
+     * RDS, EKS) can run with a different RequestContext than the creating EC2
+     * call, so a strict {@code region::id} get misses a subnet that describe
+     * just returned.
+     */
+    public Optional<Subnet> findSubnetById(String region, String subnetId) {
+        if (subnetId == null || subnetId.isBlank()) {
+            return Optional.empty();
+        }
+        ensureDefaultResources(region);
+        Subnet exact = subnets.get(key(region, subnetId)).orElse(null);
+        if (exact != null) {
+            return Optional.of(exact);
+        }
+        Optional<Subnet> currentAccount = subnets.scan(k -> true).stream()
+                .filter(s -> subnetId.equals(s.getSubnetId()))
+                .findFirst();
+        if (currentAccount.isPresent()) {
+            return currentAccount;
+        }
+        if (subnets instanceof AccountAwareStorageBackend<?> raw) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<Subnet> aware = (AccountAwareStorageBackend<Subnet>) raw;
+            return aware.scanAllAccounts().stream()
+                    .filter(s -> subnetId.equals(s.getSubnetId()))
+                    .findFirst();
+        }
+        return Optional.empty();
     }
 
     private String assignPrivateIp(String region, String subnetId) {
@@ -1433,7 +1472,7 @@ public class Ec2Service implements ContainerTeardown {
             }
         }
         return subnets.scan(k -> true).stream()
-                .filter(s -> s.getRegion().equals(region))
+                .filter(s -> s.getRegion() == null || s.getRegion().equals(region))
                 .filter(s -> subnetIds.isEmpty() || subnetIds.contains(s.getSubnetId()))
                 .filter(s -> matchesFilters(s, filters, region))
                 .collect(Collectors.toList());
@@ -3000,6 +3039,8 @@ public class Ec2Service implements ContainerTeardown {
                 case "state" -> matchesValue(values, subnet.getState());
                 case "availabilityZone", "availability-zone" -> matchesValue(values, subnet.getAvailabilityZone());
                 case "cidr-block", "cidrBlock", "cidr" -> matchesValue(values, subnet.getCidrBlock());
+                case "default-for-az", "defaultForAz" ->
+                        matchesValue(values, String.valueOf(subnet.isDefaultForAz()));
                 default -> true;
             };
         }

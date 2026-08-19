@@ -141,6 +141,32 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void createLoadBalancerAcceptsSubnetsEc2StoreCannotSee() {
+        when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
+
+        var lb = service.createLoadBalancer(
+                REGION, "foreign-subnets", "internal", "application", "ipv4",
+                List.of("subnet-05d391f2554e440c8", "subnet-0abcdef1234567890"),
+                List.of("sg-a"), Map.of());
+
+        assertEquals("vpc-default", lb.getVpcId());
+        assertEquals(2, lb.getAvailabilityZones().size());
+        assertEquals("subnet-05d391f2554e440c8", lb.getAvailabilityZones().get(0).getSubnetId());
+        assertEquals("subnet-0abcdef1234567890", lb.getAvailabilityZones().get(1).getSubnetId());
+        assertEquals(REGION + "a", lb.getAvailabilityZones().get(0).getZoneName());
+        assertEquals(REGION + "b", lb.getAvailabilityZones().get(1).getZoneName());
+    }
+
+    @Test
+    void createLoadBalancerMissingSubnetUsesTypedSubnetNotFound() {
+        AwsException error = assertThrows(AwsException.class, () -> service.createLoadBalancer(
+                REGION, "blank-subnet", "internal", "application", "ipv4",
+                List.of("subnet-a", "   "), List.of("sg-a"), Map.of()));
+        assertEquals("SubnetNotFound", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
     void createLoadBalancerUsesConfiguredHostnameForDnsSuffix() {
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.hostname()).thenReturn(Optional.of("floci"));
@@ -581,6 +607,8 @@ class ElbV2ServiceTest {
         Subnet subnetB = subnet("subnet-b", REGION + "b");
         lenient().when(ec2Service.requireSubnet(REGION, "subnet-a")).thenReturn(subnetA);
         lenient().when(ec2Service.requireSubnet(REGION, "subnet-b")).thenReturn(subnetB);
+        lenient().when(ec2Service.findSubnetById(REGION, "subnet-a")).thenReturn(Optional.of(subnetA));
+        lenient().when(ec2Service.findSubnetById(REGION, "subnet-b")).thenReturn(Optional.of(subnetB));
         lenient().when(ec2Service.describeSubnets(eq(REGION), eq(ALB_SUBNETS), eq(Map.of())))
                 .thenReturn(List.of(subnetA, subnetB));
     }

@@ -132,6 +132,9 @@ public class ElbV2QueryHandler {
         String type = p.getFirst("Type");
         String ipAddressType = p.getFirst("IpAddressType");
         List<String> subnets = memberList(p, "Subnets");
+        if (subnets.isEmpty()) {
+            subnets = subnetMappingIds(p);
+        }
         List<String> securityGroups = memberList(p, "SecurityGroups");
         Map<String, String> tags = parseTags(p);
 
@@ -291,6 +294,9 @@ public class ElbV2QueryHandler {
     private Response handleSetSubnets(MultivaluedMap<String, String> p, String region) {
         String arn = p.getFirst("LoadBalancerArn");
         List<String> subnets = memberList(p, "Subnets");
+        if (subnets.isEmpty()) {
+            subnets = subnetMappingIds(p);
+        }
         service.setSubnets(region, arn, subnets);
         return voidResponse("SetSubnetsResponse");
     }
@@ -1209,6 +1215,18 @@ public class ElbV2QueryHandler {
         int i = 1;
         while (true) {
             String val = p.getFirst(prefix + ".member." + i);
+            if (val == null) break;
+            result.add(val);
+            i++;
+        }
+        return result;
+    }
+
+    private List<String> subnetMappingIds(MultivaluedMap<String, String> p) {
+        List<String> result = new ArrayList<>();
+        int i = 1;
+        while (true) {
+            String val = p.getFirst("SubnetMappings.member." + i + ".SubnetId");
             if (val == null) break;
             result.add(val);
             i++;

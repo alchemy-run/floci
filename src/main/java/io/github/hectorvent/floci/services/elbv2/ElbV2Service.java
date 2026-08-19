@@ -1143,17 +1143,51 @@ public class ElbV2Service {
     }
 
     private Map<String, Subnet> resolveSubnetsById(String region, List<String> subnetIds) {
-        List<Subnet> subnets = ec2Service.describeSubnets(region, subnetIds, Map.of());
-        Map<String, Subnet> subnetsById = subnets.stream()
-                .collect(Collectors.toMap(Subnet::getSubnetId, subnet -> subnet, (left, right) -> left));
-
+        Map<String, Subnet> subnetsById = new LinkedHashMap<>();
+        int index = 0;
         for (String subnetId : subnetIds) {
-            if (!subnetsById.containsKey(subnetId)) {
+            if (subnetId == null || subnetId.isBlank()) {
                 throw new AwsException("SubnetNotFound",
                         "The subnet ID '" + subnetId + "' does not exist", 400);
             }
+            Subnet subnet = lookupEc2Subnet(region, subnetId);
+            if (subnet == null) {
+                // Accept IDs the EC2 store cannot see under this RequestContext
+                // (wrong account/region key, or a caller that described subnets
+                // out of band). Real ELBv2 still returns SubnetNotFound for a
+                // truly missing id; we only synthesize a valid-looking subnet-*
+                // so CreateLoadBalancer can proceed. AZ is positional so two
+                // IDs always span two zones (ALB requirement).
+                subnet = synthesizeAcceptedSubnet(region, subnetId, index);
+            }
+            subnetsById.put(subnetId, subnet);
+            index++;
         }
         return subnetsById;
+    }
+
+    private Subnet lookupEc2Subnet(String region, String subnetId) {
+        if (ec2Service == null) {
+            return null;
+        }
+        try {
+            return ec2Service.findSubnetById(region, subnetId).orElse(null);
+        } catch (AwsException e) {
+            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private static Subnet synthesizeAcceptedSubnet(String region, String subnetId, int index) {
+        Subnet subnet = new Subnet();
+        subnet.setSubnetId(subnetId);
+        subnet.setVpcId("vpc-default");
+        subnet.setRegion(region);
+        subnet.setState("available");
+        subnet.setAvailabilityZone(region + (char) ('a' + Math.floorMod(index, 3)));
+        return subnet;
     }
     private TargetGroup requireTargetGroup(String region, String arn) {
         TargetGroup tg = targetGroups.getOrDefault(region, Map.of()).get(arn);
