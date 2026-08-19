@@ -138,6 +138,7 @@ public class GlueJsonHandler {
                 yield Response.ok(Map.of("Partitions", glueService.getPartitions(dbName, tableName, expression))).build();
             }
             case "DeletePartition" -> handleDeletePartition(request);
+            case "BatchDeletePartition" -> handleBatchDeletePartition(request);
             case "UpdatePartition" -> handleUpdatePartition(request);
             case "UpdateColumnStatisticsForPartition" -> handleUpdateColumnStatisticsForPartition(request);
             case "GetColumnStatisticsForPartition" -> handleGetColumnStatisticsForPartition(request);
@@ -293,6 +294,19 @@ public class GlueJsonHandler {
         List<String> partitionValues = mapper.convertValue(request.get("PartitionValues"), STRING_LIST);
         glueService.deletePartition(dbName, tableName, partitionValues);
         return Response.ok().build();
+    }
+
+    private Response handleBatchDeletePartition(JsonNode request) {
+        String dbName = request.get("DatabaseName").asText();
+        String tableName = request.get("TableName").asText();
+        List<Map<String, Object>> partitionsToDelete = mapper.convertValue(request.get("PartitionsToDelete"), MAP_LIST);
+        List<List<String>> partitionValues = partitionsToDelete == null
+                ? List.of()
+                : partitionsToDelete.stream()
+                        .map(partition -> mapper.convertValue(partition.get("Values"), STRING_LIST))
+                        .toList();
+        return Response.ok(Map.of("Errors", glueService.batchDeletePartitions(dbName, tableName, partitionValues)))
+                .build();
     }
 
     private Response handleUpdatePartition(JsonNode request) throws Exception {

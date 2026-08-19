@@ -7,7 +7,9 @@ import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.glue.model.Column;
+import io.github.hectorvent.floci.services.glue.model.Crawler;
 import io.github.hectorvent.floci.services.glue.model.Database;
+import io.github.hectorvent.floci.services.glue.model.Job;
 import io.github.hectorvent.floci.services.glue.model.Partition;
 import io.github.hectorvent.floci.services.glue.model.SchemaReference;
 import io.github.hectorvent.floci.services.glue.model.StorageDescriptor;
@@ -987,6 +989,77 @@ class GlueServiceTest {
         AwsException nextTokenEx = assertThrows(AwsException.class,
                 () -> glueService.getUserDefinedFunctions("db1", ".*", null, 1, "invalid"));
         assertEquals("InvalidInputException", nextTokenEx.getErrorCode());
+    }
+
+    @Test
+    void createPartitionThrowsAlreadyExistsForDuplicateValues() {
+        Table table = new Table();
+        table.setName("plain");
+        glueService.createTable("db1", table);
+        Partition partition = new Partition();
+        partition.setValues(List.of("2026-01-01"));
+        glueService.createPartition("db1", "plain", partition);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> glueService.createPartition("db1", "plain", partition));
+        assertEquals("AlreadyExistsException", ex.getErrorCode());
+    }
+
+    @Test
+    void batchDeletePartitionsRemovesExistingAndReportsMissing() {
+        Table table = new Table();
+        table.setName("plain");
+        glueService.createTable("db1", table);
+        Partition first = new Partition();
+        first.setValues(List.of("2026-01-02"));
+        Partition second = new Partition();
+        second.setValues(List.of("2026-01-03"));
+        glueService.createPartition("db1", "plain", first);
+        glueService.createPartition("db1", "plain", second);
+
+        List<GlueService.BatchCreatePartitionError> errors = glueService.batchDeletePartitions(
+                "db1", "plain", List.of(List.of("2026-01-02"), List.of("missing")));
+
+        assertEquals(1, errors.size());
+        assertEquals(List.of("missing"), errors.getFirst().partitionValues());
+        assertEquals("EntityNotFoundException", errors.getFirst().errorDetail().errorCode());
+        assertEquals(1, glueService.getPartitions("db1", "plain").size());
+        assertEquals(List.of("2026-01-03"), glueService.getPartition("db1", "plain", List.of("2026-01-03")).getValues());
+    }
+
+    @Test
+    void jobBookmarkIsMissingUntilARunAndJobRunIdsUseAwsPrefix() {
+        Job job = new Job();
+        job.setName("etl");
+        job.setRole("arn:aws:iam::000000000000:role/GlueJob");
+        glueService.createJob(job, Map.of(), REGION);
+
+        AwsException missing = assertThrows(AwsException.class, () -> glueService.getJobBookmark("etl", null));
+        assertEquals("EntityNotFoundException", missing.getErrorCode());
+        AwsException missingReset = assertThrows(AwsException.class, () -> glueService.resetJobBookmark("etl", null));
+        assertEquals("EntityNotFoundException", missingReset.getErrorCode());
+
+        String runId = glueService.startJobRun("etl", Map.of());
+        assertTrue(runId.startsWith("jr_"));
+        assertEquals("SUCCEEDED", glueService.getJobRun("etl", runId).getJobRunState());
+        assertEquals("etl", glueService.getJobBookmark("etl", null).get("JobName"));
+    }
+
+    @Test
+    void stopIdleCrawlerIsNotRunning() {
+        Crawler crawler = new Crawler();
+        crawler.setName("events");
+        crawler.setRole("arn:aws:iam::000000000000:role/GlueCrawler");
+        crawler.setDatabaseName("db1");
+        glueService.createCrawler(crawler, Map.of(), REGION);
+
+        AwsException idle = assertThrows(AwsException.class, () -> glueService.stopCrawler("events"));
+        assertEquals("CrawlerNotRunningException", idle.getErrorCode());
+
+        glueService.startCrawler("events");
+        assertEquals("RUNNING", glueService.getCrawler("events").getState());
+        glueService.stopCrawler("events");
+        assertEquals("READY", glueService.getCrawler("events").getState());
     }
 
     @Test

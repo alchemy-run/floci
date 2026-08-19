@@ -342,6 +342,9 @@ public class GlueService {
     public void createPartition(String databaseName, String tableName, Partition partition) {
         Table table = getTable(databaseName, tableName);
         String key = partitionKey(databaseName, tableName, partition.getValues());
+        if (partitionStore.get(key).isPresent()) {
+            throw new AwsException("AlreadyExistsException", "Partition already exists.", 400);
+        }
         partition.setDatabaseName(table.getDatabaseName());
         partition.setTableName(table.getName());
         if (partition.getCreationTime() == null) {
@@ -442,6 +445,25 @@ public class GlueService {
         partitionColumnStatisticsStore.keys().stream()
                 .filter(statisticsKey -> statisticsKey.startsWith(key + ":"))
                 .forEach(partitionColumnStatisticsStore::delete);
+    }
+
+    public List<BatchCreatePartitionError> batchDeletePartitions(
+            String databaseName,
+            String tableName,
+            List<List<String>> partitionValues) {
+        getTable(databaseName, tableName);
+        List<BatchCreatePartitionError> errors = new ArrayList<>();
+        for (List<String> values : partitionValues == null ? List.<List<String>>of() : partitionValues) {
+            String key = partitionKey(databaseName, tableName, values);
+            if (partitionStore.get(key).isEmpty()) {
+                errors.add(new BatchCreatePartitionError(
+                        values,
+                        new ErrorDetail("EntityNotFoundException", "Cannot find partition.")));
+                continue;
+            }
+            deletePartition(databaseName, tableName, values);
+        }
+        return errors;
     }
 
     public void updatePartition(String databaseName, String tableName, List<String> partitionValues, Partition partition) {
@@ -713,7 +735,7 @@ public class GlueService {
     public String startJobRun(String jobName, Map<String, String> arguments) {
         getJob(jobName);
         JobRun run = new JobRun();
-        run.setId(UUID.randomUUID().toString());
+        run.setId("jr_" + UUID.randomUUID().toString().replace("-", ""));
         run.setJobName(jobName);
         run.setJobRunState("SUCCEEDED");
         Instant now = Instant.now();

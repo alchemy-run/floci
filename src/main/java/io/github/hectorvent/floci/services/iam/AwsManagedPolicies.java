@@ -117,6 +117,10 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AmazonRDSEnhancedMonitoringRole", "/service-role/",
                 "Provides permissions required for Amazon RDS Enhanced Monitoring."),
 
+        // Glue job/crawler execution role — Alchemy Job/Crawler/Bindings attach this ARN.
+        new ManagedPolicyDef("AWSGlueServiceRole", "/service-role/",
+                "Policy for AWS Glue service role."),
+
         // S3 Object Lambda execution role policy
         new ManagedPolicyDef("AmazonS3ObjectLambdaExecutionRolePolicy", "/service-role/",
                 "Provides write permissions to CloudWatch Logs for S3 Object Lambda access points."),

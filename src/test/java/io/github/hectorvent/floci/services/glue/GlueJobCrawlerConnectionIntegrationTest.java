@@ -11,6 +11,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.startsWith;
 
 @QuarkusTest
 class GlueJobCrawlerConnectionIntegrationTest {
@@ -53,6 +54,13 @@ class GlueJobCrawlerConnectionIntegrationTest {
                 .statusCode(200)
                 .body("Tags.Environment", equalTo("test"));
 
+        glue("GetJobBookmark", "{\"JobName\":\"%s\"}".formatted(name))
+                .statusCode(400)
+                .body("__type", equalTo("EntityNotFoundException"));
+        glue("ResetJobBookmark", "{\"JobName\":\"%s\"}".formatted(name))
+                .statusCode(400)
+                .body("__type", equalTo("EntityNotFoundException"));
+
         glue("UpdateJob", """
                 {
                   "JobName": "%s",
@@ -67,7 +75,7 @@ class GlueJobCrawlerConnectionIntegrationTest {
 
         String runId = glue("StartJobRun", "{\"JobName\":\"%s\"}".formatted(name))
                 .statusCode(200)
-                .body("JobRunId", notNullValue())
+                .body("JobRunId", startsWith("jr_"))
                 .extract().path("JobRunId");
 
         glue("GetJobRun", "{\"JobName\":\"%s\",\"RunId\":\"%s\"}".formatted(name, runId))
@@ -111,6 +119,30 @@ class GlueJobCrawlerConnectionIntegrationTest {
                 .statusCode(200)
                 .body("Crawler.State", equalTo("READY"));
 
+        glue("StopCrawler", "{\"Name\":\"%s\"}".formatted(name))
+                .statusCode(400)
+                .body("__type", equalTo("CrawlerNotRunningException"));
+
+        glue("UpdateCrawler", """
+                {
+                  "Name": "%s",
+                  "Role": "arn:aws:iam::000000000000:role/GlueCrawler",
+                  "DatabaseName": "analytics",
+                  "Targets": {"S3Targets":[{"Path":"s3://bucket/data/"}]},
+                  "Schedule": "cron(0 12 * * ? *)",
+                  "SchemaChangePolicy": {
+                    "UpdateBehavior": "UPDATE_IN_DATABASE",
+                    "DeleteBehavior": "DEPRECATE_IN_DATABASE"
+                  }
+                }
+                """.formatted(name))
+                .statusCode(200);
+        glue("GetCrawler", "{\"Name\":\"%s\"}".formatted(name))
+                .statusCode(200)
+                .body("Crawler.Schedule.ScheduleExpression", equalTo("cron(0 12 * * ? *)"))
+                .body("Crawler.Schedule.State", equalTo("SCHEDULED"))
+                .body("Crawler.SchemaChangePolicy.UpdateBehavior", equalTo("UPDATE_IN_DATABASE"));
+
         glue("StartCrawler", "{\"Name\":\"%s\"}".formatted(name))
                 .statusCode(200);
         glue("GetCrawler", "{\"Name\":\"%s\"}".formatted(name))
@@ -128,6 +160,62 @@ class GlueJobCrawlerConnectionIntegrationTest {
         glue("GetCrawler", "{\"Name\":\"%s\"}".formatted(name))
                 .statusCode(400)
                 .body("__type", equalTo("EntityNotFoundException"));
+    }
+
+    @Test
+    void partitionBatchLifecycle() {
+        String database = "db-" + UUID.randomUUID().toString().substring(0, 8);
+        String table = "events";
+
+        glue("CreateDatabase", "{\"DatabaseInput\":{\"Name\":\"%s\"}}".formatted(database))
+                .statusCode(200);
+        glue("CreateTable", """
+                {
+                  "DatabaseName": "%s",
+                  "TableInput": {
+                    "Name": "%s",
+                    "PartitionKeys": [{"Name":"dt","Type":"string"}],
+                    "StorageDescriptor": {
+                      "Columns": [{"Name":"id","Type":"string"}],
+                      "Location": "s3://bucket/events/"
+                    }
+                  }
+                }
+                """.formatted(database, table))
+                .statusCode(200);
+
+        glue("CreatePartition", """
+                {
+                  "DatabaseName": "%s",
+                  "TableName": "%s",
+                  "PartitionInput": {"Values":["2026-01-01"]}
+                }
+                """.formatted(database, table))
+                .statusCode(200);
+        glue("BatchCreatePartition", """
+                {
+                  "DatabaseName": "%s",
+                  "TableName": "%s",
+                  "PartitionInputList": [{"Values":["2026-01-02"]},{"Values":["2026-01-03"]}]
+                }
+                """.formatted(database, table))
+                .statusCode(200)
+                .body("Errors.size()", equalTo(0));
+        glue("GetPartitions", "{\"DatabaseName\":\"%s\",\"TableName\":\"%s\"}".formatted(database, table))
+                .statusCode(200)
+                .body("Partitions.size()", equalTo(3));
+        glue("BatchDeletePartition", """
+                {
+                  "DatabaseName": "%s",
+                  "TableName": "%s",
+                  "PartitionsToDelete": [{"Values":["2026-01-02"]},{"Values":["2026-01-03"]}]
+                }
+                """.formatted(database, table))
+                .statusCode(200)
+                .body("Errors.size()", equalTo(0));
+        glue("GetPartitions", "{\"DatabaseName\":\"%s\",\"TableName\":\"%s\"}".formatted(database, table))
+                .statusCode(200)
+                .body("Partitions.size()", equalTo(1));
     }
 
     @Test

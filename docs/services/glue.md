@@ -16,12 +16,12 @@ Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and G
 | GetJobs | Lists stored job definitions. |
 | UpdateJob | Replaces the stored job update payload. |
 | DeleteJob | Deletes a job, its runs, bookmark, and tags. |
-| StartJobRun | Starts a job run that completes immediately as `SUCCEEDED`. |
+| StartJobRun | Starts a job run (`jr_…` id) that completes immediately as `SUCCEEDED`. |
 | GetJobRun | Returns a stored job run. |
 | GetJobRuns | Lists runs for a job. |
 | BatchStopJobRun | Marks running job runs `STOPPED`. |
-| GetJobBookmark | Returns the stored bookmark (empty default). |
-| ResetJobBookmark | Resets the stored bookmark. |
+| GetJobBookmark | Returns the stored bookmark, or `EntityNotFoundException` (400) if the job has never run. |
+| ResetJobBookmark | Resets the stored bookmark, or `EntityNotFoundException` (400) if none exists. |
 
 ### Crawlers
 
@@ -30,10 +30,10 @@ Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and G
 | CreateCrawler | Stores a crawler in `READY` state. |
 | GetCrawler | Returns a stored crawler. |
 | GetCrawlers | Lists stored crawlers. |
-| UpdateCrawler | Updates a crawler that is not `RUNNING`. |
+| UpdateCrawler | Updates a crawler that is not `RUNNING`. Create/Update accept `Schedule` as a cron string; GetCrawler returns `{ScheduleExpression, State}`. |
 | DeleteCrawler | Deletes a crawler that is not `RUNNING`. |
 | StartCrawler | Sets crawler state to `RUNNING`. |
-| StopCrawler | Sets crawler state to `READY`. |
+| StopCrawler | Sets crawler state to `READY`. Idle crawlers raise `CrawlerNotRunningException` (400). |
 
 ### Connections
 
@@ -71,8 +71,15 @@ Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and G
 
 | Action | Description |
 |--------|-------------|
-| CreatePartition | Creates a partition for a Data Catalog table. |
+| CreatePartition | Creates a partition for a Data Catalog table (`AlreadyExistsException` on duplicate). |
+| GetPartition | Returns a stored partition. |
 | GetPartitions | Lists partitions stored for a Data Catalog table. |
+| UpdatePartition | Updates a stored partition. |
+| DeletePartition | Deletes a stored partition. |
+| BatchCreatePartition | Creates partitions and reports per-item `AlreadyExistsException` errors. |
+| BatchGetPartition | Returns the partitions that exist (missing keys are omitted). |
+| BatchUpdatePartition | Updates partitions and reports per-item `EntityNotFoundException` errors. |
+| BatchDeletePartition | Deletes partitions and reports per-item `EntityNotFoundException` errors. |
 
 #### User-defined Functions
 
