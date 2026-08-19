@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.athena;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.CsvParser;
@@ -8,6 +10,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.athena.model.*;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.glue.model.Column;
 import io.github.hectorvent.floci.services.floci.duck.FlociDuckClient;
 import io.github.hectorvent.floci.services.glue.GlueService;
@@ -26,6 +29,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class AthenaService {
@@ -35,6 +41,9 @@ public class AthenaService {
     private static final String DEFAULT_OUTPUT_BUCKET = "floci-athena-results";
     private static final String DEFAULT_WORKGROUP = "primary";
     private static final String DEFAULT_ENGINE_VERSION = "Athena engine version 3";
+    private static final Pattern SIMPLE_SELECT_LITERAL = Pattern.compile(
+            "^\\s*SELECT\\s+(\\d+)(?:\\s+AS\\s+[A-Za-z_][A-Za-z0-9_]*)?\\s*;?\\s*$",
+            Pattern.CASE_INSENSITIVE);
 
     private final StorageBackend<String, QueryExecution> queryStore;
     private final StorageBackend<String, WorkGroup> workGroupStore;
@@ -47,6 +56,10 @@ public class AthenaService {
     private final EmulatorConfig config;
     private final Vertx vertx;
     private final RegionResolver regionResolver;
+    private final EventBridgeService eventBridgeService;
+    private final ObjectMapper objectMapper;
+    private final ConcurrentHashMap<String, Integer> queryStateSequence = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ResultSet> queryResults = new ConcurrentHashMap<>();
 
     @Inject
     public AthenaService(StorageFactory storageFactory,
@@ -55,7 +68,9 @@ public class AthenaService {
                          S3Service s3Service,
                          EmulatorConfig config,
                          Vertx vertx,
-                         RegionResolver regionResolver) {
+                         RegionResolver regionResolver,
+                         EventBridgeService eventBridgeService,
+                         ObjectMapper objectMapper) {
         this.queryStore = storageFactory.create("athena", "queries.json",
                 new TypeReference<>() {});
         this.workGroupStore = storageFactory.create("athena", "workgroups.json",
@@ -72,6 +87,8 @@ public class AthenaService {
         this.config = config;
         this.vertx = vertx;
         this.regionResolver = regionResolver;
+        this.eventBridgeService = eventBridgeService;
+        this.objectMapper = objectMapper;
     }
 
     public String startQueryExecution(String query,
@@ -92,13 +109,23 @@ public class AthenaService {
         ResultConfiguration resolvedResult = new ResultConfiguration(outputLocation);
 
         QueryExecution execution = new QueryExecution(id, query, workGroup, resolvedResult, resolvedContext);
-        execution.getStatus().setState(QueryExecutionState.RUNNING);
         queryStore.put(id, execution);
+        publishQueryStateChange(execution, null, QueryExecutionState.QUEUED);
+
+        transitionQueryState(execution, QueryExecutionState.QUEUED, QueryExecutionState.RUNNING);
+
+        Optional<String> literal = simpleSelectLiteral(query);
+        if (literal.isPresent()) {
+            ResultSet results = literalResultSet(literal.get());
+            queryResults.put(id, results);
+            writeLiteralCsv(outputLocation, literal.get());
+            transitionQueryState(execution, QueryExecutionState.RUNNING, QueryExecutionState.SUCCEEDED);
+            LOG.infov("Query {0} succeeded (literal SELECT)", id);
+            return id;
+        }
 
         if (config.services().athena().mock()) {
-            execution.getStatus().setState(QueryExecutionState.SUCCEEDED);
-            execution.getStatus().setCompletionDateTime(Instant.now());
-            queryStore.put(id, execution);
+            transitionQueryState(execution, QueryExecutionState.RUNNING, QueryExecutionState.SUCCEEDED);
             LOG.infov("Query {0} accepted (mock mode)", id);
             return id;
         }
@@ -110,14 +137,11 @@ public class AthenaService {
             duckClient.execute(query, setupDdl, outputLocation);
             return null;
         }).onSuccess(v -> {
-            execution.getStatus().setState(QueryExecutionState.SUCCEEDED);
-            execution.getStatus().setCompletionDateTime(Instant.now());
-            queryStore.put(id, execution);
+            transitionQueryState(execution, QueryExecutionState.RUNNING, QueryExecutionState.SUCCEEDED);
             LOG.infov("Query {0} succeeded", id);
         }).onFailure(e -> {
-            execution.getStatus().setState(QueryExecutionState.FAILED);
             execution.getStatus().setStateChangeReason(e.getMessage());
-            queryStore.put(id, execution);
+            transitionQueryState(execution, QueryExecutionState.RUNNING, QueryExecutionState.FAILED);
             LOG.warnv("Query {0} failed: {1}", id, e.getMessage());
         });
 
@@ -142,9 +166,7 @@ public class AthenaService {
                 || state == QueryExecutionState.CANCELLED) {
             return;
         }
-        execution.getStatus().setState(QueryExecutionState.CANCELLED);
-        execution.getStatus().setCompletionDateTime(Instant.now());
-        queryStore.put(id, execution);
+        transitionQueryState(execution, state, QueryExecutionState.CANCELLED);
     }
 
     public WorkGroup createWorkGroup(CreateWorkGroupRequest request, String region) {
@@ -330,7 +352,7 @@ public class AthenaService {
     public NamedQuery getNamedQuery(String id) {
         return namedQueryStore.get(id)
                 .orElseThrow(() -> new AwsException("InvalidRequestException",
-                        "NamedQuery " + id + " is not found.", 400));
+                        "NamedQuery " + id + " does not exist", 400));
     }
 
     public List<String> listNamedQueries(String workGroup) {
@@ -357,7 +379,7 @@ public class AthenaService {
 
     public void deleteNamedQuery(String id) {
         if (namedQueryStore.get(id).isEmpty()) {
-            throw new AwsException("InvalidRequestException", "NamedQuery " + id + " is not found.", 400);
+            throw new AwsException("InvalidRequestException", "NamedQuery " + id + " does not exist", 400);
         }
         namedQueryStore.delete(id);
     }
@@ -525,6 +547,11 @@ public class AthenaService {
             throw new AwsException("InvalidRequestException", "Query has not succeeded yet", 400);
         }
 
+        ResultSet cached = queryResults.get(id);
+        if (cached != null) {
+            return cached;
+        }
+
         if (config.services().athena().mock()
                 || execution.getResultConfiguration() == null
                 || execution.getResultConfiguration().getOutputLocation() == null) {
@@ -536,60 +563,145 @@ public class AthenaService {
 
     // ── private helpers ───────────────────────────────────────────────────────
 
-    private String buildGlueDdl(String database) {
+    private static Optional<String> simpleSelectLiteral(String query) {
+        if (query == null) {
+            return Optional.empty();
+        }
+        Matcher matcher = SIMPLE_SELECT_LITERAL.matcher(query);
+        return matcher.matches() ? Optional.of(matcher.group(1)) : Optional.empty();
+    }
+
+    private static ResultSet literalResultSet(String value) {
+        ResultSet.ColumnInfo column = new ResultSet.ColumnInfo("_col0", "integer");
+        ResultSet.Row header = new ResultSet.Row(List.of(new ResultSet.Datum("_col0")));
+        ResultSet.Row data = new ResultSet.Row(List.of(new ResultSet.Datum(value)));
+        return new ResultSet(List.of(header, data), new ResultSet.ResultSetMetadata(List.of(column)));
+    }
+
+    private void writeLiteralCsv(String outputLocation, String value) {
+        try {
+            ensureOutputBucket(outputLocation);
+            String bucket = extractBucket(outputLocation);
+            String key = extractKey(outputLocation);
+            if (bucket == null || key == null || key.isBlank()) {
+                return;
+            }
+            byte[] csv = ("_col0\n" + value + "\n").getBytes(StandardCharsets.UTF_8);
+            s3Service.putObject(bucket, key, csv, "text/csv", Map.of());
+        } catch (Exception e) {
+            LOG.debugv("Could not write literal SELECT result to {0}: {1}", outputLocation, e.getMessage());
+        }
+    }
+
+    private String buildGlueDdl(String contextDatabase) {
         StringBuilder sb = new StringBuilder();
         try {
-            List<Table> tables = glueService.getTables(database);
-            for (Table table : tables) {
-                String location = table.getStorageDescriptor() != null
-                        ? table.getStorageDescriptor().getLocation()
-                        : null;
-                if (location == null || location.isBlank()) {
-                    continue;
+            for (Database database : glueService.getDatabases()) {
+                String dbName = database.getName();
+                sb.append(AthenaGlueDdl.createSchema(dbName));
+                for (Table table : glueService.getTables(dbName)) {
+                    String location = table.getStorageDescriptor() != null
+                            ? table.getStorageDescriptor().getLocation()
+                            : null;
+                    if (location == null || location.isBlank()) {
+                        continue;
+                    }
+                    String selectSql = AthenaGlueDdl.selectFromFiles(
+                            table, listDataFiles(location), AthenaGlueDdl.globForPrefix(location));
+                    if (selectSql == null) {
+                        continue;
+                    }
+                    sb.append(AthenaGlueDdl.createView(dbName, table.getName(), selectSql));
+                    if (dbName.equals(contextDatabase)) {
+                        sb.append(AthenaGlueDdl.createUnqualifiedView(table.getName(), selectSql));
+                    }
                 }
-                String readFn = inferReadFunction(table);
-                String normalizedLocation = location.endsWith("/")
-                        ? location.substring(0, location.length() - 1) : location;
-                sb.append("CREATE OR REPLACE VIEW \"")
-                  .append(table.getName())
-                  .append("\" AS SELECT * FROM ")
-                  .append(readExpression(readFn, normalizedLocation))
-                  .append(";\n");
             }
         } catch (Exception e) {
-            LOG.debugv("Could not inject Glue DDL for database {0}: {1}", database, e.getMessage());
+            LOG.debugv("Could not inject Glue DDL for database {0}: {1}", contextDatabase, e.getMessage());
         }
         return sb.toString();
     }
 
-    private String readExpression(String readFn, String normalizedLocation) {
-        String glob = normalizedLocation + "/**";
-        if ("read_parquet".equals(readFn)) {
-            return "read_parquet('" + glob + "', union_by_name = true)";
+    private List<String> listDataFiles(String location) {
+        String bucket = extractBucket(location);
+        String prefix = extractKey(location);
+        if (bucket == null) {
+            return List.of();
         }
-        return readFn + "('" + glob + "')";
+        if (!prefix.isEmpty() && !prefix.endsWith("/")) {
+            prefix = prefix + "/";
+        }
+        try {
+            return s3Service.listObjects(bucket, prefix, null, 1000).stream()
+                    .map(S3Object::getKey)
+                    .filter(key -> key != null && !key.endsWith("/"))
+                    .map(key -> "s3://" + bucket + "/" + key)
+                    .toList();
+        } catch (Exception e) {
+            LOG.debugv("Could not list S3 objects at {0}: {1}", location, e.getMessage());
+            return List.of();
+        }
     }
 
-    private String inferReadFunction(Table table) {
-        if (table.getStorageDescriptor() == null) {
-            return "read_csv_auto";
+    private void transitionQueryState(QueryExecution execution,
+                                      QueryExecutionState previous,
+                                      QueryExecutionState next) {
+        execution.getStatus().setState(next);
+        if (next == QueryExecutionState.SUCCEEDED
+                || next == QueryExecutionState.FAILED
+                || next == QueryExecutionState.CANCELLED) {
+            execution.getStatus().setCompletionDateTime(Instant.now());
         }
-        String format = table.getStorageDescriptor().getInputFormat();
-        String serde = table.getStorageDescriptor().getSerdeInfo() != null
-                ? table.getStorageDescriptor().getSerdeInfo().getSerializationLibrary()
-                : null;
-        if (containsIgnoreCase(format, "parquet") || containsIgnoreCase(serde, "parquet")) {
-            return "read_parquet";
-        }
-        if (containsIgnoreCase(format, "json") || containsIgnoreCase(serde, "json")
-                || containsIgnoreCase(format, "hive")) {
-            return "read_json_auto";
-        }
-        return "read_csv_auto";
+        queryStore.put(execution.getQueryExecutionId(), execution);
+        // Publish off the caller stack. StartQueryExecution is often nested
+        // inside a Lambda Function URL invoke; a synchronous EventBridge→Lambda
+        // delivery of the same function re-enters the executor and drops the
+        // in-flight HTTP socket.
+        publishQueryStateChange(execution, previous, next);
     }
 
-    private static boolean containsIgnoreCase(String str, String sub) {
-        return str != null && str.toLowerCase().contains(sub);
+    private void publishQueryStateChange(QueryExecution execution,
+                                         QueryExecutionState previous,
+                                         QueryExecutionState current) {
+        if (eventBridgeService == null || objectMapper == null) {
+            return;
+        }
+        String queryId = execution.getQueryExecutionId();
+        String statementType = execution.getStatementType() != null
+                ? execution.getStatementType() : "DML";
+        String workGroup = execution.getWorkGroup() != null
+                ? execution.getWorkGroup() : DEFAULT_WORKGROUP;
+        int sequence = queryStateSequence.merge(queryId, 1, Integer::sum);
+        String region = regionResolver.getRegion();
+        Runnable publish = () -> {
+            try {
+                ObjectNode detail = objectMapper.createObjectNode();
+                detail.put("versionId", "0");
+                detail.put("currentState", current.name());
+                if (previous != null) {
+                    detail.put("previousState", previous.name());
+                }
+                detail.put("statementType", statementType);
+                detail.put("queryExecutionId", queryId);
+                detail.put("workgroupName", workGroup);
+                detail.put("sequenceNumber", String.valueOf(sequence));
+
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("Source", "aws.athena");
+                entry.put("DetailType", "Athena Query State Change");
+                entry.put("Detail", objectMapper.writeValueAsString(detail));
+                eventBridgeService.putEvents(List.of(entry), region);
+            } catch (Exception e) {
+                LOG.warnv("Failed to publish Athena Query State Change for {0}: {1}",
+                        queryId, e.getMessage());
+            }
+        };
+        if (vertx != null) {
+            vertx.runOnContext(ignored -> publish.run());
+        } else {
+            publish.run();
+        }
     }
 
     private String resolveOutputLocation(ResultConfiguration rc, String queryId) {

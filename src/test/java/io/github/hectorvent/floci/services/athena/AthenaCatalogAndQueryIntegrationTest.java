@@ -8,8 +8,10 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 
 @QuarkusTest
@@ -136,8 +138,112 @@ class AthenaCatalogAndQueryIntegrationTest {
                 .statusCode(200);
         athena("DeleteNamedQuery", "{\"NamedQueryId\":\"%s\"}".formatted(namedQueryId))
                 .statusCode(200);
+        athena("GetNamedQuery", "{\"NamedQueryId\":\"%s\"}".formatted(namedQueryId))
+                .statusCode(400)
+                .body("__type", equalTo("InvalidRequestException"))
+                .body("message", equalTo("NamedQuery " + namedQueryId + " does not exist"));
         athena("DeleteDataCatalog", "{\"Name\":\"%s\"}".formatted(catalog))
                 .statusCode(200);
+    }
+
+    @Test
+    void selectLiteralReturnsValueRowWithoutDuck() {
+        String id = athena("StartQueryExecution", "{\"QueryString\":\"SELECT 1\"}")
+                .statusCode(200)
+                .extract().path("QueryExecutionId");
+
+        athena("GetQueryExecution", "{\"QueryExecutionId\":\"%s\"}".formatted(id))
+                .statusCode(200)
+                .body("QueryExecution.Status.State", equalTo("SUCCEEDED"));
+
+        athena("GetQueryResults", "{\"QueryExecutionId\":\"%s\"}".formatted(id))
+                .statusCode(200)
+                .body("ResultSet.Rows.size()", equalTo(2))
+                .body("ResultSet.Rows[1].Data[0].VarCharValue", equalTo("1"));
+    }
+
+    @Test
+    void getNamedQueryMissingUsesDoesNotExistMessage() {
+        String missing = "00000000-0000-0000-0000-000000000000";
+        athena("GetNamedQuery", "{\"NamedQueryId\":\"%s\"}".formatted(missing))
+                .statusCode(400)
+                .body("__type", equalTo("InvalidRequestException"))
+                .body("message", equalTo("NamedQuery " + missing + " does not exist"));
+    }
+
+    @Test
+    void startQueryExecutionPublishesAthenaQueryStateChange() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String queueName = "athena-state-" + suffix;
+        String ruleName = "athena-state-rule-" + suffix;
+
+        String queueUrl = given()
+                .contentType("application/x-amz-json-1.0")
+                .header("X-Amz-Target", "AmazonSQS.CreateQueue")
+                .body("{\"QueueName\":\"" + queueName + "\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .extract().jsonPath().getString("QueueUrl");
+
+        String queueArn = given()
+                .contentType("application/x-amz-json-1.0")
+                .header("X-Amz-Target", "AmazonSQS.GetQueueAttributes")
+                .body("{\"QueueUrl\":\"" + queueUrl + "\",\"AttributeNames\":[\"All\"]}")
+                .when().post("/")
+                .then().statusCode(200)
+                .extract().jsonPath().getString("Attributes.QueueArn");
+
+        given()
+                .header("X-Amz-Target", "AWSEvents.PutRule")
+                .contentType(CONTENT_TYPE)
+                .body("""
+                        {
+                          "Name": "%s",
+                          "EventBusName": "default",
+                          "EventPattern": "{\\"source\\":[\\"aws.athena\\"],\\"detail-type\\":[\\"Athena Query State Change\\"],\\"detail\\":{\\"currentState\\":[\\"SUCCEEDED\\",\\"FAILED\\",\\"CANCELLED\\"]}}"
+                        }
+                        """.formatted(ruleName))
+                .when().post("/")
+                .then().statusCode(200);
+
+        given()
+                .header("X-Amz-Target", "AWSEvents.PutTargets")
+                .contentType(CONTENT_TYPE)
+                .body("""
+                        {
+                          "Rule": "%s",
+                          "EventBusName": "default",
+                          "Targets": [{"Id": "q", "Arn": "%s"}]
+                        }
+                        """.formatted(ruleName, queueArn))
+                .when().post("/")
+                .then().statusCode(200)
+                .body("FailedEntryCount", equalTo(0));
+
+        String queryId = athena("StartQueryExecution",
+                "{\"QueryString\":\"SELECT 1\",\"WorkGroup\":\"primary\"}")
+                .statusCode(200)
+                .extract().path("QueryExecutionId");
+
+        io.restassured.response.ValidatableResponse received = null;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            received = given()
+                    .contentType("application/x-amz-json-1.0")
+                    .header("X-Amz-Target", "AmazonSQS.ReceiveMessage")
+                    .body("{\"QueueUrl\":\"" + queueUrl + "\",\"MaxNumberOfMessages\":10,\"WaitTimeSeconds\":1}")
+                    .when().post("/")
+                    .then();
+            if (received.extract().path("Messages") != null) {
+                break;
+            }
+        }
+        received.statusCode(200)
+                .body("Messages", hasSize(1))
+                .body("Messages[0].Body", containsString("\"detail-type\":\"Athena Query State Change\""))
+                .body("Messages[0].Body", containsString("\"source\":\"aws.athena\""))
+                .body("Messages[0].Body", containsString("\"currentState\":\"SUCCEEDED\""))
+                .body("Messages[0].Body", containsString("\"queryExecutionId\":\"" + queryId + "\""))
+                .body("Messages[0].Body", containsString("\"workgroupName\":\"primary\""));
     }
 
     private static io.restassured.response.ValidatableResponse athena(String action, String body) {
