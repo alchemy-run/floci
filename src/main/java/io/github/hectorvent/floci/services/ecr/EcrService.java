@@ -43,8 +43,12 @@ import java.util.regex.Pattern;
 public class EcrService {
 
     private static final Logger LOG = Logger.getLogger(EcrService.class);
+    // AWS's LIVE validation (taken verbatim from a real CreateRepository
+    // InvalidParameterException) is looser than the documented pattern:
+    // separators between alnum runs are one '.', one '_', double '__', or
+    // ONE OR MORE '-' — so names like "a--b" are legal on real ECR.
     private static final Pattern REPO_NAME = Pattern.compile(
-            "(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*");
+            "[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*");
     private static final int MAX_REPO_NAME_LENGTH = 256;
     // AWS GetAuthorizationToken returns a long docker-login credential. Alchemy
     // bindings assert length > 100; keep the "AWS:<password>" decode shape.
@@ -875,8 +879,12 @@ public class EcrService {
                     "Repository name exceeds " + MAX_REPO_NAME_LENGTH + " characters", 400);
         }
         if (!REPO_NAME.matcher(name).matches()) {
+            // AWS's exact live wording, including its regex.
             throw new AwsException("InvalidParameterException",
-                    "Repository name '" + name + "' does not match the required pattern", 400);
+                    "Invalid parameter at 'repositoryName' failed to satisfy constraint: "
+                            + "'must satisfy regular expression "
+                            + "'[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*''",
+                    400);
         }
     }
 

@@ -110,14 +110,33 @@ class EcrServiceTest {
     }
 
     @Test
-    void createRepository_rejectsDoubleHyphenLikeAws() {
-        // AWS repositoryName = (?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*
-        // Consecutive separators (`--`) are illegal on real ECR too.
+    void createRepository_acceptsDoubleHyphenLikeAws() {
+        // Verified against LIVE ECR (2026-08-18): CreateRepository accepted
+        // "alchemy-probe--double-dash". AWS's real constraint (quoted in its
+        // own InvalidParameterException) is
+        // [a-z0-9]+((\.|_|__|-+)[a-z0-9]+)* — hyphen runs are `-+`, so
+        // consecutive hyphens are LEGAL despite the older documented pattern.
+        assertEquals("aws-ecs-service-image-form--task",
+                service.createRepository(
+                        "aws-ecs-service-image-form--task",
+                        null, null, null, null, null, null, REGION)
+                        .getRepositoryName());
+    }
+
+    @Test
+    void createRepository_rejectsTrailingSeparatorLikeAws() {
+        // Verified against LIVE ECR: "trailing-dash-" and "dot..dot" are
+        // rejected — separators must sit between alphanumeric runs.
         AwsException ex = assertThrows(AwsException.class,
                 () -> service.createRepository(
-                        "aws-ecs-service-image-form--task",
+                        "trailing-dash-",
                         null, null, null, null, null, null, REGION));
         assertEquals("InvalidParameterException", ex.getErrorCode());
+        AwsException dots = assertThrows(AwsException.class,
+                () -> service.createRepository(
+                        "dot..dot",
+                        null, null, null, null, null, null, REGION));
+        assertEquals("InvalidParameterException", dots.getErrorCode());
     }
 
     @Test
