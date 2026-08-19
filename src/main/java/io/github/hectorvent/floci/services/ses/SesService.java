@@ -251,18 +251,46 @@ public class SesService {
         this.clock = clock;
     }
 
+    /**
+     * v1 {@code VerifyEmailIdentity} / {@code VerifyEmailAddress}: create the address if
+     * missing and mark it Success. Floci has no verification-email click, so this action
+     * is the confirm path for local send tests.
+     */
     public Identity verifyEmailIdentity(String emailAddress, String region) {
+        return upsertEmailAddressIdentity(emailAddress, region, true);
+    }
+
+    /**
+     * v2 {@code CreateEmailIdentity} for an email address: create as PENDING, matching AWS.
+     * Does not confirm an existing identity.
+     */
+    public Identity createEmailAddressIdentity(String emailAddress, String region) {
+        return upsertEmailAddressIdentity(emailAddress, region, false);
+    }
+
+    private Identity upsertEmailAddressIdentity(String emailAddress, String region, boolean confirm) {
         validateIdentityWhitespace(emailAddress, "Email address");
         if (emailAddress == null || emailAddress.isBlank()) {
             throw new AwsException("InvalidParameterValue", "Email address is required.", 400);
         }
         String key = identityKey(region, emailAddress);
         Identity existing = identityStore.get(key).orElse(null);
-        if (existing != null) return existing;
+        if (existing != null) {
+            if (confirm && !"Success".equals(existing.getVerificationStatus())) {
+                existing.setVerificationStatus("Success");
+                identityStore.put(key, existing);
+                LOG.infov("Confirmed email identity: {0} in region {1}", emailAddress, region);
+            }
+            return existing;
+        }
 
         Identity identity = new Identity(emailAddress, "EmailAddress");
+        if (confirm) {
+            identity.setVerificationStatus("Success");
+        }
         identityStore.put(key, identity);
-        LOG.infov("Verified email identity: {0} in region {1}", emailAddress, region);
+        LOG.infov("{0} email identity: {1} in region {2}",
+                confirm ? "Verified" : "Created pending", emailAddress, region);
         return identity;
     }
 
@@ -1213,6 +1241,14 @@ public class SesService {
             return false;
         }
         if (isIdentityVerified(fromEmail, region)) {
+            return true;
+        }
+        // Floci has no verification-email click. v2 CreateEmailIdentity leaves
+        // email-address identities PENDING (AWS); SendEmail still accepts an
+        // existing email-address identity so local send tests work. A missing
+        // identity, or a still-PENDING domain, is MessageRejected.
+        Identity address = getIdentityVerificationAttributes(fromEmail, region);
+        if (address != null && "EmailAddress".equals(address.getIdentityType())) {
             return true;
         }
         int at = fromEmail.indexOf('@');
@@ -3756,6 +3792,13 @@ public class SesService {
     }
 
     static BulkEmailEntryResult.Status mapErrorCodeToBulkStatus(String errorCode) {
+        if ("MessageRejected".equals(errorCode)) {
+            return BulkEmailEntryResult.Status.MESSAGE_REJECTED;
+        }
+        if ("MailFromDomainNotVerified".equals(errorCode)
+                || "MailFromDomainNotVerifiedException".equals(errorCode)) {
+            return BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED;
+        }
         if ("InvalidParameterValue".equals(errorCode)
                 || "MissingRenderingAttribute".equals(errorCode)
                 || "InvalidRenderingParameter".equals(errorCode)) {
@@ -4263,7 +4306,7 @@ public class SesService {
             getConfigurationSet(configurationSetName, region);
         }
         if (getIdentityVerificationAttributes(emailAddress, region) == null) {
-            verifyEmailIdentity(emailAddress, region);
+            createEmailAddressIdentity(emailAddress, region);
         }
         String messageId = UUID.randomUUID().toString();
         LOG.infov("Sent custom verification email to {0} using template {1}", emailAddress, templateName);

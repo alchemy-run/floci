@@ -177,8 +177,9 @@ curl $AWS_ENDPOINT_URL/_aws/ses
 
 ## Current Behavior
 
-- Identity verification succeeds immediately for v1 `VerifyEmailIdentity` / email-address `CreateEmailIdentity`; domain identities stay `PENDING` until matching Route53 DKIM CNAMEs exist.
-- `SendEmail` / `SendRawEmail` reject an unverified From identity with `MessageRejected` ("Email address is not verified").
+- v2 `CreateEmailIdentity` for an email address leaves the identity `PENDING` (`VerifiedForSendingStatus=false`), matching AWS. v1 `VerifyEmailIdentity` / `VerifyEmailAddress` confirm the address (`SUCCESS`) so local send tests have a click-free confirm path. Domain identities stay `PENDING` until matching Route53 DKIM CNAMEs exist. `SendEmail` still accepts an existing email-address identity (even `PENDING`) because Floci has no verification-email click; a missing From identity, or a still-`PENDING` domain, is `MessageRejected`.
+- `SendEmail` / `SendRawEmail` reject a missing From identity with `MessageRejected` ("Email address is not verified"). `SendBulkEmail` maps that same rejection onto each entry as `Status=MESSAGE_REJECTED` (not `FAILED`).
+- Identity-scoped IAM on send (`ses:SendEmail` against `arn:aws:ses:…:identity/<from>`) is not evaluated here. Global IAM enforcement is off by default, Lambda containers still sign as the `test` root stand-in, and SES is not in `IamActionRegistry`. An outsider From therefore reaches SES and is `MessageRejected` rather than `AccessDeniedException`.
 - `SendEmail` stores the text body or the HTML body as the captured message body.
 - `GetBlacklistReports` returns an empty report per requested IP. `GetMessageInsights` and `BatchGetMetricData` require account VDM (`PutAccountVdmAttributes`); without it they return `NotFoundException` / `BadRequestException`. `GetDomainStatisticsReport` returns an empty volume series for a known identity and `NotFoundException` otherwise.
 - `SetIdentityNotificationTopic` publishes to the configured topic on a Bounce/Complaint/Delivery event (triggered via the mailbox simulator addresses or the suppression list), independent of any configuration set. The payload uses the legacy format (`notificationType`, no `mail.tags`, headers only when `SetIdentityHeadersInNotificationsEnabled` is on).
@@ -252,7 +253,7 @@ Alongside the classic Query API, Floci implements a subset of the SES v2 REST JS
 | `POST` | `/v2/email/tenants/get` | `GetTenant` |
 | `POST` | `/v2/email/tenants/list` | `ListTenants` |
 | `POST` | `/v2/email/tenants/delete` | `DeleteTenant` |
-| `PUT` | `/v2/email/tenant/suppression` | `PutTenantSuppressionAttributes` |
+| `POST` | `/v2/email/tenant/suppression` | `PutTenantSuppressionAttributes` |
 | `POST` | `/v2/email/tenants/resources` | `CreateTenantResourceAssociation` |
 | `POST` | `/v2/email/tenants/resources/delete` | `DeleteTenantResourceAssociation` |
 | `POST` | `/v2/email/tenants/resources/list` | `ListTenantResources` |

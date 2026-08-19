@@ -35,7 +35,7 @@ class SesV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("IdentityType", equalTo("EMAIL_ADDRESS"))
-            .body("VerifiedForSendingStatus", equalTo(true));
+            .body("VerifiedForSendingStatus", equalTo(false));
     }
 
     @Test
@@ -89,12 +89,12 @@ class SesV2IntegrationTest {
             // VerificationStatus must be populated per identity (never null), matching AWS.
             .body("EmailIdentities.VerificationStatus", everyItem(notNullValue()))
             .body("EmailIdentities.find { it.IdentityName == 'v2sender@example.com' }.VerificationStatus",
-                    equalTo("SUCCESS"))
+                    equalTo("PENDING"))
             .body("EmailIdentities.find { it.IdentityName == 'v2example.com' }.VerificationStatus",
                     equalTo("PENDING"))
             // SendingEnabled tracks verification: SUCCESS -> true, PENDING -> false (matches AWS).
             .body("EmailIdentities.find { it.IdentityName == 'v2sender@example.com' }.SendingEnabled",
-                    equalTo(true))
+                    equalTo(false))
             .body("EmailIdentities.find { it.IdentityName == 'v2example.com' }.SendingEnabled",
                     equalTo(false));
     }
@@ -110,7 +110,7 @@ class SesV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("IdentityType", equalTo("EMAIL_ADDRESS"))
-            .body("VerifiedForSendingStatus", equalTo(true))
+            .body("VerifiedForSendingStatus", equalTo(false))
             .body("DkimAttributes", notNullValue());
     }
 
@@ -212,6 +212,41 @@ class SesV2IntegrationTest {
         .then()
             .statusCode(404)
             .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    @Order(16)
+    void verifyEmailIdentity_v1ConfirmsPendingV2Address() {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"EmailIdentity": "v2-pending-confirm@example.com"}
+                """)
+        .when()
+            .post("/v2/email/identities")
+        .then()
+            .statusCode(200)
+            .body("VerifiedForSendingStatus", equalTo(false));
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "VerifyEmailIdentity")
+            .formParam("EmailAddress", "v2-pending-confirm@example.com")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .get("/v2/email/identities/v2-pending-confirm@example.com")
+        .then()
+            .statusCode(200)
+            .body("VerifiedForSendingStatus", equalTo(true))
+            .body("VerificationStatus", equalTo("SUCCESS"));
     }
 
     @Test
@@ -970,6 +1005,15 @@ class SesV2IntegrationTest {
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
+            .body("{\"EmailIdentity\": \"raw-from@floci.test\"}")
+        .when()
+            .post("/v2/email/identities")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
             .body("""
                 {
                     "Destination": {"ToAddresses": ["r@example.com"]},
@@ -1273,13 +1317,21 @@ class SesV2IntegrationTest {
     void inspectionEndpoint_returnsEmailsFromAllRegions() {
         given().delete("/_aws/ses").then().statusCode(200);
 
-        // Create identity usable in both regions (domain covers all addresses)
+        // Domain identities stay PENDING until DKIM; create the address in each
+        // region so SendEmail accepts it (existing email-address identity).
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
-            .body("""
-                {"EmailIdentity": "example.com"}
-                """)
+            .body("{\"EmailIdentity\": \"multi@example.com\"}")
+        .when()
+            .post("/v2/email/identities")
+        .then()
+            .statusCode(200);
+        given()
+            .contentType("application/json")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=AKID/20260101/ap-northeast-1/ses/aws4_request")
+            .body("{\"EmailIdentity\": \"multi@example.com\"}")
         .when()
             .post("/v2/email/identities")
         .then()
@@ -1353,8 +1405,8 @@ class SesV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("IdentityType", equalTo("EMAIL_ADDRESS"))
-            .body("VerifiedForSendingStatus", equalTo(true))
-            .body("VerificationStatus", equalTo("SUCCESS"))
+            .body("VerifiedForSendingStatus", equalTo(false))
+            .body("VerificationStatus", equalTo("PENDING"))
             .body("FeedbackForwardingStatus", notNullValue())
             .body("DkimAttributes", notNullValue())
             .body("DkimAttributes.SigningEnabled", notNullValue())

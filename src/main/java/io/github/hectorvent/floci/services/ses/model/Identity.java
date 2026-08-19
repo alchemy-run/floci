@@ -76,7 +76,10 @@ public class Identity {
     public Identity(String identity, String identityType) {
         this.identity = identity;
         this.identityType = identityType;
-        this.verificationStatus = "Success"; // auto-verify in emulator
+        // Email-address identities stay PENDING until confirmed (v1 VerifyEmailIdentity
+        // or a verification click). Domain identities are overwritten to PENDING by
+        // verifyDomainIdentity. Matching AWS CreateEmailIdentity / VerifyEmailIdentity.
+        this.verificationStatus = "EmailAddress".equals(identityType) ? "Pending" : "Success";
         this.verificationToken = java.util.UUID.randomUUID().toString();
         this.dkimEnabled = false;
         this.dkimVerificationStatus = "NotStarted";

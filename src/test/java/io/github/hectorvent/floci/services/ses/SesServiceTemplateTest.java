@@ -248,6 +248,10 @@ class SesServiceTemplateTest {
 
     static Stream<Arguments> mapErrorCodeToBulkStatusCases() {
         return Stream.of(
+                Arguments.of("MessageRejected",           BulkEmailEntryResult.Status.MESSAGE_REJECTED),
+                Arguments.of("MailFromDomainNotVerified", BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED),
+                Arguments.of("MailFromDomainNotVerifiedException",
+                        BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED),
                 Arguments.of("InvalidParameterValue",     BulkEmailEntryResult.Status.INVALID_PARAMETER),
                 Arguments.of("MissingRenderingAttribute", BulkEmailEntryResult.Status.INVALID_PARAMETER),
                 Arguments.of("InvalidRenderingParameter", BulkEmailEntryResult.Status.INVALID_PARAMETER),

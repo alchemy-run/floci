@@ -107,7 +107,7 @@ public class SesController {
             }
 
             Identity identity = emailIdentity.contains("@")
-                    ? sesService.verifyEmailIdentity(emailIdentity, region)
+                    ? sesService.createEmailAddressIdentity(emailIdentity, region)
                     : sesService.verifyDomainIdentity(emailIdentity, region);
 
             List<Tag> parsedTags = parseTagsArray(request.path("Tags"));
@@ -2139,7 +2139,8 @@ public class SesController {
         }
     }
 
-    @PUT
+    // AWS PutTenantSuppressionAttributes is POST (not PUT) on this path.
+    @POST
     @Path("/tenant/suppression")
     public Response putTenantSuppressionAttributes(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);

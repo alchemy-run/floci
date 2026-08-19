@@ -69,6 +69,25 @@ class SesTenantV2IntegrationTest {
 
     @Test
     @Order(4)
+    void putTenantSuppressionAttributes_viaPost() {
+        // AWS PutTenantSuppressionAttributes is POST /v2/email/tenant/suppression
+        // (not PUT). Alchemy's Tenant reconciler uses this on update.
+        given().contentType("application/json").header("Authorization", AUTH)
+                .body("{\"TenantName\":\"floci-tenant\",\"SuppressedReasons\":[\"BOUNCE\",\"COMPLAINT\"],"
+                        + "\"SuppressionScope\":\"TENANT\"}")
+                .when().post("/v2/email/tenant/suppression")
+                .then().statusCode(200);
+
+        given().contentType("application/json").header("Authorization", AUTH)
+                .body("{\"TenantName\":\"floci-tenant\"}")
+                .when().post("/v2/email/tenants/get")
+                .then().statusCode(200)
+                .body("Tenant.SuppressionAttributes.SuppressedReasons", hasItem("COMPLAINT"))
+                .body("Tenant.SuppressionAttributes.SuppressionScope", equalTo("TENANT"));
+    }
+
+    @Test
+    @Order(5)
     void deleteTenant_removesAssociations() {
         given().contentType("application/json").header("Authorization", AUTH)
                 .body("{\"TenantName\":\"floci-tenant\"}")
