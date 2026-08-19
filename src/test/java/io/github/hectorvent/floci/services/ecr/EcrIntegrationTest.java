@@ -134,6 +134,22 @@ class EcrIntegrationTest {
     }
 
     @Test
+    @Order(6)
+    void doubleHyphenRepoNameFailsLikeAws() {
+        given()
+            .header("X-Amz-Target", PREFIX + "CreateRepository")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "aws-ecs-service-image-form--task" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("InvalidParameterException"));
+    }
+
+    @Test
     @Order(7)
     void getAuthorizationToken() {
         String token = given()
@@ -146,6 +162,7 @@ class EcrIntegrationTest {
             .statusCode(200)
             .body("authorizationData[0].authorizationToken", not(emptyString()))
             .body("authorizationData[0].proxyEndpoint", startsWith("http"))
+            .body("authorizationData[0].proxyEndpoint", containsString(".ecr."))
             .body("authorizationData[0].expiresAt", notNullValue())
             .extract().jsonPath().getString("authorizationData[0].authorizationToken");
 

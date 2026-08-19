@@ -15,7 +15,11 @@ import io.github.hectorvent.floci.services.ecr.model.Image;
 import io.github.hectorvent.floci.services.ecr.model.Repository;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.ecr.registry.RegistryHttpClient;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -27,6 +31,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +50,7 @@ public class EcrService {
     // bindings assert length > 100; keep the "AWS:<password>" decode shape.
     private static final String AUTH_PASSWORD = "floci-" + "0".repeat(96);
     private static final long LAYER_PART_SIZE = 20 * 1024 * 1024L;
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final StorageBackend<String, Repository> repoStore;
     private final StorageBackend<String, ImageMetadata> imageMetaStore;
@@ -55,17 +61,19 @@ public class EcrService {
     private final EcrRegistryManager registryManager;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
+    private final EventBridgeService eventBridgeService;
 
     @Inject
     public EcrService(StorageFactory factory,
                       EcrRegistryManager registryManager,
                       EmulatorConfig config,
-                      RegionResolver regionResolver) {
+                      RegionResolver regionResolver,
+                      EventBridgeService eventBridgeService) {
         this(factory.create("ecr", "repositories.json",
                         new TypeReference<Map<String, Repository>>() {}),
                 factory.create("ecr", "image-metadata.json",
                         new TypeReference<Map<String, ImageMetadata>>() {}),
-                registryManager, config, regionResolver);
+                registryManager, config, regionResolver, eventBridgeService);
     }
 
     EcrService(StorageBackend<String, Repository> repoStore,
@@ -73,11 +81,21 @@ public class EcrService {
                EcrRegistryManager registryManager,
                EmulatorConfig config,
                RegionResolver regionResolver) {
+        this(repoStore, imageMetaStore, registryManager, config, regionResolver, null);
+    }
+
+    EcrService(StorageBackend<String, Repository> repoStore,
+               StorageBackend<String, ImageMetadata> imageMetaStore,
+               EcrRegistryManager registryManager,
+               EmulatorConfig config,
+               RegionResolver regionResolver,
+               EventBridgeService eventBridgeService) {
         this.repoStore = repoStore;
         this.imageMetaStore = imageMetaStore;
         this.registryManager = registryManager;
         this.config = config;
         this.regionResolver = regionResolver;
+        this.eventBridgeService = eventBridgeService;
         this.registryManager.setReconcileHook(this::reconcileFromCatalog);
     }
 
@@ -256,13 +274,12 @@ public class EcrService {
     public List<ImageIdentifier> listImages(String repositoryName, String registryId, String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         registryManager.ensureStarted();
-        String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
         try {
             RegistryHttpClient http = registryManager.httpClient();
-            List<String> tags = http.listTags(internal);
+            List<String> names = registryLookupNames(repo, region, repositoryName);
             List<ImageIdentifier> out = new ArrayList<>();
-            for (String tag : tags) {
-                String digest = http.headManifestDigest(internal, tag, null);
+            for (String tag : listTagsFromRegistry(http, names)) {
+                String digest = headManifestDigest(http, names, tag);
                 out.add(new ImageIdentifier(tag, digest));
             }
             mergeLocalImageIds(out, region, repo.getRegistryId(), repositoryName);
@@ -281,16 +298,12 @@ public class EcrService {
                                                 String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         registryManager.ensureStarted();
-        String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
         RegistryHttpClient http = registryManager.httpClient();
+        List<String> names = registryLookupNames(repo, region, repositoryName);
 
         List<String> refs = new ArrayList<>();
         if (requested == null || requested.isEmpty()) {
-            try {
-                refs.addAll(http.listTags(internal));
-            } catch (Exception e) {
-                LOG.warnv("DescribeImages tag enumeration failed for {0}: {1}", repositoryName, e.getMessage());
-            }
+            refs.addAll(listTagsFromRegistry(http, names));
         } else {
             for (ImageIdentifier id : requested) {
                 if (id.getImageTag() != null) refs.add(id.getImageTag());
@@ -303,7 +316,7 @@ public class EcrService {
         List<ImageFailure> failures = new ArrayList<>();
         for (String ref : refs) {
             try {
-                RegistryHttpClient.ManifestResult m = http.getManifest(internal, ref, null);
+                RegistryHttpClient.ManifestResult m = getManifestFromRegistry(http, names, ref, null);
                 if (m == null) {
                     ImageDetail local = localImageDetail(region, repo, repositoryName, ref);
                     if (local != null) {
@@ -384,8 +397,8 @@ public class EcrService {
                                               String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         registryManager.ensureStarted();
-        String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
         RegistryHttpClient http = registryManager.httpClient();
+        List<String> names = registryLookupNames(repo, region, repositoryName);
 
         List<Image> images = new ArrayList<>();
         List<ImageFailure> failures = new ArrayList<>();
@@ -397,7 +410,7 @@ public class EcrService {
                 continue;
             }
             try {
-                RegistryHttpClient.ManifestResult m = http.getManifest(internal, ref, acceptedMediaTypes);
+                RegistryHttpClient.ManifestResult m = getManifestFromRegistry(http, names, ref, acceptedMediaTypes);
                 if (m == null) {
                     Image local = localImage(region, repo, repositoryName, ref, id.getImageTag());
                     if (local != null) {
@@ -434,30 +447,36 @@ public class EcrService {
                                                     String region) {
         Repository repo = requireRepo(repositoryName, registryId, region);
         registryManager.ensureStarted();
-        String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
         RegistryHttpClient http = registryManager.httpClient();
+        List<String> names = registryLookupNames(repo, region, repositoryName);
 
         List<ImageIdentifier> deleted = new ArrayList<>();
         List<ImageFailure> failures = new ArrayList<>();
         if (imageIds == null) imageIds = List.of();
         for (ImageIdentifier id : imageIds) {
             try {
+                String tag = id.getImageTag();
                 String digest = id.getImageDigest();
-                if (digest == null && id.getImageTag() != null) {
-                    digest = http.headManifestDigest(internal, id.getImageTag(), null);
+                if (digest == null && tag != null) {
+                    digest = headManifestDigest(http, names, tag);
+                }
+                LocalImage local = findLocalImage(region, repo.getRegistryId(), repositoryName, tag, digest);
+                if (digest == null && local != null) {
+                    digest = local.digest;
                 }
                 if (digest == null) {
                     failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
                     continue;
                 }
-                boolean ok = http.deleteManifest(internal, digest);
-                if (!ok) {
+                boolean registryDeleted = deleteManifestFromRegistry(http, names, digest);
+                evictLocalImage(region, repo.getRegistryId(), repositoryName, digest, tag);
+                imageMetaStore.delete(imageMetaKey(region, repo.getRegistryId(), repositoryName, digest));
+                if (!registryDeleted && local == null) {
                     failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
                     continue;
                 }
-                deleted.add(new ImageIdentifier(id.getImageTag(), digest));
-                imageMetaStore.delete(imageMetaKey(region, repo.getRegistryId(), repositoryName, digest));
-                evictLocalImage(region, repo.getRegistryId(), repositoryName, digest, id.getImageTag());
+                deleted.add(new ImageIdentifier(tag, digest));
+                publishImageAction("DELETE", repo, repositoryName, region, digest, tag, null);
             } catch (Exception e) {
                 failures.add(new ImageFailure(id, "ImageNotFound", e.getMessage()));
             }
@@ -692,6 +711,7 @@ public class EcrService {
         img.setImageId(new ImageIdentifier(imageTag, stored.digest));
         img.setImageManifest(imageManifest);
         img.setImageManifestMediaType(mediaType);
+        publishImageAction("PUSH", repo, repositoryName, region, stored.digest, imageTag, mediaType);
         return img;
     }
 
@@ -711,8 +731,11 @@ public class EcrService {
         // Alchemy bindings assert the URL is HTTPS (AWS always returns a
         // pre-signed https:// URL). The backing registry may be plain HTTP.
         String httpsBase = "https://localhost:" + registryManager.effectivePort();
-        String path = "/v2/" + registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName)
-                + "/blobs/" + layerDigest;
+        String registryName = firstRegistryNameWithBlob(repo, region, repositoryName, layerDigest);
+        if (registryName == null) {
+            registryName = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
+        }
+        String path = "/v2/" + registryName + "/blobs/" + layerDigest;
         return new DownloadUrl(httpsBase + path, layerDigest);
     }
 
@@ -818,8 +841,13 @@ public class EcrService {
 
     private List<String> listTagsBestEffort(String account, String region, String repoName) {
         try {
-            return registryManager.httpClient()
-                    .listTags(registryManager.internalRepoName(account, region, repoName));
+            RegistryHttpClient http = registryManager.httpClient();
+            List<String> names = new ArrayList<>();
+            names.add(registryManager.internalRepoName(account, region, repoName));
+            if (!names.contains(repoName)) {
+                names.add(repoName);
+            }
+            return listTagsFromRegistry(http, names);
         } catch (Exception e) {
             LOG.debugv("Could not list tags for {0} (registry not available): {1}", repoName, e.getMessage());
             return List.of();
@@ -990,8 +1018,29 @@ public class EcrService {
     private Long registryBlobSize(Repository repo, String region, String repositoryName, String digest) {
         try {
             registryManager.ensureStarted();
-            String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
-            return registryManager.httpClient().headBlob(internal, digest);
+            RegistryHttpClient http = registryManager.httpClient();
+            for (String name : registryLookupNames(repo, region, repositoryName)) {
+                Long size = http.headBlob(name, digest);
+                if (size != null) {
+                    return size;
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String firstRegistryNameWithBlob(Repository repo, String region, String repositoryName, String digest) {
+        try {
+            registryManager.ensureStarted();
+            RegistryHttpClient http = registryManager.httpClient();
+            for (String name : registryLookupNames(repo, region, repositoryName)) {
+                if (http.headBlob(name, digest) != null) {
+                    return name;
+                }
+            }
+            return null;
         } catch (Exception e) {
             return null;
         }
@@ -1017,6 +1066,114 @@ public class EcrService {
         } catch (Exception e) {
             LOG.debugv("Registry manifest push skipped for {0}/{1}: {2}", repositoryName, reference, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Hostname-style {@code docker push} lands at {@code /v2/<repoName>/...};
+     * path-style and PutImage best-effort writes use
+     * {@code /v2/<account>/<region>/<repoName>/...}. Control-plane reads try both.
+     */
+    private List<String> registryLookupNames(Repository repo, String region, String repositoryName) {
+        String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
+        if (internal.equals(repositoryName)) {
+            return List.of(internal);
+        }
+        return List.of(internal, repositoryName);
+    }
+
+    private List<String> listTagsFromRegistry(RegistryHttpClient http, List<String> names) {
+        List<String> tags = new ArrayList<>();
+        for (String name : names) {
+            try {
+                for (String tag : http.listTags(name)) {
+                    if (!tags.contains(tag)) {
+                        tags.add(tag);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry tags/list {0} failed: {1}", name, e.getMessage());
+            }
+        }
+        return tags;
+    }
+
+    private String headManifestDigest(RegistryHttpClient http, List<String> names, String reference) {
+        for (String name : names) {
+            try {
+                String digest = http.headManifestDigest(name, reference, null);
+                if (digest != null) {
+                    return digest;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry HEAD manifest {0}/{1} failed: {2}", name, reference, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private RegistryHttpClient.ManifestResult getManifestFromRegistry(RegistryHttpClient http,
+                                                                      List<String> names,
+                                                                      String reference,
+                                                                      List<String> acceptedMediaTypes) {
+        for (String name : names) {
+            try {
+                RegistryHttpClient.ManifestResult manifest = http.getManifest(name, reference, acceptedMediaTypes);
+                if (manifest != null) {
+                    return manifest;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry GET manifest {0}/{1} failed: {2}", name, reference, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private boolean deleteManifestFromRegistry(RegistryHttpClient http, List<String> names, String digest) {
+        boolean deleted = false;
+        for (String name : names) {
+            try {
+                if (http.deleteManifest(name, digest)) {
+                    deleted = true;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry DELETE manifest {0}/{1} failed: {2}", name, digest, e.getMessage());
+            }
+        }
+        return deleted;
+    }
+
+    private void publishImageAction(String actionType, Repository repo, String repositoryName,
+                                    String region, String digest, String tag, String mediaType) {
+        if (eventBridgeService == null) {
+            return;
+        }
+        try {
+            ObjectNode detail = JSON.createObjectNode();
+            detail.put("action-type", actionType);
+            detail.put("result", "SUCCESS");
+            detail.put("repository-name", repositoryName);
+            if (digest != null && !digest.isBlank()) {
+                detail.put("image-digest", digest);
+            }
+            if (tag != null && !tag.isBlank()) {
+                detail.put("image-tag", tag);
+            }
+            if (mediaType != null && !mediaType.isBlank()) {
+                detail.put("manifest-media-type", mediaType);
+            }
+            ArrayNode resources = JSON.createArrayNode();
+            if (repo.getRepositoryArn() != null) {
+                resources.add(repo.getRepositoryArn());
+            }
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("Source", "aws.ecr");
+            entry.put("DetailType", "ECR Image Action");
+            entry.put("Detail", JSON.writeValueAsString(detail));
+            entry.put("Resources", resources);
+            eventBridgeService.putEvents(List.of(entry), region);
+        } catch (Exception e) {
+            LOG.warnv("Failed to publish ECR Image Action to EventBridge: {0}", e.getMessage());
         }
     }
 

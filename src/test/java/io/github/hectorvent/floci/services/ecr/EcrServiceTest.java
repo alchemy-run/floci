@@ -12,8 +12,12 @@ import io.github.hectorvent.floci.services.ecr.model.ImageMetadata;
 import io.github.hectorvent.floci.services.ecr.model.Repository;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.ecr.registry.RegistryHttpClient;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -29,6 +33,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -43,6 +49,7 @@ class EcrServiceTest {
 
     private EcrService service;
     private EcrRegistryManager registryManager;
+    private EventBridgeService eventBridgeService;
 
     @BeforeEach
     void setUp() {
@@ -50,10 +57,15 @@ class EcrServiceTest {
         when(registryManager.getRepositoryUri(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0) + ".dkr.ecr." + inv.getArgument(1)
                         + ".localhost:5000/" + inv.getArgument(2));
-        when(registryManager.getProxyEndpoint()).thenReturn("http://localhost:5000");
+        when(registryManager.getProxyEndpoint()).thenReturn(
+                "http://" + ACCOUNT + ".dkr.ecr." + REGION + ".localhost:5000");
         when(registryManager.internalRepoName(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0) + "/" + inv.getArgument(1) + "/" + inv.getArgument(2));
         // ensureStarted() is a no-op on the mock — no Docker calls in any test below.
+
+        eventBridgeService = Mockito.mock(EventBridgeService.class);
+        when(eventBridgeService.putEvents(any(), anyString()))
+                .thenReturn(new EventBridgeService.PutEventsResult(0, List.of()));
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
         RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
@@ -63,7 +75,8 @@ class EcrServiceTest {
                 new InMemoryStorage<>(),
                 registryManager,
                 config,
-                regionResolver);
+                regionResolver,
+                eventBridgeService);
     }
 
     // ------------------------------------------------------------
@@ -94,6 +107,24 @@ class EcrServiceTest {
         AwsException ex = assertThrows(AwsException.class,
                 () -> service.createRepository("Invalid_Caps", null, null, null, null, null, null, REGION));
         assertEquals("InvalidParameterException", ex.getErrorCode());
+    }
+
+    @Test
+    void createRepository_rejectsDoubleHyphenLikeAws() {
+        // AWS repositoryName = (?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*
+        // Consecutive separators (`--`) are illegal on real ECR too.
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.createRepository(
+                        "aws-ecs-service-image-form--task",
+                        null, null, null, null, null, null, REGION));
+        assertEquals("InvalidParameterException", ex.getErrorCode());
+    }
+
+    @Test
+    void createRepository_acceptsAwsLegalSeparators() {
+        Repository repo = service.createRepository(
+                "foo-bar.baz_qux/a-b", null, null, null, null, null, null, REGION);
+        assertEquals("foo-bar.baz_qux/a-b", repo.getRepositoryName());
     }
 
     @Test
@@ -184,6 +215,8 @@ class EcrServiceTest {
         assertTrue(data.getAuthorizationToken().length() > 100,
                 "authorization token must be longer than 100 chars (AWS-shaped)");
         assertTrue(data.getProxyEndpoint().startsWith("http"));
+        assertTrue(data.getProxyEndpoint().contains(".ecr."),
+                "proxyEndpoint must be an ECR hostname, was: " + data.getProxyEndpoint());
         assertNotNull(data.getExpiresAt());
         String decoded = new String(Base64.getDecoder().decode(data.getAuthorizationToken()));
         assertTrue(decoded.startsWith("AWS:"), "decoded token should start with AWS: but was: " + decoded);
@@ -242,6 +275,78 @@ class EcrServiceTest {
             assertEquals("application/vnd.docker.container.image.v1+json", detail.getArtifactMediaType());
             assertNotNull(detail.getImagePushedAt());
         }
+    }
+
+    @Test
+    void hostnameStyleDockerPushIsVisibleViaListAndDescribeImages() throws Exception {
+        // docker push to <account>.dkr.ecr.<region>.localhost:<port>/<repo> writes
+        // /v2/<repo>/... — not the internal <account>/<region>/<repo> namespace.
+        String repositoryName = "alchemy-test-ecr-image";
+        String tag = "abc123";
+        String digest = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+        String manifest = """
+                {
+                  "schemaVersion": 2,
+                  "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+                  "config": {
+                    "mediaType": "application/vnd.docker.container.image.v1+json",
+                    "size": 123,
+                    "digest": "sha256:config"
+                  },
+                  "layers": [
+                    {
+                      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                      "size": 456,
+                      "digest": "sha256:layer"
+                    }
+                  ]
+                }
+                """;
+
+        try (FakeRegistryServer registry = new FakeRegistryServer(repositoryName, tag, digest, manifest)) {
+            when(registryManager.httpClient())
+                    .thenReturn(new RegistryHttpClient("http://localhost:" + registry.port()));
+
+            service.createRepository(repositoryName, null, null, null, null, null, null, REGION);
+
+            List<ImageIdentifier> imageIds = service.listImages(repositoryName, null, REGION);
+            assertEquals(1, imageIds.size());
+            assertEquals(tag, imageIds.get(0).getImageTag());
+            assertEquals(digest, imageIds.get(0).getImageDigest());
+
+            EcrService.DescribeImagesResult described = service.describeImages(
+                    repositoryName, List.of(new ImageIdentifier(tag, null)), null, REGION);
+            assertEquals(1, described.imageDetails().size());
+            assertEquals(digest, described.imageDetails().get(0).getImageDigest());
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void putImage_publishesEcrImageActionEvent() {
+        service.createRepository(REPO, null, null, null, null, null, null, REGION);
+        byte[] layer = "layer\n".getBytes();
+        String layerDigest = sha256(layer);
+        EcrService.InitiateLayerUploadResult init = service.initiateLayerUpload(REPO, null, REGION);
+        service.uploadLayerPart(REPO, null, REGION, init.uploadId(), 0, layer.length - 1, layer);
+        service.completeLayerUpload(REPO, null, REGION, init.uploadId(), List.of(layerDigest));
+
+        String manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.docker.distribution.manifest.v2+json\"}";
+        Image image = service.putImage(REPO, null, REGION, manifest,
+                "application/vnd.docker.distribution.manifest.v2+json", "1.0.0", null);
+
+        ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
+        verify(eventBridgeService).putEvents(captor.capture(), eq(REGION));
+        Map<String, Object> entry = captor.getValue().get(0);
+        assertEquals("aws.ecr", entry.get("Source"));
+        assertEquals("ECR Image Action", entry.get("DetailType"));
+        JsonNode detail = assertDoesNotThrow(
+                () -> new ObjectMapper().readTree((String) entry.get("Detail")));
+        assertEquals("PUSH", detail.get("action-type").asText());
+        assertEquals("SUCCESS", detail.get("result").asText());
+        assertEquals(REPO, detail.get("repository-name").asText());
+        assertEquals("1.0.0", detail.get("image-tag").asText());
+        assertEquals(image.getImageId().getImageDigest(), detail.get("image-digest").asText());
     }
 
     // ------------------------------------------------------------

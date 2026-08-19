@@ -60,6 +60,7 @@ public class EcrRegistryManager {
     private volatile boolean reconciled;
     private volatile int hostPort;
     private volatile String containerId;
+    private volatile String registryInternalHost;
     private volatile Closeable logStream;
     private volatile java.util.function.Consumer<List<String>> reconcileHook;
 
@@ -95,8 +96,27 @@ public class EcrRegistryManager {
 
     /** Returns the proxy endpoint a docker daemon should log into for any ECR repo. */
     public String getProxyEndpoint() {
+        return getProxyEndpoint(regionResolver.getAccountId(), regionResolver.getDefaultRegion());
+    }
+
+    /**
+     * AWS-shaped registry login URL. Hostname style is
+     * {@code http(s)://<account>.dkr.ecr.<region>.localhost:<port>} so the
+     * host matches {@link #getRepositoryUri} and Alchemy's token binding
+     * (which asserts the endpoint contains {@code .ecr.}).
+     */
+    public String getProxyEndpoint(String accountId, String region) {
         String scheme = config.services().ecr().tlsEnabled() ? "https" : "http";
-        return scheme + "://localhost:" + effectivePort();
+        int port = effectivePort();
+        String style = config.services().ecr().uriStyle();
+        if ("path".equalsIgnoreCase(style)) {
+            return scheme + "://localhost:" + port;
+        }
+        String account = accountId == null || accountId.isBlank()
+                ? regionResolver.getAccountId() : accountId;
+        String resolvedRegion = region == null || region.isBlank()
+                ? regionResolver.getDefaultRegion() : region;
+        return scheme + "://" + account + ".dkr.ecr." + resolvedRegion + ".localhost:" + port;
     }
 
     /** Returns the effective registry port. Stable across calls once {@link #ensureStarted} runs. */
@@ -110,11 +130,15 @@ public class EcrRegistryManager {
     }
 
     /**
-     * The registry endpoint reachable from other containers on the Docker network:
-     * the container name plus the container-internal port (not the published host port).
+     * The registry endpoint reachable from other containers on the Docker network.
+     * Prefers the inspected container IP — the default {@code bridge} network has
+     * no embedded DNS, so {@code floci-ecr-registry} does not resolve.
      */
     public String internalEndpoint() {
-        return "http://" + registryContainerName() + ":" + CONTAINER_INTERNAL_PORT;
+        String host = (registryInternalHost != null && !registryInternalHost.isBlank())
+                ? registryInternalHost
+                : registryContainerName();
+        return "http://" + host + ":" + CONTAINER_INTERNAL_PORT;
     }
 
     /** Returns a {@link RegistryHttpClient} bound to the current registry endpoint. */
@@ -123,6 +147,16 @@ public class EcrRegistryManager {
             return new RegistryHttpClient(internalEndpoint());
         }
         return new RegistryHttpClient("http://localhost:" + effectivePort());
+    }
+
+    private void rememberInternalHost(ContainerInfo info) {
+        if (info == null) {
+            return;
+        }
+        ContainerLifecycleManager.EndpointInfo endpoint = info.getEndpoint(CONTAINER_INTERNAL_PORT);
+        if (endpoint != null && endpoint.host() != null && !endpoint.host().isBlank()) {
+            this.registryInternalHost = endpoint.host();
+        }
     }
 
     /**
@@ -182,6 +216,7 @@ public class EcrRegistryManager {
             ContainerInfo info = lifecycleManager.createAndStart(spec);
             this.containerId = info.containerId();
             this.hostPort = chosenPort;
+            rememberInternalHost(info);
             this.started = true;
             LOG.infov("Started ECR backing registry {0} on host port {1}", name, String.valueOf(chosenPort));
 
@@ -359,6 +394,7 @@ public class EcrRegistryManager {
                 LOG.warnv("Adopted ECR registry container {0} has no published binding for port {1}; keeping configured port {2}",
                         containerId, String.valueOf(CONTAINER_INTERNAL_PORT), String.valueOf(hostPort));
             }
+            rememberInternalHost(info);
             this.started = true;
             LOG.infov("Adopted existing ECR registry container {0} on host port {1}",
                     containerId, String.valueOf(hostPort));

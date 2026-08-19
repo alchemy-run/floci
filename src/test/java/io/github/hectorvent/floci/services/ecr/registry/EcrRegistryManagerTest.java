@@ -78,6 +78,8 @@ class EcrRegistryManagerTest {
         when(ecr.registryBasePort()).thenReturn(BASE_PORT);
         when(ecr.registryMaxPort()).thenReturn(MAX_PORT);
         when(ecr.dockerNetwork()).thenReturn(Optional.empty());
+        when(ecr.uriStyle()).thenReturn("hostname");
+        when(ecr.tlsEnabled()).thenReturn(false);
 
         manager = new EcrRegistryManager(containerBuilder, lifecycleManager, logStreamer,
                 containerDetector, currentContainerNetworkResolver, portAllocator, config, regionResolver);
@@ -125,7 +127,10 @@ class EcrRegistryManagerTest {
         manager.ensureStarted();
 
         assertEquals(BASE_PORT + 1, manager.effectivePort());
-        assertEquals("http://localhost:" + (BASE_PORT + 1), manager.getProxyEndpoint());
+        assertEquals("http://000000000000.dkr.ecr.us-east-1.localhost:" + (BASE_PORT + 1),
+                manager.getProxyEndpoint());
+        // Default bridge has no container-name DNS — talk to the inspected IP.
+        assertEquals("http://172.17.0.5:5000", manager.httpClient().baseUrl());
     }
 
     @Test

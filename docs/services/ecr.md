@@ -11,11 +11,11 @@
 | `CreateRepository` | Create a new repository (lazy-starts the backing registry on first call) |
 | `DescribeRepositories` | List repositories or fetch by name |
 | `DeleteRepository` | Delete a repository (with `force=true` semantics for non-empty repos) |
-| `GetAuthorizationToken` | Returns a docker-login token + proxy endpoint |
+| `GetAuthorizationToken` | Returns a docker-login token + AWS-shaped `proxyEndpoint` (`<account>.dkr.ecr.<region>.localhost:<port>`) |
 | `ListImages` | Enumerate tags and digests in a repository |
 | `DescribeImages` | Image metadata: digest, size, push timestamp, manifest media type |
 | `BatchGetImage` | Fetch image manifests, honoring `acceptedMediaTypes` |
-| `BatchDeleteImage` | Delete images by tag or digest |
+| `BatchDeleteImage` | Delete images by tag or digest; publishes `ECR Image Action` (`DELETE`) to the default EventBridge bus |
 | `PutImageTagMutability` | Set tag mutability (round-trip; not enforced on push) |
 | `PutImageScanningConfiguration` | Set `scanOnPush` (round-trip; scans are not executed) |
 | `TagResource` / `UntagResource` / `ListTagsForResource` | Resource tagging |
@@ -23,7 +23,7 @@
 | `SetRepositoryPolicy` / `GetRepositoryPolicy` / `DeleteRepositoryPolicy` | Repository policy round-trip (stored, not enforced) |
 | `PutRegistryPolicy` / `GetRegistryPolicy` / `DeleteRegistryPolicy` | Account/region registry policy singleton |
 | `InitiateLayerUpload` / `UploadLayerPart` / `CompleteLayerUpload` | Layer upload (in-memory + best-effort push to `registry:2`) |
-| `PutImage` | Put a manifest by tag (in-memory + best-effort push to `registry:2`) |
+| `PutImage` | Put a manifest by tag (in-memory + best-effort push to `registry:2`); publishes `ECR Image Action` (`PUSH`) to the default EventBridge bus |
 | `GetDownloadUrlForLayer` | Returns an `https://` blob URL (AWS-shaped; backing registry may be HTTP) |
 | `BatchCheckLayerAvailability` | Reports `AVAILABLE` / `UNAVAILABLE` for uploaded or registry blobs |
 | `StartImageScan` | Requires the image; returns `UnsupportedImageTypeException` for synthetic/scratch images |
@@ -39,7 +39,10 @@
 
 - **Real OCI registry backing.** A single shared `registry:2` container per Floci instance serves all repositories. The container is started lazily on the first ECR API call and reused across Floci restarts (`keep-running-on-shutdown: true` by default), so pushed image bytes survive restarts.
 - **Loopback URI scheme.** Repository URIs follow `<account>.dkr.ecr.<region>.localhost:<registryPort>/<repoName>`. RFC 6761 reserves `*.localhost` to resolve to the loopback address, and the docker daemon auto-trusts loopback as an insecure registry, so **no daemon configuration changes are required** — `docker push` and `docker pull` work out of the box. A `path` URI style fallback (`localhost:<port>/<account>/<region>/<repo>`) is available via `floci.services.ecr.uri-style: path` for environments where `*.localhost` resolution misbehaves.
-- **Authorization.** `GetAuthorizationToken` returns `Base64("AWS:<long password>")` plus a proxy endpoint. The token is longer than 100 characters (AWS-shaped). The backing `registry:2` runs without auth, so any `aws ecr get-login-password | docker login` succeeds.
+- **Authorization.** `GetAuthorizationToken` returns `Base64("AWS:<long password>")` plus a proxy endpoint of the form `http://<account>.dkr.ecr.<region>.localhost:<port>` (contains `.ecr.`, matching live AWS). The token is longer than 100 characters. The backing `registry:2` runs without auth, so any `aws ecr get-login-password | docker login` succeeds. Login host and `repositoryUri` host are the same, so `docker push` reuses the token.
+- **Hostname-style docker push.** `docker push <account>.dkr.ecr.<region>.localhost:<port>/<repo>` writes `/v2/<repo>/...` in `registry:2`. Control-plane `ListImages` / `DescribeImages` / `BatchGetImage` / `BatchDeleteImage` also look up that bare path (in addition to the internal `<account>/<region>/<repo>` namespace used by path-style URIs and `PutImage`). When Floci itself runs in Docker, the control plane talks to the registry sidecar by **container IP** (the default `bridge` network has no name DNS).
+- **EventBridge image actions.** A successful `PutImage` or `BatchDeleteImage` publishes `source=aws.ecr`, `detail-type=ECR Image Action` on the default bus (`action-type` `PUSH`/`DELETE`, `result=SUCCESS`, plus repository name / digest / tag). Re-push of an identical tag throws `ImageAlreadyExistsException` and does **not** emit a second event.
+- **Repository names.** Validation matches live AWS: `(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*`. Consecutive separators (`--`) are rejected.
 - **Manifest format negotiation.** `BatchGetImage` forwards the caller's `acceptedMediaTypes` as the upstream `Accept` header. Modern OCI manifests (`application/vnd.oci.image.manifest.v1+json`) and Docker v2 schema 2 are both supported.
 - **Cross-account / cross-region isolation.** Internally the registry namespaces repositories as `<account>/<region>/<repoName>`, so the same repository name in different accounts or regions cannot collide.
 - **Reconcile on first start.** When the registry container starts, Floci queries `GET /v2/_catalog` and recreates `Repository` metadata entries for any namespaces present in the registry but missing from local storage. This means image bytes are never orphaned across restarts.
@@ -191,8 +194,8 @@ The following ECR features are **not** implemented. Stored values for policies a
 - Image signing and notary attachments
 - Lifecycle policy enforcement (the policy text is stored but not applied)
 - Repository / registry policy enforcement (no IAM evaluation)
-- EventBridge `ECR Image Action` notifications on `PutImage` (consumed by Alchemy `ImageActionEventSource`)
 - TLS via emulated ACM
+- `docker push` to real `*.amazonaws.com` ECR hostnames (Floci advertises `*.localhost` URIs; rewriting public AWS hostnames is out of scope)
 
 ## Troubleshooting
 
