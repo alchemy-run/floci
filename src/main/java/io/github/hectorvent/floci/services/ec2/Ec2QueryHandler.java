@@ -951,7 +951,11 @@ public class Ec2QueryHandler {
         if (ids.isEmpty()) {
             ids = getList(p, "FlowLogIds.member");
         }
-        List<FlowLog> logs = flowLogService.describeFlowLogs(region, ids);
+        Map<String, List<String>> filters = getFilters(p);
+        int maxResults = parseIntParam(p, "MaxResults", 0);
+        FlowLogService.FlowLogListResult page = flowLogService.describeFlowLogs(
+                region, ids, filters, maxResults, p.getFirst("NextToken"));
+        List<FlowLog> logs = page.logs();
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeFlowLogsResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -985,7 +989,11 @@ public class Ec2QueryHandler {
             xml.raw(tagSetXml(tags));
             xml.end("item");
         }
-        xml.end("flowLogSet").end("DescribeFlowLogsResponse");
+        xml.end("flowLogSet");
+        if (page.nextToken() != null) {
+            xml.elem("nextToken", page.nextToken());
+        }
+        xml.end("DescribeFlowLogsResponse");
         return xmlResponse(xml.build());
     }
 

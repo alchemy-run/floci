@@ -397,4 +397,39 @@ class Ec2AlchemyParityIntegrationTest {
             .body("CreateVolumeResponse.kmsKeyId", equalTo(keyArn))
             .body("CreateVolumeResponse.availabilityZone", equalTo("us-west-2a"));
     }
+
+    @Test
+    @Order(21)
+    void createRouteAppearsOnUnfilteredDescribeWithGatewayId() {
+        String igwId = given()
+            .formParam("Action", "CreateInternetGateway")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("CreateInternetGatewayResponse.internetGateway.internetGatewayId");
+
+        given()
+            .formParam("Action", "CreateRoute")
+            .formParam("RouteTableId", routeTableId)
+            .formParam("DestinationCidrBlock", "0.0.0.0/0")
+            .formParam("GatewayId", igwId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .formParam("Action", "DescribeRouteTables")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DescribeRouteTablesResponse.routeTableSet.item.find { it.routeTableId == '" + routeTableId
+                    + "' }.routeSet.item.find { it.destinationCidrBlock == '0.0.0.0/0' }.gatewayId",
+                    equalTo(igwId));
+    }
 }

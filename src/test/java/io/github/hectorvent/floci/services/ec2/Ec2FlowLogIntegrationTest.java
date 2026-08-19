@@ -190,6 +190,19 @@ class Ec2FlowLogIntegrationTest {
     }
 
     @Test
+    @Order(23)
+    void unfilteredDescribeFlowLogsReturnsTheCreatedLog() {
+        given()
+            .formParam("Action", "DescribeFlowLogs")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DescribeFlowLogsResponse.flowLogSet.item.flowLogId", equalTo(flowLogId));
+    }
+
+    @Test
     @Order(22)
     void describeTagsReturnsVpcFlowLogResourceType() {
         given()

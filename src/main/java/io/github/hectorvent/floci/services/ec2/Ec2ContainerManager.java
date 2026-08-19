@@ -119,7 +119,12 @@ public class Ec2ContainerManager {
      *                 via socat sidecars once the container is running (empty for none)
      */
     public void launch(Instance instance, ResolvedAmiImage image, String publicKey, String region, Set<Integer> appPorts) {
-        instance.setState(InstanceState.pending());
+        // Do not reset a control-plane `running` state back to pending — Alchemy's
+        // waitForState budget is too short for image pulls, and a later terminate
+        // on guest failure makes DescribeInstances return NotFound after prune/replace.
+        if (instance.getState() == null || instance.getState().getName() == null) {
+            instance.setState(InstanceState.pending());
+        }
 
         executor.submit(() -> {
             try {
@@ -180,8 +185,8 @@ public class Ec2ContainerManager {
                 }
 
                 if (!running) {
-                    LOG.warnv("EC2 instance {0} container {1} did not reach running state", instanceId, containerId);
-                    instance.setState(InstanceState.terminated());
+                    LOG.warnv("EC2 instance {0} container {1} did not reach running state; keeping control-plane record",
+                            instanceId, containerId);
                     return;
                 }
 
@@ -196,9 +201,8 @@ public class Ec2ContainerManager {
                     metadataServer.registerContainer(containerIp, instanceId, instance);
                 }
                 else {
-                    LOG.warnv("EC2 instance {0} container {1} did not receive a usable bridge IP for IMDS",
+                    LOG.warnv("EC2 instance {0} container {1} did not receive a usable bridge IP for IMDS; keeping control-plane record",
                             instanceId, containerId);
-                    instance.setState(InstanceState.terminated());
                     return;
                 }
 
@@ -231,10 +235,10 @@ public class Ec2ContainerManager {
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                instance.setState(InstanceState.terminated());
+                LOG.warnv("EC2 instance {0} launch interrupted; keeping control-plane record", instance.getInstanceId());
             } catch (Exception e) {
-                LOG.warnv("Failed to launch EC2 instance {0}: {1}", instance.getInstanceId(), e.getMessage());
-                instance.setState(InstanceState.terminated());
+                LOG.warnv("Failed to launch EC2 instance {0} guest ({1}); keeping control-plane record",
+                        instance.getInstanceId(), e.getMessage());
             }
         });
     }

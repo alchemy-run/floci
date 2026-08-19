@@ -27,6 +27,7 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -165,6 +166,11 @@ public class FlowLogService {
     }
 
     public List<FlowLog> describeFlowLogs(String region, List<String> flowLogIds) {
+        return describeFlowLogs(region, flowLogIds, Map.of(), 0, null).logs();
+    }
+
+    public FlowLogListResult describeFlowLogs(String region, List<String> flowLogIds,
+                                              Map<String, List<String>> filters, int maxResults, String nextToken) {
         List<FlowLog> result = new ArrayList<>();
         for (FlowLog fl : flowLogs.scan(k -> true)) {
             if (region != null && fl.getRegion() != null && !region.equals(fl.getRegion())) {
@@ -173,10 +179,58 @@ public class FlowLogService {
             if (flowLogIds != null && !flowLogIds.isEmpty() && !flowLogIds.contains(fl.getFlowLogId())) {
                 continue;
             }
+            if (!matchesFlowLogFilters(fl, filters)) {
+                continue;
+            }
             result.add(fl);
         }
-        return result;
+        result.sort(Comparator.comparing(FlowLog::getFlowLogId, Comparator.nullsLast(String::compareTo)));
+        int start = parseOffsetToken(nextToken);
+        if (start > result.size()) {
+            start = result.size();
+        }
+        int end = maxResults > 0 ? Math.min(result.size(), start + maxResults) : result.size();
+        String token = end < result.size() ? String.valueOf(end) : null;
+        return new FlowLogListResult(result.subList(start, end), token);
     }
+
+    private static boolean matchesFlowLogFilters(FlowLog fl, Map<String, List<String>> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<String, List<String>> filter : filters.entrySet()) {
+            List<String> values = filter.getValue();
+            if (values == null || values.isEmpty()) {
+                continue;
+            }
+            String observed = switch (filter.getKey()) {
+                case "flow-log-id" -> fl.getFlowLogId();
+                case "resource-id" -> fl.getResourceId();
+                case "resource-type" -> fl.getResourceType();
+                case "traffic-type" -> fl.getTrafficType();
+                case "log-destination-type" -> fl.getLogDestinationType();
+                case "log-group-name" -> fl.getLogGroupName();
+                default -> null;
+            };
+            if (observed != null && values.stream().noneMatch(observed::equals)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int parseOffsetToken(String nextToken) {
+        if (nextToken == null || nextToken.isBlank()) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(nextToken));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    public record FlowLogListResult(List<FlowLog> logs, String nextToken) {}
 
     public List<String> deleteFlowLogs(String region, List<String> flowLogIds) {
         List<String> deleted = new ArrayList<>();

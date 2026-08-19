@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -50,6 +51,32 @@ class FlowLogServiceTest {
     @Test
     void deleteFlowLogsIgnoresUnknownIds() {
         assertTrue(flowLogService.deleteFlowLogs("us-east-1", List.of("fl-doesnotexist")).isEmpty());
+    }
+
+    @Test
+    void describeFlowLogsHonorsFiltersAndPagination() {
+        FlowLog a = flowLogService.createFlowLog("us-east-1", "vpc-aaa", "VPC", "ALL",
+                "cloud-watch-logs", null, null, 600, "/aws/vpc/a",
+                "arn:aws:iam::000000000000:role/flow", List.of());
+        FlowLog b = flowLogService.createFlowLog("us-east-1", "vpc-bbb", "VPC", "ACCEPT",
+                "s3", "arn:aws:s3:::flow-b", null, 600);
+
+        assertEquals(1, flowLogService.describeFlowLogs("us-east-1", List.of(),
+                Map.of("resource-id", List.of("vpc-aaa")), 0, null).logs().size());
+        assertEquals(a.getFlowLogId(), flowLogService.describeFlowLogs("us-east-1", List.of(),
+                Map.of("log-destination-type", List.of("cloud-watch-logs")), 0, null).logs().getFirst().getFlowLogId());
+        assertEquals(b.getFlowLogId(), flowLogService.describeFlowLogs("us-east-1", List.of(),
+                Map.of("traffic-type", List.of("ACCEPT")), 0, null).logs().getFirst().getFlowLogId());
+
+        FlowLogService.FlowLogListResult page = flowLogService.describeFlowLogs(
+                "us-east-1", List.of(), Map.of(), 1, null);
+        assertEquals(1, page.logs().size());
+        assertEquals("1", page.nextToken());
+        FlowLogService.FlowLogListResult rest = flowLogService.describeFlowLogs(
+                "us-east-1", List.of(), Map.of(), 1, page.nextToken());
+        assertEquals(1, rest.logs().size());
+        assertTrue(rest.nextToken() == null);
+        assertTrue(!page.logs().getFirst().getFlowLogId().equals(rest.logs().getFirst().getFlowLogId()));
     }
 
     @Test

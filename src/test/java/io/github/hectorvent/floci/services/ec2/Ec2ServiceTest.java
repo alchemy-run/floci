@@ -537,6 +537,37 @@ class Ec2ServiceTest {
     }
 
     @Test
+    void deleteVpcRemovesDefaultFurnitureAndRejectsSubnets() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        var vpc = service.createVpc("us-east-1", "10.90.0.0/16", false);
+        SecurityGroup extra = service.createSecurityGroup("us-east-1", "extra", "user sg", vpc.getVpcId());
+
+        AwsException blocked = assertThrows(AwsException.class,
+                () -> service.deleteVpc("us-east-1", vpc.getVpcId()));
+        assertEquals("DependencyViolation", blocked.getErrorCode());
+
+        service.deleteSecurityGroup("us-east-1", extra.getGroupId());
+        service.deleteVpc("us-east-1", vpc.getVpcId());
+
+        assertEquals("InvalidVpcID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeVpcs("us-east-1", List.of(vpc.getVpcId()), Map.of()))
+                        .getErrorCode());
+    }
+
+    @Test
+    void runInstancesIsControlPlaneRunningWithoutDocker() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        Reservation reservation = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), null, null, List.of(), null, null);
+        assertEquals("running", reservation.getInstances().getFirst().getState().getName());
+    }
+
+    @Test
     void describeTagsClassifiesFlowLogIdsAsVpcFlowLog() {
         Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
                 mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),

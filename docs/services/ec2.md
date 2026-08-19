@@ -159,7 +159,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 
 | Action | Description |
 |--------|-------------|
-| RunInstances | Creates one or more local EC2 instances, starting Docker-backed runtime when not in mock mode. |
+| RunInstances | Creates one or more local EC2 instances in `running` immediately. Docker guest boot is best-effort (IMDS/userdata) and does not terminate the control-plane record on failure. |
 | DescribeInstances | Lists or returns stored EC2 instances. |
 | TerminateInstances | Terminates instances and updates their stored lifecycle state. |
 | StartInstances | Starts stopped instances and their local runtime when applicable. |
@@ -171,13 +171,18 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | GetConsoleOutput | Returns dummy console output for a stored instance. |
 | GetPasswordData | Returns empty password data for a stored instance. |
 
+`RunInstances` marks the instance `running` immediately so control-plane
+describe/list/wait succeed without waiting for the Docker guest. Guest boot
+(IMDS, userdata, published ports) is best-effort; a failed container no
+longer flips the record to `terminated`.
+
 ### VPCs
 
 | Action | Description |
 |--------|-------------|
 | CreateVpc | Creates a VPC with the requested CIDR block. |
 | DescribeVpcs | Lists or returns stored VPCs. |
-| DeleteVpc | Deletes a VPC from the local EC2 store. |
+| DeleteVpc | Deletes a VPC. Auto-removes the default security group, main route table, and default network ACL (AWS furniture). Remaining subnets, extra groups/tables, instances, attachments, or endpoints are `DependencyViolation`. |
 | ModifyVpcAttribute | Updates supported VPC attributes. |
 | DescribeVpcAttribute | Returns a supported VPC attribute. |
 | DescribeVpcEndpointServices | Returns an empty local VPC endpoint service catalog. |
@@ -205,7 +210,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Action | Description |
 |--------|-------------|
 | CreateFlowLogs | Creates a VPC flow log. CloudWatch Logs (`LogGroupName` + `DeliverLogsPermissionArn`) and S3 destinations are stored. Create-time `TagSpecification` of `vpc-flow-log` is applied. |
-| DescribeFlowLogs | Lists or returns stored flow logs, including `logGroupName`, `deliverLogsPermissionArn`, and `tagSet`. |
+| DescribeFlowLogs | Lists or returns stored flow logs, including `logGroupName`, `deliverLogsPermissionArn`, and `tagSet`. Honors `Filter` (`flow-log-id`, `resource-id`, `resource-type`, `traffic-type`, `log-destination-type`, `log-group-name`) and `MaxResults`/`NextToken`. |
 | DeleteFlowLogs | Deletes stored flow logs. Missing ids are ignored (idempotent). |
 
 `DescribeTags` classifies `fl-*` ids as `vpc-flow-log`.

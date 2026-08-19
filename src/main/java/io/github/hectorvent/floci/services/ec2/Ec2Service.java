@@ -734,6 +734,10 @@ public class Ec2Service implements ContainerTeardown {
             rootVol.getAttachments().add(att);
             volumes.put(key(region, rootVolId), rootVol);
 
+            // Control-plane ready immediately. Docker launch is best-effort for
+            // IMDS/userdata; Alchemy waitForState only retries ~8 times and treats
+            // a later `terminated` (failed guest) as a failed create.
+            inst.setState(InstanceState.running());
             instances.put(key(region, instanceId), inst);
             reservation.getInstances().add(inst);
 
@@ -1143,7 +1147,71 @@ public class Ec2Service implements ContainerTeardown {
         ensureDefaultResources(region);
         getRequiredVpc(region, vpcId);
 
+        // AWS DeleteVpc auto-removes the default SG, main route table, and
+        // default NACL. Anything else (subnets, extra SGs/RTs, instances, …)
+        // is a DependencyViolation — the same message Alchemy retries on.
+        if (vpcHasBlockingDependencies(region, vpcId)) {
+            throw new AwsException("DependencyViolation",
+                    "The vpc '" + vpcId + "' has dependencies and cannot be deleted.", 400);
+        }
+        deleteVpcFurniture(region, vpcId);
         vpcs.delete(key(region, vpcId));
+    }
+
+    private boolean vpcHasBlockingDependencies(String region, String vpcId) {
+        boolean liveInstance = instances.scan(k -> true).stream()
+                .anyMatch(i -> region.equals(i.getRegion()) && vpcId.equals(i.getVpcId())
+                        && i.getState() != null
+                        && !"terminated".equals(i.getState().getName())
+                        && !"shutting-down".equals(i.getState().getName()));
+        boolean subnet = subnets.scan(k -> true).stream()
+                .anyMatch(s -> region.equals(s.getRegion()) && vpcId.equals(s.getVpcId()));
+        boolean extraSg = securityGroups.scan(k -> true).stream()
+                .anyMatch(sg -> region.equals(sg.getRegion()) && vpcId.equals(sg.getVpcId())
+                        && !"default".equals(sg.getGroupName()));
+        boolean extraRt = routeTables.scan(k -> true).stream()
+                .anyMatch(rt -> region.equals(rt.getRegion()) && vpcId.equals(rt.getVpcId())
+                        && rt.getAssociations().stream().noneMatch(RouteTableAssociation::isMain));
+        boolean extraAcl = networkAcls.scan(k -> true).stream()
+                .anyMatch(acl -> region.equals(acl.getRegion()) && vpcId.equals(acl.getVpcId())
+                        && !acl.isDefault());
+        boolean attachedIgw = internetGateways.scan(k -> true).stream()
+                .anyMatch(igw -> igw.getAttachments().stream().anyMatch(a -> vpcId.equals(a.getVpcId())));
+        boolean nat = natGateways.scan(k -> true).stream()
+                .anyMatch(n -> region.equals(n.getRegion()) && vpcId.equals(n.getVpcId())
+                        && !"deleted".equals(n.getState()));
+        boolean endpoint = vpcEndpoints.scan(k -> true).stream()
+                .anyMatch(e -> region.equals(e.getRegion()) && vpcId.equals(e.getVpcId())
+                        && !"deleted".equals(e.getState()));
+        boolean eigw = egressOnlyInternetGateways.values().stream()
+                .anyMatch(e -> vpcId.equals(e.getVpcId()));
+        boolean eni = standaloneNetworkInterfaces.values().stream()
+                .anyMatch(n -> vpcId.equals(n.getVpcId()));
+        return liveInstance || subnet || extraSg || extraRt || extraAcl
+                || attachedIgw || nat || endpoint || eigw || eni;
+    }
+
+    private void deleteVpcFurniture(String region, String vpcId) {
+        for (SecurityGroup sg : new ArrayList<>(securityGroups.scan(k -> true))) {
+            if (region.equals(sg.getRegion()) && vpcId.equals(sg.getVpcId())
+                    && "default".equals(sg.getGroupName())) {
+                securityGroups.delete(key(region, sg.getGroupId()));
+                tags.delete(sg.getGroupId());
+            }
+        }
+        for (RouteTable rt : new ArrayList<>(routeTables.scan(k -> true))) {
+            if (region.equals(rt.getRegion()) && vpcId.equals(rt.getVpcId())
+                    && rt.getAssociations().stream().anyMatch(RouteTableAssociation::isMain)) {
+                routeTables.delete(key(region, rt.getRouteTableId()));
+                tags.delete(rt.getRouteTableId());
+            }
+        }
+        for (NetworkAcl acl : new ArrayList<>(networkAcls.scan(k -> true))) {
+            if (region.equals(acl.getRegion()) && vpcId.equals(acl.getVpcId()) && acl.isDefault()) {
+                networkAcls.delete(key(region, acl.getNetworkAclId()));
+                tags.delete(acl.getNetworkAclId());
+            }
+        }
     }
 
     public void modifyVpcAttribute(String region, String vpcId, String attribute, String value) {
