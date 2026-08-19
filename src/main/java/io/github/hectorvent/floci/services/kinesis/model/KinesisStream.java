@@ -27,6 +27,9 @@ public class KinesisStream {
     private String streamMode = "PROVISIONED";
     private Set<String> enhancedMonitoringMetrics = new HashSet<>();
     private String resourcePolicy;
+    private Integer maxRecordSizeInKiB;
+    private Integer warmThroughputTargetMiBps;
+    private Integer warmThroughputCurrentMiBps;
 
     public KinesisStream() {}
 
@@ -75,4 +78,17 @@ public class KinesisStream {
 
     public String getResourcePolicy() { return resourcePolicy; }
     public void setResourcePolicy(String resourcePolicy) { this.resourcePolicy = resourcePolicy; }
+
+    public Integer getMaxRecordSizeInKiB() { return maxRecordSizeInKiB; }
+    public void setMaxRecordSizeInKiB(Integer maxRecordSizeInKiB) { this.maxRecordSizeInKiB = maxRecordSizeInKiB; }
+
+    public Integer getWarmThroughputTargetMiBps() { return warmThroughputTargetMiBps; }
+    public void setWarmThroughputTargetMiBps(Integer warmThroughputTargetMiBps) {
+        this.warmThroughputTargetMiBps = warmThroughputTargetMiBps;
+    }
+
+    public Integer getWarmThroughputCurrentMiBps() { return warmThroughputCurrentMiBps; }
+    public void setWarmThroughputCurrentMiBps(Integer warmThroughputCurrentMiBps) {
+        this.warmThroughputCurrentMiBps = warmThroughputCurrentMiBps;
+    }
 }

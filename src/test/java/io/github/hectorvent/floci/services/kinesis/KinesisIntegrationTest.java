@@ -58,8 +58,8 @@ class KinesisIntegrationTest {
             .body("Shards.size()", equalTo(2))
             .body("Shards[0].ShardId", equalTo("shardId-000000000000"))
             .body("Shards[1].ShardId", equalTo("shardId-000000000001"))
-            .body("Shards[0].HashKeyRange.StartingHashKey", notNullValue())
-            .body("Shards[0].HashKeyRange.EndingHashKey", equalTo("340282366920938463463374607431768211455"))
+            .body("Shards[0].HashKeyRange.StartingHashKey", equalTo("0"))
+            .body("Shards[1].HashKeyRange.EndingHashKey", equalTo("340282366920938463463374607431768211455"))
             .body("Shards[0].SequenceNumberRange.StartingSequenceNumber", notNullValue());
     }
 

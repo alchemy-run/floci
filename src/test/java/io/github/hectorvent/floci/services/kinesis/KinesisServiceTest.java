@@ -305,6 +305,21 @@ class KinesisServiceTest {
         assertTrue(updated.getShards().get(0).isClosed());
         assertTrue(updated.getShards().get(1).isClosed());
         assertFalse(updated.getShards().get(2).isClosed());
+        assertEquals(shard0, updated.getShards().get(2).getParentShardId());
+    }
+
+    @Test
+    void updateShardCountIncreasesOpenShards() {
+        kinesisService.createStream("my-stream", 1, REGION);
+        KinesisService.UpdateShardCountResult result =
+                kinesisService.updateShardCount("my-stream", 2, "UNIFORM_SCALING", REGION);
+
+        assertEquals(1, result.currentShardCount());
+        assertEquals(2, result.targetShardCount());
+        long open = kinesisService.describeStream("my-stream", REGION).getShards().stream()
+                .filter(s -> !s.isClosed())
+                .count();
+        assertEquals(2, open);
     }
 
     @Test
