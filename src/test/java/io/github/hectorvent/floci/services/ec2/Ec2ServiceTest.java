@@ -28,6 +28,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -555,6 +557,41 @@ class Ec2ServiceTest {
                 assertThrows(AwsException.class,
                         () -> service.describeVpcs("us-east-1", List.of(vpc.getVpcId()), Map.of()))
                         .getErrorCode());
+    }
+
+    @Test
+    void runInstancesOnDefaultSubnetAssignsPublicAddressImmediately() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        Reservation reservation = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), null, null, List.of(), null, null);
+        Instance inst = reservation.getInstances().getFirst();
+        assertNotNull(inst.getPublicIpAddress());
+        assertTrue(inst.getPublicIpAddress().startsWith(inst.getInstanceId()));
+        assertTrue(inst.getPublicIpAddress().endsWith(".localhost.floci.io"));
+        assertEquals(inst.getPublicIpAddress(), inst.getPublicDnsName());
+    }
+
+    @Test
+    void runInstancesHonorsAssociatePublicIpAddressOnPrivateSubnet() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        var vpc = service.createVpc("us-east-1", "10.90.0.0/16", false);
+        var subnet = service.createSubnet("us-east-1", vpc.getVpcId(), "10.90.1.0/24", "us-east-1a");
+        assertFalse(subnet.isMapPublicIpOnLaunch());
+
+        Instance without = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), subnet.getSubnetId(), null, List.of(), null, null, null)
+                .getInstances().getFirst();
+        assertNull(without.getPublicIpAddress());
+
+        Instance with = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), subnet.getSubnetId(), null, List.of(), null, null, true)
+                .getInstances().getFirst();
+        assertNotNull(with.getPublicIpAddress());
+        assertTrue(with.getPublicIpAddress().endsWith(".localhost.floci.io"));
     }
 
     @Test

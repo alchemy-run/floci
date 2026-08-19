@@ -160,7 +160,7 @@ class Ec2PortForwardManagerTest {
         when(ec2.mock()).thenReturn(false);
 
         Ec2PortForwardManager manager = new Ec2PortForwardManager(
-                dockerClient, mock(ContainerBuilder.class), lifecycleManager, portAllocator, config);
+                dockerClient, mock(ContainerBuilder.class), lifecycleManager, portAllocator, config, null);
         List<String> persisted = new ArrayList<>();
         manager.setPersister(inst -> persisted.add(inst.getInstanceId()));
 
@@ -184,7 +184,7 @@ class Ec2PortForwardManagerTest {
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
         Ec2PortForwardManager manager = new Ec2PortForwardManager(
                 mock(DockerClient.class), mock(ContainerBuilder.class), lifecycleManager,
-                portAllocator, mock(EmulatorConfig.class));
+                portAllocator, mock(EmulatorConfig.class), null);
 
         Instance instance = new Instance();
         instance.setInstanceId("i-1");
@@ -215,7 +215,7 @@ class Ec2PortForwardManagerTest {
 
         Ec2PortForwardManager manager = new Ec2PortForwardManager(
                 dockerClient, mock(ContainerBuilder.class), mock(ContainerLifecycleManager.class),
-                portAllocator, config);
+                portAllocator, config, null);
 
         Instance instance = new Instance();
         instance.setInstanceId("i-1");

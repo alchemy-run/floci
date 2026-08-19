@@ -142,11 +142,11 @@ Patched in this tree (peering, DHCP, prefix lists, ENIs, snapshots,
 describe-by-id NotFound, default-VPC reseed, CloudWatch VPC flow logs +
 `vpc-flow-log` tags, CreateVolume `KmsKeyId` alias→ARN, DescribeFlowLogs
 filters/pagination, DeleteVpc default-furniture reap, instance
-control-plane `running` without waiting on Docker). Alchemy now
-`flociDual`s Instance, FlowLog, and the networking/storage resources the
-suite hits. Transit / Carrier / LocalGateway / CoreNetwork route targets
-stay `UnsupportedOperation`. Hosted-instance HTTP smoke (userdata +
-published ports) is still a data-plane/platform question.
+control-plane `running` without waiting on Docker, RunInstances
+`NetworkInterface.N` subnet/SG/public-IP, hosted `systemctl` shim, HTTP
+mux on the guest app port). Alchemy now `flociDual`s Instance, FlowLog,
+and the networking/storage resources the suite hits. Transit / Carrier /
+LocalGateway / CoreNetwork route targets stay `UnsupportedOperation`.
 
 ## ECR
 

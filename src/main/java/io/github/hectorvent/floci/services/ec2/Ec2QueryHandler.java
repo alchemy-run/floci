@@ -258,6 +258,65 @@ public class Ec2QueryHandler {
         return result;
     }
 
+    /**
+     * Alchemy (and the AWS SDKs) send the primary ENI as
+     * {@code NetworkInterface.1.*} instead of top-level {@code SubnetId} /
+     * {@code SecurityGroupId} / {@code AssociatePublicIpAddress}.
+     */
+    static PrimaryNetworkInterface parsePrimaryNetworkInterface(MultivaluedMap<String, String> p) {
+        PrimaryNetworkInterface first = null;
+        for (int i = 1; ; i++) {
+            String prefix = "NetworkInterface." + i + ".";
+            String deviceIndex = p.getFirst(prefix + "DeviceIndex");
+            String subnetId = p.getFirst(prefix + "SubnetId");
+            Boolean associate = parseOptionalBoolean(p.getFirst(prefix + "AssociatePublicIpAddress"));
+            List<String> groups = new ArrayList<>();
+            groups.addAll(getStaticList(p, prefix + "SecurityGroupId"));
+            groups.addAll(getStaticList(p, prefix + "GroupId"));
+            groups.addAll(getStaticList(p, prefix + "Groups"));
+            if (deviceIndex == null && subnetId == null && associate == null && groups.isEmpty()) {
+                break;
+            }
+            PrimaryNetworkInterface parsed = new PrimaryNetworkInterface(subnetId, groups, associate);
+            if (first == null) {
+                first = parsed;
+            }
+            if ("0".equals(deviceIndex)) {
+                return parsed;
+            }
+        }
+        return first != null ? first : PrimaryNetworkInterface.empty();
+    }
+
+    private static List<String> getStaticList(MultivaluedMap<String, String> p, String prefix) {
+        List<String> result = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            String v = p.getFirst(prefix + "." + i);
+            if (v == null) {
+                break;
+            }
+            result.add(v);
+        }
+        String single = p.getFirst(prefix);
+        if (result.isEmpty() && single != null && !single.isBlank()) {
+            result.add(single);
+        }
+        return result;
+    }
+
+    static Boolean parseOptionalBoolean(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return "true".equalsIgnoreCase(value) || "1".equals(value);
+    }
+
+    record PrimaryNetworkInterface(String subnetId, List<String> securityGroupIds, Boolean associatePublicIpAddress) {
+        static PrimaryNetworkInterface empty() {
+            return new PrimaryNetworkInterface(null, List.of(), null);
+        }
+    }
+
     private String firstPresent(MultivaluedMap<String, String> p, String first, String second) {
         String value = p.getFirst(first);
         return value != null && !value.isBlank() ? value : p.getFirst(second);
@@ -470,6 +529,17 @@ public class Ec2QueryHandler {
         String subnetId = p.getFirst("SubnetId");
         String clientToken = p.getFirst("ClientToken");
         List<String> sgIds = getList(p, "SecurityGroupId");
+        Boolean associatePublicIpAddress = parseOptionalBoolean(p.getFirst("AssociatePublicIpAddress"));
+        PrimaryNetworkInterface primaryInterface = parsePrimaryNetworkInterface(p);
+        if (primaryInterface.subnetId() != null) {
+            subnetId = primaryInterface.subnetId();
+        }
+        if (!primaryInterface.securityGroupIds().isEmpty()) {
+            sgIds = new ArrayList<>(primaryInterface.securityGroupIds());
+        }
+        if (primaryInterface.associatePublicIpAddress() != null) {
+            associatePublicIpAddress = primaryInterface.associatePublicIpAddress();
+        }
 
         // UserData is base64-encoded in the wire format
         String userDataEncoded = p.getFirst("UserData");
@@ -514,7 +584,8 @@ public class Ec2QueryHandler {
         }
 
         Reservation res = service.runInstances(region, imageId, instanceType, minCount, maxCount,
-                keyName, sgIds, subnetId, clientToken, instanceTags, userData, iamInstanceProfileArn);
+                keyName, sgIds, subnetId, clientToken, instanceTags, userData, iamInstanceProfileArn,
+                associatePublicIpAddress);
 
         XmlBuilder xml = new XmlBuilder()
                 .start("RunInstancesResponse", AwsNamespaces.EC2)
@@ -2453,8 +2524,15 @@ public class Ec2QueryHandler {
                 xml.elem("attachTime", eni.getAttachTime());
             }
             xml.elem("deleteOnTermination", "true")
-                    .end("attachment")
-                    .start("privateIpAddressesSet")
+                    .end("attachment");
+            if (inst.getPublicIpAddress() != null) {
+                xml.start("association")
+                        .elem("publicIp", inst.getPublicIpAddress())
+                        .elem("publicDnsName", inst.getPublicDnsName())
+                        .elem("ipOwnerId", "amazon")
+                        .end("association");
+            }
+            xml.start("privateIpAddressesSet")
                     .start("item")
                     .elem("privateIpAddress", eni.getPrivateIpAddress())
                     .elem("privateDnsName", eni.getPrivateDnsName())

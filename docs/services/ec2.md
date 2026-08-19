@@ -78,7 +78,7 @@ Key pairs created with `CreateKeyPair` contain dummy private key material. Impor
 
 ## Security Group Port Publishing
 
-When an instance's security groups open a TCP port to a CIDR source, Floci publishes that port on the host so you can reach the app from `localhost`. For each opened port Floci starts a small `alpine/socat` sidecar container that binds an allocated host port (default range 30000–30999) and forwards it to the instance container's IP. This works both for rules present at launch and for rules added later with `authorize-security-group-ingress`; revoking the rule removes the forward. The mapping (`app port -> host port`) is written to the logs:
+When an instance's security groups open a TCP port to a CIDR source, Floci publishes that port on the host so you can reach the app from `localhost`. Hosted instances that auto-assign a public address use `{instanceId}.localhost.floci.io` (the public `*.localhost.floci.io` wildcard resolves to `127.0.0.1`) and an nginx mux sidecar that binds the **same** host port the guest listens on, routing by `Host`. If the mux cannot claim that port, Floci falls back to a per-instance `alpine/socat` sidecar on an allocated host port (default range 30000–30999). This works both for rules present at launch and for rules added later with `authorize-security-group-ingress`; revoking the rule removes the forward. The mapping (`app port -> host port`) is written to the logs:
 
 ```
 Published EC2 instance i-0abc... app port 80 on host port 30000 (socat -> 172.17.0.3:80)

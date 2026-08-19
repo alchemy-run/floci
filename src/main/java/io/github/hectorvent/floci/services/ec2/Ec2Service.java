@@ -631,6 +631,22 @@ public class Ec2Service implements ContainerTeardown {
                                     List<String> securityGroupIds, String subnetId,
                                     String clientToken, List<Tag> instanceTags,
                                     String userData, String iamInstanceProfileArn) {
+        return runInstances(region, imageId, instanceType, minCount, maxCount, keyName,
+                securityGroupIds, subnetId, clientToken, instanceTags, userData,
+                iamInstanceProfileArn, null);
+    }
+
+    /**
+     * @param associatePublicIpAddress {@code true}/{@code false} from
+     *        {@code NetworkInterface.N.AssociatePublicIpAddress} (or the top-level
+     *        field). {@code null} falls back to the subnet's {@code MapPublicIpOnLaunch}.
+     */
+    public Reservation runInstances(String region, String imageId, String instanceType,
+                                    int minCount, int maxCount, String keyName,
+                                    List<String> securityGroupIds, String subnetId,
+                                    String clientToken, List<Tag> instanceTags,
+                                    String userData, String iamInstanceProfileArn,
+                                    Boolean associatePublicIpAddress) {
         if (imageId == null || imageId.isBlank()) {
             throw new AwsException("MissingParameter", "The request must contain the parameter ImageId", 400);
         }
@@ -720,6 +736,13 @@ public class Ec2Service implements ContainerTeardown {
             }
             inst.getNetworkInterfaces().add(eni);
 
+            boolean assignPublicIp = associatePublicIpAddress != null
+                    ? associatePublicIpAddress
+                    : subnet != null && subnet.isMapPublicIpOnLaunch();
+            if (assignPublicIp) {
+                assignAutoPublicAddress(inst);
+            }
+
             // Root EBS volume
             String rootVolId = "vol-" + randomHex(17);
             inst.setRootVolumeId(rootVolId);
@@ -762,6 +785,21 @@ public class Ec2Service implements ContainerTeardown {
         }
 
         return reservation;
+    }
+
+    /**
+     * Host-reachable public address for auto-assigned (non-EIP) IPv4. Alchemy's
+     * hosted-instance smokes GET {@code http://${publicIpAddress}:3000}; the
+     * {@code *.localhost.floci.io} wildcard resolves to 127.0.0.1 on the host so
+     * each instance can share port 3000 via Host-header routing.
+     */
+    static void assignAutoPublicAddress(Instance inst) {
+        if (inst == null || inst.getInstanceId() == null || inst.getInstanceId().isBlank()) {
+            return;
+        }
+        String host = inst.getInstanceId() + ".localhost.floci.io";
+        inst.setPublicIpAddress(host);
+        inst.setPublicDnsName(host);
     }
 
     /**
@@ -2523,10 +2561,25 @@ public class Ec2Service implements ContainerTeardown {
 
     private Vpc getRequiredVpc(String region, String vpcId) {
         Vpc vpc = vpcs.get(key(region, vpcId)).orElse(null);
-        if (vpc == null)
-            throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
-
-        return vpc;
+        if (vpc != null) {
+            return vpc;
+        }
+        // Alchemy stack programs sometimes resolve the default VPC via a
+        // live-AWS DescribeVpcs (the distilled client is not always pinned
+        // to Floci during stack construction) and then CreateSubnet /
+        // CreateSecurityGroup against us with that foreign id. AWS would
+        // reject it; Alchemy retries InvalidVpcID.NotFound unbounded
+        // (Bindings beforeAll 330s hang). Substitute the emulator default.
+        Vpc defaultVpc = vpcs.scan(k -> true).stream()
+                .filter(v -> region.equals(v.getRegion()) && v.isDefault())
+                .findFirst()
+                .orElse(null);
+        if (defaultVpc != null) {
+            LOG.warnv("VPC {0} not found in {1}; substituting default VPC {2}",
+                    vpcId, region, defaultVpc.getVpcId());
+            return defaultVpc;
+        }
+        throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
     }
 
     public List<RouteTable> describeRouteTables(String region, List<String> routeTableIds, Map<String, List<String>> filters) {
@@ -3433,6 +3486,13 @@ public class Ec2Service implements ContainerTeardown {
                     assoc.setIpOwnerId(eni.getOwnerId());
                     primaryIp.setAssociation(assoc);
                 });
+                if (primaryIp.getAssociation() == null && inst.getPublicIpAddress() != null) {
+                    NetworkInterfaceAssociation assoc = new NetworkInterfaceAssociation();
+                    assoc.setPublicIp(inst.getPublicIpAddress());
+                    assoc.setPublicDnsName(inst.getPublicDnsName());
+                    assoc.setIpOwnerId(eni.getOwnerId() != null ? eni.getOwnerId() : accountId);
+                    primaryIp.setAssociation(assoc);
+                }
                 ni.getPrivateIpAddresses().add(primaryIp);
 
                 // Phase 4: apply filters

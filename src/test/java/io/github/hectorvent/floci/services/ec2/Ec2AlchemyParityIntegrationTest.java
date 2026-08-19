@@ -312,6 +312,39 @@ class Ec2AlchemyParityIntegrationTest {
 
     @Test
     @Order(8)
+    void runInstancesNetworkInterfaceAssignsPublicAddressAndSubnet() {
+        String launched = given()
+            .formParam("Action", "RunInstances")
+            .formParam("ImageId", "ami-amazonlinux2023")
+            .formParam("InstanceType", "t3.micro")
+            .formParam("MinCount", "1")
+            .formParam("MaxCount", "1")
+            .formParam("NetworkInterface.1.DeviceIndex", "0")
+            .formParam("NetworkInterface.1.SubnetId", subnetId)
+            .formParam("NetworkInterface.1.AssociatePublicIpAddress", "true")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("RunInstancesResponse.instancesSet.item.subnetId", equalTo(subnetId))
+            .body("RunInstancesResponse.instancesSet.item.ipAddress", startsWith("i-"))
+            .extract().path("RunInstancesResponse.instancesSet.item.instanceId");
+
+        given()
+            .formParam("Action", "DescribeInstances")
+            .formParam("InstanceId.1", launched)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DescribeInstancesResponse.reservationSet.item.instancesSet.item.ipAddress",
+                    startsWith(launched));
+    }
+
+    @Test
+    @Order(8)
     void networkInterfaceAndVpcEndpointModify() {
         eniId = given()
             .formParam("Action", "CreateNetworkInterface")
