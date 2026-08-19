@@ -60,6 +60,8 @@ public class TlsConfigSource implements ConfigSource {
             // GraphQL data plane: {apiId}.appsync-api.{region}.amazonaws.com
             // (*.us-east-1.amazonaws.com is a single-label wildcard and does not match this.)
             "*.appsync-api.us-east-1.amazonaws.com",
+            // API Gateway invoke / @connections: {apiId}.execute-api.{region}.amazonaws.com
+            "*.execute-api.us-east-1.amazonaws.com",
             // Lambda MicroVM endpoints: {microvmId}.lambda-microvm.{region}.localhost.floci.io
             // (*.localhost.floci.io is a single-label wildcard and does not match this.)
             "*.lambda-microvm.us-east-1.localhost.floci.io");

@@ -2,12 +2,28 @@ package io.github.hectorvent.floci.services.apigateway;
 
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ApiGatewayExecuteApiRoutingFilterTest {
+
+    @Test
+    void resolveHostFallsBackToUriAuthorityWhenHostHeaderMissing() {
+        assertEquals(
+                "abc123.execute-api.us-east-1.amazonaws.com:4566",
+                ApiGatewayExecuteApiRoutingFilter.resolveHost(
+                        null,
+                        URI.create("https://abc123.execute-api.us-east-1.amazonaws.com:4566/test/@connections/xyz")));
+        assertEquals(
+                "abc123.execute-api.us-east-1.amazonaws.com",
+                ApiGatewayExecuteApiRoutingFilter.resolveHost(
+                        "abc123.execute-api.us-east-1.amazonaws.com",
+                        URI.create("https://ignored.example/test")));
+    }
 
     @Test
     void extractsApiIdAndRegionFromExecuteApiHost() {

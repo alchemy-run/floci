@@ -96,6 +96,7 @@ class ContainerLauncherTest {
         when(docker.logMaxSize()).thenReturn("10m");
         when(docker.logMaxFile()).thenReturn("3");
         when(config.baseUrl()).thenReturn("http://localhost:4566");
+        lenient().when(config.port()).thenReturn(4566);
         EmulatorConfig.TlsConfig tls = mock(EmulatorConfig.TlsConfig.class);
         when(config.tls()).thenReturn(tls);
         lenient().when(tls.enabled()).thenReturn(false);
@@ -397,32 +398,45 @@ class ContainerLauncherTest {
         launcher.launch(fn);
 
         List<String> env = captureRealContainerSpec().env();
-        // Docker honours the last occurrence of a duplicate Env entry, so user
-        // overrides must appear after the Floci defaults.
-        int defaultKeyIdx = -1;
-        int userKeyIdx = -1;
-        int defaultSecretIdx = -1;
-        int userSecretIdx = -1;
-        for (int i = 0; i < env.size(); i++) {
-            if (env.get(i).startsWith("AWS_ACCESS_KEY_ID=") && userKeyIdx < 0 && !env.get(i).equals("AWS_ACCESS_KEY_ID=user-key")) {
-                defaultKeyIdx = i;
-            }
-            if (env.get(i).equals("AWS_ACCESS_KEY_ID=user-key")) userKeyIdx = i;
-            if (env.get(i).startsWith("AWS_SECRET_ACCESS_KEY=") && userSecretIdx < 0 && !env.get(i).equals("AWS_SECRET_ACCESS_KEY=user-secret")) {
-                defaultSecretIdx = i;
-            }
-            if (env.get(i).equals("AWS_SECRET_ACCESS_KEY=user-secret")) userSecretIdx = i;
-        }
-        assertTrue(defaultKeyIdx >= 0, "default AWS_ACCESS_KEY_ID still present");
-        assertTrue(userKeyIdx > defaultKeyIdx,
-                "user AWS_ACCESS_KEY_ID must appear after the default");
-        assertTrue(defaultSecretIdx >= 0, "default AWS_SECRET_ACCESS_KEY still present");
-        assertTrue(userSecretIdx > defaultSecretIdx,
-                "user AWS_SECRET_ACCESS_KEY must appear after the default");
-
-        // AWS_SESSION_TOKEN was not overridden so the default remains.
+        // Reserved credential keys are ignored so a function env cannot
+        // clobber the execution-role session (last-wins Docker env).
+        assertTrue(env.stream().noneMatch(e -> e.equals("AWS_ACCESS_KEY_ID=user-key")),
+                "user AWS_ACCESS_KEY_ID must not override reserved credentials");
+        assertTrue(env.stream().noneMatch(e -> e.equals("AWS_SECRET_ACCESS_KEY=user-secret")),
+                "user AWS_SECRET_ACCESS_KEY must not override reserved credentials");
+        assertEquals(1, env.stream().filter(e -> e.startsWith("AWS_ACCESS_KEY_ID=")).count(),
+                "AWS_ACCESS_KEY_ID should appear exactly once");
+        assertEquals(1, env.stream().filter(e -> e.startsWith("AWS_SECRET_ACCESS_KEY=")).count(),
+                "AWS_SECRET_ACCESS_KEY should appear exactly once");
         assertEquals(1, env.stream().filter(e -> e.startsWith("AWS_SESSION_TOKEN=")).count(),
                 "AWS_SESSION_TOKEN should retain its default exactly once");
+    }
+
+    @Test
+    void launchFunction_rewritesLoopbackCollectorUrlsOntoDockerHost() throws Exception {
+        Path codePath = Files.createDirectory(tempDir.resolve("otel-loopback"));
+
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("otel-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+        fn.setEnvironment(Map.of(
+                "COLLECTOR_URL", "http://localhost:8787",
+                "ALCHEMY_OTEL_EXPORTERS",
+                "[{\"traces\":{\"url\":\"http://127.0.0.1:8787/v1/traces\"}}]",
+                "WS_URL", "wss://abc123.execute-api.us-east-1.amazonaws.com/test",
+                "CALLBACK_URL", "https://abc123.execute-api.us-east-1.amazonaws.com/test"));
+
+        launcher.launch(fn);
+
+        List<String> env = captureRealContainerSpec().env();
+        assertTrue(env.contains("COLLECTOR_URL=http://host.docker.internal:8787"));
+        assertTrue(env.contains(
+                "ALCHEMY_OTEL_EXPORTERS=[{\"traces\":{\"url\":\"http://host.docker.internal:8787/v1/traces\"}}]"));
+        assertTrue(env.contains("WS_URL=wss://127.0.0.1:4566/ws/abc123/test"));
+        assertTrue(env.contains(
+                "CALLBACK_URL=https://localhost.floci.io:4566/execute-api/abc123/test"));
     }
 
     @Test
@@ -898,7 +912,7 @@ class ContainerLauncherTest {
         launcher.launch(fn);
 
         InOrder inOrder = inOrder(logStreamer, dockerClient);
-        inOrder.verify(logStreamer).ensureLogGroupAndStream(
+        inOrder.verify(logStreamer, atLeastOnce()).ensureLogGroupAndStream(
                 eq("/aws/lambda/ordering-fn"), anyString(), anyString());
         inOrder.verify(dockerClient, atLeastOnce()).execCreateCmd("container-123");
     }

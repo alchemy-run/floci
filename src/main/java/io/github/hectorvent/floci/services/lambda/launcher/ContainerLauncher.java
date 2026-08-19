@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
+import io.github.hectorvent.floci.core.common.docker.ContainerReachableUrls;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
@@ -229,7 +230,10 @@ public class ContainerLauncher {
                     LOG.debugv("Ignoring function env override of reserved credential key {0}", k);
                     return;
                 }
-                env.add(k + "=" + v);
+                // Host-loopback collector URLs → host.docker.internal.
+                // WebSocket invoke URLs → path-style on the published gateway
+                // so the host-side test client can dial them.
+                env.add(k + "=" + ContainerReachableUrls.rewriteFunctionEnv(v, hostGatewayPort()));
             });
         }
 
@@ -892,6 +896,11 @@ public class ContainerLauncher {
                     + "using placeholder credentials", fn.getFunctionName());
             return Optional.empty();
         }
+    }
+
+    private int hostGatewayPort() {
+        int port = config.port();
+        return port > 0 ? port : ContainerReachableUrls.DEFAULT_HOST_GATEWAY_PORT;
     }
 
     private static String extractRegionFromArn(String arn, String defaultRegion) {

@@ -179,7 +179,7 @@ public class EmbeddedDnsServer {
      * through {@code AWS_ENDPOINT_URL}).
      */
     static boolean isAwsDataPlaneHost(String name) {
-        return isSyncStatesHost(name) || isAppSyncHost(name);
+        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name);
     }
 
     /**
@@ -208,6 +208,20 @@ public class EmbeddedDnsServer {
         String lower = name.toLowerCase();
         return lower.matches("[a-z0-9-]+\\.appsync-api\\.[a-z0-9-]+\\.amazonaws\\.com")
                 || lower.matches("appsync(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * API Gateway invoke / {@code @connections} data-plane
+     * ({@code {apiId}.execute-api.{region}.amazonaws.com}). Alchemy's
+     * ManageConnections binding {@code fetch()}es the advertised callback
+     * URL from inside Lambda; {@code AWS_ENDPOINT_URL} is not applied
+     * because the client overrides the endpoint with that URL.
+     */
+    static boolean isExecuteApiHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches("[a-z0-9-]+\\.execute-api\\.[a-z0-9-]+\\.amazonaws\\.com");
     }
 
     Optional<String> resolveEc2PrivateDnsName(String name) {

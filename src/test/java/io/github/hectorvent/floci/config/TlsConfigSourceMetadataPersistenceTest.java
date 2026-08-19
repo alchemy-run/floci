@@ -89,6 +89,8 @@ class TlsConfigSourceMetadataPersistenceTest {
             "Metadata should contain StartSyncExecution host sync-states.us-east-1.amazonaws.com");
         assertTrue(metadata.getHostnames().contains("*.appsync-api.us-east-1.amazonaws.com"),
             "Metadata should contain AppSync GraphQL host *.appsync-api.us-east-1.amazonaws.com");
+        assertTrue(metadata.getHostnames().contains("*.execute-api.us-east-1.amazonaws.com"),
+            "Metadata should contain API Gateway execute-api host *.execute-api.us-east-1.amazonaws.com");
     }
 
     /**

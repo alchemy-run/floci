@@ -53,13 +53,18 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        String host = requestContext.getHeaderString("Host");
+        URI original = requestContext.getUriInfo().getRequestUri();
+        // HTTP/2 has no Host header — authority is on the request URI
+        // (same fallback as S3VirtualHostFilter). Lambda's fetch() to
+        // wss/https execute-api hosts negotiates h2 over TlsProxy, so a
+        // Host-only check would leave /{stage}/@connections/... as
+        // path-style S3 (POST → InvalidArgument).
+        String host = resolveHost(requestContext.getHeaderString("Host"), original);
         String apiId = extractApiId(host);
         if (apiId == null) {
             return;
         }
 
-        URI original = requestContext.getUriInfo().getRequestUri();
         String path = original.getRawPath();
         if (path == null) {
             path = "/";
@@ -80,7 +85,7 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
                 .host("localhost")
                 .replacePath(rewritten)
                 .build();
-        LOG.debugv("Routing execute-api Host {0}{1} -> {2}", host, path, newUri.getPath());
+        LOG.infov("Routing execute-api Host {0}{1} -> {2}", host, path, newUri.getPath());
         requestContext.setRequestUri(newUri);
     }
 
@@ -136,7 +141,7 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
         }
     }
 
-    static String extractApiId(String host) {
+    public static String extractApiId(String host) {
         String hostname = stripPort(host);
         if (hostname == null || !hostname.contains(".execute-api.")) {
             return null;
@@ -168,7 +173,7 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
         return "/execute-api/" + apiId + "/" + stageName + "/" + remaining;
     }
 
-    static boolean alreadyPathStyle(String path) {
+    public static boolean alreadyPathStyle(String path) {
         return path.startsWith("/execute-api/")
                 || path.startsWith("/restapis/")
                 || path.startsWith("/v2/")
@@ -176,7 +181,7 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
                 || path.startsWith("/ws/");
     }
 
-    static String firstSegment(String path) {
+    public static String firstSegment(String path) {
         if (path == null || path.isBlank() || "/".equals(path)) {
             return null;
         }
@@ -210,6 +215,17 @@ public class ApiGatewayExecuteApiRoutingFilter implements ContainerRequestFilter
             return "";
         }
         return path.startsWith("/") ? path.substring(1) : path;
+    }
+
+    /**
+     * HTTP/1.1 {@code Host}, else the request URI authority (HTTP/2
+     * {@code :authority}).
+     */
+    public static String resolveHost(String hostHeader, URI requestUri) {
+        if (hostHeader != null && !hostHeader.isBlank()) {
+            return hostHeader;
+        }
+        return requestUri != null ? requestUri.getAuthority() : null;
     }
 
     static String stripPort(String host) {

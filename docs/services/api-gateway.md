@@ -76,11 +76,16 @@ The gateway accepts those Host headers on `:4566` and rewrites them to
 `/_user_request_` and `/_aws/execute-api/`. HTTP `$default` omits the stage from
 the URL; a first-segment match against an existing named stage wins.
 
-WebSocket clients still connect at `ws://localhost:4566/ws/{apiId}/{stage}`.
-`wss://{apiId}.execute-api.{region}.amazonaws.com/{stage}` is the advertised
-AWS shape. Alchemy's test HttpClient rewrite does not apply to the `ws`
-package, so host-side `wss://*.execute-api.*.amazonaws.com` connections never
-reach the gateway (platform / test-harness, not a missing control-plane op).
+WebSocket clients connect at `ws://localhost:4566/ws/{apiId}/{stage}` or
+via the advertised AWS host
+`wss://{apiId}.execute-api.{region}.amazonaws.com/{stage}` (TLS SAN +
+embedded DNS + the Vert.x virtual-host upgrade handler). Lambda env
+values that carry those invoke URLs are rewritten to the path-style
+`wss://127.0.0.1:{port}/ws/{apiId}/{stage}` so a host-side `ws` client
+(which cannot use Floci DNS) can dial them. `@connections` POSTs from
+inside Lambda are rewritten onto
+`https://localhost.floci.io:{port}/execute-api/{apiId}/{stage}` so they
+do not fall through to S3's catch-all `POST /{bucket}/{key}`.
 
 v2 stages persist `description` and `tags`. `TagResource` / `GetTags` /
 `UntagResource` accept stage ARNs (`…/apis/{apiId}/stages/{stageName}`) as

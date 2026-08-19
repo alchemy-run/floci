@@ -86,8 +86,10 @@ routing onto `/execute-api/{apiId}/{stage}/…`). Alchemy now `flociDual`s
 RestApi and the related v1/v2 resources. Api mappings stay live-only
 (unimplemented). Still missing ReimportApi, routing rules,
 TestInvokeAuthorizer, docs parts, client certificates. WebSocket
-`wss://*.execute-api.*.amazonaws.com` from the host is a platform issue
-(Alchemy's HttpClient rewrite does not apply to the `ws` package).
+invoke URLs in Lambda env are rewritten to
+`wss://127.0.0.1:{port}/ws/{apiId}/{stage}` so the host-side `ws`
+client can dial them; `@connections` POSTs from inside Lambda are
+rewritten onto the path-style execute-api plane.
 
 ## AppSync
 
