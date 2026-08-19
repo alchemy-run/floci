@@ -469,7 +469,8 @@ public class AppSyncService {
         }
         response.put("logs", List.of());
         response.put("stash", "{}");
-        response.put("outErrors", List.of());
+        // AWS returns outErrors as a JSON-encoded string, not an array.
+        response.put("outErrors", "[]");
         return response;
     }
 

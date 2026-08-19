@@ -244,6 +244,8 @@ https://{apiId}.appsync-api.{region}.amazonaws.com/graphql
 
 The gateway also accepts the path-style data-plane URL `POST /v1/apis/{apiId}/graphql`. Host headers matching `{apiId}.appsync-api.{region}.*` are rewritten onto that path. API_KEY APIs require `x-api-key`; AWS_IAM APIs accept a SigV4 `Authorization` header (and an additional API_KEY provider if configured).
 
+Lambda containers resolve `{apiId}.appsync-api.{region}.amazonaws.com` and `appsync.{region}.amazonaws.com` through Floci's embedded DNS (same pattern as `sync-states`). TLS SAN `*.appsync-api.us-east-1.amazonaws.com` covers in-Lambda `https://` GraphQL `fetch()` — a single-label `*.us-east-1.amazonaws.com` wildcard does not match that hostname. `EvaluateCode` / `EvaluateMappingTemplate` return `outErrors` as a JSON string (`"[]"`), matching the AWS wire shape.
+
 Resolvers run `APPSYNC_JS` (`request`/`response`) or VTL templates. `NONE` data sources use the request `payload` as `ctx.result`. `AWS_LAMBDA` data sources invoke the configured function with that payload. Pipeline resolvers chain AppSync Functions and expose `ctx.prev.result`.
 
 ## Not Implemented

@@ -56,7 +56,10 @@ public class TlsConfigSource implements ConfigSource {
             // StartSyncExecution's Smithy hostPrefix "sync-" → sync-states.{region}.amazonaws.com
             "sync-states.us-east-1.amazonaws.com",
             "sync-states-fips.us-east-1.amazonaws.com",
-            "*.us-east-1.amazonaws.com");
+            "*.us-east-1.amazonaws.com",
+            // GraphQL data plane: {apiId}.appsync-api.{region}.amazonaws.com
+            // (*.us-east-1.amazonaws.com is a single-label wildcard and does not match this.)
+            "*.appsync-api.us-east-1.amazonaws.com");
 
     private final Map<String, String> properties = new HashMap<>();
 

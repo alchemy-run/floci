@@ -87,6 +87,8 @@ class TlsConfigSourceMetadataPersistenceTest {
             "Metadata should contain 'host.docker.internal'");
         assertTrue(metadata.getHostnames().contains("sync-states.us-east-1.amazonaws.com"),
             "Metadata should contain StartSyncExecution host sync-states.us-east-1.amazonaws.com");
+        assertTrue(metadata.getHostnames().contains("*.appsync-api.us-east-1.amazonaws.com"),
+            "Metadata should contain AppSync GraphQL host *.appsync-api.us-east-1.amazonaws.com");
     }
 
     /**

@@ -231,7 +231,7 @@ class TlsCertificateHostnameTest {
         Set<String> expectedSans = Set.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci.io", "*.localhost.floci.io", "host.docker.internal",
                 "sync-states.us-east-1.amazonaws.com", "sync-states-fips.us-east-1.amazonaws.com",
-                "*.us-east-1.amazonaws.com");
+                "*.us-east-1.amazonaws.com", "*.appsync-api.us-east-1.amazonaws.com");
         Set<String> actualSans = new HashSet<>(sans);
         
         assertEquals(expectedSans, actualSans,
@@ -256,7 +256,7 @@ class TlsCertificateHostnameTest {
         Set<String> expectedSans = Set.of("localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
                 "localhost.floci.io", "*.localhost.floci.io", "host.docker.internal",
                 "sync-states.us-east-1.amazonaws.com", "sync-states-fips.us-east-1.amazonaws.com",
-                "*.us-east-1.amazonaws.com");
+                "*.us-east-1.amazonaws.com", "*.appsync-api.us-east-1.amazonaws.com");
         Set<String> actualSans = new HashSet<>(sans);
         
         assertEquals(expectedSans, actualSans,

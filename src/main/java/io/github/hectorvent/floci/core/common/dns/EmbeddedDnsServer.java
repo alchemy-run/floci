@@ -167,10 +167,19 @@ public class EmbeddedDnsServer {
         if (matchesSuffix(name)) {
             return Optional.of(myIp);
         }
-        if (isSyncStatesHost(name)) {
+        if (isAwsDataPlaneHost(name)) {
             return Optional.of(myIp);
         }
         return resolveEc2PrivateDnsName(name);
+    }
+
+    /**
+     * AWS hostnames that Lambda containers must resolve to Floci rather than
+     * the public internet (SigV4 data-plane URLs the SDK does not rewrite
+     * through {@code AWS_ENDPOINT_URL}).
+     */
+    static boolean isAwsDataPlaneHost(String name) {
+        return isSyncStatesHost(name) || isAppSyncHost(name);
     }
 
     /**
@@ -183,6 +192,22 @@ public class EmbeddedDnsServer {
             return false;
         }
         return name.toLowerCase().matches("sync-states(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * AppSync GraphQL data-plane ({@code {apiId}.appsync-api.{region}.amazonaws.com})
+     * and management-plane ({@code appsync[-fips].{region}.amazonaws.com}) hosts.
+     * Alchemy's GraphQL binding {@code fetch()}es the advertised GRAPHQL URI
+     * from inside Lambda; EvaluateCode / FlushApiCache fall back here when
+     * {@code AWS_ENDPOINT_URL} is not applied.
+     */
+    static boolean isAppSyncHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        String lower = name.toLowerCase();
+        return lower.matches("[a-z0-9-]+\\.appsync-api\\.[a-z0-9-]+\\.amazonaws\\.com")
+                || lower.matches("appsync(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
     }
 
     Optional<String> resolveEc2PrivateDnsName(String name) {

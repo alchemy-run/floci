@@ -164,10 +164,12 @@ class TlsConfigSourceCertificateGenerationTest {
             "Certificate SANs should include StartSyncExecution host sync-states.us-east-1.amazonaws.com");
         assertTrue(sans.contains("*.us-east-1.amazonaws.com"),
             "Certificate SANs should include *.us-east-1.amazonaws.com");
+        assertTrue(sans.contains("*.appsync-api.us-east-1.amazonaws.com"),
+            "Certificate SANs should include AppSync GraphQL host *.appsync-api.us-east-1.amazonaws.com");
 
         // Should not contain any custom hostnames
-        assertEquals(10, sans.size(),
-            "Certificate SANs should contain exactly 10 default entries (7 loopback/docker + 3 sync-states)");
+        assertEquals(11, sans.size(),
+            "Certificate SANs should contain exactly 11 default entries (7 loopback/docker + 3 sync-states + 1 appsync)");
     }
 
     /**

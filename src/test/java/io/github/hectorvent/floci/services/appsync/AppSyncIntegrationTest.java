@@ -2542,7 +2542,8 @@ class AppSyncIntegrationTest {
             .post("/v1/dataplane-evaluatecode")
         .then()
             .statusCode(200)
-            .body("evaluationResult", containsString("5"));
+            .body("evaluationResult", containsString("5"))
+            .body("outErrors", equalTo("[]"));
     }
 
     @Test
@@ -2591,6 +2592,24 @@ class AppSyncIntegrationTest {
         .then()
             .statusCode(401)
             .body("__type", equalTo("UnauthorizedException"));
+    }
+
+    @Test
+    @Order(251)
+    void executeGraphql_hostHeaderRoutesToDataPlane() {
+        given()
+            .header("Host", apiId + ".appsync-api.us-east-1.amazonaws.com")
+            .header("Authorization", AUTH)
+            .header("x-api-key", keyId)
+            .contentType("application/json")
+            .body("""
+                {"query": "query { nonexistentField }"}
+                """)
+        .when()
+            .post("/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors", hasSize(greaterThanOrEqualTo(1)));
     }
 
     // ── Phase 2: Domain Names ────────────────────────────────────────────────

@@ -24,24 +24,51 @@ public class AppSyncRoutingFilter implements ContainerRequestFilter {
     @Override
     public void filter(ContainerRequestContext requestContext) throws IOException {
         String host = requestContext.getHeaderString("Host");
-        if (host == null || !host.contains(".appsync-api.")) {
+        String apiId = extractApiId(host);
+        if (apiId == null) {
             return;
         }
-        String[] parts = host.split("\\.");
-        if (parts.length < 3) {
-            return;
-        }
-        String apiId = parts[0];
         URI original = requestContext.getUriInfo().getRequestUri();
         String path = original.getRawPath();
-        if (path == null || path.isBlank() || "/".equals(path) || path.equals("/graphql")) {
-            path = "/graphql";
+        if (alreadyPathStyle(path)) {
+            return;
         }
+        String rewrittenPath = graphqlPath(apiId, path);
         URI rewritten = UriBuilder.fromUri(original)
                 .host("localhost")
-                .replacePath("/v1/apis/" + apiId + path)
+                .replacePath(rewrittenPath)
                 .build();
         LOG.debugv("Routing AppSync GraphQL: {0} -> {1}", host, rewritten.getPath());
         requestContext.setRequestUri(rewritten);
+    }
+
+    static String extractApiId(String host) {
+        if (host == null || host.isBlank()) {
+            return null;
+        }
+        String hostname = host.split(":")[0];
+        if (!hostname.contains(".appsync-api.")) {
+            return null;
+        }
+        String[] parts = hostname.split("\\.");
+        if (parts.length < 3 || parts[0].isBlank() || !"appsync-api".equals(parts[1])) {
+            return null;
+        }
+        return parts[0];
+    }
+
+    static String graphqlPath(String apiId, String path) {
+        String normalized = path;
+        if (normalized == null || normalized.isBlank() || "/".equals(normalized) || "/graphql".equals(normalized)) {
+            normalized = "/graphql";
+        }
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        return "/v1/apis/" + apiId + normalized;
+    }
+
+    static boolean alreadyPathStyle(String path) {
+        return path != null && path.startsWith("/v1/apis/");
     }
 }
