@@ -123,6 +123,47 @@ public class CloudWatchLogsService {
         this.clock = clock;
     }
 
+    // ──────────────────────────── Resource Policies ─────────────────────
+
+    /** An account-level Logs resource policy (used by Route53 query logging, etc.). */
+    public record ResourcePolicy(String policyName, String policyDocument, long lastUpdatedTime) {}
+
+    /**
+     * Resource policies keyed by {@code region::policyName}. Kept in memory:
+     * they are tiny metadata consulted only by control-plane callers (e.g.
+     * Route53 CreateQueryLoggingConfig checks one exists for the log group).
+     */
+    private final Map<String, ResourcePolicy> resourcePolicies =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    public ResourcePolicy putResourcePolicy(String policyName, String policyDocument, String region) {
+        if (policyName == null || policyName.isBlank()) {
+            throw new AwsException("InvalidParameterException", "policyName is required.", 400);
+        }
+        if (policyDocument == null || policyDocument.isBlank()) {
+            throw new AwsException("InvalidParameterException", "policyDocument is required.", 400);
+        }
+        ResourcePolicy policy = new ResourcePolicy(policyName, policyDocument, clock.getAsLong());
+        resourcePolicies.put(region + "::" + policyName, policy);
+        return policy;
+    }
+
+    public List<ResourcePolicy> describeResourcePolicies(String region) {
+        String prefix = region + "::";
+        return resourcePolicies.entrySet().stream()
+                .filter(e -> e.getKey().startsWith(prefix))
+                .map(Map.Entry::getValue)
+                .sorted((a, b) -> a.policyName().compareTo(b.policyName()))
+                .toList();
+    }
+
+    public void deleteResourcePolicy(String policyName, String region) {
+        if (resourcePolicies.remove(region + "::" + policyName) == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Policy with name [" + policyName + "] does not exist", 400);
+        }
+    }
+
     // ──────────────────────────── Log Groups ────────────────────────────
 
     public void createLogGroup(String name, Integer retentionInDays, Map<String, String> tags, String region) {

@@ -55,6 +55,9 @@ public class CloudWatchLogsHandler {
             case "DescribeSubscriptionFilters" -> handleDescribeSubscriptionFilters(request, region);
             case "DeleteSubscriptionFilter" -> handleDeleteSubscriptionFilter(request, region);
             case "GetDataProtectionPolicy" -> handleGetDataProtectionPolicy(request, region);
+            case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
+            case "DescribeResourcePolicies" -> handleDescribeResourcePolicies(region);
+            case "DeleteResourcePolicy" -> handleDeleteResourcePolicy(request, region);
             case "StartQuery" -> handleStartQuery(request, region);
             case "GetQueryResults" -> handleGetQueryResults(request, region);
             case "StopQuery" -> handleStopQuery(request, region);
@@ -62,6 +65,38 @@ public class CloudWatchLogsHandler {
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                     .build();
         };
+    }
+
+    private Response handlePutResourcePolicy(JsonNode request, String region) {
+        CloudWatchLogsService.ResourcePolicy policy = logsService.putResourcePolicy(
+                request.path("policyName").asText(null),
+                request.path("policyDocument").asText(null),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("resourcePolicy", resourcePolicyNode(policy));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeResourcePolicies(String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode policies = response.putArray("resourcePolicies");
+        for (CloudWatchLogsService.ResourcePolicy policy : logsService.describeResourcePolicies(region)) {
+            policies.add(resourcePolicyNode(policy));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteResourcePolicy(JsonNode request, String region) {
+        logsService.deleteResourcePolicy(request.path("policyName").asText(null), region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private ObjectNode resourcePolicyNode(CloudWatchLogsService.ResourcePolicy policy) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("policyName", policy.policyName());
+        node.put("policyDocument", policy.policyDocument());
+        node.put("lastUpdatedTime", policy.lastUpdatedTime());
+        return node;
     }
 
     private Response handleCreateLogGroup(JsonNode request, String region) {
