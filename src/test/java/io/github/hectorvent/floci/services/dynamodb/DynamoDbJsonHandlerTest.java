@@ -491,4 +491,143 @@ class DynamoDbJsonHandlerTest {
         assertEquals("MILLISECOND", afterUpdate.path("KinesisDataStreamDestinations").get(0)
                 .path("ApproximateCreationDateTimePrecision").asText());
     }
+
+    @Test
+    void updateTableRejectsUnchangedThroughputWhenItIsTheOnlyField() throws Exception {
+        ObjectNode create = provisionedUsersTable();
+        assertEquals(200, handler.handle("CreateTable", create, "us-east-1").getStatus());
+
+        ObjectNode update = mapper.createObjectNode();
+        update.put("TableName", "Users");
+        update.putObject("ProvisionedThroughput")
+                .put("ReadCapacityUnits", 5)
+                .put("WriteCapacityUnits", 5);
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> handler.handle("UpdateTable", update, "us-east-1"));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertTrue(error.getMessage().contains("provisioned throughput for the table will not change"));
+    }
+
+    @Test
+    void updateTableAllowsUnchangedThroughputWhenOtherFieldsArePresent() throws Exception {
+        ObjectNode create = provisionedUsersTable();
+        assertEquals(200, handler.handle("CreateTable", create, "us-east-1").getStatus());
+
+        ObjectNode update = mapper.createObjectNode();
+        update.put("TableName", "Users");
+        update.put("BillingMode", "PROVISIONED");
+        update.put("DeletionProtectionEnabled", true);
+        update.putArray("AttributeDefinitions").addObject()
+                .put("AttributeName", "userId").put("AttributeType", "S");
+        update.putObject("ProvisionedThroughput")
+                .put("ReadCapacityUnits", 5)
+                .put("WriteCapacityUnits", 5);
+
+        Response response = handler.handle("UpdateTable", update, "us-east-1");
+        assertEquals(200, response.getStatus());
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        assertEquals(5, body.path("TableDescription").path("ProvisionedThroughput")
+                .path("ReadCapacityUnits").asLong());
+        assertTrue(body.path("TableDescription").path("DeletionProtectionEnabled").asBoolean());
+    }
+
+    @Test
+    void executeTransactionSelectReturnsItemResponses() throws Exception {
+        createUsersTable("us-east-1");
+        service.putItem("Users", item("userId", "u1", "name", "Ada"), "us-east-1");
+        service.putItem("Users", item("userId", "u2", "name", "Grace"), "us-east-1");
+
+        ObjectNode request = mapper.createObjectNode();
+        ArrayNode statements = request.putArray("TransactStatements");
+        statements.addObject()
+                .put("Statement", "SELECT * FROM \"Users\" WHERE userId=?")
+                .set("Parameters", mapper.createArrayNode().add(attributeValue("S", "u1")));
+        statements.addObject()
+                .put("Statement", "SELECT * FROM \"Users\" WHERE userId=?")
+                .set("Parameters", mapper.createArrayNode().add(attributeValue("S", "u2")));
+
+        JsonNode body = mapper.convertValue(
+                handler.handle("ExecuteTransaction", request, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals(2, body.path("Responses").size());
+        assertEquals("Ada", body.path("Responses").get(0).path("Item").path("name").path("S").asText());
+        assertEquals("Grace", body.path("Responses").get(1).path("Item").path("name").path("S").asText());
+    }
+
+    @Test
+    void onDemandBackupRoundTripAndRestoreConflict() throws Exception {
+        createUsersTable("us-east-1");
+        service.putItem("Users", item("userId", "u1"), "us-east-1");
+
+        ObjectNode create = mapper.createObjectNode();
+        create.put("TableName", "Users");
+        create.put("BackupName", "nightly");
+        JsonNode created = mapper.convertValue(
+                handler.handle("CreateBackup", create, "us-east-1").getEntity(), JsonNode.class);
+        String backupArn = created.path("BackupDetails").path("BackupArn").asText();
+        assertTrue(backupArn.contains("/backup/"));
+        assertEquals("AVAILABLE", created.path("BackupDetails").path("BackupStatus").asText());
+
+        ObjectNode describe = mapper.createObjectNode();
+        describe.put("BackupArn", backupArn);
+        JsonNode described = mapper.convertValue(
+                handler.handle("DescribeBackup", describe, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals("AVAILABLE", described.path("BackupDescription").path("BackupDetails")
+                .path("BackupStatus").asText());
+
+        ObjectNode list = mapper.createObjectNode();
+        list.put("TableName", "Users");
+        JsonNode listed = mapper.convertValue(
+                handler.handle("ListBackups", list, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals(1, listed.path("BackupSummaries").size());
+        assertEquals(backupArn, listed.path("BackupSummaries").get(0).path("BackupArn").asText());
+
+        ObjectNode restore = mapper.createObjectNode();
+        restore.put("BackupArn", backupArn);
+        restore.put("TargetTableName", "Users");
+        AwsException exists = assertThrows(AwsException.class,
+                () -> handler.handle("RestoreTableFromBackup", restore, "us-east-1"));
+        assertEquals("TableAlreadyExistsException", exists.getErrorCode());
+
+        ObjectNode delete = mapper.createObjectNode();
+        delete.put("BackupArn", backupArn);
+        handler.handle("DeleteBackup", delete, "us-east-1");
+        JsonNode afterDelete = mapper.convertValue(
+                handler.handle("ListBackups", list, "us-east-1").getEntity(), JsonNode.class);
+        assertEquals(0, afterDelete.path("BackupSummaries").size());
+    }
+
+    @Test
+    void exportAndRestoreRequirePointInTimeRecovery() throws Exception {
+        TableDefinition table = createUsersTable("us-east-1");
+
+        ObjectNode export = mapper.createObjectNode();
+        export.put("TableArn", table.getTableArn());
+        export.put("S3Bucket", "exports");
+        AwsException exportError = assertThrows(AwsException.class,
+                () -> handler.handle("ExportTableToPointInTime", export, "us-east-1"));
+        assertEquals("PointInTimeRecoveryUnavailableException", exportError.getErrorCode());
+
+        ObjectNode restore = mapper.createObjectNode();
+        restore.put("SourceTableName", "Users");
+        restore.put("TargetTableName", "UsersRestored");
+        restore.put("UseLatestRestorableTime", true);
+        AwsException restoreError = assertThrows(AwsException.class,
+                () -> handler.handle("RestoreTableToPointInTime", restore, "us-east-1"));
+        assertEquals("PointInTimeRecoveryUnavailableException", restoreError.getErrorCode());
+    }
+
+    private ObjectNode provisionedUsersTable() {
+        ObjectNode create = mapper.createObjectNode();
+        create.put("TableName", "Users");
+        create.put("BillingMode", "PROVISIONED");
+        create.putArray("KeySchema").addObject()
+                .put("AttributeName", "userId").put("KeyType", "HASH");
+        create.putArray("AttributeDefinitions").addObject()
+                .put("AttributeName", "userId").put("AttributeType", "S");
+        create.putObject("ProvisionedThroughput")
+                .put("ReadCapacityUnits", 5)
+                .put("WriteCapacityUnits", 5);
+        return create;
+    }
 }

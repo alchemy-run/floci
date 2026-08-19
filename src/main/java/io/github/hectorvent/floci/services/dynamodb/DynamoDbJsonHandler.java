@@ -82,6 +82,12 @@ public class DynamoDbJsonHandler {
             case "UpdateContributorInsights" -> handleUpdateContributorInsights(request, region);
             case "DescribeContributorInsights" -> handleDescribeContributorInsights(request, region);
             case "ListContributorInsights" -> handleListContributorInsights(request, region);
+            case "CreateBackup" -> handleCreateBackup(request, region);
+            case "DescribeBackup" -> handleDescribeBackup(request, region);
+            case "DeleteBackup" -> handleDeleteBackup(request, region);
+            case "ListBackups" -> handleListBackups(request, region);
+            case "RestoreTableFromBackup" -> handleRestoreTableFromBackup(request, region);
+            case "RestoreTableToPointInTime" -> handleRestoreTableToPointInTime(request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException", "Operation " + action + " is not supported."))
                     .build();
@@ -1207,7 +1213,7 @@ public class DynamoDbJsonHandler {
         }
 
         TableDefinition table = dynamoDbService.updateTable(tableName, readCapacity, writeCapacity,
-                gsiCreates, gsiDeletes, newAttrDefs, region);
+                gsiCreates, gsiDeletes, newAttrDefs, region, hasOtherTableUpdates(request));
 
         JsonNode deletionProtectionNode = request.path("DeletionProtectionEnabled");
         if (!deletionProtectionNode.isMissingNode()) {
@@ -1258,6 +1264,26 @@ public class DynamoDbJsonHandler {
         ObjectNode response = objectMapper.createObjectNode();
         response.set("TableDescription", tableToNode(table));
         return Response.ok(response).build();
+    }
+
+    /**
+     * Real AWS only rejects an unchanged ProvisionedThroughput when that is
+     * the sole field on UpdateTable. Alchemy's Table reconciler always sends
+     * BillingMode / AttributeDefinitions / SSE / deletion protection alongside
+     * throughput, so a same-RCU request must still succeed.
+     */
+    private static boolean hasOtherTableUpdates(JsonNode request) {
+        return request.has("BillingMode")
+                || request.has("StreamSpecification")
+                || request.has("SSESpecification")
+                || request.has("GlobalSecondaryIndexUpdates")
+                || request.has("ReplicaUpdates")
+                || request.has("DeletionProtectionEnabled")
+                || request.has("TableClass")
+                || request.has("WarmThroughput")
+                || request.has("OnDemandThroughput")
+                || request.has("AttributeDefinitions")
+                || request.has("MultiRegionConsistency");
     }
 
     private Response handleDescribeTimeToLive(JsonNode request, String region) {
@@ -2215,6 +2241,93 @@ public class DynamoDbJsonHandler {
         return node;
     }
 
+    private Response handleCreateBackup(JsonNode request, String region) {
+        String tableName = request.path("TableName").asText();
+        String backupName = request.path("BackupName").asText();
+        TableBackup backup = dynamoDbService.createBackup(tableName, backupName, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("BackupDetails", backupDetailsNode(backup));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeBackup(JsonNode request, String region) {
+        TableBackup backup = dynamoDbService.describeBackup(request.path("BackupArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("BackupDescription", backupDescriptionNode(backup));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteBackup(JsonNode request, String region) {
+        TableBackup backup = dynamoDbService.deleteBackup(request.path("BackupArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("BackupDescription", backupDescriptionNode(backup));
+        return Response.ok(response).build();
+    }
+
+    private Response handleListBackups(JsonNode request, String region) {
+        String tableName = request.has("TableName") && !request.get("TableName").isNull()
+                ? request.get("TableName").asText() : null;
+        List<TableBackup> backups = dynamoDbService.listBackups(tableName, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode summaries = objectMapper.createArrayNode();
+        for (TableBackup backup : backups) {
+            ObjectNode summary = backupDetailsNode(backup);
+            summary.put("TableName", backup.getTableName());
+            summary.put("TableId", backup.getTableId());
+            summary.put("TableArn", backup.getTableArn());
+            summaries.add(summary);
+        }
+        response.set("BackupSummaries", summaries);
+        return Response.ok(response).build();
+    }
+
+    private Response handleRestoreTableFromBackup(JsonNode request, String region) {
+        TableDefinition table = dynamoDbService.restoreTableFromBackup(
+                request.path("BackupArn").asText(),
+                request.path("TargetTableName").asText(),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("TableDescription", tableToNode(table));
+        return Response.ok(response).build();
+    }
+
+    private Response handleRestoreTableToPointInTime(JsonNode request, String region) {
+        String sourceTableName = request.has("SourceTableName") && !request.get("SourceTableName").isNull()
+                ? request.get("SourceTableName").asText() : null;
+        if ((sourceTableName == null || sourceTableName.isBlank()) && request.has("SourceTableArn")) {
+            sourceTableName = request.get("SourceTableArn").asText();
+        }
+        TableDefinition table = dynamoDbService.restoreTableToPointInTime(
+                sourceTableName,
+                request.path("TargetTableName").asText(),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("TableDescription", tableToNode(table));
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode backupDetailsNode(TableBackup backup) {
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("BackupArn", backup.getBackupArn());
+        details.put("BackupName", backup.getBackupName());
+        details.put("BackupSizeBytes", backup.getBackupSizeBytes());
+        details.put("BackupStatus", backup.getBackupStatus());
+        details.put("BackupType", backup.getBackupType());
+        details.put("BackupCreationDateTime", backup.getBackupCreationDateTime());
+        return details;
+    }
+
+    private ObjectNode backupDescriptionNode(TableBackup backup) {
+        ObjectNode description = objectMapper.createObjectNode();
+        description.set("BackupDetails", backupDetailsNode(backup));
+        ObjectNode source = objectMapper.createObjectNode();
+        source.put("TableName", backup.getTableName());
+        source.put("TableId", backup.getTableId());
+        source.put("TableArn", backup.getTableArn());
+        description.set("SourceTableDetails", source);
+        return description;
+    }
+
     private Response handleExportTable(JsonNode request, String region) {
         Map<String, Object> params = new java.util.HashMap<>();
         request.fields().forEachRemaining(e -> params.put(e.getKey(), e.getValue().isTextual()
@@ -2274,16 +2387,34 @@ public class DynamoDbJsonHandler {
         if (stmts.isMissingNode() || !stmts.isArray() || stmts.isEmpty()) {
             throw new AwsException("ValidationException", "TransactStatements must not be empty", 400);
         }
-        List<JsonNode> transactItems = new ArrayList<>();
+        List<DynamoDbPartiQLParser.Stmt> parsed = new ArrayList<>();
+        List<JsonNode> writeItems = new ArrayList<>();
         for (JsonNode s : stmts) {
             DynamoDbPartiQLParser.Stmt stmt = DynamoDbPartiQLParser.parse(
                     s.path("Statement").asText(), toPartiQLParams(s.path("Parameters")));
-            transactItems.add(partiQLHandler.toTransactItem(stmt, region));
+            parsed.add(stmt);
+            if (!(stmt instanceof DynamoDbPartiQLParser.Stmt.Select)) {
+                writeItems.add(partiQLHandler.toTransactItem(stmt, region));
+            }
         }
         try {
-            dynamoDbService.transactWriteItems(transactItems, region);
+            if (!writeItems.isEmpty()) {
+                dynamoDbService.transactWriteItems(writeItems, region);
+            }
+            ArrayNode responses = objectMapper.createArrayNode();
+            for (DynamoDbPartiQLParser.Stmt stmt : parsed) {
+                ObjectNode slot = objectMapper.createObjectNode();
+                if (stmt instanceof DynamoDbPartiQLParser.Stmt.Select) {
+                    JsonNode result = partiQLHandler.execute(stmt, PartiQLExecuteContext.builder(), region);
+                    JsonNode firstItem = result.path("Items").path(0);
+                    if (!firstItem.isMissingNode()) {
+                        slot.set("Item", firstItem);
+                    }
+                }
+                responses.add(slot);
+            }
             ObjectNode resp = objectMapper.createObjectNode();
-            resp.set("Responses", objectMapper.createArrayNode());
+            resp.set("Responses", responses);
             return Response.ok(resp).build();
         } catch (TransactionCanceledException e) {
             ObjectNode body = objectMapper.createObjectNode();

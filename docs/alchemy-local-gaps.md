@@ -56,7 +56,13 @@ Failure classes, largest first:
 ## S3
 
 Patched in this tree (tagging `NoSuchTagSet`, singleton policy collapse,
-accelerate, replication, intelligent-tiering including list). Remaining:
+accelerate, replication, intelligent-tiering including list;
+`RestoreObject` → `403 InvalidObjectState` on STANDARD;
+Get/Put ObjectRetention and LegalHold → `400 InvalidRequest` without
+Object Lock; presigned PUT Content-Type mismatch → `403`; copy REPLACE
+`application/octet-stream` → `binary/octet-stream`). Isolated
+`pnpm test:aws:floci test/AWS/S3 --retry 0 --concurrency 8` (2026-08-19):
+**51 passed / 0 failed**. Remaining:
 
 | Gap | Evidence | Notes |
 |---|---|---|
@@ -148,8 +154,27 @@ on `ServicePhase2Config`, AAS unstamped-row delete, stale live-AWS
 
 Patched in this tree (stream spec omitted when disabled, resource policy,
 Contributor Insights, Kinesis destination precision, Kinesis
-`ListTagsForResource`, CloudWatch `DescribeInsightRules`). Remaining
-after the image rebuild: none for `Table.test.ts`.
+`ListTagsForResource`, CloudWatch `DescribeInsightRules`).
+
+`UpdateTable` matches AWS no-op semantics: unchanged
+`ProvisionedThroughput` is rejected only when it is the sole field on the
+request. Alchemy's Table reconciler always sends BillingMode /
+AttributeDefinitions / SSE / deletion protection alongside throughput, so
+those updates now succeed (unblocks Application Auto Scaling's nine
+DynamoDB-backed suites).
+
+On-demand backups (`CreateBackup` / `DescribeBackup` / `ListBackups` /
+`DeleteBackup` / `RestoreTableFromBackup`) and
+`RestoreTableToPointInTime` are implemented. `ExportTableToPointInTime`
+and PITR restore emit `PointInTimeRecoveryUnavailableException` when
+PITR is disabled. `ExecuteTransaction` returns per-statement
+`Responses` for PartiQL `SELECT`.
+
+Isolated DynamoDB (2026-08-19): **103 passed / 2 failed / 1 todo**.
+Remaining Bindings `DeleteItem` and `Backups` delete are Lambda Function
+URL dropping HTTP DELETE bodies (`RequestParseError: Unexpected end of
+JSON input`) — the DynamoDB APIs themselves work. Out of scope for this
+service.
 
 ## Lambda
 
@@ -178,24 +203,32 @@ image picks up those handlers:
 
 ## Application Auto Scaling
 
-Implemented in this tree (scheduled actions, `DescribeScalingActivities`,
-`GetPredictiveScalingForecast` with the AWS-shaped non-ECS
-`AccessDeniedException`). Remaining:
+Control plane is implemented: scalable targets (local DynamoDB
+`table/{name}` and ECS `service/{cluster}/{service}` IDs are stored
+without probing the backing service), target-tracking policies +
+managed CloudWatch alarms, scheduled actions, empty
+`DescribeScalingActivities` pages, and `GetPredictiveScalingForecast`
+with AWS-shaped non-ECS `AccessDeniedException` ("GetPredictiveScalingForecast
+is not supported.") that distilled maps to
+`PredictiveScalingForecastNotSupported`.
+
+Isolated `pnpm test:aws:floci test/AWS/ApplicationAutoScaling --retry 0
+--concurrency 8` (2026-08-19): **10 passed / 0 failed** after DynamoDB
+`UpdateTable` no-op parity.
 
 | Gap | Evidence | Notes |
 |---|---|---|
-| DynamoDB `UpdateTable` no-op | AAS Bindings / ScalableTarget / ScalingPolicy / ScheduledAction | `ValidationException: The provisioned throughput for the table will not change` — DynamoDB owner. |
-| `RegisterScalableTarget` vs local ECS | `EcsServiceScaling.test.ts` | Current image rejects `ECS service doesn't exist`. Source here stores the target without requiring a live ECS row. |
+| DynamoDB `UpdateTable` no-op | Bindings / ScalableTarget / ScalingPolicy / ScheduledAction | Fixed — reject unchanged throughput only when it is the sole UpdateTable field. |
 | Policies stay inert | documented | No control loop; `DescribeScalingActivities` returns an empty page. |
-
-Alchemy now `flociDual`s ASG, LaunchTemplate, LifecycleHook, ScalingPolicy,
-ScheduledAction, and AAS ScalableTarget / ScalingPolicy / ScheduledAction.
 
 ## Step Functions
 
 Patched in this tree (`UpdateStateMachine`, `TestState`, `RedriveExecution`,
-Map Run list/describe/update). Alchemy now `flociDual`s StateMachine and
-Activity (creates were landing on live AWS). Remaining after rebuild:
+Map Run list/describe/update, Fail-state Catch unwrap, `sync-states` DNS +
+TLS SAN so Lambda `StartSyncExecution` can reach Floci on 443, optimized
+`lambda:invoke` envelope wraps `{Payload, StatusCode}`). Alchemy now
+`flociDual`s StateMachine and Activity (creates were landing on live AWS).
+Remaining after rebuild:
 
 | Gap | Evidence | Notes |
 |---|---|---|
@@ -298,16 +331,23 @@ data plane (`GET /key-value-stores/{arn}`) has no Floci service.
 
 ## Cognito
 
-Patched in this tree (IdP CRUD, user-pool domains, risk configuration,
-cascade delete). Suite was 0/19 on current `floci:dev` (ops not in the
-image). Alchemy now `flociDual`s User Pool resources. Identity Pools stay
-live-only — `AWSCognitoIdentityService` has no Floci implementation.
+Patched in this tree: user-pool JWT issuer is now AWS-shaped
+(`https://cognito-idp.<region>.amazonaws.com/<poolId>`), custom schema
+attributes are prefixed `custom:` on create, `DeleteUser` /
+`AdminListDevices` exist, and `AWSCognitoIdentityService` implements
+identity-pool CRUD, tags, roles (no PassRole / cross-account check),
+guest `GetId` / credentials / OpenID token, and identity admin.
+
+User-pool control plane (UserPool, Client, Domain, Group, User,
+IdentityProvider, ResourceServer, RiskConfiguration, custom schema) is
+green against `floci:dev`. Remaining Alchemy suite failures are not
+missing IdP APIs:
 
 | Gap | Evidence | Notes |
 |---|---|---|
-| Identity Pool APIs | `DescribeIdentityPool` / roles | Remote-only until a cognito-identity service exists. |
-| Cross-region Lambda triggers | `InvalidParameterException` | UserPool `LambdaConfig` pointing at a local Function. |
-| IdentityPoolRoleAttachment | `AccessDeniedException: Cross-account pass role` | Bindings; Identity Pool path. |
+| IdentityPool / RoleAttachment not `flociDual` | create without `(local)`; `ResourceNotFoundException` on distilled describe; `AccessDeniedException: Cross-account pass role` | Alchemy still registers live-only `IdentityPoolProvider` / `IdentityPoolRoleAttachmentProvider`. Floci implements the identity APIs; Bindings + IdentityPool tests hit real AWS (split-brain). |
+| Triggers Function URL socket close | `HttpClientError` POST `…lambda-url…/sign-up-flow` | One Lambda is both the Function URL and PreSignUp/PreTokenGeneration. Cognito `RequestResponse`-invokes that same function while the URL invoke is in-flight. Reproduced isolated. Lambda same-function concurrency — trigger handlers themselves exist. |
+| Cross-region Lambda triggers | `InvalidParameterException` | Only if a pool's `LambdaConfig` ARN region differs from the pool; same-account local Functions work. |
 
 ## Firehose
 
@@ -321,23 +361,33 @@ SSE start/stop still needs the image rebuild (`InvalidAction` on current
 ## SES
 
 Patched in this tree (receipt rules/filters, tenants, MREs, VDM,
-SendBounce, deliverability stubs). Alchemy now `flociDual`s the SES
-resource set. New v1 actions are on `AwsQueryController.SES_ACTIONS`.
-Inbound receiving data plane stays out of scope. Contact lists are
-1-per-account (concurrent Contact/ContactList tests collide).
+SendBounce, deliverability stubs, `PutTenantSuppressionAttributes` as
+POST, v2 email-address identities stay PENDING, bulk
+`MessageRejected` → entry `MESSAGE_REJECTED`). Alchemy now
+`flociDual`s the SES resource set. New v1 actions are on
+`AwsQueryController.SES_ACTIONS`. Inbound receiving data plane stays
+out of scope. Contact lists are 1-per-account (concurrent
+Contact/ContactList tests collide).
+
+| Gap | Evidence | Notes |
+|---|---|---|
+| Bindings IAM outsider From is `MessageRejected`, not `AccessDeniedException` | `SendEmail > a sender outside the bound identity is denied by the scoped IAM policy` | Needs Lambda execution-role credentials (today `test`/`test` bypass) plus `FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED` and SES send action/ARN mapping. Not a SES handler bug — IAM fires before SES on AWS. |
 
 ## Secrets Manager
 
 Patched in this tree (`CancelRotateSecret`; persist Put/Get/Delete
-ResourcePolicy). Against current `floci:dev` (pre-rebuild): 3/14.
+ResourcePolicy; `RotateSecret` no longer reserves an empty `AWSPENDING`
+version before `createSecret`). Isolated `test/AWS/SecretsManager`
+against a rebuilt image: resource CRUD, bindings (Get/Put/Describe/
+List/Batch/GetRandomPassword), and rotation schedule config.
 
 | Gap | Evidence | Notes |
 |---|---|---|
-| ResourcePolicy no-op in running image | resource policy deploys | Source persists policy; needs rebuild. |
 | `ValidateResourcePolicy` / replica APIs | not called by suite | Still unimplemented. |
 
-Alchemy: `RotationSchedule` is now `flociDual` so Bindings no longer call
-live `RotateSecret` with a `000000000000` ARN.
+Alchemy: `RotationSchedule` is `flociDual` so Bindings call Floci
+`RotateSecret` (which invokes the emulated Lambda through the four-step
+protocol).
 
 ## SSM
 
