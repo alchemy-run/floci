@@ -994,6 +994,27 @@ class RdsServiceTest {
     }
 
     @Test
+    void applyPendingMaintenanceActionMissingClusterArnThrowsResourceNotFoundFault() {
+        String arn = "arn:aws:rds:us-east-1:123456789012:cluster:alchemy-nonexistent-rds-cluster-probe";
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                rdsService.applyPendingMaintenanceAction(arn));
+
+        assertEquals("ResourceNotFoundFault", exception.getErrorCode());
+        assertEquals(404, exception.getHttpStatus());
+        assertTrue(exception.getMessage().contains(arn));
+    }
+
+    @Test
+    void applyPendingMaintenanceActionExistingClusterIsNoOp() {
+        DbCluster cluster = rdsService.createDbCluster("cluster1", "aurora-postgresql", "16.3",
+                "admin", "secret", "app", false, null);
+        String arn = cluster.getDbClusterArn();
+
+        assertEquals(arn, rdsService.applyPendingMaintenanceAction(arn));
+    }
+
+    @Test
     void getDbClusterParameterGroupMissingThrows() {
         AwsException exception = assertThrows(AwsException.class, () ->
                 rdsService.getDbClusterParameterGroup("nonexistent"));

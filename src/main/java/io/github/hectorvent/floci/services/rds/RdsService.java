@@ -407,6 +407,61 @@ public class RdsService implements Resettable {
         return instance;
     }
 
+    /**
+     * Apply a pending maintenance action. Floci has no real maintenance window,
+     * so an existing resource is a no-op that echoes the identifier. A missing
+     * ARN is {@code ResourceNotFoundFault} — the typed tag Alchemy bindings
+     * decode for {@code ApplyPendingMaintenanceAction}.
+     */
+    public String applyPendingMaintenanceAction(String resourceIdentifier) {
+        if (resourceIdentifier == null || resourceIdentifier.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "ResourceIdentifier is required.", 400);
+        }
+        if (!resourceExists(resourceIdentifier)) {
+            throw new AwsException("ResourceNotFoundFault",
+                    "The resource identified by ResourceIdentifier " + resourceIdentifier + " does not exist.",
+                    404);
+        }
+        return resourceIdentifier;
+    }
+
+    private boolean resourceExists(String resourceName) {
+        String type = "db";
+        String id = resourceName;
+        if (resourceName.startsWith("arn:")) {
+            AwsArnUtils.Arn arn;
+            try {
+                arn = AwsArnUtils.parse(resourceName);
+            } catch (IllegalArgumentException malformed) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            if (!"rds".equals(arn.service())) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            String resource = arn.resource();
+            int sep = resource.indexOf(':');
+            if (sep < 0) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            type = resource.substring(0, sep);
+            id = resource.substring(sep + 1);
+        }
+        return switch (type) {
+            case "db" -> instances.get(id).isPresent();
+            case "cluster" -> clusters.get(id).isPresent();
+            case "subgrp" -> subnetGroups.get(id).isPresent();
+            case "pg" -> parameterGroups.get(id).isPresent();
+            case "cluster-pg" -> clusterParameterGroups.get(id).isPresent();
+            case "cluster-endpoint" -> clusterEndpoints.get(id).isPresent();
+            case "snapshot" -> snapshots.get(id).isPresent();
+            case "cluster-snapshot" -> clusterSnapshots.get(id).isPresent();
+            default -> false;
+        };
+    }
+
     public Map<String, String> listTagsForResource(String resourceName) {
         return Map.copyOf(resolveTagHandle(resourceName).tags());
     }

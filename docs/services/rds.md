@@ -54,6 +54,7 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 | `ResetDBClusterParameterGroup` | Reset user parameters on a cluster parameter group |
 | `DescribeEvents` | List RDS events (empty locally) |
 | `DescribePendingMaintenanceActions` | List pending maintenance (empty locally) |
+| `ApplyPendingMaintenanceAction` | Opt in to pending maintenance; missing ARN is `ResourceNotFoundFault` |
 | `StartDBInstance` | Return the instance unchanged |
 | `StopDBInstance` | Return the instance unchanged |
 | `StartDBCluster` | Return the cluster unchanged |

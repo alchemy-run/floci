@@ -22,7 +22,6 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +92,7 @@ public class RdsQueryHandler {
                 case "ResetDBClusterParameterGroup" -> handleResetDbClusterParameterGroup(params);
                 case "DescribeEvents" -> handleDescribeEvents();
                 case "DescribePendingMaintenanceActions" -> handleDescribePendingMaintenanceActions();
+                case "ApplyPendingMaintenanceAction" -> handleApplyPendingMaintenanceAction(params);
                 case "StartDBInstance" -> handleStartStopInstance(params, "StartDBInstance");
                 case "StopDBInstance" -> handleStartStopInstance(params, "StopDBInstance");
                 case "StartDBCluster" -> handleStartStopCluster(params, "StartDBCluster");
@@ -147,6 +147,8 @@ public class RdsQueryHandler {
         }
 
         try {
+            validateMasterUserPassword(masterPassword);
+            validateBackupRetentionPeriod(params.getFirst("BackupRetentionPeriod"), false);
             List<String> vpcSecurityGroupIds = vpcSecurityGroupIds(params);
             DbInstance instance = service.createDbInstance(id, engine, engineVersion, masterUsername,
                     masterPassword, dbName, dbInstanceClass, allocatedStorage, iamEnabled,
@@ -376,6 +378,8 @@ public class RdsQueryHandler {
         }
 
         try {
+            validateMasterUserPassword(masterPassword);
+            validateBackupRetentionPeriod(params.getFirst("BackupRetentionPeriod"), true);
             DbCluster cluster = service.createDbCluster(id, engine, engineVersion, masterUsername,
                     masterPassword, databaseName, iamEnabled, paramGroupName,
                     dbSubnetGroupName, availabilityZone, multiAz, region);
@@ -495,17 +499,7 @@ public class RdsQueryHandler {
         if (name == null || name.isBlank()) {
             return AwsQueryResponse.error("InvalidParameterValue", "DBParameterGroupName is required.", AwsNamespaces.RDS, 400);
         }
-        Map<String, String> parameters = new HashMap<>();
-        for (int n = 1; ; n++) {
-            String paramName = params.getFirst("Parameters.member." + n + ".ParameterName");
-            if (paramName == null) {
-                break;
-            }
-            String paramValue = params.getFirst("Parameters.member." + n + ".ParameterValue");
-            if (paramValue != null) {
-                parameters.put(paramName, paramValue);
-            }
-        }
+        Map<String, String> parameters = parseParameters(params);
         try {
             DbParameterGroup group = service.modifyDbParameterGroup(name, parameters);
             String result = new XmlBuilder()
@@ -598,17 +592,7 @@ public class RdsQueryHandler {
         if (name == null || name.isBlank()) {
             return AwsQueryResponse.error("InvalidParameterValue", "DBClusterParameterGroupName is required.", AwsNamespaces.RDS, 400);
         }
-        Map<String, String> parameters = new HashMap<>();
-        for (int n = 1; ; n++) {
-            String paramName = params.getFirst("Parameters.member." + n + ".ParameterName");
-            if (paramName == null) {
-                break;
-            }
-            String paramValue = params.getFirst("Parameters.member." + n + ".ParameterValue");
-            if (paramValue != null) {
-                parameters.put(paramName, paramValue);
-            }
-        }
+        Map<String, String> parameters = parseParameters(params);
         try {
             DbClusterParameterGroup group = service.modifyDbClusterParameterGroup(name, parameters);
             String result = new XmlBuilder()
@@ -834,6 +818,24 @@ public class RdsQueryHandler {
     private Response handleDescribeEvents() {
         String result = new XmlBuilder().start("Events").end("Events").build();
         return Response.ok(AwsQueryResponse.envelope("DescribeEvents", AwsNamespaces.RDS, result)).build();
+    }
+
+    private Response handleApplyPendingMaintenanceAction(MultivaluedMap<String, String> params) {
+        try {
+            String resourceIdentifier = service.applyPendingMaintenanceAction(
+                    params.getFirst("ResourceIdentifier"));
+            String result = new XmlBuilder()
+                    .start("ResourcePendingMaintenanceActions")
+                    .elem("ResourceIdentifier", resourceIdentifier)
+                    .start("PendingMaintenanceActionDetails")
+                    .end("PendingMaintenanceActionDetails")
+                    .end("ResourcePendingMaintenanceActions")
+                    .build();
+            return Response.ok(AwsQueryResponse.envelope(
+                    "ApplyPendingMaintenanceAction", AwsNamespaces.RDS, result)).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.RDS, e.getHttpStatus());
+        }
     }
 
     private Response handleDescribePendingMaintenanceActions() {
@@ -1191,16 +1193,89 @@ public class RdsQueryHandler {
         return xml.build();
     }
 
+    /**
+     * Distilled's AWS Query serializer uses the list element's xmlName
+     * ({@code Parameter}), so requests arrive as {@code Parameters.Parameter.N.*}.
+     * Classic AWS SDKs still send {@code Parameters.member.N.*}; flattened
+     * {@code Parameters.N.*} is accepted as a fallback.
+     */
+    private static Map<String, String> parseParameters(MultivaluedMap<String, String> params) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        for (int n = 1; ; n++) {
+            String paramName = parameterField(params, n, "ParameterName");
+            if (paramName == null) {
+                break;
+            }
+            String paramValue = parameterField(params, n, "ParameterValue");
+            if (paramValue != null) {
+                parameters.put(paramName, paramValue);
+            }
+        }
+        return parameters;
+    }
+
     private static List<String> parameterNames(MultivaluedMap<String, String> params) {
         List<String> names = new java.util.ArrayList<>();
         for (int n = 1; ; n++) {
-            String name = params.getFirst("Parameters.member." + n + ".ParameterName");
+            String name = parameterField(params, n, "ParameterName");
             if (name == null) {
                 break;
             }
             names.add(name);
         }
         return names;
+    }
+
+    private static String parameterField(MultivaluedMap<String, String> params, int n, String field) {
+        String value = params.getFirst("Parameters.Parameter." + n + "." + field);
+        if (value != null) {
+            return value;
+        }
+        value = params.getFirst("Parameters.member." + n + "." + field);
+        if (value != null) {
+            return value;
+        }
+        return params.getFirst("Parameters." + n + "." + field);
+    }
+
+    /**
+     * AWS rejects {@code /}, {@code "}, {@code @}, space, and non-printable
+     * characters on {@code MasterUserPassword} before provisioning.
+     */
+    private static void validateMasterUserPassword(String password) {
+        if (password == null || password.isBlank()) {
+            return;
+        }
+        for (int i = 0; i < password.length(); i++) {
+            char c = password.charAt(i);
+            if (c == '/' || c == '"' || c == '@' || c == ' ' || c < 0x20 || c > 0x7E) {
+                throw new AwsException("InvalidParameterValue",
+                        "The parameter MasterUserPassword is not a valid password. Only printable ASCII characters besides '/', '@', '\"', ' ' may be used.",
+                        400);
+            }
+        }
+    }
+
+    /**
+     * AWS backup retention is 0–35 days on instances and 1–35 on clusters.
+     */
+    private static void validateBackupRetentionPeriod(String raw, boolean cluster) {
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        int days;
+        try {
+            days = Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid backup retention period: " + raw + ".", 400);
+        }
+        int min = cluster ? 1 : 0;
+        if (days < min || days > 35) {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid backup retention period: " + days + ". Valid values are " + min + "-35.",
+                    400);
+        }
     }
 
     private String statusLabel(DbInstanceStatus status) {
