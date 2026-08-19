@@ -231,6 +231,43 @@ when the function has no role.
 | OTLP export from Lambda to a Cloudflare collector | `Telemetry.test.ts` `/probe` status 0 | Platform: collector reachability from the Lambda container, not a missing Lambda op. |
 | CloudWatch Logs log-group reap | Prior destroy hangs | Logs describe/delete is slow or unimplemented enough that alchemy now skips reap on the emulator account. |
 
+## Lambda MicroVMs
+
+Implemented in this tree (see `docs/services/lambda-microvms.md`): the full
+`2025-09-09` control plane (image CRUD + versions + builds, managed base-image
+catalog, Run/Get/List/Suspend/Resume/Terminate, auth tokens, Lambda-shared tag
+routes), real `docker build` of code artifacts, real Docker containers per
+MicroVM, and the authenticated endpoint data plane on
+`{id}.lambda-microvm.{region}.localhost.floci.io:443`.
+
+Acceptance status (`LAMBDA_TEST_MICROVM=1 pnpm test:aws:floci
+test/AWS/Lambda/MicrovmImage.test.ts --retry 0`, 2026-08-19): **3 passed / 1
+failed**. The Lambda-host lifecycle, the in-VM tagged-RPC + fetch round-trip,
+and the external Dockerfile+context build all pass against Floci. The
+following Alchemy-side registrations were flipped to get there (single-line
+`flociDual` wraps in `Providers.ts`, pending coordinator review):
+`Lambda.MicrovmImage`, `Lambda.NetworkConnector`, `IAM.User`, `IAM.AccessKey`
+(`IAM.Role` was already dual). Without them the mixed state was actively
+harmful: the dualized Role landed in Floci (account `000000000000`) while the
+live-only MicrovmImage handed that role ARN to real AWS, which rejects it with
+`AccessDeniedException: Cross-account pass role is not allowed`.
+
+**The one remaining failure — `drives the MicroVM from a Cloudflare Worker
+(cross-cloud assume-role)` — is Alchemy-side wiring, not a Floci gap:**
+
+| Gap | Evidence | Notes |
+|---|---|---|
+| Worker-side MicroVM bindings never provide `Endpoint` | `MicrovmBinding.ts`: `makeAssumeRoleResolver` provides `Credentials`/`Region`/`FetchHttpClient` only; same for `withRuntimeCredentials` | Inside workerd the STS `AssumeRole` (and, if it got that far, every MicroVM control-plane op) resolves the default real-AWS endpoint. Real STS rejects the Floci-minted user key: `UnknownAwsError: The security token included in the request is invalid.` (verified in the worker log). Fix: provide an `Endpoint` layer (host-reachable emulator URL) through the binding when the stack is dev-mode, or inject `AWS_ENDPOINT_URL` into the local worker env and honor it in distilled's endpoint resolution under workerd. |
+| Local workerd does not trust Floci's CA | MicroVM RPC stubs call `https://{endpoint}` (TLS terminated by Floci's self-signed cert) | Bites immediately after the endpoint gap is fixed. Host-side workerd needs the CA (downloadable at `GET /_floci/tls/ca`) via `NODE_EXTRA_CA_CERTS` or equivalent; Floci-launched Lambda containers already get it injected. The endpoint hostnames (`*.lambda-microvm.us-east-1.localhost.floci.io`) already resolve to `127.0.0.1` from the host and are covered by the cert's SANs. |
+| `Lambda.NetworkConnector` emulation is identity-only | Floci stores connector records; no real network plumbing | The MicroVM fixtures never create connectors, so this is inert for the acceptance suite. |
+
+IAM policy evaluation is **intentionally permissive for MicroVM actions**:
+`lambda:RunMicrovm` etc. are not on the enforcement allowlist and unmapped
+actions are allow-by-default; STS `AssumeRole` session keys only need to
+resolve as identities (they do — `IamService.registerSession`). TODO: evaluate
+role policies once the IAM enforcement allowlist grows to cover MicroVM
+actions.
+
 ## IAM
 
 Lambda execution-role sessions (`ASIA…` minted at container launch) are
