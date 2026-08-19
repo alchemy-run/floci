@@ -5,6 +5,8 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.kms.KmsService;
+import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.ssm.model.Parameter;
 import io.github.hectorvent.floci.services.ssm.model.ParameterHistory;
 import io.github.hectorvent.floci.services.ssm.model.PatchBaselineIdentity;
@@ -20,14 +22,17 @@ import java.util.*;
 public class SsmService {
 
     private static final Logger LOG = Logger.getLogger(SsmService.class);
+    static final String AWS_MANAGED_SSM_ALIAS = "alias/aws/ssm";
 
     private final StorageBackend<String, Parameter> parameterStore;
     private final StorageBackend<String, List<ParameterHistory>> historyStore;
     private final int maxParameterHistory;
     private final RegionResolver regionResolver;
+    private final KmsService kmsService;
 
     @Inject
-    public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver) {
+    public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                      KmsService kmsService) {
         this(
                 storageFactory.create("ssm", "ssm-parameters.json",
                         new TypeReference<>() {
@@ -36,7 +41,8 @@ public class SsmService {
                         new TypeReference<>() {
                         }),
                 config.services().ssm().maxParameterHistory(),
-                regionResolver
+                regionResolver,
+                kmsService
         );
     }
 
@@ -53,10 +59,18 @@ public class SsmService {
     SsmService(StorageBackend<String, Parameter> parameterStore,
                StorageBackend<String, List<ParameterHistory>> historyStore,
                int maxParameterHistory, RegionResolver regionResolver) {
+        this(parameterStore, historyStore, maxParameterHistory, regionResolver, null);
+    }
+
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               int maxParameterHistory, RegionResolver regionResolver,
+               KmsService kmsService) {
         this.parameterStore = parameterStore;
         this.historyStore = historyStore;
         this.maxParameterHistory = maxParameterHistory;
         this.regionResolver = regionResolver;
+        this.kmsService = kmsService;
     }
 
     /**
@@ -119,8 +133,10 @@ public class SsmService {
         parameter.setDataType(dataType != null ? dataType
                 : (existing != null && existing.getDataType() != null ? existing.getDataType() : "text"));
         if ("SecureString".equals(resolvedType)) {
-            parameter.setKeyId(keyId != null ? keyId
-                    : (existing != null && existing.getKeyId() != null ? existing.getKeyId() : "alias/aws/ssm"));
+            String resolvedKeyId = keyId != null ? keyId
+                    : (existing != null && existing.getKeyId() != null ? existing.getKeyId() : AWS_MANAGED_SSM_ALIAS);
+            parameter.setKeyId(resolvedKeyId);
+            ensureAwsManagedSsmKey(resolvedKeyId, region);
         } else {
             parameter.setKeyId(null);
         }
@@ -441,6 +457,38 @@ public class SsmService {
                 .map(PatchBaselineIdentity::baselineId)
                 .orElseThrow(() -> new AwsException("DoesNotExistException",
                         "No default patch baseline exists for operating system " + os, 400));
+    }
+
+    /**
+     * AWS lazily creates {@code alias/aws/ssm} on the first SecureString that
+     * uses the default key. Seed that alias in KMS so DescribeKey resolves a
+     * real {@code arn:aws:kms:...:key/...}.
+     */
+    void ensureAwsManagedSsmKey(String keyId, String region) {
+        if (kmsService == null || keyId == null) {
+            return;
+        }
+        if (!AWS_MANAGED_SSM_ALIAS.equals(keyId) && !keyId.endsWith(":" + AWS_MANAGED_SSM_ALIAS)) {
+            return;
+        }
+        try {
+            kmsService.describeKey(AWS_MANAGED_SSM_ALIAS, region);
+            return;
+        } catch (AwsException e) {
+            if (!"NotFoundException".equals(e.getErrorCode())) {
+                throw e;
+            }
+        }
+        try {
+            KmsKey key = kmsService.createKey(
+                    "Default key that protects my SSM SecureString parameters when no other key is defined",
+                    region);
+            kmsService.createAlias(AWS_MANAGED_SSM_ALIAS, key.getKeyId(), region);
+        } catch (AwsException e) {
+            if (!"AlreadyExistsException".equals(e.getErrorCode())) {
+                throw e;
+            }
+        }
     }
 
     private static String regionKey(String region, String name) {

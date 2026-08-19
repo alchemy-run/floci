@@ -494,6 +494,53 @@ class SsmIntegrationTest {
     }
 
     @Test
+    void putSecureStringSeedsAwsManagedKmsAlias() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "Name": "/app/secure",
+                    "Value": "super-secret",
+                    "Type": "SecureString"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Version", equalTo(1));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "Name": "/app/secure",
+                    "WithDecryption": true
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.Type", equalTo("SecureString"))
+            .body("Parameter.Value", equalTo("super-secret"));
+
+        given()
+            .header("X-Amz-Target", "TrentService.DescribeKey")
+            .contentType("application/x-amz-json-1.1")
+            .body("""
+                { "KeyId": "alias/aws/ssm" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("KeyMetadata.Arn", containsString(":key/"));
+    }
+
+    @Test
     void unsupportedOperation() {
         given()
             .header("X-Amz-Target", "AmazonSSM.UnsupportedAction")

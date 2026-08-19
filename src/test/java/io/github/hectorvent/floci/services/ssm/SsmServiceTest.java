@@ -216,4 +216,17 @@ class SsmServiceTest {
         Parameter param = ssmService.getParameter("/app/secret", region);
         assertEquals("alias/aws/ssm", param.getKeyId());
     }
+
+    @Test
+    void typeChangeToSecureStringSetsDefaultKeyId() {
+        String region = "eu-west-1";
+        ssmService.putParameter("/app/flag", "plain", "String", null, false, region);
+        assertNull(ssmService.getParameter("/app/flag", region).getKeyId());
+
+        ssmService.putParameter("/app/flag", "now-secret", "SecureString", null, true, region);
+        Parameter param = ssmService.getParameter("/app/flag", region);
+        assertEquals("SecureString", param.getType());
+        assertEquals("alias/aws/ssm", param.getKeyId());
+        assertEquals("now-secret", param.getValue());
+    }
 }
