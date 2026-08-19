@@ -162,7 +162,7 @@ services:
     drain window `Σreserved-inflight + unreserved-inflight` can briefly
     exceed `region-concurrency-limit`.
 
-Function URLs are also reachable directly on `/{proxy:.*}` under the Lambda URL controller, which routes the request into the normal `Invoke` path. The URL controller waits for the container on a dedicated pool so a nested emulator call (the function talking back to Floci) can still be served. In-flight Docker environments per function are capped by `floci.services.lambda.max-concurrent-containers` (default 1); excess sync invokes wait for a free environment *before* the Lambda timeout clock starts.
+Function URLs are also reachable directly on `/{proxy:.*}` under the Lambda URL controller, which routes the request into the normal `Invoke` path. The URL controller waits for the container on a dedicated pool so a nested emulator call (the function talking back to Floci) can still be served. In-flight Docker environments per function are capped by `floci.services.lambda.max-concurrent-containers` (default 4 — must be ≥ 2 so a service that synchronously re-invokes the function serving the current request, e.g. a Cognito trigger, cannot self-deadlock); excess sync invokes wait for a free environment *before* the Lambda timeout clock starts.
 
 **Stubbed:** `ListLayers` and `ListLayerVersions` return empty arrays. No layer storage exists.
 

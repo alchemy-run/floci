@@ -1449,13 +1449,14 @@ public interface EmulatorConfig {
          * Max execution environments in flight per function. Excess sync
          * invokes wait here — before the Lambda timeout clock starts — for a
          * free environment. AWS would scale out instantly; Floci Docker
-         * cold-starts cannot, and a Function URL burst plus nested emulator
-         * HTTP (the handler calling back into Floci) livelocks the 3s default
-         * timeout. {@code 1} is the emulator-safe default.
+         * cold-starts cannot, so the cap bounds cold-start storms. It must be
+         * at least 2: services that synchronously re-invoke the SAME function
+         * that is serving the current request (Cognito triggers invoking the
+         * host Lambda, recursive handlers) self-deadlock at 1.
          *
          * Env var: FLOCI_SERVICES_LAMBDA_MAX_CONCURRENT_CONTAINERS
          */
-        @WithDefault("1")
+        @WithDefault("4")
         int maxConcurrentContainers();
 
         /**
