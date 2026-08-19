@@ -21,6 +21,7 @@ import io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -64,6 +65,9 @@ public class SnsService implements Resettable {
             "APNS", "APNS_SANDBOX", "GCM", "FCM");
     private static final java.util.regex.Pattern PLATFORM_APP_NAME_PATTERN =
             java.util.regex.Pattern.compile("[a-zA-Z0-9_.\\-]{1,256}");
+    private static final java.util.regex.Pattern E164_PHONE =
+            java.util.regex.Pattern.compile("^\\+[1-9]\\d{1,14}$");
+    private static final int MIN_GCM_CREDENTIAL_LENGTH = 24;
 
     private final StorageBackend<String, Topic> topicStore;
     private final StorageBackend<String, Subscription> subscriptionStore;
@@ -78,6 +82,9 @@ public class SnsService implements Resettable {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final Map<String, Instant> fifoDeduplicationCache = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, String>> smsAttributesByRegion = new ConcurrentHashMap<>();
+    private final Set<String> optedOutNumbers = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> sandboxNumbers = new ConcurrentHashMap<>();
     private static final HexFormat HEX = HexFormat.of();
     
     @Inject
@@ -163,6 +170,9 @@ public class SnsService implements Resettable {
     public void clear() {
         pushCapture.clear();
         fifoDeduplicationCache.clear();
+        smsAttributesByRegion.clear();
+        optedOutNumbers.clear();
+        sandboxNumbers.clear();
     }
 
     public Topic createTopic(String name, Map<String, String> attributes,
@@ -238,10 +248,90 @@ public class SnsService implements Resettable {
         attrs.putIfAbsent("Owner", regionResolver.getAccountId());
         attrs.putIfAbsent("EffectiveDeliveryPolicy", "{\"http\":{\"defaultHealthyRetryPolicy\":{\"minDelayTarget\":20,\"maxDelayTarget\":20,\"numRetries\":3,\"numMaxDelayRetries\":0,\"numNoDelayRetries\":0,\"numMinDelayRetries\":0,\"backoffFunction\":\"linear\"},\"disableSubscriptionOverrides\":false}}");
         if (!attrs.containsKey("Policy") || attrs.get("Policy") == null || attrs.get("Policy").isBlank()) {
-            String account = regionResolver.getAccountId();
-            attrs.put("Policy", "{\"Version\":\"2012-10-17\",\"Id\":\"__default_policy_ID\",\"Statement\":[{\"Sid\":\"__default_statement_ID\",\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":[\"SNS:GetTopicAttributes\",\"SNS:SetTopicAttributes\",\"SNS:AddPermission\",\"SNS:RemovePermission\",\"SNS:DeleteTopic\",\"SNS:Subscribe\",\"SNS:ListSubscriptionsByTopic\",\"SNS:Publish\"],\"Resource\":\"" + topicArn + "\",\"Condition\":{\"StringEquals\":{\"AWS:SourceAccount\":\"" + account + "\"}}}]}");
+            attrs.put("Policy", defaultTopicPolicy(topicArn));
         }
         return attrs;
+    }
+
+    public void addPermission(String topicArn, String label, List<String> awsAccountIds,
+                              List<String> actionNames, String region) {
+        if (label == null || label.isBlank()) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: Label", 400);
+        }
+        if (awsAccountIds == null || awsAccountIds.isEmpty()) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: AWSAccountId Reason: no value for required parameter AWSAccountId", 400);
+        }
+        if (actionNames == null || actionNames.isEmpty()) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: ActionName Reason: no value for required parameter ActionName", 400);
+        }
+        String key = topicKey(region, topicArn);
+        Topic topic = topicStore.get(key)
+                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
+
+        ObjectNode policy = parseTopicPolicy(topic.getAttributes().get("Policy"), topicArn);
+        ArrayNode statements = ensureStatementArray(policy);
+        for (JsonNode stmt : statements) {
+            if (label.equals(stmt.path("Sid").asText(null))) {
+                throw new AwsException("InvalidParameter",
+                        "Invalid parameter: Policy statement with this Sid already exists", 400);
+            }
+        }
+
+        ObjectNode statement = objectMapper.createObjectNode();
+        statement.put("Sid", label);
+        statement.put("Effect", "Allow");
+        ObjectNode principal = statement.putObject("Principal");
+        if (awsAccountIds.size() == 1) {
+            principal.put("AWS", "arn:aws:iam::" + awsAccountIds.getFirst() + ":root");
+        } else {
+            ArrayNode awsArns = principal.putArray("AWS");
+            for (String accountId : awsAccountIds) {
+                awsArns.add("arn:aws:iam::" + accountId + ":root");
+            }
+        }
+        if (actionNames.size() == 1) {
+            statement.put("Action", snsAction(actionNames.getFirst()));
+        } else {
+            ArrayNode actions = statement.putArray("Action");
+            for (String action : actionNames) {
+                actions.add(snsAction(action));
+            }
+        }
+        statement.put("Resource", topicArn);
+        statements.add(statement);
+
+        topic.getAttributes().put("Policy", policy.toString());
+        topicStore.put(key, topic);
+        LOG.infov("Added permission {0} to topic {1}", label, topicArn);
+    }
+
+    public void removePermission(String topicArn, String label, String region) {
+        if (label == null || label.isBlank()) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: Label", 400);
+        }
+        String key = topicKey(region, topicArn);
+        Topic topic = topicStore.get(key)
+                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
+
+        ObjectNode policy = parseTopicPolicy(topic.getAttributes().get("Policy"), topicArn);
+        ArrayNode statements = ensureStatementArray(policy);
+        int removeIndex = -1;
+        for (int i = 0; i < statements.size(); i++) {
+            if (label.equals(statements.get(i).path("Sid").asText(null))) {
+                removeIndex = i;
+                break;
+            }
+        }
+        if (removeIndex < 0) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: Policy statement with this Sid does not exist", 400);
+        }
+        statements.remove(removeIndex);
+        topic.getAttributes().put("Policy", policy.toString());
+        topicStore.put(key, topic);
+        LOG.infov("Removed permission {0} from topic {1}", label, topicArn);
     }
 
     public void setTopicAttributes(String topicArn, String attributeName,
@@ -459,6 +549,14 @@ public class SnsService implements Resettable {
             throw new AwsException("InvalidParameter",
                     "Invalid parameter: Platform Reason: Floci mocks only APNS, APNS_SANDBOX, GCM, and FCM.",
                     400);
+        }
+        if ("GCM".equals(platform) || "FCM".equals(platform)) {
+            String credential = attributes != null ? attributes.get("PlatformCredential") : null;
+            if (!isPlausibleGcmCredential(credential)) {
+                throw new AwsException("InvalidParameter",
+                        "Invalid parameter: Attributes Reason: Platform credentials are invalid",
+                        400);
+            }
         }
         String arn = platformApplicationArn(region, platform, name);
         String key = platformAppKey(region, arn);
@@ -1542,6 +1640,157 @@ public class SnsService implements Resettable {
 
     private static String subKey(String region, String subscriptionArn) {
         return "sub::" + region + "::" + subscriptionArn;
+    }
+
+    public Map<String, String> getSmsAttributes(String region) {
+        Map<String, String> attrs = new java.util.LinkedHashMap<>();
+        attrs.put("DefaultSMSType", "Promotional");
+        Map<String, String> stored = smsAttributesByRegion.get(region);
+        if (stored != null) {
+            attrs.putAll(stored);
+        }
+        return attrs;
+    }
+
+    public void setSmsAttributes(Map<String, String> attributes, String region) {
+        if (attributes == null || attributes.isEmpty()) {
+            return;
+        }
+        smsAttributesByRegion.computeIfAbsent(region, k -> new ConcurrentHashMap<>()).putAll(attributes);
+    }
+
+    public boolean isPhoneNumberOptedOut(String phoneNumber, String region) {
+        return optedOutNumbers.contains(phoneKey(region, phoneNumber));
+    }
+
+    public List<String> listPhoneNumbersOptedOut(String region) {
+        String prefix = region + "::";
+        List<String> numbers = new ArrayList<>();
+        for (String key : optedOutNumbers) {
+            if (key.startsWith(prefix)) {
+                numbers.add(key.substring(prefix.length()));
+            }
+        }
+        return numbers;
+    }
+
+    public void optInPhoneNumber(String phoneNumber, String region) {
+        optedOutNumbers.remove(phoneKey(region, phoneNumber));
+    }
+
+    public boolean isInSmsSandbox() {
+        return true;
+    }
+
+    public List<Map<String, String>> listOriginationNumbers() {
+        return List.of();
+    }
+
+    public List<Map<String, String>> listSmsSandboxPhoneNumbers(String region) {
+        String prefix = region + "::";
+        List<Map<String, String>> numbers = new ArrayList<>();
+        for (var entry : sandboxNumbers.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            numbers.add(Map.of(
+                    "PhoneNumber", entry.getKey().substring(prefix.length()),
+                    "Status", entry.getValue()));
+        }
+        return numbers;
+    }
+
+    public void createSmsSandboxPhoneNumber(String phoneNumber, String region) {
+        if (!isE164(phoneNumber)) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: PhoneNumber Reason: invalid phone number",
+                    400);
+        }
+        sandboxNumbers.putIfAbsent(phoneKey(region, phoneNumber), "Pending");
+    }
+
+    public void verifySmsSandboxPhoneNumber(String phoneNumber, String oneTimePassword, String region) {
+        String key = phoneKey(region, phoneNumber);
+        if (!sandboxNumbers.containsKey(key)) {
+            throw new AwsException("ResourceNotFound",
+                    "The phone number is not registered in the SMS sandbox.", 404);
+        }
+        if (oneTimePassword == null || oneTimePassword.isBlank()) {
+            throw new AwsException("InvalidParameter",
+                    "Invalid parameter: OneTimePassword Reason: invalid OTP", 400);
+        }
+        sandboxNumbers.put(key, "Verified");
+    }
+
+    public void deleteSmsSandboxPhoneNumber(String phoneNumber, String region) {
+        String key = phoneKey(region, phoneNumber);
+        if (sandboxNumbers.remove(key) == null) {
+            throw new AwsException("ResourceNotFound",
+                    "The phone number is not registered in the SMS sandbox.", 404);
+        }
+    }
+
+    private String defaultTopicPolicy(String topicArn) {
+        String account = regionResolver.getAccountId();
+        return "{\"Version\":\"2012-10-17\",\"Id\":\"__default_policy_ID\",\"Statement\":[{\"Sid\":\"__default_statement_ID\",\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":[\"SNS:GetTopicAttributes\",\"SNS:SetTopicAttributes\",\"SNS:AddPermission\",\"SNS:RemovePermission\",\"SNS:DeleteTopic\",\"SNS:Subscribe\",\"SNS:ListSubscriptionsByTopic\",\"SNS:Publish\"],\"Resource\":\""
+                + topicArn + "\",\"Condition\":{\"StringEquals\":{\"AWS:SourceAccount\":\"" + account + "\"}}}]}";
+    }
+
+    private ObjectNode parseTopicPolicy(String raw, String topicArn) {
+        String source = (raw == null || raw.isBlank()) ? defaultTopicPolicy(topicArn) : raw;
+        try {
+            JsonNode parsed = objectMapper.readTree(source);
+            if (parsed instanceof ObjectNode obj) {
+                return obj;
+            }
+        } catch (Exception e) {
+            LOG.debugv(e, "Failed to parse topic policy; resetting to default");
+        }
+        try {
+            return (ObjectNode) objectMapper.readTree(defaultTopicPolicy(topicArn));
+        } catch (Exception e) {
+            throw new AwsException("InvalidParameter", "Invalid parameter: Policy", 400);
+        }
+    }
+
+    private static ArrayNode ensureStatementArray(ObjectNode policy) {
+        JsonNode existing = policy.get("Statement");
+        if (existing instanceof ArrayNode arr) {
+            return arr;
+        }
+        if (existing instanceof ObjectNode stmt) {
+            ArrayNode arr = policy.putArray("Statement");
+            arr.add(stmt);
+            return arr;
+        }
+        return policy.putArray("Statement");
+    }
+
+    private static String snsAction(String action) {
+        if (action == null) {
+            return "SNS:Publish";
+        }
+        return action.startsWith("SNS:") ? action : "SNS:" + action;
+    }
+
+    static boolean isPlausibleGcmCredential(String credential) {
+        if (credential == null || credential.isBlank()) {
+            return false;
+        }
+        String trimmed = credential.trim();
+        if (trimmed.length() < MIN_GCM_CREDENTIAL_LENGTH) {
+            return false;
+        }
+        String lower = trimmed.toLowerCase(java.util.Locale.ROOT);
+        return !lower.contains("invalid") && !lower.contains("fake") && !lower.contains("probe");
+    }
+
+    private static boolean isE164(String phoneNumber) {
+        return phoneNumber != null && E164_PHONE.matcher(phoneNumber).matches();
+    }
+
+    private static String phoneKey(String region, String phoneNumber) {
+        return region + "::" + (phoneNumber == null ? "" : phoneNumber);
     }
 
     /** All SMS messages published since last clear. Used by SnsInspectionController. */

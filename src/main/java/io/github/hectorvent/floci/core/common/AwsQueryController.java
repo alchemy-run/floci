@@ -75,7 +75,8 @@ public class AwsQueryController {
             "GetSubscriptionAttributes", "SetSubscriptionAttributes", "ConfirmSubscription",
             "CreateSMSSandboxPhoneNumber", "DeleteSMSSandboxPhoneNumber",
             "GetSMSSandboxAccountStatus", "ListSMSSandboxPhoneNumbers",
-            "VerifySMSSandboxPhoneNumber", "AddPermission", "RemovePermission"
+            "VerifySMSSandboxPhoneNumber", "ListOriginationNumbers",
+            "AddPermission", "RemovePermission"
     );
 
     private static final Set<String> IAM_ACTIONS = Set.of(

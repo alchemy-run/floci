@@ -12,7 +12,7 @@ Operation counts are exact. For dispatch-table services (Query and JSON 1.1) eac
 |---|---|---|---|
 | [SSM](ssm.md) | `POST /` + `X-Amz-Target: AmazonSSM.*` / `AmazonSSMMessageDeliveryService.*` | JSON 1.1 | 22 |
 | [SQS](sqs.md) | `POST /` with `Action=` param | Query / JSON | 20 |
-| [SNS](sns.md) | `POST /` with `Action=` param | Query / JSON | 17 |
+| [SNS](sns.md) | `POST /` with `Action=` param | Query / JSON | 42 |
 | [S3](s3.md) | `/{bucket}/{key}` | REST XML | 58 |
 | [S3 Vectors](s3vectors.md) | `POST /{OperationName}` | REST JSON | 19 |
 | [DynamoDB](dynamodb.md) | `POST /` + `X-Amz-Target: DynamoDB_20120810.*` | JSON 1.1 | 41 |

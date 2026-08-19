@@ -68,6 +68,19 @@ public class SnsJsonHandler {
             case "GetEndpointAttributes" -> handleGetEndpointAttributes(request, region);
             case "SetEndpointAttributes" -> handleSetEndpointAttributes(request, region);
             case "ListEndpointsByPlatformApplication" -> handleListEndpointsByPlatformApplication(request, region);
+            case "AddPermission" -> handleAddPermission(request, region);
+            case "RemovePermission" -> handleRemovePermission(request, region);
+            case "GetSMSAttributes" -> handleGetSmsAttributes(request, region);
+            case "SetSMSAttributes" -> handleSetSmsAttributes(request, region);
+            case "CheckIfPhoneNumberIsOptedOut" -> handleCheckIfPhoneNumberIsOptedOut(request, region);
+            case "ListPhoneNumbersOptedOut" -> handleListPhoneNumbersOptedOut(region);
+            case "OptInPhoneNumber" -> handleOptInPhoneNumber(request, region);
+            case "ListOriginationNumbers" -> handleListOriginationNumbers();
+            case "GetSMSSandboxAccountStatus" -> handleGetSmsSandboxAccountStatus();
+            case "ListSMSSandboxPhoneNumbers" -> handleListSmsSandboxPhoneNumbers(region);
+            case "CreateSMSSandboxPhoneNumber" -> handleCreateSmsSandboxPhoneNumber(request, region);
+            case "VerifySMSSandboxPhoneNumber" -> handleVerifySmsSandboxPhoneNumber(request, region);
+            case "DeleteSMSSandboxPhoneNumber" -> handleDeleteSmsSandboxPhoneNumber(request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                     .build();
@@ -435,11 +448,139 @@ public class SnsJsonHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleAddPermission(JsonNode request, String region) {
+        String topicArn = request.path("TopicArn").asText(null);
+        String label = request.path("Label").asText(null);
+        List<String> accountIds = jsonNodeToList(firstPresent(request, "AWSAccountId", "AWSAccountIds"));
+        List<String> actions = jsonNodeToList(firstPresent(request, "ActionName", "ActionNames"));
+        snsService.addPermission(topicArn, label, accountIds, actions, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleRemovePermission(JsonNode request, String region) {
+        String topicArn = request.path("TopicArn").asText(null);
+        String label = request.path("Label").asText(null);
+        snsService.removePermission(topicArn, label, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetSmsAttributes(JsonNode request, String region) {
+        Map<String, String> attrs = snsService.getSmsAttributes(region);
+        List<String> requested = jsonNodeToList(firstPresent(request, "attributes", "Attributes"));
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode attrsNode = response.putObject("attributes");
+        for (var entry : attrs.entrySet()) {
+            if (!requested.isEmpty() && !requested.contains(entry.getKey())) {
+                continue;
+            }
+            attrsNode.put(entry.getKey(), entry.getValue());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleSetSmsAttributes(JsonNode request, String region) {
+        Map<String, String> attrs = jsonNodeToMap(firstPresent(request, "attributes", "Attributes"));
+        snsService.setSmsAttributes(attrs, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleCheckIfPhoneNumberIsOptedOut(JsonNode request, String region) {
+        String phone = textOrNull(firstPresent(request, "phoneNumber", "PhoneNumber"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("isOptedOut", snsService.isPhoneNumberOptedOut(phone, region));
+        return Response.ok(response).build();
+    }
+
+    private Response handleListPhoneNumbersOptedOut(String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode numbers = response.putArray("phoneNumbers");
+        for (String number : snsService.listPhoneNumbersOptedOut(region)) {
+            numbers.add(number);
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleOptInPhoneNumber(JsonNode request, String region) {
+        String phone = textOrNull(firstPresent(request, "phoneNumber", "PhoneNumber"));
+        snsService.optInPhoneNumber(phone, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleListOriginationNumbers() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("PhoneNumbers");
+        return Response.ok(response).build();
+    }
+
+    private Response handleGetSmsSandboxAccountStatus() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("IsInSandbox", snsService.isInSmsSandbox());
+        return Response.ok(response).build();
+    }
+
+    private Response handleListSmsSandboxPhoneNumbers(String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode numbers = response.putArray("PhoneNumbers");
+        for (Map<String, String> number : snsService.listSmsSandboxPhoneNumbers(region)) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("PhoneNumber", number.get("PhoneNumber"));
+            node.put("Status", number.get("Status"));
+            numbers.add(node);
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleCreateSmsSandboxPhoneNumber(JsonNode request, String region) {
+        String phone = textOrNull(firstPresent(request, "PhoneNumber", "phoneNumber"));
+        snsService.createSmsSandboxPhoneNumber(phone, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleVerifySmsSandboxPhoneNumber(JsonNode request, String region) {
+        String phone = textOrNull(firstPresent(request, "PhoneNumber", "phoneNumber"));
+        String otp = request.path("OneTimePassword").asText(null);
+        snsService.verifySmsSandboxPhoneNumber(phone, otp, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleDeleteSmsSandboxPhoneNumber(JsonNode request, String region) {
+        String phone = textOrNull(firstPresent(request, "PhoneNumber", "phoneNumber"));
+        snsService.deleteSmsSandboxPhoneNumber(phone, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     private Map<String, String> jsonNodeToMap(JsonNode node) {
         Map<String, String> map = new HashMap<>();
         if (node != null && node.isObject()) {
             node.fields().forEachRemaining(entry -> map.put(entry.getKey(), entry.getValue().asText()));
         }
         return map;
+    }
+
+    private static List<String> jsonNodeToList(JsonNode node) {
+        List<String> values = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            for (JsonNode item : node) {
+                values.add(item.asText());
+            }
+        }
+        return values;
+    }
+
+    private static JsonNode firstPresent(JsonNode request, String... names) {
+        for (String name : names) {
+            JsonNode node = request.get(name);
+            if (node != null && !node.isMissingNode() && !node.isNull()) {
+                return node;
+            }
+        }
+        return request.path(names[0]);
+    }
+
+    private static String textOrNull(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        return node.asText(null);
     }
 }
