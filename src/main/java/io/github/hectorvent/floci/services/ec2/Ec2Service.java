@@ -417,7 +417,7 @@ public class Ec2Service implements ContainerTeardown {
     // A brand-new custom NACL starts closed: only the implicit deny rules, no allows.
     public NetworkAcl createNetworkAcl(String region, String vpcId) {
         ensureDefaultResources(region);
-        getRequiredVpc(region, vpcId);
+        resolveVpcForCreate(region, vpcId);
         String networkAclId = "acl-" + randomHex(17);
         NetworkAcl acl = new NetworkAcl();
         acl.setNetworkAclId(networkAclId);
@@ -1348,7 +1348,7 @@ public class Ec2Service implements ContainerTeardown {
                                          List<String> routeTableIds, List<String> subnetIds,
                                          List<String> securityGroupIds, Boolean privateDnsEnabled, List<Tag> endpointTags) {
         ensureDefaultResources(region);
-        getRequiredVpc(region, vpcId);
+        resolveVpcForCreate(region, vpcId);
         for (String routeTableId : routeTableIds) {
             getRequiredRouteTable(region, routeTableId);
         }
@@ -1472,7 +1472,7 @@ public class Ec2Service implements ContainerTeardown {
             throw new AwsException("MissingParameter", "The request must contain the parameter VpcId", 400);
         }
         ensureDefaultResources(region);
-        getRequiredVpc(region, vpcId);
+        resolveVpcForCreate(region, vpcId);
 
         String subnetId = "subnet-" + randomHex(8);
         Subnet subnet = new Subnet();
@@ -1545,7 +1545,7 @@ public class Ec2Service implements ContainerTeardown {
     public SecurityGroup createSecurityGroup(String region, String groupName, String description, String vpcId) {
         ensureDefaultResources(region);
         if (vpcId != null && !vpcId.isEmpty()) {
-            getRequiredVpc(region, vpcId);
+            resolveVpcForCreate(region, vpcId);
         } else {
             vpcId = "vpc-default";
         }
@@ -2546,7 +2546,7 @@ public class Ec2Service implements ContainerTeardown {
 
     public RouteTable createRouteTable(String region, String vpcId) {
         ensureDefaultResources(region);
-        Vpc vpc = getRequiredVpc(region, vpcId);
+        Vpc vpc = resolveVpcForCreate(region, vpcId);
 
         String rtId = "rtb-" + randomHex(8);
         RouteTable rt = new RouteTable();
@@ -2564,12 +2564,23 @@ public class Ec2Service implements ContainerTeardown {
         if (vpc != null) {
             return vpc;
         }
-        // Alchemy stack programs sometimes resolve the default VPC via a
-        // live-AWS DescribeVpcs (the distilled client is not always pinned
-        // to Floci during stack construction) and then CreateSubnet /
-        // CreateSecurityGroup against us with that foreign id. AWS would
-        // reject it; Alchemy retries InvalidVpcID.NotFound unbounded
-        // (Bindings beforeAll 330s hang). Substitute the emulator default.
+        throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
+    }
+
+    /**
+     * Create-path lookup. Alchemy Bindings sometimes resolve the default VPC via
+     * a live-AWS DescribeVpcs and then CreateSubnet / CreateSecurityGroup against
+     * us with that foreign id. AWS would reject it; Alchemy retries
+     * {@code InvalidVpcID.NotFound} unbounded. Substitute the emulator default
+     * for those creates only — describe/delete-by-id must still NotFound a
+     * missing id (otherwise {@code assertVpcGone} after DeleteVpc never
+     * completes: DescribeVpcs succeeds with an empty set).
+     */
+    private Vpc resolveVpcForCreate(String region, String vpcId) {
+        Vpc vpc = vpcs.get(key(region, vpcId)).orElse(null);
+        if (vpc != null) {
+            return vpc;
+        }
         Vpc defaultVpc = vpcs.scan(k -> true).stream()
                 .filter(v -> region.equals(v.getRegion()) && v.isDefault())
                 .findFirst()
@@ -3813,7 +3824,7 @@ public class Ec2Service implements ContainerTeardown {
 
     public VpcPeeringConnection createVpcPeeringConnection(String region, String vpcId, String peerVpcId,
                                                            String peerOwnerId, String peerRegion, List<Tag> peeringTags) {
-        Vpc requester = getRequiredVpc(region, vpcId);
+        Vpc requester = resolveVpcForCreate(region, vpcId);
         String accepterRegion = peerRegion != null && !peerRegion.isBlank() ? peerRegion : region;
         Vpc accepter = vpcs.get(key(accepterRegion, peerVpcId)).orElse(null);
         VpcPeeringConnection peering = new VpcPeeringConnection();
@@ -3872,7 +3883,7 @@ public class Ec2Service implements ContainerTeardown {
     }
 
     public EgressOnlyInternetGateway createEgressOnlyInternetGateway(String region, String vpcId, List<Tag> eigwTags) {
-        getRequiredVpc(region, vpcId);
+        resolveVpcForCreate(region, vpcId);
         EgressOnlyInternetGateway eigw = new EgressOnlyInternetGateway();
         eigw.setEgressOnlyInternetGatewayId("eigw-" + randomHex(17));
         eigw.setVpcId(vpcId);

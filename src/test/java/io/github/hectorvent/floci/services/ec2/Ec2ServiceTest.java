@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.ec2.model.Reservation;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Snapshot;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
+import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
 import io.github.hectorvent.floci.services.ec2.model.Volume;
 import io.github.hectorvent.floci.services.ec2.model.VolumeAttachment;
@@ -726,6 +727,41 @@ class Ec2ServiceTest {
                 assertThrows(AwsException.class,
                         () -> service.describeNetworkAcls("us-east-1", List.of("acl-missing"), Map.of()))
                         .getErrorCode());
+        assertEquals("InvalidVpcID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeVpcs("us-east-1", List.of("vpc-missing"), Map.of()))
+                        .getErrorCode());
+    }
+
+    @Test
+    void describeVpcsByIdDoesNotSubstituteDefaultAfterDelete() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        var vpc = service.createVpc("us-east-1", "10.90.0.0/16", false);
+        assertTrue(service.describeVpcs("us-east-1", List.of(), Map.of()).stream()
+                .anyMatch(Vpc::isDefault));
+
+        service.deleteVpc("us-east-1", vpc.getVpcId());
+
+        assertEquals("InvalidVpcID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeVpcs("us-east-1", List.of(vpc.getVpcId()), Map.of()))
+                        .getErrorCode());
+        assertTrue(service.describeVpcs("us-east-1", List.of(), Map.of()).stream()
+                .anyMatch(Vpc::isDefault));
+    }
+
+    @Test
+    void createSubnetAcceptsForeignVpcIdByUsingDefault() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        var subnet = service.createSubnet("us-east-1", "vpc-0abcdef1234567890", "172.31.96.0/20", "us-east-1a");
+        assertEquals("vpc-0abcdef1234567890", subnet.getVpcId());
+        assertEquals("available", subnet.getState());
     }
 
     private static EmulatorConfig mockConfig(boolean ec2Mock) {
