@@ -47,6 +47,9 @@ public class MicrovmEndpointProxyController {
 
     private static final Logger LOG = Logger.getLogger(MicrovmEndpointProxyController.class);
     private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(60);
+    /** How long to retry connection refusals while a fresh VM's server binds its port. */
+    private static final Duration CONNECT_RETRY_WINDOW = Duration.ofSeconds(5);
+    private static final Duration CONNECT_RETRY_INTERVAL = Duration.ofMillis(200);
 
     /** Hop-by-hop / transport headers never forwarded in either direction. */
     private static final Set<String> SKIPPED_HEADERS = Set.of(
@@ -154,23 +157,47 @@ public class MicrovmEndpointProxyController {
             }
         });
 
-        try {
-            HttpResponse<byte[]> response = httpClient.send(
-                    builder.build(), HttpResponse.BodyHandlers.ofByteArray());
-            Response.ResponseBuilder out = Response.status(response.statusCode());
-            response.headers().map().forEach((name, values) -> {
-                if (!SKIPPED_HEADERS.contains(name.toLowerCase()) && !name.startsWith(":")) {
-                    values.forEach(v -> out.header(name, v));
+        // RunMicrovm reports RUNNING as soon as the container process starts;
+        // the in-VM server may still be binding its port for the first ~seconds.
+        // Retry connection-level failures briefly so the first proxied request
+        // after boot doesn't 502 on a race the caller cannot see.
+        long deadline = System.nanoTime() + CONNECT_RETRY_WINDOW.toNanos();
+        Exception failure;
+        while (true) {
+            try {
+                HttpResponse<byte[]> response = httpClient.send(
+                        builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+                Response.ResponseBuilder out = Response.status(response.statusCode());
+                response.headers().map().forEach((name, values) -> {
+                    if (!SKIPPED_HEADERS.contains(name.toLowerCase()) && !name.startsWith(":")) {
+                        values.forEach(v -> out.header(name, v));
+                    }
+                });
+                return out.entity(response.body()).build();
+            } catch (java.net.ConnectException | java.net.http.HttpConnectTimeoutException e) {
+                failure = e;
+                if (System.nanoTime() >= deadline) break;
+                try {
+                    Thread.sleep(CONNECT_RETRY_INTERVAL.toMillis());
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
-            });
-            return out.entity(response.body()).build();
-        } catch (Exception e) {
-            LOG.warnv("MicroVM endpoint proxy failed for {0} {1}: {2}", method, target, e.getMessage());
-            return Response.status(502)
-                    .type(MediaType.APPLICATION_JSON)
-                    .entity("{\"message\":\"MicroVM endpoint unreachable: "
-                            + e.getMessage().replace("\"", "'") + "\"}")
-                    .build();
+            } catch (Exception e) {
+                failure = e;
+                break;
+            }
         }
+        // Some transport exceptions (interrupts, wrapped socket errors) carry a
+        // null message — never NPE while rendering the error envelope.
+        String message = failure.getMessage() != null
+                ? failure.getMessage()
+                : failure.getClass().getSimpleName();
+        LOG.warnv("MicroVM endpoint proxy failed for {0} {1}: {2}", method, target, message);
+        return Response.status(502)
+                .type(MediaType.APPLICATION_JSON)
+                .entity("{\"message\":\"MicroVM endpoint unreachable: "
+                        + message.replace("\"", "'") + "\"}")
+                .build();
     }
 }
