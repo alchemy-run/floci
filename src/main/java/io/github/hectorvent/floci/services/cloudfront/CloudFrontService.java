@@ -36,6 +36,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -559,40 +560,61 @@ public class CloudFrontService {
 
     // ── CloudFront Functions ──────────────────────────────────────────────────
 
+    private static final String FUNCTION_STAGE_DEVELOPMENT = "DEVELOPMENT";
+    private static final String FUNCTION_STAGE_LIVE = "LIVE";
+
+    private static String functionKey(String name, String stage) {
+        return name + ":" + stage;
+    }
+
     public synchronized CloudFrontFunction createFunction(CloudFrontFunction fn) {
-        if (fn.getName() != null && functionStore.get(fn.getName()).isPresent()) {
+        if (fn.getName() != null && findFunction(fn.getName(), null).isPresent()) {
             throw new AwsException("FunctionAlreadyExists",
                     "A function with the specified name already exists.", 409);
         }
-        fn.setStage("DEVELOPMENT");
+        fn.setStage(FUNCTION_STAGE_DEVELOPMENT);
         fn.setStatus("UNPUBLISHED");
         fn.setEtag(UUID.randomUUID().toString());
         fn.setCreatedTime(Instant.now());
         fn.setLastModifiedTime(Instant.now());
-        functionStore.put(fn.getName(), fn);
+        functionStore.put(functionKey(fn.getName(), FUNCTION_STAGE_DEVELOPMENT), fn);
         return fn;
     }
 
     public CloudFrontFunction describeFunction(String name, String stage) {
-        CloudFrontFunction fn = functionStore.get(name).orElseThrow(() ->
+        return findFunction(name, stage).orElseThrow(() ->
                 new AwsException("NoSuchFunctionExists",
                         "The specified function does not exist.", 404));
-        if (stage != null && !stage.isEmpty() && !fn.getStage().equals(stage)) {
-            throw new AwsException("NoSuchFunctionExists",
-                    "The specified function does not exist.", 404);
+    }
+
+    private Optional<CloudFrontFunction> findFunction(String name, String stage) {
+        if (stage != null && !stage.isEmpty()) {
+            Optional<CloudFrontFunction> staged = functionStore.get(functionKey(name, stage));
+            if (staged.isPresent()) {
+                return staged;
+            }
+            return functionStore.get(name).filter(fn -> stage.equals(fn.getStage()));
         }
-        return fn;
+        Optional<CloudFrontFunction> live = functionStore.get(functionKey(name, FUNCTION_STAGE_LIVE));
+        if (live.isPresent()) {
+            return live;
+        }
+        Optional<CloudFrontFunction> development = functionStore.get(functionKey(name, FUNCTION_STAGE_DEVELOPMENT));
+        if (development.isPresent()) {
+            return development;
+        }
+        return functionStore.get(name);
     }
 
     public synchronized CloudFrontFunction updateFunction(String name, String ifMatch,
                                                           CloudFrontFunction updated) {
-        CloudFrontFunction existing = describeFunction(name, null);
+        CloudFrontFunction existing = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
         if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
         updated.setName(name);
-        updated.setStage(existing.getStage());
+        updated.setStage(FUNCTION_STAGE_DEVELOPMENT);
         updated.setStatus(existing.getStatus());
         updated.setEtag(UUID.randomUUID().toString());
         updated.setCreatedTime(existing.getCreatedTime());
@@ -600,30 +622,43 @@ public class CloudFrontService {
         if (updated.getKeyValueStoreArns() == null || updated.getKeyValueStoreArns().isEmpty()) {
             updated.setKeyValueStoreArns(existing.getKeyValueStoreArns());
         }
-        functionStore.put(name, updated);
+        functionStore.put(functionKey(name, FUNCTION_STAGE_DEVELOPMENT), updated);
+        functionStore.delete(name);
         return updated;
     }
 
     public synchronized CloudFrontFunction publishFunction(String name, String ifMatch) {
-        CloudFrontFunction fn = describeFunction(name, null);
-        if (!fn.getEtag().equals(ifMatch)) {
+        CloudFrontFunction development = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
+        if (!development.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
-        fn.setStage("LIVE");
-        fn.setStatus("DEPLOYED");
-        fn.setEtag(UUID.randomUUID().toString());
-        fn.setLastModifiedTime(Instant.now());
-        functionStore.put(name, fn);
-        return fn;
+        CloudFrontFunction live = development.copy();
+        live.setStage(FUNCTION_STAGE_LIVE);
+        live.setStatus("DEPLOYED");
+        live.setEtag(UUID.randomUUID().toString());
+        live.setLastModifiedTime(Instant.now());
+        functionStore.put(functionKey(name, FUNCTION_STAGE_LIVE), live);
+        return live;
     }
 
     public synchronized void deleteFunction(String name, String ifMatch) {
-        CloudFrontFunction existing = describeFunction(name, null);
-        if (!existing.getEtag().equals(ifMatch)) {
+        Optional<CloudFrontFunction> development = findFunction(name, FUNCTION_STAGE_DEVELOPMENT);
+        Optional<CloudFrontFunction> live = findFunction(name, FUNCTION_STAGE_LIVE);
+        Optional<CloudFrontFunction> legacy = functionStore.get(name);
+        if (development.isEmpty() && live.isEmpty() && legacy.isEmpty()) {
+            throw new AwsException("NoSuchFunctionExists",
+                    "The specified function does not exist.", 404);
+        }
+        boolean match = development.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
+                || live.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
+                || legacy.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent();
+        if (!match) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
+        functionStore.delete(functionKey(name, FUNCTION_STAGE_DEVELOPMENT));
+        functionStore.delete(functionKey(name, FUNCTION_STAGE_LIVE));
         functionStore.delete(name);
     }
 
@@ -633,7 +668,15 @@ public class CloudFrontService {
             all = all.stream().filter(f -> stage.equals(f.getStage())).toList();
             all = new ArrayList<>(all);
         }
-        all.sort((a, b) -> a.getName().compareTo(b.getName()));
+        all.sort((a, b) -> {
+            int names = a.getName().compareTo(b.getName());
+            if (names != 0) {
+                return names;
+            }
+            String left = a.getStage() != null ? a.getStage() : "";
+            String right = b.getStage() != null ? b.getStage() : "";
+            return left.compareTo(right);
+        });
         return all;
     }
 

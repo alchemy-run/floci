@@ -209,7 +209,9 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
 - `DeleteDistribution` returns `DistributionNotDisabled` (409) if `Enabled` is `true` in the config.
 - All mutating operations (`PUT`, `DELETE`) require an `If-Match` header containing the current `ETag`. A missing or incorrect `ETag` returns `InvalidIfMatchVersion` (400).
 - All `GET` and `POST` (create) responses include an `ETag` response header.
-- All list-type sub-elements in XML follow CloudFront's `<Quantity>N</Quantity><Items>...</Items>` wrapper pattern.
+- List operations emit the list envelope as the XML root (`CachePolicyList`, `FunctionList`, `KeyGroupList`, …) because distilled marks those structs as the HTTP payload — not a `List*Result` wrapper.
+- Nested CloudFront collections (origins, behaviors, KVS associations) use `<Quantity>` + `<Items>`. Exceptions that distilled models as flat arrays: `KeyGroupConfig.Items` is `<Items><PublicKey>…</PublicKey></Items>` (no Quantity), and `RealtimeLogConfig` `Fields` / `EndPoints` are flat `<Field>` / `<EndPoint>` children.
+- Publishing a CloudFront Function copies DEVELOPMENT to LIVE and leaves DEVELOPMENT in place so `DescribeFunction(Stage=DEVELOPMENT)` and delete-by-development-ETag keep working.
 - OAI `CallerReference` uniqueness is enforced — duplicate `CallerReference` values return `CloudFrontOriginAccessIdentityAlreadyExists` (409).
 - `AssociateAlias` attaches a CNAME alias to the target distribution's config.
 - VPC origins are immediately `Deployed`. `CreateVpcOrigin` rejects an ELB ARN that does not resolve to a load balancer in Floci's ELBv2 store with `InvalidArgument` (400).

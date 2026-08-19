@@ -53,4 +53,19 @@ public class CloudFrontFunction {
     public void setKeyValueStoreArns(List<String> keyValueStoreArns) {
         this.keyValueStoreArns = keyValueStoreArns != null ? keyValueStoreArns : new ArrayList<>();
     }
+
+    public CloudFrontFunction copy() {
+        CloudFrontFunction copy = new CloudFrontFunction();
+        copy.name = name;
+        copy.stage = stage;
+        copy.status = status;
+        copy.functionCode = functionCode;
+        copy.runtime = runtime;
+        copy.comment = comment;
+        copy.etag = etag;
+        copy.createdTime = createdTime;
+        copy.lastModifiedTime = lastModifiedTime;
+        copy.keyValueStoreArns = new ArrayList<>(keyValueStoreArns);
+        return copy;
+    }
 }

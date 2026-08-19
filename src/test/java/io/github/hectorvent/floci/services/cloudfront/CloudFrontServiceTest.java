@@ -6,7 +6,9 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontFunction;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
+import io.github.hectorvent.floci.services.cloudfront.model.KeyGroup;
 import io.github.hectorvent.floci.services.cloudfront.model.KeyValueStore;
+import io.github.hectorvent.floci.services.cloudfront.model.RealtimeLogConfig;
 import io.github.hectorvent.floci.services.cloudfront.model.StreamingDistribution;
 import io.github.hectorvent.floci.services.cloudfront.model.VpcOrigin;
 import org.junit.jupiter.api.Test;
@@ -120,5 +122,55 @@ class CloudFrontServiceTest {
                 created.getKeyValueStoreArns());
         assertEquals("arn:aws:cloudfront::000000000000:key-value-store/abc",
                 service.describeFunction("assoc-fn", null).getKeyValueStoreArns().get(0));
+    }
+
+    @Test
+    void publishKeepsDevelopmentStageSoDeleteCanUseItsEtag() {
+        CloudFrontService service = serviceWithDomainSuffix("cloudfront.net");
+        CloudFrontFunction fn = new CloudFrontFunction();
+        fn.setName("staged-fn");
+        CloudFrontFunction created = service.createFunction(fn);
+
+        CloudFrontFunction live = service.publishFunction("staged-fn", created.getEtag());
+        assertEquals("LIVE", live.getStage());
+        assertEquals("DEVELOPMENT", service.describeFunction("staged-fn", "DEVELOPMENT").getStage());
+        assertEquals(created.getEtag(), service.describeFunction("staged-fn", "DEVELOPMENT").getEtag());
+
+        service.deleteFunction("staged-fn", created.getEtag());
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.describeFunction("staged-fn", "LIVE"));
+        assertEquals("NoSuchFunctionExists", missing.getErrorCode());
+    }
+
+    @Test
+    void keyGroupStoresPublicKeyIds() {
+        CloudFrontService service = serviceWithDomainSuffix("cloudfront.net");
+        KeyGroup group = new KeyGroup();
+        group.setName("signed-url-keys");
+        group.setComment("initial");
+        group.setItems(List.of("584d39cc-9ebb-45a7-9697-58932d0f4358"));
+
+        KeyGroup created = service.createKeyGroup(group);
+        assertEquals(List.of("584d39cc-9ebb-45a7-9697-58932d0f4358"),
+                service.getKeyGroup(created.getId()).getItems());
+    }
+
+    @Test
+    void realtimeLogConfigStoresFieldsAndEndpoints() {
+        CloudFrontService service = serviceWithDomainSuffix("cloudfront.net");
+        RealtimeLogConfig cfg = new RealtimeLogConfig();
+        cfg.setName("edge-logs");
+        cfg.setSamplingRate(100);
+        cfg.setFields(List.of("timestamp", "c-ip"));
+        cfg.setEndPoints(List.of(Map.of(
+                "StreamType", "Kinesis",
+                "RoleARN", "arn:aws:iam::000000000000:role/log",
+                "StreamARN", "arn:aws:kinesis:us-east-1:000000000000:stream/edge")));
+
+        RealtimeLogConfig created = service.createRealtimeLogConfig(cfg);
+        assertEquals(List.of("timestamp", "c-ip"), created.getFields());
+        assertEquals(1, created.getEndPoints().size());
+        assertEquals("arn:aws:kinesis:us-east-1:000000000000:stream/edge",
+                created.getEndPoints().get(0).get("StreamARN"));
     }
 }

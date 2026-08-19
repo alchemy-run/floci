@@ -142,8 +142,7 @@ public class CloudFrontController {
             boolean truncated = dists.size() == maxItems && dists.size() < total;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListDistributionsResult", NS)
-                    .start("DistributionList")
+                    .start("DistributionList", NS)
                     .elem("Marker", marker != null ? marker : "")
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated);
@@ -156,8 +155,7 @@ public class CloudFrontController {
                 xml.raw(xmlDistributionSummary(d));
             }
             xml.end("Items")
-                    .end("DistributionList")
-                    .end("ListDistributionsResult");
+                    .end("DistributionList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -339,8 +337,7 @@ public class CloudFrontController {
             boolean truncated = policies.size() == maxItems;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListCachePoliciesResult", NS)
-                    .start("CachePolicyList")
+                    .start("CachePolicyList", NS)
                     .elem("Marker", marker != null ? marker : "")
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated)
@@ -352,7 +349,7 @@ public class CloudFrontController {
                         .raw(xmlCachePolicyResponse(p))
                         .end("CachePolicySummary");
             }
-            xml.end("Items").end("CachePolicyList").end("ListCachePoliciesResult");
+            xml.end("Items").end("CachePolicyList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -452,8 +449,7 @@ public class CloudFrontController {
             boolean truncated = policies.size() == maxItems;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListOriginRequestPoliciesResult", NS)
-                    .start("OriginRequestPolicyList")
+                    .start("OriginRequestPolicyList", NS)
                     .elem("Marker", marker != null ? marker : "")
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated)
@@ -465,7 +461,7 @@ public class CloudFrontController {
                         .raw(xmlOriginRequestPolicyResponse(p))
                         .end("OriginRequestPolicySummary");
             }
-            xml.end("Items").end("OriginRequestPolicyList").end("ListOriginRequestPoliciesResult");
+            xml.end("Items").end("OriginRequestPolicyList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -566,8 +562,7 @@ public class CloudFrontController {
             boolean truncated = policies.size() == maxItems;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListResponseHeadersPoliciesResult", NS)
-                    .start("ResponseHeadersPolicyList")
+                    .start("ResponseHeadersPolicyList", NS)
                     .elem("Marker", marker != null ? marker : "")
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated)
@@ -579,7 +574,7 @@ public class CloudFrontController {
                         .raw(xmlResponseHeadersPolicyResponse(p))
                         .end("ResponseHeadersPolicySummary");
             }
-            xml.end("Items").end("ResponseHeadersPolicyList").end("ListResponseHeadersPoliciesResult");
+            xml.end("Items").end("ResponseHeadersPolicyList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -681,8 +676,7 @@ public class CloudFrontController {
             boolean truncated = oacs.size() == maxItems;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListOriginAccessControlsResult", NS)
-                    .start("OriginAccessControlList")
+                    .start("OriginAccessControlList", NS)
                     .elem("Marker", marker != null ? marker : "")
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated)
@@ -691,7 +685,7 @@ public class CloudFrontController {
             for (OriginAccessControl o : oacs) {
                 xml.raw(xmlOriginAccessControlSummary(o));
             }
-            xml.end("Items").end("OriginAccessControlList").end("ListOriginAccessControlsResult");
+            xml.end("Items").end("OriginAccessControlList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -914,8 +908,7 @@ public class CloudFrontController {
         try {
             List<CloudFrontFunction> fns = service.listFunctions(stage);
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListFunctionsResult", NS)
-                    .start("FunctionList")
+                    .start("FunctionList", NS)
                     .elem("MaxItems", maxItems)
                     .elem("Quantity", fns.size())
                     .start("Items");
@@ -938,7 +931,7 @@ public class CloudFrontController {
                         .end("FunctionMetadata")
                         .end("FunctionSummary");
             }
-            xml.end("Items").end("FunctionList").end("ListFunctionsResult");
+            xml.end("Items").end("FunctionList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1200,8 +1193,7 @@ public class CloudFrontController {
             boolean truncated = keys.size() == maxItems;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListPublicKeysResult", NS)
-                    .start("PublicKeyList")
+                    .start("PublicKeyList", NS)
                     .elem("Marker", marker != null ? marker : "")
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated)
@@ -1210,7 +1202,7 @@ public class CloudFrontController {
             for (PublicKey k : keys) {
                 xml.raw(xmlPublicKeySummary(k));
             }
-            xml.end("Items").end("PublicKeyList").end("ListPublicKeysResult");
+            xml.end("Items").end("PublicKeyList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1257,8 +1249,7 @@ public class CloudFrontController {
                     .start("KeyGroupConfig", NS)
                     .elem("Name", group.getName() != null ? group.getName() : "")
                     .elem("Comment", group.getComment() != null ? group.getComment() : "")
-                    .raw(xmlQuantityItems("Items", "PublicKey", items.size(),
-                            items.stream().map(k -> "<PublicKey>" + XmlBuilder.escape(k) + "</PublicKey>").toList()))
+                    .raw(xmlPublicKeyItems(items))
                     .end("KeyGroupConfig")
                     .build();
             return Response.ok(xml, XML).header("ETag", group.getEtag()).build();
@@ -1310,8 +1301,7 @@ public class CloudFrontController {
             boolean truncated = groups.size() == maxItems;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListKeyGroupsResult", NS)
-                    .start("KeyGroupList")
+                    .start("KeyGroupList", NS)
                     .elem("Marker", marker != null ? marker : "")
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated)
@@ -1320,7 +1310,7 @@ public class CloudFrontController {
             for (KeyGroup g : groups) {
                 xml.start("KeyGroupSummary").raw(xmlKeyGroupResponse(g)).end("KeyGroupSummary");
             }
-            xml.end("Items").end("KeyGroupList").end("ListKeyGroupsResult");
+            xml.end("Items").end("KeyGroupList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1406,8 +1396,7 @@ public class CloudFrontController {
             boolean truncated = configs.size() == maxItems;
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListRealtimeLogConfigsResult", NS)
-                    .start("RealtimeLogConfigs")
+                    .start("RealtimeLogConfigs", NS)
                     .elem("MaxItems", maxItems)
                     .elem("IsTruncated", truncated)
                     .elem("Quantity", configs.size())
@@ -1415,7 +1404,7 @@ public class CloudFrontController {
             for (RealtimeLogConfig c : configs) {
                 xml.raw(xmlRealtimeLogConfigBody(c));
             }
-            xml.end("Items").end("RealtimeLogConfigs").end("ListRealtimeLogConfigsResult");
+            xml.end("Items").end("RealtimeLogConfigs");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -2935,8 +2924,7 @@ public class CloudFrontController {
                 .start("KeyGroupConfig")
                 .elem("Name", group.getName() != null ? group.getName() : "")
                 .elem("Comment", group.getComment() != null ? group.getComment() : "")
-                .raw(xmlQuantityItems("Items", "PublicKey", items.size(),
-                        items.stream().map(k -> "<PublicKey>" + XmlBuilder.escape(k) + "</PublicKey>").toList()))
+                .raw(xmlPublicKeyItems(items))
                 .end("KeyGroupConfig")
                 .end("KeyGroup");
         return xml.build();
@@ -2944,24 +2932,40 @@ public class CloudFrontController {
 
     private String xmlRealtimeLogConfigBody(RealtimeLogConfig cfg) {
         List<String> fields = cfg.getFields() != null ? cfg.getFields() : List.of();
+        List<Map<String, Object>> endpoints = cfg.getEndPoints() != null ? cfg.getEndPoints() : List.of();
         XmlBuilder xml = new XmlBuilder()
                 .start("RealtimeLogConfig")
                 .elem("ARN", cfg.getArn() != null ? cfg.getArn() : "")
                 .elem("Name", cfg.getName() != null ? cfg.getName() : "")
                 .elem("SamplingRate", cfg.getSamplingRate())
-                .start("Fields")
-                .elem("Quantity", fields.size());
-        if (!fields.isEmpty()) {
-            xml.start("Items");
-            for (String f : fields) {
-                xml.elem("Field", f);
-            }
-            xml.end("Items");
+                .start("Fields");
+        for (String f : fields) {
+            xml.elem("Field", f);
         }
         xml.end("Fields");
-        xml.start("EndPoints").elem("Quantity", 0).end("EndPoints");
-        xml.end("RealtimeLogConfig");
+        xml.start("EndPoints");
+        for (Map<String, Object> ep : endpoints) {
+            xml.start("EndPoint")
+                    .elem("StreamType", String.valueOf(ep.getOrDefault("StreamType", "Kinesis")))
+                    .start("KinesisStreamConfig")
+                    .elem("RoleARN", ep.get("RoleARN") != null ? String.valueOf(ep.get("RoleARN")) : "")
+                    .elem("StreamARN", ep.get("StreamARN") != null ? String.valueOf(ep.get("StreamARN")) : "")
+                    .end("KinesisStreamConfig")
+                    .end("EndPoint");
+        }
+        xml.end("EndPoints")
+                .end("RealtimeLogConfig");
         return xml.build();
+    }
+
+    private String xmlPublicKeyItems(List<String> items) {
+        XmlBuilder xml = new XmlBuilder().start("Items");
+        if (items != null) {
+            for (String item : items) {
+                xml.elem("PublicKey", item);
+            }
+        }
+        return xml.end("Items").build();
     }
 
     private String xmlStreamingDistributionResponse(StreamingDistribution sd) {
@@ -3088,6 +3092,15 @@ public class CloudFrontController {
             cfg.setSamplingRate(100);
         }
         cfg.setFields(XmlParser.extractAll(body, "Field"));
+        List<Map<String, Object>> endpoints = new ArrayList<>();
+        for (Map<String, String> stream : XmlParser.extractGroups(body, "KinesisStreamConfig")) {
+            Map<String, Object> endpoint = new LinkedHashMap<>();
+            endpoint.put("StreamType", "Kinesis");
+            endpoint.put("RoleARN", stream.get("RoleARN"));
+            endpoint.put("StreamARN", stream.get("StreamARN"));
+            endpoints.add(endpoint);
+        }
+        cfg.setEndPoints(endpoints);
         return cfg;
     }
 
