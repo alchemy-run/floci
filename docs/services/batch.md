@@ -107,7 +107,7 @@ IAM roles, VPC fields, Fargate declarations, log configuration, storage, and res
 
 ## Limitations
 
-- No IAM enforcement.
+- No IAM enforcement. `AWSBatchServiceRole` is seeded so Alchemy Bindings can attach it to an unmanaged CE service role.
 - No VPC/subnet/security-group simulation.
 - No AWS-faithful capacity scheduling.
 - No array job fan-out or multi-node jobs.
