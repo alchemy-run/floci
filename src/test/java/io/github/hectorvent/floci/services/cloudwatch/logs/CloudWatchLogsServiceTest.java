@@ -503,4 +503,103 @@ class CloudWatchLogsServiceTest {
         assertEquals(0, atStart.events().size());
         assertEquals("b/0", atStart.nextBackwardToken(), "token must echo back to signal start of stream");
     }
+
+    @Test
+    void createLogGroupStoresClassAndDeletionProtection() {
+        service.createLogGroup("/app/ia", null, null, "INFREQUENT_ACCESS", false, null, REGION);
+        LogGroup group = service.describeLogGroups("/app/ia", REGION).getFirst();
+        assertEquals("INFREQUENT_ACCESS", group.getLogGroupClass());
+        assertEquals(Boolean.FALSE, group.getDeletionProtectionEnabled());
+    }
+
+    @Test
+    void deleteLogGroupRejectedWhenDeletionProtectionEnabled() {
+        service.createLogGroup("/app/protected", null, null, REGION);
+        service.putLogGroupDeletionProtection("/app/protected", true, REGION);
+        AwsException ex = assertThrows(AwsException.class, () -> service.deleteLogGroup("/app/protected", REGION));
+        assertEquals("InvalidParameterException", ex.getErrorCode());
+        service.putLogGroupDeletionProtection("/app/protected", false, REGION);
+        service.deleteLogGroup("/app/protected", REGION);
+    }
+
+    @Test
+    void putLogEventsRejectsEventsMoreThanTwoHoursInTheFuture() {
+        service.createLogGroup("/app/logs", null, null, REGION);
+        service.createLogStream("/app/logs", "stream-1", REGION);
+        long now = System.currentTimeMillis();
+        CloudWatchLogsService.PutLogEventsResult result = service.putLogEvents("/app/logs", "stream-1", List.of(
+                Map.of("timestamp", now, "message", "valid"),
+                Map.of("timestamp", now + 3L * 60 * 60 * 1000, "message", "too-new")
+        ), REGION);
+        assertEquals(1, result.tooNewLogEventStartIndex());
+        var stored = service.getLogEvents("/app/logs", "stream-1", null, null, 10, true, null, REGION);
+        assertEquals(1, stored.events().size());
+        assertEquals("valid", stored.events().getFirst().getMessage());
+    }
+
+    @Test
+    void filterLogEventsStripsQuotedPattern() {
+        service.createLogGroup("/app/logs", null, null, REGION);
+        service.createLogStream("/app/logs", "stream-1", REGION);
+        service.putLogEvents("/app/logs", "stream-1",
+                List.of(Map.of("timestamp", System.currentTimeMillis(), "message", "marker-abc")),
+                REGION);
+        var result = service.filterLogEvents("/app/logs", List.of(), null, null, "\"marker-abc\"", 10, REGION);
+        assertEquals(1, result.events().size());
+    }
+
+    @Test
+    void putDestinationAllowsCanonicalAccountRole() {
+        var dest = service.putDestination("central",
+                "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+                "arn:aws:iam::000000000000:role/delivery", REGION);
+        assertEquals("central", dest.getDestinationName());
+        assertTrue(dest.getArn().contains(":destination:central"));
+        service.putDestinationPolicy("central", "{\"Version\":\"2012-10-17\"}", REGION);
+        assertEquals(1, service.describeDestinations("central", REGION).size());
+        service.deleteDestination("central", REGION);
+        assertTrue(service.describeDestinations("central", REGION).isEmpty());
+    }
+
+    @Test
+    void putDestinationRejectsForeignAccountRole() {
+        AwsException ex = assertThrows(AwsException.class, () ->
+                service.putDestination("foreign",
+                        "arn:aws:kinesis:us-east-1:000000000000:stream/s",
+                        "arn:aws:iam::999999999999:role/other", REGION));
+        assertEquals("InvalidParameterException", ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("Cross-account role passing"));
+    }
+
+    @Test
+    void metricFilterRoundTrip() {
+        service.createLogGroup("/app/logs", null, null, REGION);
+        service.putMetricFilter("/app/logs", "errors", "?ERROR",
+                List.of(Map.of("metricName", "Errors", "metricNamespace", "Test", "metricValue", "1", "defaultValue", 0)),
+                REGION);
+        var described = service.describeMetricFilters("/app/logs", "errors", null, 10, REGION);
+        assertEquals(1, described.metricFilters().size());
+        assertEquals("?ERROR", described.metricFilters().getFirst().getFilterPattern());
+        service.deleteMetricFilter("/app/logs", "errors", REGION);
+        assertTrue(service.describeMetricFilters("/app/logs", "errors", null, 10, REGION).metricFilters().isEmpty());
+    }
+
+    @Test
+    void getLogRecordAndGroupFields() {
+        service.createLogGroup("/app/logs", null, null, REGION);
+        service.createLogStream("/app/logs", "stream-1", REGION);
+        service.putLogEvents("/app/logs", "stream-1",
+                List.of(Map.of("timestamp", System.currentTimeMillis(), "message", "hello-record")),
+                REGION);
+        var queryId = service.startQuery(List.of("/app/logs"),
+                System.currentTimeMillis() / 1000 - 60,
+                System.currentTimeMillis() / 1000 + 60,
+                "fields @timestamp, @message | limit 10", 10, REGION);
+        var state = service.getQueryResults(queryId);
+        String ptr = state.rows().getFirst().get("@ptr");
+        var record = service.getLogRecord(ptr);
+        assertEquals("hello-record", record.get("@message"));
+        var fields = service.getLogGroupFields("/app/logs", REGION);
+        assertTrue(fields.stream().anyMatch(f -> "@message".equals(f.name())));
+    }
 }

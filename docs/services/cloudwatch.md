@@ -30,19 +30,37 @@ Floci supports both CloudWatch Logs and CloudWatch Metrics.
 | `TagResource` | Tag a log group by ARN |
 | `UntagResource` | Remove tags from a log group by ARN |
 | `ListTagsForResource` | List tags for a log group ARN |
-| `PutSubscriptionFilter` | Create or update a subscription filter (stored only, see note below) |
+| `PutSubscriptionFilter` | Create or update a subscription filter and deliver matching events |
 | `DescribeSubscriptionFilters` | List subscription filters on a log group |
 | `DeleteSubscriptionFilter` | Delete a subscription filter |
+| `PutDestination` | Create or update a logs destination (Kinesis target + delivery role) |
+| `PutDestinationPolicy` | Set the destination access policy |
+| `DescribeDestinations` | List destinations (`DestinationNamePrefix` or `destinationNamePrefix`) |
+| `DeleteDestination` | Delete a destination |
+| `PutMetricFilter` | Create or update a metric filter |
+| `DescribeMetricFilters` | List metric filters on a log group |
+| `DeleteMetricFilter` | Delete a metric filter |
+| `GetLogGroupFields` | Discover fields present in a log group |
+| `GetLogRecord` | Fetch the full record behind an Insights `@ptr` |
+| `PutLogGroupDeletionProtection` | Enable or disable log-group deletion protection |
 | `GetDataProtectionPolicy` | Return the resolved log group identifier (see note below) |
 | `StartQuery` | Start a Logs Insights query (see [Logs Insights](#logs-insights)) |
 | `GetQueryResults` | Get the status and results of a Logs Insights query |
 | `StopQuery` | Stop a query that has not completed yet |
 
-Two actions are currently simplified:
+Notes:
 
-- **`PutSubscriptionFilter`** stores the filter so that `DescribeSubscriptionFilters`
-  returns it, but log events are **not** forwarded to the destination ARN. Lambda,
-  Kinesis, and Firehose subscription destinations are not wired up.
+- **`CreateLogGroup`** stores `logGroupClass` (default `STANDARD`) and
+  `deletionProtectionEnabled`. `DescribeLogGroups` always returns both, plus
+  `arn` (with `:*`) and `logGroupArn` (without).
+- **`PutLogEvents`** rejects events more than two hours in the future via
+  `rejectedLogEventsInfo.tooNewLogEventStartIndex` and still ingests the rest.
+- **`PutSubscriptionFilter`** delivers matching events to Lambda (gzipped
+  `awslogs.data` envelope) and Kinesis. Same-account pass-role / Lambda
+  targeting compares the ARN account to both the request identity and Floci's
+  canonical account `000000000000`; a local IAM role or Lambda still counts as
+  in-account when those IDs differ. Cross-account Lambda targets require a
+  logs Destination.
 - **`GetDataProtectionPolicy`** does not model data-protection policies. It returns
   HTTP 200 with the resolved `logGroupIdentifier` and no `policyDocument` — including for
   a log group that does not exist, where real AWS returns `ResourceNotFoundException`.

@@ -289,4 +289,36 @@ class CloudWatchLogsHandlerTest {
                 () -> handler.handle("StartQuery", request, REGION));
         assertEquals("InvalidParameterException", ex.getErrorCode());
     }
+
+    @Test
+    void describeLogGroupsReturnsClassAndDeletionProtection() {
+        service.createLogGroup("/classed", null, null, "INFREQUENT_ACCESS", false, null, REGION);
+
+        ObjectNode request = MAPPER.createObjectNode();
+        request.put("logGroupNamePrefix", "/classed");
+        Response response = handler.handle("DescribeLogGroups", request, REGION);
+
+        JsonNode group = ((ObjectNode) response.getEntity()).path("logGroups").get(0);
+        assertEquals("INFREQUENT_ACCESS", group.path("logGroupClass").asText());
+        assertEquals(false, group.path("deletionProtectionEnabled").asBoolean());
+        assertTrue(group.path("arn").asText().endsWith(":*"));
+        assertThat(group.path("logGroupArn").asText(), not(containsString(":*")));
+    }
+
+    @Test
+    void putAndDescribeDestination() {
+        ObjectNode put = MAPPER.createObjectNode();
+        put.put("destinationName", "central");
+        put.put("targetArn", "arn:aws:kinesis:us-east-1:000000000000:stream/s");
+        put.put("roleArn", "arn:aws:iam::000000000000:role/delivery");
+        Response created = handler.handle("PutDestination", put, REGION);
+        assertEquals(200, created.getStatus());
+
+        ObjectNode describe = MAPPER.createObjectNode();
+        describe.put("DestinationNamePrefix", "central");
+        Response listed = handler.handle("DescribeDestinations", describe, REGION);
+        JsonNode dest = ((ObjectNode) listed.getEntity()).path("destinations").get(0);
+        assertEquals("central", dest.path("destinationName").asText());
+        assertEquals("arn:aws:iam::000000000000:role/delivery", dest.path("roleArn").asText());
+    }
 }

@@ -3,19 +3,21 @@ package io.github.hectorvent.floci.services.cloudwatch.logs.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class SubscriptionFilter {
+public class MetricFilter {
 
     private String filterName;
     private String logGroupName;
     private String filterPattern;
-    private String destinationArn;
-    private String roleArn;
-    private String distribution;
+    private List<Map<String, Object>> metricTransformations = new ArrayList<>();
     private long creationTime;
 
-    public SubscriptionFilter() {}
+    public MetricFilter() {}
 
     public String getFilterName() { return filterName; }
     public void setFilterName(String filterName) { this.filterName = filterName; }
@@ -26,14 +28,10 @@ public class SubscriptionFilter {
     public String getFilterPattern() { return filterPattern; }
     public void setFilterPattern(String filterPattern) { this.filterPattern = filterPattern; }
 
-    public String getDestinationArn() { return destinationArn; }
-    public void setDestinationArn(String destinationArn) { this.destinationArn = destinationArn; }
-
-    public String getRoleArn() { return roleArn; }
-    public void setRoleArn(String roleArn) { this.roleArn = roleArn; }
-
-    public String getDistribution() { return distribution; }
-    public void setDistribution(String distribution) { this.distribution = distribution; }
+    public List<Map<String, Object>> getMetricTransformations() { return metricTransformations; }
+    public void setMetricTransformations(List<Map<String, Object>> metricTransformations) {
+        this.metricTransformations = metricTransformations != null ? metricTransformations : new ArrayList<>();
+    }
 
     public long getCreationTime() { return creationTime; }
     public void setCreationTime(long creationTime) { this.creationTime = creationTime; }
