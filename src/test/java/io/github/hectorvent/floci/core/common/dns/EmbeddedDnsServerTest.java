@@ -97,6 +97,18 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_syncStatesHostMapsToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("sync-states.us-east-1.amazonaws.com", "172.19.0.2").orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("sync-states-fips.us-west-2.amazonaws.com", "172.19.0.2").orElseThrow());
+        assertTrue(dns.resolveARecord("states.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("my-bucket.s3.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
     void resolveARecord_prefersEc2PrivateDnsAddressOverFlociWildcard() {
         assertEquals(
                 "172.16.128.9",

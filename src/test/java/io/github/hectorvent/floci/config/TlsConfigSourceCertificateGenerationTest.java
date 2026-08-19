@@ -160,10 +160,14 @@ class TlsConfigSourceCertificateGenerationTest {
         
         assertTrue(sans.contains("host.docker.internal"),
             "Certificate SANs should include default 'host.docker.internal'");
+        assertTrue(sans.contains("sync-states.us-east-1.amazonaws.com"),
+            "Certificate SANs should include StartSyncExecution host sync-states.us-east-1.amazonaws.com");
+        assertTrue(sans.contains("*.us-east-1.amazonaws.com"),
+            "Certificate SANs should include *.us-east-1.amazonaws.com");
 
         // Should not contain any custom hostnames
-        assertEquals(7, sans.size(),
-            "Certificate SANs should contain exactly 7 default entries (localhost, 127.0.0.1, 0.0.0.0, *.localhost, localhost.floci.io, *.localhost.floci.io, host.docker.internal)");
+        assertEquals(10, sans.size(),
+            "Certificate SANs should contain exactly 10 default entries (7 loopback/docker + 3 sync-states)");
     }
 
     /**

@@ -209,7 +209,18 @@ public class AslExecutor {
             exec.setStopDate(System.currentTimeMillis() / 1000.0);
             onUpdate.accept(exec, history);
         } catch (Exception e) {
-            LOG.warnv("Sync execution wait failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
+            // FailStateException must never escape to the JSON controller — AWS
+            // StartSyncExecution returns HTTP 200 with status FAILED + Error/Cause.
+            FailStateException fail = unwrapFail(e);
+            if (fail != null && !"FAILED".equals(exec.getStatus())
+                    && !"SUCCEEDED".equals(exec.getStatus())
+                    && !"TIMED_OUT".equals(exec.getStatus())
+                    && !"ABORTED".equals(exec.getStatus())) {
+                failExecution(exec, history, new AtomicLong(history.size()), fail);
+                onUpdate.accept(exec, history);
+            } else {
+                LOG.warnv("Sync execution wait failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
+            }
         }
     }
 
@@ -351,8 +362,15 @@ public class AslExecutor {
 
         } catch (Exception e) {
             LOG.warnv("ASL execution failed for {0}: {1}", exec.getExecutionArn(), e.getMessage());
-            exec.setStatus("FAILED");
-            exec.setStopDate(System.currentTimeMillis() / 1000.0);
+            FailStateException fail = unwrapFail(e);
+            if (fail != null) {
+                failExecution(exec, history, new AtomicLong(history.size()), fail);
+            } else {
+                exec.setStatus("FAILED");
+                exec.setStopDate(System.currentTimeMillis() / 1000.0);
+                exec.setError("States.Runtime");
+                exec.setCause(e.getMessage() != null ? e.getMessage() : "Unknown error");
+            }
             onUpdate.accept(exec, history);
         }
     }
@@ -497,15 +515,29 @@ public class AslExecutor {
         return fn;
     }
 
+    /**
+     * AWS optimized {@code arn:aws:states:::lambda:invoke} returns the Lambda
+     * InvokeFunction envelope, not the raw function payload. Alchemy's
+     * {@code fromProgram} compiler assigns {@code {% $states.result.Payload %}}.
+     */
+    private JsonNode wrapOptimizedLambdaInvokeResult(JsonNode functionOutput, InvokeResult result) {
+        ObjectNode wrapped = objectMapper.createObjectNode();
+        wrapped.put("StatusCode", result.getStatusCode() > 0 ? result.getStatusCode() : 200);
+        wrapped.put("ExecutedVersion", "$LATEST");
+        wrapped.set("Payload", functionOutput != null ? functionOutput : NullNode.getInstance());
+        return wrapped;
+    }
+
     private JsonNode invokeResource(String resource, JsonNode input, StateMachine sm, String taskToken) throws Exception {
         // Support Lambda resources: direct ARN or optimized integration
         String functionName = null;
         JsonNode lambdaPayload = input;
+        boolean optimizedLambdaInvoke = resource.startsWith("arn:aws:states:::lambda:invoke");
 
         if (resource.contains(":lambda:") && resource.contains(":function:")) {
             // Direct Lambda ARN: arn:aws:lambda:region:account:function:name[:qualifier]
             functionName = extractLambdaFunctionName(resource);
-        } else if (resource.equals("arn:aws:states:::lambda:invoke")) {
+        } else if (optimizedLambdaInvoke) {
             // Optimized Lambda integration — function name and payload come from resolved input
             String fnRef = input.path("FunctionName").asText(null);
             if (fnRef != null) {
@@ -532,11 +564,17 @@ public class AslExecutor {
                 throw new FailStateException("Lambda.AWSLambdaException", result.getFunctionError());
             }
 
+            JsonNode functionOutput = NullNode.getInstance();
             byte[] responseBytes = result.getPayload();
             if (responseBytes != null && responseBytes.length > 0) {
-                return objectMapper.readTree(responseBytes);
+                functionOutput = objectMapper.readTree(responseBytes);
             }
-            return NullNode.getInstance();
+            // AWS `lambda:invoke` (optimized) wraps the function output so
+            // JSONata `{% $states.result.Payload %}` / JSONPath `$.Payload` work.
+            // A direct function ARN returns the payload as the task result.
+            return optimizedLambdaInvoke
+                    ? wrapOptimizedLambdaInvokeResult(functionOutput, result)
+                    : functionOutput;
         }
 
         // DynamoDB optimized integrations (4 actions)
@@ -1443,6 +1481,16 @@ public class AslExecutor {
                 futures.forEach(f -> f.cancel(true));
                 throw new FailStateException("States.Timeout",
                         "Parallel state timed out after " + timeoutSeconds + " seconds");
+            } catch (ExecutionException e) {
+                // Branch failures are FailStateException; Future.get wraps them.
+                // Re-throw so the Parallel state's Catch can match AWS Error names
+                // (e.g. a typed Fail inside a single-branch Parallel that Alchemy's
+                // Sfn.catchTag emits). Leaving the wrapper in place leaked
+                // `AslExecutor$FailStateException: OrderRejected: …` to the client.
+                throw unwrapBranchFailure(e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new FailStateException("States.Runtime", "Parallel branch interrupted");
             }
         }
 
@@ -2693,6 +2741,34 @@ public class AslExecutor {
     }
 
     record StateResult(JsonNode output, String nextState) {}
+
+    /**
+     * {@link Future#get} wraps a branch {@link FailStateException} in
+     * {@link ExecutionException}. Unwrap so Catch can match the AWS error name
+     * instead of leaking the Java class to the client.
+     */
+    private static FailStateException unwrapFail(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof FailStateException fail) {
+                return fail;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private static FailStateException unwrapBranchFailure(ExecutionException error) {
+        FailStateException fail = unwrapFail(error);
+        if (fail != null) {
+            return fail;
+        }
+        Throwable cause = error.getCause();
+        String message = cause != null && cause.getMessage() != null
+                ? cause.getMessage()
+                : "Parallel branch failed";
+        return new FailStateException("States.Runtime", message);
+    }
 
     static class FailStateException extends RuntimeException {
         final String error;

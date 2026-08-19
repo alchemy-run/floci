@@ -85,6 +85,8 @@ class TlsConfigSourceMetadataPersistenceTest {
             "Metadata should contain '*.localhost.floci.io'");
         assertTrue(metadata.getHostnames().contains("host.docker.internal"),
             "Metadata should contain 'host.docker.internal'");
+        assertTrue(metadata.getHostnames().contains("sync-states.us-east-1.amazonaws.com"),
+            "Metadata should contain StartSyncExecution host sync-states.us-east-1.amazonaws.com");
     }
 
     /**

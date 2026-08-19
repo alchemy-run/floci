@@ -172,6 +172,104 @@ class StepFunctionsAlchemyParityIntegrationTest {
     }
 
     @Test
+    void failState_surfacesAwsShapedExecutionFailureNotJavaException() {
+        String definition = """
+                {
+                  "StartAt": "Reject",
+                  "States": {
+                    "Reject": {
+                      "Type": "Fail",
+                      "Error": "OrderRejected",
+                      "Cause": "no stock"
+                    }
+                  }
+                }
+                """;
+        String arn = createStateMachine("parity-fail-shape-sm", definition, "EXPRESS", false);
+
+        given()
+                .header("X-Amz-Target", "AWSStepFunctions.StartSyncExecution")
+                .header("Host", "sync-states.us-east-1.amazonaws.com")
+                .contentType(CT)
+                .body("{\"stateMachineArn\":\"" + arn + "\",\"input\":\"{}\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("status", equalTo("FAILED"))
+                .body("error", equalTo("OrderRejected"))
+                .body("cause", equalTo("no stock"));
+    }
+
+    @Test
+    void parallelCatch_recoversTypedFailState() {
+        // Alchemy Sfn.catchTag(Sfn.fail(...)) compiles to a single-branch Parallel
+        // whose Catch matches the Fail state's Error. Future.get must unwrap
+        // FailStateException or the Java class name leaks and Catch never fires.
+        String definition = """
+                {
+                  "QueryLanguage": "JSONata",
+                  "StartAt": "Try",
+                  "States": {
+                    "Try": {
+                      "Type": "Parallel",
+                      "Branches": [
+                        {
+                          "StartAt": "Reject",
+                          "States": {
+                            "Reject": {
+                              "Type": "Fail",
+                              "Error": "OrderRejected",
+                              "Cause": "no stock"
+                            }
+                          }
+                        }
+                      ],
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["OrderRejected"],
+                          "Next": "Recover",
+                          "Assign": {
+                            "recovered": "{% $states.errorOutput.Cause %}"
+                          }
+                        }
+                      ]
+                    },
+                    "Recover": {
+                      "Type": "Pass",
+                      "Output": {
+                        "recovered": "{% $recovered %}"
+                      },
+                      "End": true
+                    }
+                  }
+                }
+                """;
+        String arn = createStateMachine("parity-fail-catch-sm", definition, "EXPRESS", false);
+
+        given()
+                .header("X-Amz-Target", "AWSStepFunctions.StartSyncExecution")
+                .contentType(CT)
+                .body("{\"stateMachineArn\":\"" + arn + "\",\"input\":\"{}\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("status", equalTo("SUCCEEDED"))
+                .body("output", equalTo("{\"recovered\":\"no stock\"}"));
+    }
+
+    @Test
+    void startSyncExecution_acceptsAmazonStatesServiceTargetAndSyncHost() {
+        String arn = createStateMachine("parity-sync-host-sm", PASS_V1, "EXPRESS", false);
+
+        given()
+                .header("X-Amz-Target", "AmazonStatesService.StartSyncExecution")
+                .header("Host", "sync-states.us-east-1.amazonaws.com")
+                .contentType(CT)
+                .body("{\"stateMachineArn\":\"" + arn + "\",\"input\":\"{}\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("status", equalTo("SUCCEEDED"));
+    }
+
+    @Test
     void sendTaskHeartbeat_rejectsUnknownToken() {
         given()
                 .header("X-Amz-Target", "AWSStepFunctions.SendTaskHeartbeat")

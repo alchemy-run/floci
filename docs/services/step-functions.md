@@ -1,7 +1,7 @@
 # Step Functions
 
-**Protocol:** JSON 1.1 (`X-Amz-Target: AmazonStatesService.*`)
-**Endpoint:** `POST http://localhost:4566/`
+**Protocol:** JSON 1.0 (`X-Amz-Target: AWSStepFunctions.*` or `AmazonStatesService.*`)
+**Endpoint:** `POST http://localhost:4566/` (`Host: sync-states.{region}.amazonaws.com` is accepted for `StartSyncExecution`). The Docker image sets `FLOCI_TLS_ENABLED=true` so Lambda callers that hit `https://sync-states.{region}.amazonaws.com:443` reach Floci's TLS proxy (SAN includes `sync-states.us-east-1.amazonaws.com` / `*.us-east-1.amazonaws.com`).
 
 ## Supported Actions
 
@@ -19,7 +19,8 @@
 | `ValidateStateMachineDefinition` | Validate an ASL definition without creating a state machine |
 | `TestState` | Execute a single ASL state without creating a machine |
 | `StartExecution` | Start a new execution |
-| `StartSyncExecution` | - |
+| `StartSyncExecution` | Synchronous EXPRESS execution (HTTP 200 even when the run FAILED) |
+| `lambda:invoke` (optimized) | Task result is the Lambda Invoke envelope (`Payload` / `StatusCode`), not the raw function body |
 | `DescribeExecution` | Get execution status and output |
 | `ListExecutions` | List executions for a state machine |
 | `StopExecution` | Stop a running execution |

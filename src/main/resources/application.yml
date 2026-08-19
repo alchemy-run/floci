@@ -174,7 +174,7 @@ floci:
     cors-allow-private-network: false
 
   tls:
-    enabled: false                     # FLOCI_TLS_ENABLED (default: false)
+    enabled: false                     # FLOCI_TLS_ENABLED (default: false; the Docker image sets FLOCI_TLS_ENABLED=true so Lambda can reach sync-states.{region}:443)
     # cert-path: ""                    # FLOCI_TLS_CERT_PATH (PEM certificate file)
     # key-path: ""                     # FLOCI_TLS_KEY_PATH (PEM private key file)
     self-signed: true                  # FLOCI_TLS_SELF_SIGNED — auto-generate a self-signed cert if no cert-path provided

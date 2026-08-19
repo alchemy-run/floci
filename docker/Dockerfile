@@ -16,6 +16,10 @@ FROM eclipse-temurin:25-jre-noble
 ARG VERSION=latest
 ENV FLOCI_VERSION=${VERSION}
 ENV FLOCI_STORAGE_PERSISTENT_PATH=/app/data
+# Alchemy Lambda StartSyncExecution targets https://sync-states.{region}.amazonaws.com:443
+# (Smithy hostPrefix "sync-"). TLS + the TlsProxyServer 443 bind + CA mount in
+# ContainerLauncher are required for that hop; HTTP on 4566 stays dual-protocol.
+ENV FLOCI_TLS_ENABLED=true
 
 ENV AWS_DEFAULT_REGION=us-east-1
 ENV AWS_ACCESS_KEY_ID=test
@@ -62,6 +66,7 @@ COPY --chmod=755 docker/localstack-parity.sh /usr/local/bin/localstack-parity.sh
 VOLUME /app/data
 
 EXPOSE 4566
+EXPOSE 443
 
 # Need to expose separately due to https://github.com/floci-io/floci/issues/2095.
 # This preseres compatibility with https://github.com/docker-java/docker-java/blob/002b6eb7aa2b892be729c7c2a5e95f782924db38/docker-java-api/src/main/java/com/github/dockerjava/api/model/ExposedPort.java#L119

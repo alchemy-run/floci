@@ -167,7 +167,22 @@ public class EmbeddedDnsServer {
         if (matchesSuffix(name)) {
             return Optional.of(myIp);
         }
+        if (isSyncStatesHost(name)) {
+            return Optional.of(myIp);
+        }
         return resolveEc2PrivateDnsName(name);
+    }
+
+    /**
+     * {@code StartSyncExecution} targets {@code sync-states.{region}.amazonaws.com}
+     * (Smithy {@code hostPrefix: "sync-"}). Lambda containers that call that
+     * host (Alchemy's StartSyncExecutionHttp) must resolve it to Floci.
+     */
+    static boolean isSyncStatesHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches("sync-states(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
     }
 
     Optional<String> resolveEc2PrivateDnsName(String name) {

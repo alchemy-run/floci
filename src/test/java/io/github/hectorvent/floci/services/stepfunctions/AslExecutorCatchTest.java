@@ -154,6 +154,35 @@ class AslExecutorCatchTest {
         verify(lambdaExecutor, never()).invoke(eq(cleanupFunction), any(byte[].class), eq(InvocationType.RequestResponse));
     }
 
+    @Test
+    void optimizedLambdaInvoke_wrapsFunctionOutputUnderPayload() throws Exception {
+        // Alchemy StateMachine.fromProgram compiles Sfn.invoke to
+        // Resource=arn:aws:states:::lambda:invoke + Assign {% $states.result.Payload %}.
+        Execution execution = run("""
+                {
+                  "QueryLanguage": "JSONata",
+                  "StartAt": "Invoke",
+                  "States": {
+                    "Invoke": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::lambda:invoke",
+                      "Arguments": {
+                        "FunctionName": "%s",
+                        "Payload": { "value": 6 }
+                      },
+                      "Output": "{%% $states.result.Payload %%}",
+                      "End": true
+                    }
+                  }
+                }
+                """.formatted(CLEANUP_FUNCTION_ARN));
+
+        assertEquals("SUCCEEDED", execution.getStatus());
+        JsonNode output = objectMapper.readTree(execution.getOutput());
+        assertTrue(output.path("cleanup").asBoolean());
+        assertEquals(6, output.path("input").path("value").asInt());
+    }
+
     private Execution run(String definition) {
         StateMachine stateMachine = new StateMachine();
         stateMachine.setName("catch-test");
