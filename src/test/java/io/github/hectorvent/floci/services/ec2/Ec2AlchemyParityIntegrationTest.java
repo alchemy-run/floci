@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.ec2;
 
+import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -365,5 +366,35 @@ class Ec2AlchemyParityIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+    }
+
+    @Test
+    @Order(20)
+    void createEncryptedVolumeResolvesKmsAliasToKeyArn() throws Exception {
+        RestAssuredJsonUtils.configureAwsContentTypes();
+        var key = RestAssuredJsonUtils.awsActionJson("TrentService", "CreateKey",
+                "{\"Description\":\"ec2-encrypted-volume\"}");
+        String keyId = key.path("KeyMetadata").path("KeyId").asText();
+        String keyArn = key.path("KeyMetadata").path("Arn").asText();
+
+        RestAssuredJsonUtils.awsAction("TrentService", "CreateAlias",
+                "{\"AliasName\":\"alias/ec2-encrypted-volume\",\"TargetKeyId\":\"" + keyId + "\"}")
+                .then().statusCode(200);
+
+        given()
+            .formParam("Action", "CreateVolume")
+            .formParam("AvailabilityZone", "us-west-2a")
+            .formParam("Size", "1")
+            .formParam("VolumeType", "gp3")
+            .formParam("Encrypted", "true")
+            .formParam("KmsKeyId", "alias/ec2-encrypted-volume")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("CreateVolumeResponse.encrypted", equalTo("true"))
+            .body("CreateVolumeResponse.kmsKeyId", equalTo(keyArn))
+            .body("CreateVolumeResponse.availabilityZone", equalTo("us-west-2a"));
     }
 }

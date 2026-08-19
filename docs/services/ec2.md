@@ -200,6 +200,16 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | AssociateVpcCidrBlock | Adds a secondary CIDR block association to a VPC. |
 | DisassociateVpcCidrBlock | Removes a secondary CIDR block association from a VPC. |
 
+### Flow Logs
+
+| Action | Description |
+|--------|-------------|
+| CreateFlowLogs | Creates a VPC flow log. CloudWatch Logs (`LogGroupName` + `DeliverLogsPermissionArn`) and S3 destinations are stored. Create-time `TagSpecification` of `vpc-flow-log` is applied. |
+| DescribeFlowLogs | Lists or returns stored flow logs, including `logGroupName`, `deliverLogsPermissionArn`, and `tagSet`. |
+| DeleteFlowLogs | Deletes stored flow logs. Missing ids are ignored (idempotent). |
+
+`DescribeTags` classifies `fl-*` ids as `vpc-flow-log`.
+
 ### Subnets
 
 | Action | Description |
@@ -363,7 +373,7 @@ Launch templates store versioned launch data. New template versions can be creat
 
 | Action | Description |
 |--------|-------------|
-| CreateVolume | Creates an EBS volume record. |
+| CreateVolume | Creates an EBS volume record. `KmsKeyId` (alias name, key id, or ARN) is resolved to the CMK ARN via KMS and returned on describe. |
 | DescribeVolumes | Lists or returns stored EBS volume records. |
 | DeleteVolume | Deletes an EBS volume record. |
 | ModifyVolume | Updates size, type, IOPS, or throughput on a volume. |

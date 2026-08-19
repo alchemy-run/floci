@@ -520,6 +520,39 @@ class Ec2ServiceTest {
     }
 
     @Test
+    void createVolumeStoresKmsKeyIdAndAcceptsForeignAz() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        String keyArn = "arn:aws:kms:us-east-1:000000000000:key/abc";
+        Volume volume = service.createVolume("us-east-1", "us-west-2a", "gp3", 1,
+                true, 0, null, null, keyArn, List.of());
+
+        assertTrue(volume.isEncrypted());
+        assertEquals(keyArn, volume.getKmsKeyId());
+        assertEquals("us-west-2a", volume.getAvailabilityZone());
+        Volume observed = service.describeVolumes("us-east-1", List.of(volume.getVolumeId()), Map.of()).getFirst();
+        assertEquals(keyArn, observed.getKmsKeyId());
+        assertTrue(observed.isEncrypted());
+    }
+
+    @Test
+    void describeTagsClassifiesFlowLogIdsAsVpcFlowLog() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        service.createTags("us-east-1", List.of("fl-abc123"), List.of(new Tag("env", "prod")));
+
+        List<Map<String, String>> items = service.describeTags("us-east-1",
+                Map.of("resource-id", List.of("fl-abc123"), "resource-type", List.of("vpc-flow-log")));
+
+        assertEquals(1, items.size());
+        assertEquals("vpc-flow-log", items.getFirst().get("resourceType"));
+        assertEquals("env", items.getFirst().get("key"));
+        assertEquals("prod", items.getFirst().get("value"));
+    }
+
+    @Test
     void detachRootVolumeRequiresForceAndStopped() {
         Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
                 mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),

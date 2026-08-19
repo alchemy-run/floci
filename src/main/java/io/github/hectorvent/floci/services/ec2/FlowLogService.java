@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.model.FlowLog;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
+import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.ec2.model.InstanceNetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
@@ -118,18 +119,35 @@ public class FlowLogService {
     public FlowLog createFlowLog(String region, String resourceId, String resourceType,
                                  String trafficType, String logDestinationType,
                                  String logDestination, String logFormat, int maxAggregationInterval) {
+        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
+                logDestination, logFormat, maxAggregationInterval, null, null, List.of());
+    }
+
+    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
+                                 String trafficType, String logDestinationType,
+                                 String logDestination, String logFormat, int maxAggregationInterval,
+                                 String logGroupName, String deliverLogsPermissionArn, List<Tag> tags) {
         FlowLog fl = new FlowLog();
         fl.setFlowLogId("fl-" + randomHex(17));
         fl.setResourceId(resourceId);
         fl.setResourceType(resourceType != null ? resourceType : "VPC");
         fl.setTrafficType(trafficType != null ? trafficType : "ALL");
-        fl.setLogDestinationType(logDestinationType != null ? logDestinationType : "s3");
+        boolean cloudWatch = logGroupName != null && !logGroupName.isBlank();
+        String destinationType = logDestinationType != null && !logDestinationType.isBlank()
+                ? logDestinationType
+                : (cloudWatch ? "cloud-watch-logs" : "s3");
+        fl.setLogDestinationType(destinationType);
         fl.setLogDestination(logDestination);
+        fl.setLogGroupName(logGroupName);
+        fl.setDeliverLogsPermissionArn(deliverLogsPermissionArn);
         fl.setBucketName(bucketFromArn(logDestination));
         fl.setLogFormat(logFormat);
         fl.setMaxAggregationInterval(maxAggregationInterval);
         fl.setRegion(region);
         fl.setAccountId(config.defaultAccountId());
+        if (tags != null && !tags.isEmpty()) {
+            fl.setTags(new ArrayList<>(tags));
+        }
         flowLogs.put(fl.getFlowLogId(), fl);
         LOG.infov("Created flow log {0} for {1} {2} -> {3}",
                 fl.getFlowLogId(), fl.getResourceType(), resourceId, fl.getBucketName());

@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.ec2;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ec2.model.FlowLog;
+import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,5 +50,18 @@ class FlowLogServiceTest {
     @Test
     void deleteFlowLogsIgnoresUnknownIds() {
         assertTrue(flowLogService.deleteFlowLogs("us-east-1", List.of("fl-doesnotexist")).isEmpty());
+    }
+
+    @Test
+    void createFlowLogDefaultsToCloudWatchWhenLogGroupNameIsSet() {
+        FlowLog fl = flowLogService.createFlowLog("us-east-1", "vpc-123", "VPC", "ALL",
+                null, null, null, 600, "/aws/vpc/flow",
+                "arn:aws:iam::000000000000:role/flow", List.of(new Tag("env", "prod")));
+
+        assertEquals("cloud-watch-logs", fl.getLogDestinationType());
+        assertEquals("/aws/vpc/flow", fl.getLogGroupName());
+        assertEquals("arn:aws:iam::000000000000:role/flow", fl.getDeliverLogsPermissionArn());
+        assertEquals(1, fl.getTags().size());
+        assertEquals("env", fl.getTags().getFirst().getKey());
     }
 }

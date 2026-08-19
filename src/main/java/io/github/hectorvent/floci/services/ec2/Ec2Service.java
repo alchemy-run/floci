@@ -2275,6 +2275,10 @@ public class Ec2Service implements ContainerTeardown {
         if (eni != null) { eni.setTagSet(new ArrayList<>(tagList)); }
     }
 
+    public List<Tag> getResourceTags(String resourceId) {
+        return new ArrayList<>(tags.get(resourceId).orElse(List.of()));
+    }
+
     public List<Map<String, String>> describeTags(String region, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
         List<String> filterResourceIds   = filters != null ? filters.get("resource-id")   : null;
@@ -2330,6 +2334,7 @@ public class Ec2Service implements ContainerTeardown {
         if (resourceId.startsWith("pl-")) return "prefix-list";
         if (resourceId.startsWith("eni-")) return "network-interface";
         if (resourceId.startsWith("acl-")) return "network-acl";
+        if (resourceId.startsWith("fl-")) return "vpc-flow-log";
         return "unknown";
     }
 
@@ -3083,6 +3088,13 @@ public class Ec2Service implements ContainerTeardown {
     public Volume createVolume(String region, String availabilityZone, String volumeType,
                                int size, boolean encrypted, int iops, Integer throughput,
                                String snapshotId, List<Tag> volumeTags) {
+        return createVolume(region, availabilityZone, volumeType, size, encrypted, iops, throughput,
+                snapshotId, null, volumeTags);
+    }
+
+    public Volume createVolume(String region, String availabilityZone, String volumeType,
+                               int size, boolean encrypted, int iops, Integer throughput,
+                               String snapshotId, String kmsKeyId, List<Tag> volumeTags) {
         ensureDefaultResources(region);
         String volumeId = "vol-" + randomHex(17);
         String effectiveType = volumeType != null ? volumeType : "gp2";
@@ -3091,7 +3103,11 @@ public class Ec2Service implements ContainerTeardown {
         vol.setAvailabilityZone(availabilityZone != null ? availabilityZone : region + "a");
         vol.setVolumeType(effectiveType);
         vol.setSize(size > 0 ? size : 8);
-        vol.setEncrypted(encrypted);
+        boolean useEncryption = encrypted || (kmsKeyId != null && !kmsKeyId.isBlank());
+        vol.setEncrypted(useEncryption);
+        if (kmsKeyId != null && !kmsKeyId.isBlank()) {
+            vol.setKmsKeyId(kmsKeyId);
+        }
         vol.setIops(iops > 0 ? iops : (volumeType != null && volumeType.startsWith("io") ? iops : 0));
         // Throughput is a gp3-only attribute; AWS reports 125 MiB/s by default for gp3.
         if ("gp3".equals(effectiveType)) {

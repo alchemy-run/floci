@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.ec2.model.*;
+import io.github.hectorvent.floci.services.kms.KmsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -39,12 +40,15 @@ public class Ec2QueryHandler {
     private final Ec2Service service;
     private final EmulatorConfig config;
     private final FlowLogService flowLogService;
+    private final KmsService kmsService;
 
     @Inject
-    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService) {
+    public Ec2QueryHandler(Ec2Service service, EmulatorConfig config, FlowLogService flowLogService,
+                           KmsService kmsService) {
         this.service = service;
         this.config = config;
         this.flowLogService = flowLogService;
+        this.kmsService = kmsService;
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
@@ -257,6 +261,23 @@ public class Ec2QueryHandler {
     private String firstPresent(MultivaluedMap<String, String> p, String first, String second) {
         String value = p.getFirst(first);
         return value != null && !value.isBlank() ? value : p.getFirst(second);
+    }
+
+    /**
+     * AWS CreateVolume stores the CMK ARN even when the request passed an alias
+     * name ({@code alias/...}) or key id. Resolve through KMS so DescribeVolumes
+     * matches live EC2.
+     */
+    private String resolveVolumeKmsKeyId(String kmsKeyId, String region) {
+        if (kmsKeyId == null || kmsKeyId.isBlank()) {
+            return null;
+        }
+        try {
+            return kmsService.describeKey(kmsKeyId, region).getArn();
+        } catch (AwsException e) {
+            throw new AwsException("InvalidParameterValue",
+                    "The KMS key " + kmsKeyId + " does not exist, is disabled, or is not usable.", 400);
+        }
     }
 
     private int parseIntParam(MultivaluedMap<String, String> p, String name, int defaultValue) {
@@ -887,10 +908,16 @@ public class Ec2QueryHandler {
             logDestination = p.getFirst("LogDestinationArn");
         }
         String logFormat = p.getFirst("LogFormat");
+        String logGroupName = p.getFirst("LogGroupName");
+        String deliverLogsPermissionArn = p.getFirst("DeliverLogsPermissionArn");
         int maxAgg = parseIntParam(p, "MaxAggregationInterval", 600);
+        List<Tag> flowLogTags = parseTagsForResource(p, "vpc-flow-log");
 
         if (resourceIds.isEmpty()) {
-            // Some SDKs send ResourceIds.member.N — fall back to that prefix.
+            // Some SDKs send ResourceIds.N or ResourceIds.member.N — fall back.
+            resourceIds = getList(p, "ResourceIds");
+        }
+        if (resourceIds.isEmpty()) {
             resourceIds = getList(p, "ResourceIds.member");
         }
         if (resourceIds.isEmpty()) {
@@ -903,7 +930,11 @@ public class Ec2QueryHandler {
                 .start("flowLogIdSet");
         for (String resourceId : resourceIds) {
             FlowLog fl = flowLogService.createFlowLog(region, resourceId, resourceType, trafficType,
-                    logDestinationType, logDestination, logFormat, maxAgg);
+                    logDestinationType, logDestination, logFormat, maxAgg,
+                    logGroupName, deliverLogsPermissionArn, flowLogTags);
+            if (!flowLogTags.isEmpty()) {
+                service.createTags(region, List.of(fl.getFlowLogId()), flowLogTags);
+            }
             xml.elem("item", fl.getFlowLogId());
         }
         xml.end("flowLogIdSet")
@@ -914,6 +945,9 @@ public class Ec2QueryHandler {
 
     private Response handleDescribeFlowLogs(MultivaluedMap<String, String> p, String region) {
         List<String> ids = getList(p, "FlowLogId");
+        if (ids.isEmpty()) {
+            ids = getList(p, "FlowLogIds");
+        }
         if (ids.isEmpty()) {
             ids = getList(p, "FlowLogIds.member");
         }
@@ -928,12 +962,28 @@ public class Ec2QueryHandler {
                     .elem("resourceId", fl.getResourceId())
                     .elem("trafficType", fl.getTrafficType())
                     .elem("logDestinationType", fl.getLogDestinationType())
-                    .elem("logDestination", fl.getLogDestination())
                     .elem("flowLogStatus", fl.getFlowLogStatus())
                     .elem("deliverLogsStatus", fl.getDeliverLogsStatus())
                     .elem("maxAggregationInterval", String.valueOf(fl.getMaxAggregationInterval()))
-                    .elem("creationTime", ISO_FMT.format(fl.getCreationTime()))
-                    .end("item");
+                    .elem("creationTime", ISO_FMT.format(fl.getCreationTime()));
+            if (fl.getLogDestination() != null) {
+                xml.elem("logDestination", fl.getLogDestination());
+            }
+            if (fl.getLogGroupName() != null) {
+                xml.elem("logGroupName", fl.getLogGroupName());
+            }
+            if (fl.getDeliverLogsPermissionArn() != null) {
+                xml.elem("deliverLogsPermissionArn", fl.getDeliverLogsPermissionArn());
+            }
+            if (fl.getLogFormat() != null) {
+                xml.elem("logFormat", fl.getLogFormat());
+            }
+            List<Tag> tags = service.getResourceTags(fl.getFlowLogId());
+            if (tags.isEmpty() && fl.getTags() != null) {
+                tags = fl.getTags();
+            }
+            xml.raw(tagSetXml(tags));
+            xml.end("item");
         }
         xml.end("flowLogSet").end("DescribeFlowLogsResponse");
         return xmlResponse(xml.build());
@@ -941,6 +991,9 @@ public class Ec2QueryHandler {
 
     private Response handleDeleteFlowLogs(MultivaluedMap<String, String> p, String region) {
         List<String> ids = getList(p, "FlowLogId");
+        if (ids.isEmpty()) {
+            ids = getList(p, "FlowLogIds");
+        }
         if (ids.isEmpty()) {
             ids = getList(p, "FlowLogIds.member");
         }
@@ -3032,6 +3085,7 @@ public class Ec2QueryHandler {
         }
 
         String snapshotId = p.getFirst("SnapshotId");
+        String kmsKeyId = resolveVolumeKmsKeyId(p.getFirst("KmsKeyId"), region);
 
         List<Tag> volumeTags = new ArrayList<>();
         for (int i = 1; ; i++) {
@@ -3048,7 +3102,7 @@ public class Ec2QueryHandler {
         }
 
         Volume vol = service.createVolume(region, availabilityZone, volumeType, size,
-                encrypted, iops, throughput, snapshotId, volumeTags);
+                encrypted, iops, throughput, snapshotId, kmsKeyId, volumeTags);
         XmlBuilder xml = new XmlBuilder()
                 .start("CreateVolumeResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -3235,6 +3289,9 @@ public class Ec2QueryHandler {
                 .elem("status", vol.getState())
                 .elem("availabilityZone", vol.getAvailabilityZone())
                 .elem("encrypted", String.valueOf(vol.isEncrypted()));
+        if (vol.getKmsKeyId() != null) {
+            xml.elem("kmsKeyId", vol.getKmsKeyId());
+        }
         if (vol.getIops() > 0) {
             xml.elem("iops", String.valueOf(vol.getIops()));
         }
