@@ -233,7 +233,12 @@ the checkpoint data plane the Durable Execution SDK speaks from inside
 the function (`CheckpointDurableExecution`, `GetDurableExecutionState`),
 real suspend/resume (a durable wait arms a Vert.x timer and the function
 is re-invoked with `UpdatedOperationIds`; no container is held during the
-wait), callbacks, `Stop`, `List`, `Get`, and synthesized `History`.
+wait), chained invokes (`CHAINED_INVOKE` starts a child durable execution
+and resumes the parent with the child's result), callbacks, `Stop`,
+`List`, `Get`, and synthesized `History`. Suspended WAIT/RETRY/callback
+timers are re-armed from `lambda-durable-executions.json` on startup
+(hybrid storage under `/app/data`). Function delete — API or CloudFormation
+— purges the function's executions via `LambdaService.deleteFunction`.
 `timeout 900 pnpm test:aws:floci test/AWS/Lambda/DurableFunction.test.ts
 --retry 0` is green (2026-08-19): typed-error probe + the full 2-step +
 5s-sleep suspend/resume lifecycle.
@@ -241,9 +246,7 @@ wait), callbacks, `Stop`, `List`, `Get`, and synthesized `History`.
 | Gap | Evidence | Notes |
 |---|---|---|
 | `LayerVersion` dualization unverified | historical `391965393224` / `us-west-2` ARNs | `Version`/`Alias` verified local via `DurableFunction.test.ts`; re-run the layer suites to confirm. Floci implements layer CRUD. |
-| Durable chained invokes | `CHAINED_INVOKE` checkpoint op | Fails the operation with a typed `ChainedInvokeNotSupported` error instead of invoking the child durable function. |
-| Durable execution timeout / retention not enforced | `DurableConfig.ExecutionTimeout` / `RetentionPeriodInDays` accepted at CreateFunction | Executions never TIMED_OUT server-side and are retained until function delete or emulator restart. |
-| Suspended durable executions don't survive restart | In-memory Vert.x timers | Timers are not re-armed from persisted state after an emulator restart; a suspended execution stays RUNNING forever. |
+| Durable execution timeout / retention not enforced | `DurableConfig.ExecutionTimeout` / `RetentionPeriodInDays` accepted at CreateFunction | Executions never TIMED_OUT server-side; they are retained until function delete. |
 | OTLP export from Lambda to a Cloudflare collector | `Telemetry.test.ts` `/probe` status 0 | Platform: collector reachability from the Lambda container, not a missing Lambda op. |
 | CloudWatch Logs log-group reap | Prior destroy hangs | Logs describe/delete is slow or unimplemented enough that alchemy now skips reap on the emulator account. |
 

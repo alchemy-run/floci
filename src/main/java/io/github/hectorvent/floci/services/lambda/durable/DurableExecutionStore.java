@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.lambda.durable;
 
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.lambda.durable.model.DurableExecution;
@@ -38,6 +39,18 @@ public class DurableExecutionStore {
     }
 
     public List<DurableExecution> list() {
+        return backend.scan(k -> true);
+    }
+
+    /**
+     * Every execution across every account. Startup timer re-arm and chained-invoke
+     * completion run outside a request, so they must not be scoped to the default
+     * account prefix.
+     */
+    public List<DurableExecution> listAllAccounts() {
+        if (backend instanceof AccountAwareStorageBackend<DurableExecution> aware) {
+            return aware.scanAllAccounts();
+        }
         return backend.scan(k -> true);
     }
 

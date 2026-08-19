@@ -190,7 +190,6 @@ public class LambdaController {
                                    @QueryParam("Qualifier") String qualifier) {
         String region = regionResolver.resolveRegion(headers);
         lambdaService.deleteFunction(region, functionName, qualifier);
-        durableService.purgeExecutionsIfFunctionDeleted(region, functionName);
         return Response.noContent().build();
     }
 

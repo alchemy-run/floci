@@ -205,7 +205,6 @@ These AWS Lambda operations have no handler in Floci. Calls will return `404` or
 - Layer resource policies (`AddLayerVersionPermission`, `RemoveLayerVersionPermission`, `GetLayerVersionPolicy`)
 - Provisioned concurrency (`PutProvisionedConcurrencyConfig`, `GetProvisionedConcurrencyConfig`, `ListProvisionedConcurrencyConfigs`, `DeleteProvisionedConcurrencyConfig`)
 - Code signing management (only `GetFunctionCodeSigningConfig` is wired; there is no `PutFunctionCodeSigningConfig` or `CreateCodeSigningConfig`)
-- Durable chained invokes (`CHAINED_INVOKE` checkpoint operations fail with `ChainedInvokeNotSupported`)
 
 ## Durable Executions
 
@@ -229,11 +228,16 @@ fresh invocation. The implementation lives in
    paginated `GetDurableExecutionState` at init.
 2. **Checkpoint** — from inside the invocation the SDK records operation
    transitions with `CheckpointDurableExecution` (`STEP` `START`/`SUCCEED`/
-   `FAIL`/`RETRY`, `WAIT` `START`, `CALLBACK` `START`, `CONTEXT` ops, and
-   `EXECUTION SUCCEED` for oversized results). Each update is applied to the
-   log and the response returns the full refreshed state, which the SDK merges
-   into its replay map. The `CheckpointToken` is minted per invocation and
-   validated on every data-plane call — a stale token is rejected with `400`.
+   `FAIL`/`RETRY`, `WAIT` `START`, `CALLBACK` `START`, `CHAINED_INVOKE` `START`,
+   `CONTEXT` ops, and `EXECUTION SUCCEED` for oversized results). Each update
+   is applied to the log and the response returns the full refreshed state,
+   which the SDK merges into its replay map. The `CheckpointToken` is minted
+   per invocation and validated on every data-plane call — a stale token is
+   rejected with `400`. A `CHAINED_INVOKE START` starts a child durable
+   execution against `ChainedInvokeOptions.FunctionName` (reusing the durable
+   Invoke path); when the child reaches a terminal status the parent op is
+   completed with `ChainedInvokeDetails.Result` / `Error` and the parent is
+   resumed.
 3. **Suspend** — a `WAIT START` update stamps
    `WaitDetails.ScheduledEndTimestamp = now + WaitSeconds` and arms a Vert.x
    one-shot timer. When only timed operations remain, the SDK returns a
@@ -258,8 +262,9 @@ Execution names are unique per function: re-invoking with the same
 `X-Amz-Durable-Execution-Name` and the same payload reattaches to the existing
 execution (`202` with the same ARN, no new invocation); a different payload is
 rejected with `DurableExecutionAlreadyStartedException` (`409`). Executions
-are function-scoped — deleting the function (via the `DeleteFunction` API)
-drops its executions, so a recreated function starts fresh.
+are function-scoped — deleting the function (via `LambdaService.deleteFunction`,
+the shared path used by the `DeleteFunction` API, CloudFormation, and
+replacement deletes) drops its executions, so a recreated function starts fresh.
 
 ### Emulation notes
 
@@ -267,15 +272,19 @@ drops its executions, so a recreated function starts fresh.
   `arn:aws:lambda:{region}:{account}:durable-execution:{function}:{name}:{suffix}`.
 - Timestamps are serialized as epoch seconds, matching the AWS wire format.
 - `ExecutionTimeout` / `RetentionPeriodInDays` from `DurableConfig` are
-  accepted but not enforced: executions never time out and are retained until
-  the function is deleted or the emulator restarts.
-- Suspended executions do not survive an emulator restart (timers are not
-  re-armed from persisted state).
+  accepted but not enforced: executions never time out server-side. They are
+  retained until the function is deleted.
+- Execution records persist through the Lambda `StorageFactory` backend
+  (`lambda-durable-executions.json` under `FLOCI_STORAGE_PERSISTENT_PATH`,
+  `/app/data` in the Docker image, when storage mode is `hybrid`/`persistent`/
+  `wal` — Alchemy's container sets `FLOCI_STORAGE_MODE=hybrid`). On startup
+  Floci scans running executions and re-arms WAIT / RETRY / callback-timeout
+  deadlines (firing immediately if the deadline already passed) and resumes
+  in-flight chained invokes. The in-process Vert.x timers themselves are not
+  persisted; they are reconstructed from the store.
 - `GetDurableExecutionHistory` synthesizes events from the operation log
-  (`ExecutionStarted`, `StepSucceeded`, `WaitStarted`, ...) rather than
-  keeping a separate event journal.
-- Durable executions started through CloudFormation-driven function deletes
-  are not purged (only the `DeleteFunction` API path is hooked).
+  (`ExecutionStarted`, `StepSucceeded`, `WaitStarted`, `ChainedInvokeSucceeded`,
+  ...) rather than keeping a separate event journal.
 
 ## Configuration
 

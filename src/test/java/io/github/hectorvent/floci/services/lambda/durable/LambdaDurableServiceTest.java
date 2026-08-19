@@ -15,7 +15,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -36,6 +38,7 @@ class LambdaDurableServiceTest {
 
     private static final String REGION = "us-east-1";
     private static final String FUNCTION = "durable-fn";
+    private static final String CHILD = "child-fn";
 
     private ObjectMapper mapper;
     private DurableExecutionStore store;
@@ -43,6 +46,7 @@ class LambdaDurableServiceTest {
     private ScriptedInvoker invoker;
     private LambdaDurableService service;
     private boolean functionDeleted;
+    private Set<String> knownFunctions;
 
     @BeforeEach
     void setUp() {
@@ -51,12 +55,15 @@ class LambdaDurableServiceTest {
         scheduler = new ManualScheduler();
         invoker = new ScriptedInvoker(mapper);
         functionDeleted = false;
+        knownFunctions = new HashSet<>(Set.of(FUNCTION, CHILD));
         LambdaDurableService.FunctionResolver resolver = (region, name, qualifier) -> {
-            if (functionDeleted || (!FUNCTION.equals(name) && !name.startsWith("arn:"))) {
+            io.github.hectorvent.floci.services.lambda.LambdaArnUtils.ResolvedFunctionRef ref =
+                    io.github.hectorvent.floci.services.lambda.LambdaArnUtils.resolveWithQualifier(name, qualifier);
+            if (functionDeleted || !knownFunctions.contains(ref.name())) {
                 throw new AwsException("ResourceNotFoundException", "Function not found: " + name, 404);
             }
-            return new LambdaDurableService.ResolvedFunction(FUNCTION, qualifier,
-                    "arn:aws:lambda:" + REGION + ":000000000000:function:" + FUNCTION, "000000000000");
+            return new LambdaDurableService.ResolvedFunction(ref.name(), ref.qualifier(),
+                    "arn:aws:lambda:" + REGION + ":000000000000:function:" + ref.name(), "000000000000");
         };
         service = new LambdaDurableService(store, mapper, resolver, invoker, scheduler, new DirectExecutor());
     }
@@ -322,6 +329,139 @@ class LambdaDurableServiceTest {
         assertTrue(store.get(arn).isEmpty(), "executions are dropped with the function");
         AwsException e = assertThrows(AwsException.class, () -> service.getExecution(arn));
         assertEquals("ResourceNotFoundException", e.getErrorCode());
+    }
+
+    @Test
+    void purgeExecutionsForFunctionDropsEvenWhileFunctionExists() {
+        invoker.enqueue(event -> invocationEnvelope("SUCCEEDED", "\"done\""));
+        DurableExecution execution = service.startExecution(REGION, FUNCTION, null, "flow-1",
+                "{}".getBytes(StandardCharsets.UTF_8));
+        String arn = execution.getExecutionArn();
+
+        service.purgeExecutionsForFunction(REGION, FUNCTION);
+        assertTrue(store.get(arn).isEmpty(), "unconditional purge is the shared delete-path hook");
+    }
+
+    @Test
+    void chainedInvokeRunsChildDurableExecutionAndResumesParent() {
+        // Parent starts first (invocation #1). Its CHAINED_INVOKE checkpoint
+        // nested-dispatches the child (invocation #2) via DirectExecutor.
+        invoker.enqueue(event -> {
+            String arn = event.get("DurableExecutionArn").asText();
+            String token = event.get("CheckpointToken").asText();
+            ObjectNode response = (ObjectNode) service.checkpoint(arn, checkpointBody(token,
+                    update("chained-1", "CHAINED_INVOKE", "START", u -> {
+                        u.put("Name", "process-payment").put("SubType", "ChainedInvoke");
+                        u.put("Payload", "{\"n\":1}");
+                        u.putObject("ChainedInvokeOptions").put("FunctionName", CHILD);
+                    })));
+            JsonNode chained = findOperation(response.get("NewExecutionState").get("Operations"), "chained-1");
+            assertEquals("SUCCEEDED", chained.get("Status").asText());
+            assertEquals("{\"doubled\":2}", chained.get("ChainedInvokeDetails").get("Result").asText());
+            return invocationEnvelope("SUCCEEDED", "{\"fromChild\":true}");
+        });
+        invoker.enqueue(event -> {
+            JsonNode operations = event.get("InitialExecutionState").get("Operations");
+            assertEquals("EXECUTION", operations.get(0).get("Type").asText());
+            assertEquals("{\"n\":1}",
+                    operations.get(0).get("ExecutionDetails").get("InputPayload").asText());
+            return invocationEnvelope("SUCCEEDED", "{\"doubled\":2}");
+        });
+
+        DurableExecution execution = service.startExecution(REGION, FUNCTION, null, "flow-chain",
+                "{\"orderId\":\"o1\"}".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(2, invoker.invocationCount());
+        DurableExecution finished = store.get(execution.getExecutionArn()).orElseThrow();
+        assertEquals(DurableExecution.STATUS_SUCCEEDED, finished.getStatus());
+        assertEquals("{\"fromChild\":true}", finished.getResult());
+        DurableOperation chained = finished.findOperation("chained-1");
+        assertEquals(DurableOperation.STATUS_SUCCEEDED, chained.getStatus());
+        assertEquals("{\"doubled\":2}", chained.getResult());
+        assertNotNull(chained.getChainedChildExecutionArn());
+    }
+
+    @Test
+    void restoreTimersRearmsWaitFromPersistedStore() {
+        invoker.enqueue(event -> {
+            String arn = event.get("DurableExecutionArn").asText();
+            String token = event.get("CheckpointToken").asText();
+            service.checkpoint(arn, checkpointBody(token,
+                    update("wait-1", "WAIT", "START", u -> {
+                        u.put("Name", "cooldown");
+                        u.putObject("WaitOptions").put("WaitSeconds", 5);
+                    })));
+            return invocationEnvelope("PENDING", null);
+        });
+
+        DurableExecution execution = service.startExecution(REGION, FUNCTION, null, "flow-restart",
+                "{}".getBytes(StandardCharsets.UTF_8));
+        String arn = execution.getExecutionArn();
+        assertEquals(1, scheduler.pending());
+
+        // Simulate emulator restart: a new service + scheduler over the same
+        // store, then re-arm from persisted WAIT deadlines (no Quarkus reboot).
+        ManualScheduler restartedScheduler = new ManualScheduler();
+        LambdaDurableService.FunctionResolver resolver = (region, name, qualifier) ->
+                new LambdaDurableService.ResolvedFunction(FUNCTION, qualifier,
+                        "arn:aws:lambda:" + REGION + ":000000000000:function:" + FUNCTION, "000000000000");
+        LambdaDurableService restarted = new LambdaDurableService(
+                store, mapper, resolver, invoker, restartedScheduler, new DirectExecutor());
+        restarted.restoreTimers();
+
+        assertEquals(1, restartedScheduler.pending(), "WAIT timer re-armed from the store");
+        assertTrue(restartedScheduler.lastDelayMs() > 0, "remaining WAIT delay is still in the future");
+        assertTrue(restartedScheduler.lastDelayMs() <= 5000);
+
+        invoker.enqueue(event -> {
+            List<String> updatedIds = new ArrayList<>();
+            event.get("UpdatedOperationIds").forEach(n -> updatedIds.add(n.asText()));
+            assertTrue(updatedIds.contains("wait-1"));
+            assertEquals("SUCCEEDED", findOperation(
+                    event.get("InitialExecutionState").get("Operations"), "wait-1").get("Status").asText());
+            return invocationEnvelope("SUCCEEDED", "\"resumed\"");
+        });
+
+        restartedScheduler.fireNext();
+
+        DurableExecution finished = store.get(arn).orElseThrow();
+        assertEquals(DurableExecution.STATUS_SUCCEEDED, finished.getStatus());
+        assertEquals("\"resumed\"", finished.getResult());
+    }
+
+    @Test
+    void restoreTimersFiresImmediatelyWhenWaitDeadlineAlreadyPassed() {
+        invoker.enqueue(event -> {
+            String arn = event.get("DurableExecutionArn").asText();
+            String token = event.get("CheckpointToken").asText();
+            service.checkpoint(arn, checkpointBody(token,
+                    update("wait-1", "WAIT", "START", u -> {
+                        u.put("Name", "cooldown");
+                        u.putObject("WaitOptions").put("WaitSeconds", 5);
+                    })));
+            return invocationEnvelope("PENDING", null);
+        });
+
+        DurableExecution execution = service.startExecution(REGION, FUNCTION, null, "flow-late",
+                "{}".getBytes(StandardCharsets.UTF_8));
+        String arn = execution.getExecutionArn();
+        DurableOperation wait = store.get(arn).orElseThrow().findOperation("wait-1");
+        wait.setScheduledEndTimestampMillis(System.currentTimeMillis() - 1_000);
+        store.save(store.get(arn).orElseThrow());
+
+        ManualScheduler restartedScheduler = new ManualScheduler();
+        LambdaDurableService.FunctionResolver resolver = (region, name, qualifier) ->
+                new LambdaDurableService.ResolvedFunction(FUNCTION, qualifier,
+                        "arn:aws:lambda:" + REGION + ":000000000000:function:" + FUNCTION, "000000000000");
+        LambdaDurableService restarted = new LambdaDurableService(
+                store, mapper, resolver, invoker, restartedScheduler, new DirectExecutor());
+        restarted.restoreTimers();
+
+        assertEquals(0, restartedScheduler.lastDelayMs(), "past deadline fires immediately");
+
+        invoker.enqueue(event -> invocationEnvelope("SUCCEEDED", "\"late\""));
+        restartedScheduler.fireNext();
+        assertEquals(DurableExecution.STATUS_SUCCEEDED, store.get(arn).orElseThrow().getStatus());
     }
 
     // ──────────────────────────── helpers ────────────────────────────

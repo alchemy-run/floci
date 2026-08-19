@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.vertx.core.Vertx;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -128,6 +129,33 @@ public class LambdaDurableService {
         // Vert.x timers are non-blocking; the fired task runs on a worker
         // thread because it invokes Lambda synchronously.
         this.scheduler = (delayMs, task) -> vertx.setTimer(Math.max(1, delayMs), id -> workers.submit(task));
+    }
+
+    /**
+     * Re-arms WAIT / RETRY / callback-timeout timers (and in-flight chained
+     * invokes) from persisted state after an emulator restart. CDI calls this
+     * once the store has loaded; unit tests call it to simulate a restart.
+     */
+    @PostConstruct
+    void restoreTimers() {
+        long now = System.currentTimeMillis();
+        int rearmed = 0;
+        for (DurableExecution execution : store.listAllAccounts()) {
+            for (DurableOperation op : execution.getOperations()) {
+                if (op.getCallbackId() != null) {
+                    callbackIndex.put(op.getCallbackId(), execution.getExecutionArn());
+                }
+            }
+            if (!execution.isRunning()) {
+                continue;
+            }
+            if (rearmExecution(execution, now)) {
+                rearmed++;
+            }
+        }
+        if (rearmed > 0) {
+            LOG.infov("Re-armed durable execution timers for {0} running execution(s)", rearmed);
+        }
     }
 
     LambdaDurableService(DurableExecutionStore store, ObjectMapper objectMapper,
@@ -278,6 +306,7 @@ public class LambdaDurableService {
     }
 
     private void handleInvocationResult(String executionArn, InvokeResult result, Exception failure) {
+        DurableExecution terminal = null;
         synchronized (lock(executionArn)) {
             inFlight.remove(executionArn);
             DurableExecution execution = store.get(executionArn).orElse(null);
@@ -317,48 +346,55 @@ public class LambdaDurableService {
                             executionArn, execution.getInvocationFailures(), problem);
                     failExecution(execution, errorObject("Lambda.InvocationError", problem));
                     store.save(execution);
+                    terminal = execution;
                 }
-                return;
-            }
-
-            execution.setInvocationFailures(0);
-            String status = envelope.get("Status").asText();
-            switch (status) {
-                case "SUCCEEDED" -> {
-                    String resultPayload = envelope.hasNonNull("Result")
-                            ? envelope.get("Result").asText()
-                            : null;
-                    // An empty Result means the (oversized) result was already
-                    // checkpointed via an EXECUTION SUCCEED update.
-                    if (resultPayload != null && !resultPayload.isEmpty() || execution.getResult() == null) {
-                        execution.setResult(resultPayload);
+                // fall through to notify after releasing the lock
+            } else {
+                execution.setInvocationFailures(0);
+                String status = envelope.get("Status").asText();
+                switch (status) {
+                    case "SUCCEEDED" -> {
+                        String resultPayload = envelope.hasNonNull("Result")
+                                ? envelope.get("Result").asText()
+                                : null;
+                        // An empty Result means the (oversized) result was already
+                        // checkpointed via an EXECUTION SUCCEED update.
+                        if (resultPayload != null && !resultPayload.isEmpty() || execution.getResult() == null) {
+                            execution.setResult(resultPayload);
+                        }
+                        execution.setStatus(DurableExecution.STATUS_SUCCEEDED);
+                        execution.setEndTimestampMillis(System.currentTimeMillis());
+                        store.save(execution);
+                        terminal = execution;
                     }
-                    execution.setStatus(DurableExecution.STATUS_SUCCEEDED);
-                    execution.setEndTimestampMillis(System.currentTimeMillis());
-                    store.save(execution);
-                }
-                case "FAILED" -> {
-                    Map<String, Object> error = envelope.has("Error")
-                            ? objectMapper.convertValue(envelope.get("Error"), Map.class)
-                            : errorObject("DurableExecutionFailed", "execution failed");
-                    failExecution(execution, error);
-                    store.save(execution);
-                }
-                case "PENDING" -> {
-                    store.save(execution);
-                    if (pendingUpdatedIds.containsKey(executionArn)) {
-                        // A timed operation completed while this invocation
-                        // was finishing — resume immediately.
-                        workers.submit(() -> dispatch(executionArn));
+                    case "FAILED" -> {
+                        Map<String, Object> error = envelope.has("Error")
+                                ? objectMapper.convertValue(envelope.get("Error"), Map.class)
+                                : errorObject("DurableExecutionFailed", "execution failed");
+                        failExecution(execution, error);
+                        store.save(execution);
+                        terminal = execution;
+                    }
+                    case "PENDING" -> {
+                        store.save(execution);
+                        if (pendingUpdatedIds.containsKey(executionArn)) {
+                            // A timed operation completed while this invocation
+                            // was finishing — resume immediately.
+                            workers.submit(() -> dispatch(executionArn));
+                        }
+                    }
+                    default -> {
+                        LOG.warnv("Durable execution {0} returned unknown envelope status {1}", executionArn, status);
+                        failExecution(execution, errorObject("Lambda.InvocationError",
+                                "unknown envelope status " + status));
+                        store.save(execution);
+                        terminal = execution;
                     }
                 }
-                default -> {
-                    LOG.warnv("Durable execution {0} returned unknown envelope status {1}", executionArn, status);
-                    failExecution(execution, errorObject("Lambda.InvocationError",
-                            "unknown envelope status " + status));
-                    store.save(execution);
-                }
             }
+        }
+        if (terminal != null) {
+            notifyChainedParents(terminal);
         }
     }
 
@@ -494,16 +530,26 @@ public class LambdaDurableService {
                 callbackIndex.put(callbackId, execution.getExecutionArn());
                 long timeoutSeconds = update.path("CallbackOptions").path("TimeoutSeconds").asLong(0);
                 if (timeoutSeconds > 0) {
+                    op.setScheduledEndTimestampMillis(now + timeoutSeconds * 1000L);
                     armCallbackTimeout(execution.getExecutionArn(), op.getId(), timeoutSeconds * 1000L);
                 }
             }
             case DurableOperation.TYPE_CHAINED_INVOKE -> {
-                // Not emulated yet: fail the operation so the SDK surfaces a
-                // typed error to user code instead of hanging the execution.
-                op.setStatus(DurableOperation.STATUS_FAILED);
-                op.setEndTimestampMillis(now);
-                op.setError(errorObject("ChainedInvokeNotSupported",
-                        "Floci does not emulate durable chained invokes yet"));
+                String functionName = update.path("ChainedInvokeOptions").path("FunctionName").asText(null);
+                if (functionName == null || functionName.isBlank()) {
+                    op.setStatus(DurableOperation.STATUS_FAILED);
+                    op.setEndTimestampMillis(now);
+                    op.setError(errorObject("InvalidParameterValueException",
+                            "ChainedInvokeOptions.FunctionName is required"));
+                    break;
+                }
+                op.setChainedFunctionName(functionName);
+                if (update.hasNonNull("Payload")) {
+                    op.setInputPayload(update.get("Payload").asText());
+                }
+                String parentArn = execution.getExecutionArn();
+                String opId = op.getId();
+                workers.submit(() -> runChainedInvoke(parentArn, opId));
             }
             default -> {
                 // EXECUTION restart or CONTEXT start: nothing beyond STARTED.
@@ -587,6 +633,214 @@ public class LambdaDurableService {
         }
     }
 
+    /**
+     * Re-arms persisted WAIT / RETRY / callback-timeout deadlines and resumes
+     * in-flight chained invokes. Returns true if the execution had something
+     * to restore. Fire-immediately when the deadline is already in the past.
+     */
+    private boolean rearmExecution(DurableExecution execution, long now) {
+        String arn = execution.getExecutionArn();
+        boolean pending = false;
+        for (DurableOperation op : execution.getOperations()) {
+            switch (op.getType()) {
+                case DurableOperation.TYPE_WAIT -> {
+                    if (DurableOperation.STATUS_STARTED.equals(op.getStatus())
+                            && op.getScheduledEndTimestampMillis() != null) {
+                        armWaitTimer(arn, op.getId(), Math.max(0, op.getScheduledEndTimestampMillis() - now));
+                        pending = true;
+                    }
+                }
+                case DurableOperation.TYPE_STEP -> {
+                    if (DurableOperation.STATUS_PENDING.equals(op.getStatus())
+                            && op.getNextAttemptTimestampMillis() != null) {
+                        armRetryTimer(arn, op.getId(), Math.max(0, op.getNextAttemptTimestampMillis() - now));
+                        pending = true;
+                    }
+                }
+                case DurableOperation.TYPE_CALLBACK -> {
+                    if (DurableOperation.STATUS_STARTED.equals(op.getStatus())
+                            && op.getScheduledEndTimestampMillis() != null) {
+                        armCallbackTimeout(arn, op.getId(),
+                                Math.max(0, op.getScheduledEndTimestampMillis() - now));
+                        pending = true;
+                    }
+                }
+                case DurableOperation.TYPE_CHAINED_INVOKE -> {
+                    if (DurableOperation.STATUS_STARTED.equals(op.getStatus())) {
+                        workers.submit(() -> runChainedInvoke(arn, op.getId()));
+                        pending = true;
+                    }
+                }
+                default -> {
+                    // EXECUTION / CONTEXT: nothing to re-arm
+                }
+            }
+        }
+        if (!pending) {
+            // Crashed mid-invocation with no timed operation outstanding —
+            // re-dispatch so the SDK can replay and continue.
+            workers.submit(() -> dispatch(arn));
+        }
+        return true;
+    }
+
+    // ──────────────────────────── Chained invokes ────────────────────────────
+
+    /**
+     * Starts (or reattaches to) a child durable execution for a CHAINED_INVOKE
+     * operation and completes the parent op when the child is terminal.
+     */
+    private void runChainedInvoke(String parentArn, String opId) {
+        String functionName;
+        String payloadText;
+        String existingChildArn;
+        String region;
+        synchronized (lock(parentArn)) {
+            DurableExecution parent = store.get(parentArn).orElse(null);
+            if (parent == null || !parent.isRunning()) {
+                return;
+            }
+            DurableOperation op = parent.findOperation(opId);
+            if (op == null || !DurableOperation.STATUS_STARTED.equals(op.getStatus())) {
+                return;
+            }
+            functionName = op.getChainedFunctionName();
+            payloadText = op.getInputPayload() != null ? op.getInputPayload() : "{}";
+            existingChildArn = op.getChainedChildExecutionArn();
+            region = parent.getRegion();
+        }
+
+        if (existingChildArn != null) {
+            completeChainedIfChildTerminal(parentArn, opId, existingChildArn);
+            return;
+        }
+        if (functionName == null || functionName.isBlank()) {
+            failChainedOp(parentArn, opId, errorObject("InvalidParameterValueException",
+                    "ChainedInvokeOptions.FunctionName is required"));
+            return;
+        }
+
+        String childName = chainedChildName(opId);
+        DurableExecution child;
+        try {
+            child = startExecution(region, functionName, null, childName,
+                    payloadText.getBytes(StandardCharsets.UTF_8));
+        } catch (AwsException e) {
+            failChainedOp(parentArn, opId, errorObject(e.getErrorCode(), e.getMessage()));
+            return;
+        } catch (Exception e) {
+            failChainedOp(parentArn, opId, errorObject("ChainedInvokeFailed",
+                    e.getMessage() != null ? e.getMessage() : "chained invoke failed"));
+            return;
+        }
+
+        synchronized (lock(parentArn)) {
+            DurableExecution parent = store.get(parentArn).orElse(null);
+            if (parent == null || !parent.isRunning()) {
+                return;
+            }
+            DurableOperation op = parent.findOperation(opId);
+            if (op == null || !DurableOperation.STATUS_STARTED.equals(op.getStatus())) {
+                return;
+            }
+            op.setChainedChildExecutionArn(child.getExecutionArn());
+            store.save(parent);
+        }
+        completeChainedIfChildTerminal(parentArn, opId, child.getExecutionArn());
+    }
+
+    private void completeChainedIfChildTerminal(String parentArn, String opId, String childArn) {
+        DurableExecution child = store.get(childArn).orElse(null);
+        if (child == null || child.isRunning()) {
+            return;
+        }
+        applyChildResultToChainedOp(parentArn, opId, child);
+    }
+
+    private void notifyChainedParents(DurableExecution child) {
+        if (child == null || child.isRunning()) {
+            return;
+        }
+        String childArn = child.getExecutionArn();
+        for (DurableExecution parent : store.listAllAccounts()) {
+            if (childArn.equals(parent.getExecutionArn()) || !parent.isRunning()) {
+                continue;
+            }
+            for (DurableOperation op : parent.getOperations()) {
+                if (DurableOperation.TYPE_CHAINED_INVOKE.equals(op.getType())
+                        && DurableOperation.STATUS_STARTED.equals(op.getStatus())
+                        && childArn.equals(op.getChainedChildExecutionArn())) {
+                    applyChildResultToChainedOp(parent.getExecutionArn(), op.getId(), child);
+                }
+            }
+        }
+    }
+
+    private void applyChildResultToChainedOp(String parentArn, String opId, DurableExecution child) {
+        synchronized (lock(parentArn)) {
+            DurableExecution parent = store.get(parentArn).orElse(null);
+            if (parent == null || !parent.isRunning()) {
+                return;
+            }
+            DurableOperation op = parent.findOperation(opId);
+            if (op == null || !DurableOperation.STATUS_STARTED.equals(op.getStatus())) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            op.setEndTimestampMillis(now);
+            switch (child.getStatus()) {
+                case DurableExecution.STATUS_SUCCEEDED -> {
+                    op.setStatus(DurableOperation.STATUS_SUCCEEDED);
+                    op.setResult(child.getResult());
+                }
+                case DurableExecution.STATUS_TIMED_OUT -> {
+                    op.setStatus(DurableOperation.STATUS_TIMED_OUT);
+                    op.setError(child.getError() != null
+                            ? child.getError()
+                            : errorObject("ChainedInvokeTimedOut", "chained invoke timed out"));
+                }
+                case DurableExecution.STATUS_STOPPED -> {
+                    op.setStatus(DurableOperation.STATUS_FAILED);
+                    op.setError(child.getError() != null
+                            ? child.getError()
+                            : errorObject("ChainedInvokeStopped", "chained invoke stopped"));
+                }
+                default -> {
+                    op.setStatus(DurableOperation.STATUS_FAILED);
+                    op.setError(child.getError() != null
+                            ? child.getError()
+                            : errorObject("ChainedInvokeFailed", "chained invoke failed"));
+                }
+            }
+            store.save(parent);
+        }
+        resume(parentArn, opId);
+    }
+
+    private void failChainedOp(String parentArn, String opId, Map<String, Object> error) {
+        synchronized (lock(parentArn)) {
+            DurableExecution parent = store.get(parentArn).orElse(null);
+            if (parent == null || !parent.isRunning()) {
+                return;
+            }
+            DurableOperation op = parent.findOperation(opId);
+            if (op == null || !DurableOperation.STATUS_STARTED.equals(op.getStatus())) {
+                return;
+            }
+            op.setStatus(DurableOperation.STATUS_FAILED);
+            op.setEndTimestampMillis(System.currentTimeMillis());
+            op.setError(error);
+            store.save(parent);
+        }
+        resume(parentArn, opId);
+    }
+
+    private static String chainedChildName(String opId) {
+        String sanitized = opId == null ? "" : opId.replaceAll("[^a-zA-Z0-9-_]", "");
+        String name = "chained-" + (sanitized.isEmpty() ? UUID.randomUUID().toString().substring(0, 8) : sanitized);
+        return name.length() > 64 ? name.substring(0, 64) : name;
+    }
+
     // ──────────────────────────── Callbacks ────────────────────────────
 
     public void callbackSucceed(String callbackId, byte[] result) {
@@ -636,7 +890,7 @@ public class LambdaDurableService {
         String executionArn = callbackIndex.get(callbackId);
         if (executionArn == null) {
             // Rebuild lazily (e.g. after the in-memory index was reset).
-            for (DurableExecution execution : store.list()) {
+            for (DurableExecution execution : store.listAllAccounts()) {
                 for (DurableOperation op : execution.getOperations()) {
                     if (callbackId.equals(op.getCallbackId())) {
                         callbackIndex.put(callbackId, execution.getExecutionArn());
@@ -725,6 +979,32 @@ public class LambdaDurableService {
     }
 
     /**
+     * Drops all executions of a function. Called from {@code LambdaService.deleteFunction}
+     * after the function row is gone, covering every delete route (API, CloudFormation,
+     * replacement).
+     */
+    public void purgeExecutionsForFunction(String region, String functionNameParam) {
+        String functionName;
+        try {
+            functionName = LambdaArnUtils.resolve(functionNameParam).name();
+        } catch (AwsException e) {
+            return;
+        }
+        for (DurableExecution execution : store.listByFunction(region, functionName)) {
+            synchronized (lock(execution.getExecutionArn())) {
+                for (DurableOperation op : execution.getOperations()) {
+                    if (op.getCallbackId() != null) {
+                        callbackIndex.remove(op.getCallbackId());
+                    }
+                }
+                store.delete(execution.getExecutionArn());
+                pendingUpdatedIds.remove(execution.getExecutionArn());
+                inFlight.remove(execution.getExecutionArn());
+            }
+        }
+    }
+
+    /**
      * Drops all executions of a function once the function itself is gone
      * (executions are function-scoped on AWS; keeping them would let a
      * recreated function reattach to a previous incarnation's results).
@@ -741,12 +1021,7 @@ public class LambdaDurableService {
             resolver.resolve(region, functionName, null);
         } catch (AwsException e) {
             if (e.getHttpStatus() == 404) {
-                for (DurableExecution execution : store.listByFunction(region, functionName)) {
-                    synchronized (lock(execution.getExecutionArn())) {
-                        store.delete(execution.getExecutionArn());
-                        pendingUpdatedIds.remove(execution.getExecutionArn());
-                    }
-                }
+                purgeExecutionsForFunction(region, functionName);
             }
         }
     }
@@ -763,6 +1038,10 @@ public class LambdaDurableService {
                         : errorObject("ExecutionStopped", "execution stopped"));
                 store.save(execution);
             }
+        }
+        DurableExecution stopped = store.get(executionArn).orElse(null);
+        if (stopped != null) {
+            notifyChainedParents(stopped);
         }
         ObjectNode response = objectMapper.createObjectNode();
         response.put("StopTimestamp", toEpochSeconds(now));

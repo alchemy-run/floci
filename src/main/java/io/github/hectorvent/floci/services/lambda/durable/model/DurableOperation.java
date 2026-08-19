@@ -57,7 +57,15 @@ public class DurableOperation {
     /** CALLBACK only. */
     private String callbackId;
 
-    /** Result payload for STEP / CONTEXT / CALLBACK / EXECUTION operations. */
+    /**
+     * CHAINED_INVOKE only: the FunctionName (name, name:qualifier, or ARN)
+     * from {@code ChainedInvokeOptions}, persisted so a restart can re-dispatch.
+     */
+    private String chainedFunctionName;
+    /** CHAINED_INVOKE only: the child durable-execution ARN once started. */
+    private String chainedChildExecutionArn;
+
+    /** Result payload for STEP / CONTEXT / CALLBACK / EXECUTION / CHAINED_INVOKE operations. */
     private String result;
 
     /** AWS ErrorObject shape ({@code ErrorMessage}, {@code ErrorType}, ...). */
@@ -101,6 +109,12 @@ public class DurableOperation {
 
     public String getCallbackId() { return callbackId; }
     public void setCallbackId(String callbackId) { this.callbackId = callbackId; }
+
+    public String getChainedFunctionName() { return chainedFunctionName; }
+    public void setChainedFunctionName(String chainedFunctionName) { this.chainedFunctionName = chainedFunctionName; }
+
+    public String getChainedChildExecutionArn() { return chainedChildExecutionArn; }
+    public void setChainedChildExecutionArn(String chainedChildExecutionArn) { this.chainedChildExecutionArn = chainedChildExecutionArn; }
 
     public String getResult() { return result; }
     public void setResult(String result) { this.result = result; }

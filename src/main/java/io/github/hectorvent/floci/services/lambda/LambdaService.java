@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
 import io.github.hectorvent.floci.services.lambda.model.FunctionEventInvokeConfig;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
@@ -26,6 +27,7 @@ import io.github.hectorvent.floci.services.sqs.SqsService;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -85,6 +87,15 @@ public class LambdaService {
      */
     private final ConcurrentHashMap<String, Object> concurrencyOpLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Object> versionCounterLocks = new ConcurrentHashMap<>();
+
+    /**
+     * Optional: durable-execution purge on function delete. Injected lazily so
+     * LambdaDurableService can depend on LambdaService without a CDI cycle.
+     * Unit tests assign it via {@link #setDurableService}.
+     */
+    @Inject
+    Instance<LambdaDurableService> durableServiceInstance;
+    private LambdaDurableService durableService;
 
     /**
      * Package-private constructor for testing without CDI. Config defaults
@@ -645,6 +656,22 @@ public class LambdaService {
             }
         }
         LOG.infov("Deleted Lambda function: {0}", functionName);
+        purgeDurableExecutions(region, functionName);
+    }
+
+    /** Test hook: wire the durable service without CDI. */
+    void setDurableService(LambdaDurableService durableService) {
+        this.durableService = durableService;
+    }
+
+    private void purgeDurableExecutions(String region, String functionName) {
+        LambdaDurableService durable = durableService;
+        if (durable == null && durableServiceInstance != null && durableServiceInstance.isResolvable()) {
+            durable = durableServiceInstance.get();
+        }
+        if (durable != null) {
+            durable.purgeExecutionsForFunction(region, functionName);
+        }
     }
 
     public InvokeResult invoke(String region, String functionName, byte[] payload, InvocationType type) {

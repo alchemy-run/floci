@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
 import io.github.hectorvent.floci.services.lambda.zip.CodeStore;
@@ -187,6 +188,15 @@ class LambdaServiceTest {
         service.createFunction(REGION, baseRequest("del-fn"));
         service.deleteFunction(REGION, "del-fn");
         assertThrows(AwsException.class, () -> service.getFunction(REGION, "del-fn"));
+    }
+
+    @Test
+    void deleteFunctionPurgesDurableExecutionsOnEveryPath() {
+        LambdaDurableService durable = mock(LambdaDurableService.class);
+        service.setDurableService(durable);
+        service.createFunction(REGION, baseRequest("del-fn"));
+        service.deleteFunction(REGION, "del-fn");
+        verify(durable).purgeExecutionsForFunction(REGION, "del-fn");
     }
 
     @Test
