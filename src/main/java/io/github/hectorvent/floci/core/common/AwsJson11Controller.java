@@ -29,6 +29,7 @@ import io.github.hectorvent.floci.services.textract.TextractJsonHandler;
 import io.github.hectorvent.floci.services.transcribe.TranscribeJsonHandler;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2JsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsHandler;
+import io.github.hectorvent.floci.services.cognito.CognitoIdentityJsonHandler;
 import io.github.hectorvent.floci.services.cognito.CognitoJsonHandler;
 import io.github.hectorvent.floci.services.cloudmap.CloudMapHandler;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler;
@@ -80,6 +81,7 @@ public class AwsJson11Controller {
     private final ApiGatewayV2JsonHandler apigwV2JsonHandler;
     private final KmsJsonHandler kmsJsonHandler;
     private final CognitoJsonHandler cognitoJsonHandler;
+    private final CognitoIdentityJsonHandler cognitoIdentityJsonHandler;
     private final AcmJsonHandler acmJsonHandler;
     private final EcsJsonHandler ecsJsonHandler;
     private final EcrJsonHandler ecrJsonHandler;
@@ -118,6 +120,7 @@ public class AwsJson11Controller {
                                KinesisAnalyticsV2JsonHandler kinesisAnalyticsV2JsonHandler,
                                ApiGatewayV2JsonHandler apigwV2JsonHandler,
                                KmsJsonHandler kmsJsonHandler, CognitoJsonHandler cognitoJsonHandler,
+                               CognitoIdentityJsonHandler cognitoIdentityJsonHandler,
                                AcmJsonHandler acmJsonHandler, EcsJsonHandler ecsJsonHandler,
                                EcrJsonHandler ecrJsonHandler, GlueJsonHandler glueJsonHandler,
                                AthenaJsonHandler athenaJsonHandler,
@@ -156,6 +159,7 @@ public class AwsJson11Controller {
         this.apigwV2JsonHandler = apigwV2JsonHandler;
         this.kmsJsonHandler = kmsJsonHandler;
         this.cognitoJsonHandler = cognitoJsonHandler;
+        this.cognitoIdentityJsonHandler = cognitoIdentityJsonHandler;
         this.acmJsonHandler = acmJsonHandler;
         this.ecsJsonHandler = ecsJsonHandler;
         this.ecrJsonHandler = ecrJsonHandler;
@@ -226,6 +230,7 @@ public class AwsJson11Controller {
                 case "apigatewayv2" -> apigwV2JsonHandler.handle(action, request, region);
                 case "kms" -> kmsJsonHandler.handle(action, request, region);
                 case "cognito-idp" -> cognitoJsonHandler.handle(action, request, region);
+                case "cognito-identity" -> cognitoIdentityJsonHandler.handle(action, request, region);
                 case "acm" -> acmJsonHandler.handle(action, request, region);
                 case "ecs" -> ecsJsonHandler.handle(action, request, region);
                 case "ecr" -> ecrJsonHandler.handle(action, request, region);

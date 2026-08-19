@@ -235,7 +235,7 @@ class CognitoOAuthTokenIntegrationTest {
 
         JsonNode payload = decodeJwtPayload(response.jsonPath().getString("access_token"));
         assertEquals(confidentialClientId, payload.path("client_id").asText());
-        assertEquals("http://localhost:4566/" + poolId, payload.path("iss").asText());
+        assertEquals("https://cognito-idp.us-east-1.amazonaws.com/" + poolId, payload.path("iss").asText());
     }
 
     @Test

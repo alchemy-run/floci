@@ -91,7 +91,8 @@ class CognitoServiceTest {
         assertNotNull(pool.getId());
         assertEquals("FullConfigPool", pool.getName());
         assertEquals("arn:aws:cognito-idp:us-east-1:000000000000:userpool/" + pool.getId(), pool.getArn());
-        assertEquals(schema, pool.getSchemaAttributes());
+        assertEquals(List.of(Map.of("Name", "custom:my-attr", "AttributeDataType", "String")),
+                pool.getSchemaAttributes());
         assertEquals(policies, pool.getPolicies());
         assertEquals(List.of("email"), pool.getUsernameAttributes());
     }
@@ -779,7 +780,7 @@ class CognitoServiceTest {
                 "us-east-1"
         );
 
-        assertEquals("http://localhost:4566/custompool", service.getIssuer(pool.getId()));
+        assertEquals("https://cognito-idp.us-east-1.amazonaws.com/custompool", service.getIssuer(pool.getId()));
     }
 
     // =========================================================================
@@ -1386,6 +1387,38 @@ class CognitoServiceTest {
         Map<String, Object> result = service.initiateAuth(client.getClientId(), "USER_PASSWORD_AUTH",
                 Map.of("USERNAME", "bob", "PASSWORD", "Perm1!"));
         assertNotNull(((Map<String, Object>) result.get("AuthenticationResult")).get("AccessToken"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserRemovesTheAuthenticatedUser() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "TestPool"), "us-east-1");
+        service.adminCreateUser(pool.getId(), "bob", Map.of("email", "bob@example.com"), null);
+        service.adminSetUserPassword(pool.getId(), "bob", "Perm1!", true);
+        UserPoolClient client = service.createUserPoolClient(pool.getId(), "c", false, false, List.of(), List.of());
+        Map<String, Object> result = service.initiateAuth(client.getClientId(), "USER_PASSWORD_AUTH",
+                Map.of("USERNAME", "bob", "PASSWORD", "Perm1!"));
+        String accessToken = (String) ((Map<String, Object>) result.get("AuthenticationResult")).get("AccessToken");
+
+        service.deleteUser(accessToken);
+
+        AwsException gone = assertThrows(AwsException.class, () -> service.adminGetUser(pool.getId(), "bob"));
+        assertEquals("UserNotFoundException", gone.getErrorCode());
+    }
+
+    @Test
+    void adminListDevicesReturnsEmptyForFreshUser() {
+        UserPool pool = createPoolAndUser();
+        assertTrue(service.adminListDevices(pool.getId(), "alice").isEmpty());
+    }
+
+    @Test
+    void createUserPoolPrefixesUnprefixedCustomSchemaAttributes() {
+        UserPool pool = service.createUserPool(Map.of(
+                "PoolName", "SchemaPool",
+                "Schema", List.of(Map.of("Name", "tenantId", "Mutable", true))
+        ), "us-east-1");
+        assertEquals("custom:tenantId", pool.getSchemaAttributes().getFirst().get("Name"));
     }
 
     // =========================================================================

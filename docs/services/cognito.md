@@ -1,6 +1,6 @@
 # Cognito
 
-**Protocol:** JSON 1.1 (`X-Amz-Target: AWSCognitoIdentityProviderService.*`)
+**Protocol:** JSON 1.1 (`X-Amz-Target: AWSCognitoIdentityProviderService.*` and `AWSCognitoIdentityService.*`)
 **Endpoint:** `POST http://localhost:4566/`
 
 Floci serves pool-specific discovery and JWKS endpoints, plus a relaxed OAuth token endpoint, so local clients can mint and validate Cognito-like access tokens against RS256 signing keys.
@@ -27,6 +27,7 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | DescribeUserPool | Returns the stored user pool configuration. |
 | ListUserPools | Lists local user pools visible in the request region. |
 | UpdateUserPool | Updates mutable user pool settings and persisted user-pool tags. |
+| AddCustomAttributes | Adds custom schema attributes in place (AWS-prefixes `custom:` / `dev:`). |
 | DeleteUserPool | Deletes a local user pool and cascades groups, users, clients, resource servers, identity providers, domains, and risk configuration. |
 
 ### User Pool Tags
@@ -92,6 +93,11 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | AdminSetUserPassword | Sets a user's password and permanent-password status. |
 | AdminUpdateUserAttributes | Updates attributes for a user in a user pool. |
 | AdminLinkProviderForUser | Links an external IdP identity to an existing user's `identities` attribute. |
+| AdminEnableUser | Enables a disabled user. |
+| AdminDisableUser | Disables a user. |
+| AdminConfirmSignUp | Confirms a self-service signup without a code. |
+| AdminDeleteUserAttributes | Removes attributes from a user. |
+| AdminListDevices | Returns remembered devices (empty when device tracking is off). |
 
 ### User Operations
 
@@ -104,6 +110,9 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | ChangePassword | Changes the authenticated user's password. |
 | ForgotPassword | Starts the local forgot-password flow for a user. |
 | ConfirmForgotPassword | Completes the forgot-password flow by setting a replacement password. |
+| DeleteUserAttributes | Removes attributes for the authenticated access-token user. |
+| DeleteUser | Deletes the authenticated access-token user. |
+| GetTokensFromRefreshToken | Exchanges a refresh token for new access and ID tokens. |
 
 ### Authentication
 
@@ -132,6 +141,25 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | AdminAddUserToGroup | Adds a user to a group. |
 | AdminRemoveUserFromGroup | Removes a user from a group. |
 | AdminListGroupsForUser | Lists the groups assigned to a user. |
+
+### Identity Pools (`AWSCognitoIdentityService`)
+
+| Action | Description |
+|--------|-------------|
+| CreateIdentityPool | Creates an identity pool, including optional federation and tags. |
+| DescribeIdentityPool | Returns the stored identity pool, including `IdentityPoolTags`. |
+| UpdateIdentityPool | Full-PUT of mutable pool configuration; tags stay on TagResource. |
+| DeleteIdentityPool | Deletes a pool and its issued identities. |
+| ListIdentityPools | Lists identity pools with `MaxResults` / `NextToken` pagination. |
+| SetIdentityPoolRoles | Stores authenticated/unauthenticated role ARNs without iam:PassRole or cross-account checks. |
+| GetIdentityPoolRoles | Returns the stored role map. |
+| GetId | Issues a `{region}:{uuid}` identity (guest or login-linked). |
+| GetCredentialsForIdentity | Vends temporary AWS credentials from the attached role. |
+| GetOpenIdToken | Returns an OIDC token for the identity. |
+| DescribeIdentity | Returns identity metadata. |
+| ListIdentities | Lists identities for a pool. |
+| DeleteIdentities | Deletes identities by id. |
+| TagResource / UntagResource / ListTagsForResource | Identity-pool tag APIs (`arn:aws:cognito-identity:…:identitypool/…`). |
 
 ## Well-Known And OAuth Endpoints
 
@@ -263,10 +291,10 @@ http://localhost:4566/$POOL_ID/.well-known/jwks.json
 
 Tokens include the `cognito:groups` claim as a JSON array when the authenticated user belongs to one or more groups.
 
-Tokens issued by Cognito auth flows and the OAuth token endpoint use the emulator base URL plus the pool id:
+Tokens issued by Cognito auth flows and the OAuth token endpoint use the AWS-shaped issuer:
 
 ```
-http://localhost:4566/$POOL_ID
+https://cognito-idp.<region>.amazonaws.com/$POOL_ID
 ```
 
-This keeps the issuer, discovery document, JWKS URL, and token endpoint internally consistent for local JWT validation while supporting LocalStack-style confidential clients and resource-server-backed scopes.
+JWKS remains reachable at the emulator URL (`http://localhost:4566/$POOL_ID/.well-known/jwks.json`) so local validators can fetch signing keys without talking to AWS. The discovery document's `issuer` matches the JWT `iss` claim; `jwks_uri` stays on the local host.

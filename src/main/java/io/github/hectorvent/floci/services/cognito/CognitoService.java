@@ -245,12 +245,40 @@ public class CognitoService {
         LOG.infov("Added custom attributes to User Pool: {0}", userPoolId);
     }
 
+    /**
+     * AWS prefixes custom schema attributes with {@code custom:} (or {@code dev:}
+     * for developer-only) on create. Standard attribute names are left unprefixed.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> normalizeSchemaAttributes(List<Map<String, Object>> schema) {
+        if (schema == null) {
+            return new ArrayList<>();
+        }
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (Map<String, Object> attr : schema) {
+            Map<String, Object> copy = attr == null ? new HashMap<>() : new HashMap<>(attr);
+            String name = (String) copy.get("Name");
+            if (name != null && !name.startsWith("custom:") && !name.startsWith("dev:")) {
+                boolean standard = CognitoStandardAttributes.DEFAULTS.stream()
+                        .anyMatch(existing -> name.equals(existing.get("Name")));
+                if (!standard) {
+                    boolean developerOnly = Boolean.TRUE.equals(copy.get("DeveloperOnlyAttribute"));
+                    copy.put("Name", (developerOnly ? "dev:" : "custom:") + name);
+                }
+            }
+            normalized.add(copy);
+        }
+        return normalized;
+    }
+
     @SuppressWarnings("unchecked")
     private void populateUserPool(UserPool pool, Map<String, Object> request) {
         if (request.containsKey("Policies")) pool.setPolicies((Map<String, Object>) request.get("Policies"));
         if (request.containsKey("DeletionProtection")) pool.setDeletionProtection((String) request.get("DeletionProtection"));
         if (request.containsKey("LambdaConfig")) pool.setLambdaConfig((Map<String, Object>) request.get("LambdaConfig"));
-        if (request.containsKey("Schema")) pool.setSchemaAttributes((List<Map<String, Object>>) request.get("Schema"));
+        if (request.containsKey("Schema")) {
+            pool.setSchemaAttributes(normalizeSchemaAttributes((List<Map<String, Object>>) request.get("Schema")));
+        }
         if (request.containsKey("AutoVerifiedAttributes")) pool.setAutoVerifiedAttributes((List<String>) request.get("AutoVerifiedAttributes"));
         if (request.containsKey("AliasAttributes")) pool.setAliasAttributes((List<String>) request.get("AliasAttributes"));
         if (request.containsKey("UsernameAttributes")) pool.setUsernameAttributes((List<String>) request.get("UsernameAttributes"));
@@ -1824,6 +1852,30 @@ public class CognitoService {
         adminDeleteUserAttributes(poolId, username, attributeNames);
     }
 
+    public void deleteUser(String accessToken) {
+        String username = extractUsernameFromToken(accessToken);
+        String poolId = extractPoolIdFromToken(accessToken);
+        String jti = extractJtiFromToken(accessToken);
+
+        if (username == null || poolId == null) {
+            throw new AwsException("NotAuthorizedException", "Invalid access token", 400);
+        }
+
+        validateTokenNotRevoked(jti, poolId, "access");
+        validateOriginJtiNotRevoked(accessToken, poolId);
+        Long iat = extractIatFromToken(accessToken);
+        validateUserNotGloballySignedOut(username, poolId, "access", iat != null ? iat : 0L);
+
+        adminDeleteUser(poolId, username);
+    }
+
+    public List<Map<String, Object>> adminListDevices(String userPoolId, String username) {
+        adminGetUser(userPoolId, username);
+        // Device tracking is off unless DeviceConfiguration is set; a fresh user
+        // has no remembered devices either way.
+        return List.of();
+    }
+
     public Map<String, Object> issueClientCredentialsToken(String clientId, String clientSecret, String scope) {
         UserPoolClient client = clientStore.get(clientId)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Client not found", 404));
@@ -1839,8 +1891,13 @@ public class CognitoService {
         return response;
     }
 
+    /**
+     * AWS-shaped issuer so local JWTs satisfy clients that assert
+     * {@code iss} contains {@code cognito-idp.} and {@code /{userPoolId}}.
+     * JWKS stays on the emulator base URL (see {@link #getJwksUri(String)}).
+     */
     public String getIssuer(String poolId) {
-        return baseUrl + "/" + poolId;
+        return "https://cognito-idp." + regionFromPoolId(poolId) + ".amazonaws.com/" + poolId;
     }
 
     private String resolveUserPoolId(String region, Map<String, String> tags) {
@@ -1852,7 +1909,17 @@ public class CognitoService {
     }
 
     public String getJwksUri(String poolId) {
-        return getIssuer(poolId) + "/.well-known/jwks.json";
+        return baseUrl + "/" + poolId + "/.well-known/jwks.json";
+    }
+
+    private String regionFromPoolId(String poolId) {
+        if (poolId != null) {
+            int underscore = poolId.indexOf('_');
+            if (underscore > 0) {
+                return poolId.substring(0, underscore);
+            }
+        }
+        return regionResolver.getDefaultRegion();
     }
 
     public String getTokenEndpoint() {

@@ -11,6 +11,7 @@ import java.util.UUID;
 import static io.github.hectorvent.floci.services.cognito.CognitoRestAssuredUtils.cognitoAction;
 import static io.github.hectorvent.floci.services.cognito.CognitoRestAssuredUtils.cognitoJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -104,5 +105,77 @@ class CognitoAlchemyParityIntegrationTest {
         cognitoAction("DeleteUserPool", """
                 { "UserPoolId": "%s" }
                 """.formatted(poolId)).then().statusCode(200);
+    }
+
+    @Test
+    void identityPoolGuestCredentialsAndAdminRoundTrip() throws Exception {
+        JsonNode created = identityJson("CreateIdentityPool", """
+                {
+                  "IdentityPoolName": "AlchemyIdentity-%s",
+                  "AllowUnauthenticatedIdentities": true,
+                  "IdentityPoolTags": { "Environment": "test", "alchemy::id": "Identities" }
+                }
+                """.formatted(UUID.randomUUID().toString().substring(0, 8)));
+        String poolId = created.path("IdentityPoolId").asText();
+        assertTrue(poolId.contains(":"));
+        assertEquals("test", created.path("IdentityPoolTags").path("Environment").asText());
+
+        identityAction("SetIdentityPoolRoles", """
+                {
+                  "IdentityPoolId": "%s",
+                  "Roles": {
+                    "unauthenticated": "arn:aws:iam::391965393224:role/Guest",
+                    "authenticated": "arn:aws:iam::000000000000:role/Auth"
+                  }
+                }
+                """.formatted(poolId)).then().statusCode(200);
+
+        JsonNode roles = identityJson("GetIdentityPoolRoles", """
+                { "IdentityPoolId": "%s" }
+                """.formatted(poolId));
+        assertEquals("arn:aws:iam::391965393224:role/Guest",
+                roles.path("Roles").path("unauthenticated").asText());
+
+        JsonNode got = identityJson("GetId", """
+                { "IdentityPoolId": "%s" }
+                """.formatted(poolId));
+        String identityId = got.path("IdentityId").asText();
+        assertTrue(identityId.contains(":"));
+
+        JsonNode creds = identityJson("GetCredentialsForIdentity", """
+                { "IdentityId": "%s" }
+                """.formatted(identityId));
+        assertFalse(creds.path("Credentials").path("AccessKeyId").asText().isBlank());
+        assertFalse(creds.path("Credentials").path("SessionToken").asText().isBlank());
+
+        JsonNode openId = identityJson("GetOpenIdToken", """
+                { "IdentityId": "%s" }
+                """.formatted(identityId));
+        assertTrue(openId.path("Token").asText().contains("."));
+
+        JsonNode described = identityJson("DescribeIdentity", """
+                { "IdentityId": "%s" }
+                """.formatted(identityId));
+        assertEquals(identityId, described.path("IdentityId").asText());
+
+        JsonNode listed = identityJson("ListIdentities", """
+                { "IdentityPoolId": "%s", "MaxResults": 60 }
+                """.formatted(poolId));
+        assertEquals(identityId, listed.path("Identities").get(0).path("IdentityId").asText());
+
+        identityAction("DeleteIdentities", """
+                { "IdentityIdsToDelete": ["%s"] }
+                """.formatted(identityId)).then().statusCode(200);
+        identityAction("DeleteIdentityPool", """
+                { "IdentityPoolId": "%s" }
+                """.formatted(poolId)).then().statusCode(200);
+    }
+
+    private static JsonNode identityJson(String action, String body) throws Exception {
+        return RestAssuredJsonUtils.awsActionJson("AWSCognitoIdentityService", action, body);
+    }
+
+    private static io.restassured.response.Response identityAction(String action, String body) {
+        return RestAssuredJsonUtils.awsAction("AWSCognitoIdentityService", action, body);
     }
 }
