@@ -625,7 +625,8 @@ class Route53IntegrationTest {
                 .extract().body().asString();
 
         assertThat(xml, containsString("<HealthCheckObservations"));
-        assertThat(xml, not(containsString("<HealthCheckObservation>")));
+        assertThat(xml, containsString("<HealthCheckObservation>"));
+        assertThat(xml, containsString("<StatusReport>"));
 
         given().delete("/2013-04-01/healthcheck/" + id).then().statusCode(200);
     }

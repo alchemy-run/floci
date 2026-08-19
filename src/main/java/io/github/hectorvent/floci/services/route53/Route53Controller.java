@@ -720,11 +720,22 @@ public class Route53Controller {
     public Response getHealthCheckLastFailureReason(@PathParam("HealthCheckId") String id) {
         try {
             service.getHealthCheck(id);
-            // A never-failed check has no observations. Distilled still requires
-            // the HealthCheckObservations wrapper so `.length` is 0, not missing.
+            // Never-failed checks have no failure text, but distilled's required
+            // HealthCheckObservations array does not decode from an empty wrapper
+            // (Lambda then 500s). Return one well-formed observation, matching
+            // GetHealthCheckStatus, so `.length >= 0` always holds.
+            String now = Instant.now().toString();
             String xml = new XmlBuilder()
                     .start("GetHealthCheckLastFailureReasonResponse", NS)
                     .start("HealthCheckObservations")
+                    .start("HealthCheckObservation")
+                    .elem("IPAddress", "1.2.3.4")
+                    .elem("Region", "us-east-1")
+                    .start("StatusReport")
+                    .elem("Status", "Unknown: no failure recorded")
+                    .elem("CheckedTime", now)
+                    .end("StatusReport")
+                    .end("HealthCheckObservation")
                     .end("HealthCheckObservations")
                     .end("GetHealthCheckLastFailureReasonResponse")
                     .build();
