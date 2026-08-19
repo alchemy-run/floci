@@ -78,11 +78,16 @@ rebuild (old image falls through missing `GetVectorBucketPolicy` to S3).
 
 Patched in this tree (usage-plan get/update, key/authorizer/deployment
 updates, gateway responses, v1 VPC links, ExportApi, cache flush, v2
-domain names, binaryMediaTypes, and `rootResourceId` on every RestApi
-response shape — its absence failed alchemy's RestApi precreate). Alchemy
-now `flociDual`s RestApi and the related v1/v2 resources. Api mappings
-stay live-only (unimplemented). Still missing ReimportApi, routing rules,
-TestInvokeAuthorizer, docs parts, client certificates.
+domain names, binaryMediaTypes, `rootResourceId` on every RestApi
+response, `GetResources?embed=methods`, GetUsage/UpdateUsage, v2 stage
+`description` + tags, TagResource on `/apis/{id}/stages/{name}` ARNs,
+and `{apiId}.execute-api.{region}.amazonaws.com` Host
+routing onto `/execute-api/{apiId}/{stage}/…`). Alchemy now `flociDual`s
+RestApi and the related v1/v2 resources. Api mappings stay live-only
+(unimplemented). Still missing ReimportApi, routing rules,
+TestInvokeAuthorizer, docs parts, client certificates. WebSocket
+`wss://*.execute-api.*.amazonaws.com` from the host is a platform issue
+(Alchemy's HttpClient rewrite does not apply to the `ws` package).
 
 ## AppSync
 
@@ -125,18 +130,31 @@ batch. No missing operations.
 ## EC2
 
 Patched in this tree (peering, DHCP, prefix lists, ENIs, snapshots,
-describe-by-id NotFound, default-VPC reseed). Alchemy now `flociDual`s
-the networking/storage resources the suite hits. Instance and FlowLog
-stay live-only (no Floci FlowLog; Instance is smoke/VM). Transit /
-Carrier / LocalGateway / CoreNetwork route targets stay
-`UnsupportedOperation`.
+describe-by-id NotFound, default-VPC reseed, CloudWatch VPC flow logs +
+`vpc-flow-log` tags, CreateVolume `KmsKeyId` alias→ARN, DescribeFlowLogs
+filters/pagination, DeleteVpc default-furniture reap, instance
+control-plane `running` without waiting on Docker). Alchemy now
+`flociDual`s Instance, FlowLog, and the networking/storage resources the
+suite hits. Transit / Carrier / LocalGateway / CoreNetwork route targets
+stay `UnsupportedOperation`. Hosted-instance HTTP smoke (userdata +
+published ports) is still a data-plane/platform question.
 
 ## ECR
 
 Patched in this tree (registry policy, scan config, layer upload/PutImage,
-download URL, scan APIs, describe fallback across account ids). Alchemy
-now `flociDual`s Repository, Image, and RegistryPolicy. EventBridge image
-action notifications and docker-push to `amazonaws.com` URIs remain.
+download URL, scan APIs, describe fallback across account ids, AWS-shaped
+`GetAuthorizationToken` proxyEndpoint, hostname-style docker-push lookup,
+EventBridge `ECR Image Action` on PutImage / BatchDeleteImage). Alchemy
+`flociDual`s Repository, Image, and RegistryPolicy.
+
+Repository-name validation matches live AWS
+`(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*` —
+consecutive separators (`--`) are rejected on both. ECS-generated names
+containing `--` are out-of-scope (name generation), not an ECR emulator
+bug.
+
+Remaining: `docker push` to real `*.amazonaws.com` hostnames (Floci
+returns `*.localhost` URIs).
 
 ## ECS
 
@@ -146,7 +164,7 @@ No missing operations. Source now round-trips task-def/service fields
 TaskDefinition already dual; CapacityProvider now dual.
 Remaining: EC2 `InvalidVpcID.NotFound` / hung subnet create (Bindings),
 Route53 hosted-zone lookup (`ServiceHostedZoneNotFound` after local
-`CreateHostedZone`), ELBv2 Listener `InternalFailure`, Cloud Map + EFS
+`CreateHostedZone` — fixed in Route 53 `ListHostedZonesByName`), Cloud Map + EFS
 on `ServicePhase2Config`, AAS unstamped-row delete, stale live-AWS
 `delete (remote)` / `ServiceNotActiveException`, ECR repo-name pattern.
 
@@ -261,7 +279,9 @@ filters, service attributes, `UpdateInstanceCustomHealthStatus`.
 Patched in this tree: private-zone VPC attach/associate/auth, query logging
 configs, `UpdateHostedZoneComment`, `TestDNSAnswer`,
 `GetHealthCheckLastFailureReason`, `ListHostedZonesByVPC`, geo/cidr/geoproximity
-record fields. Remaining:
+record fields, DNS-order `ListHostedZonesByName` (fixes ECS
+`ServiceHostedZoneNotFound` after a local `CreateHostedZone`),
+`QueryLoggingConfigAlreadyExists`, weighted/failover `SetIdentifier` DELETE.
 
 | Gap | Evidence | Notes |
 |---|---|---|
@@ -327,10 +347,11 @@ SecureString `keyArn`.
 ## CloudFront
 
 Patched in this tree (VpcOrigin + KeyValueStore CRUD, DescribeFunction,
-KVS associations, policy XML round-trip). Against current `floci:dev`:
-12/21. Alchemy now `flociDual`s Distribution and the other control-plane
-resources. KvEntries / KvRoutesUpdate stay live-only — CloudFront-KeyValueStore
-data plane (`GET /key-value-stores/{arn}`) has no Floci service.
+KVS associations, policy XML round-trip, list envelopes as HttpPayload
+roots, KeyGroup `PublicKey` items, realtime-log Fields/EndPoints, Function
+DEVELOPMENT+LIVE stages). KvEntries / KvRoutesUpdate stay live-only —
+CloudFront-KeyValueStore data plane is a separate service (now implemented
+in this tree; see KVS data-plane section above).
 
 ## Cognito
 
@@ -360,6 +381,21 @@ Suite was 0/7 against live Firehose because `DeliveryStream` was not
 `DeliveryStream` and `Kinesis.Stream` / `StreamConsumer` via `flociDual`.
 SSE start/stop still needs the image rebuild (`InvalidAction` on current
 `floci:dev`).
+
+## Kinesis
+
+Patched in this tree: `UpdateShardCount` (uniform split/merge),
+`UpdateMaxRecordSize` / `MaxRecordSizeInKiB` on describe,
+`UpdateStreamWarmThroughput` + `DescribeAccountSettings` (commitment
+`ENABLED`), `DescribeLimits`, `ListStreams.StreamSummaries`,
+`CreateStream` tags / warm throughput / max record size, consumer
+`TagResource` (consumer ARNs no longer mutate the stream), even
+hash-key ranges, and `MergeShards` adjacency + parent lineage.
+`DeleteStream EnforceConsumerDeletion` removes registered consumers.
+
+Isolated `pnpm test:aws:floci test/AWS/Kinesis --retry 0 --concurrency 8`
+(2026-08-19): **37 passed / 0 failed** (two transport flakes on a
+mid-run container restart reran green).
 
 ## SES
 
@@ -430,11 +466,10 @@ Implemented in this tree: workgroup update/tags, data catalogs, named queries, p
 
 ## Batch
 
-Implemented in this tree: update/delete CE+queue, cancel/terminate, snapshot, tag APIs. Remaining:
+Implemented in this tree: update/delete CE+queue, cancel/terminate (no-op when already terminal), snapshot (`earliestTimeAtPosition`), tag APIs, unmanaged `unmanagedvCpus`, distilled not-found / `ComputeEnvironmentInUse` messages, and `AWSBatchServiceRole` IAM seed. The Alchemy image sets `immediate-complete: false` so `SubmitJob` leaves jobs `RUNNABLE` for binding cancel/terminate tests. Isolated `pnpm test:aws:floci test/AWS/Batch --retry 0 --concurrency 4`: 10 passed, 2 todo (`AWS_TEST_SLOW`).
 
 | Gap | Evidence | Notes |
 |---|---|---|
-| Cancel/terminate of already-succeeded jobs | Immediate runner | Jobs finish in-process; cancel after submit is usually terminal. |
 | No array / multi-node jobs | Existing limitation | Unchanged. |
 
 ## How to reproduce
