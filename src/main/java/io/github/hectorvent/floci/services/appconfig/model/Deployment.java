@@ -25,6 +25,20 @@ public class Deployment {
     private String state; // BAKING, VALIDATING, DEPLOYING, COMPLETE, ROLLING_BACK, ROLLED_BACK
     @JsonProperty("Description")
     private String description;
+    @JsonProperty("PercentageComplete")
+    private Float percentageComplete;
+    @JsonProperty("DeploymentDurationInMinutes")
+    private Integer deploymentDurationInMinutes;
+    @JsonProperty("GrowthFactor")
+    private Float growthFactor;
+    @JsonProperty("FinalBakeTimeInMinutes")
+    private Integer finalBakeTimeInMinutes;
+    @JsonProperty("GrowthType")
+    private String growthType;
+    @JsonProperty("StartedAt")
+    private String startedAt;
+    @JsonProperty("CompletedAt")
+    private String completedAt;
 
     public Deployment() {}
 
@@ -54,4 +68,25 @@ public class Deployment {
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+
+    public Float getPercentageComplete() { return percentageComplete; }
+    public void setPercentageComplete(Float percentageComplete) { this.percentageComplete = percentageComplete; }
+
+    public Integer getDeploymentDurationInMinutes() { return deploymentDurationInMinutes; }
+    public void setDeploymentDurationInMinutes(Integer deploymentDurationInMinutes) { this.deploymentDurationInMinutes = deploymentDurationInMinutes; }
+
+    public Float getGrowthFactor() { return growthFactor; }
+    public void setGrowthFactor(Float growthFactor) { this.growthFactor = growthFactor; }
+
+    public Integer getFinalBakeTimeInMinutes() { return finalBakeTimeInMinutes; }
+    public void setFinalBakeTimeInMinutes(Integer finalBakeTimeInMinutes) { this.finalBakeTimeInMinutes = finalBakeTimeInMinutes; }
+
+    public String getGrowthType() { return growthType; }
+    public void setGrowthType(String growthType) { this.growthType = growthType; }
+
+    public String getStartedAt() { return startedAt; }
+    public void setStartedAt(String startedAt) { this.startedAt = startedAt; }
+
+    public String getCompletedAt() { return completedAt; }
+    public void setCompletedAt(String completedAt) { this.completedAt = completedAt; }
 }

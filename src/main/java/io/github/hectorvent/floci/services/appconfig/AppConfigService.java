@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.appconfig;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -8,15 +9,28 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.appconfig.model.*;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
+import io.github.hectorvent.floci.services.lambda.LambdaService;
+import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 @ApplicationScoped
 public class AppConfigService {
     private static final Logger LOG = Logger.getLogger(AppConfigService.class);
+    private static final Set<String> IN_FLIGHT_STATES = Set.of("DEPLOYING", "BAKING", "VALIDATING", "ROLLING_BACK");
 
     private final StorageBackend<String, Application> applicationStore;
     private final StorageBackend<String, Environment> environmentStore;
@@ -28,9 +42,16 @@ public class AppConfigService {
     private final StorageBackend<String, Extension> extensionStore;
     private final StorageBackend<String, ExtensionAssociation> associationStore;
     private final RegionResolver regionResolver;
+    private final Instance<LambdaService> lambdaService;
+    private final Instance<EventBridgeService> eventBridgeService;
+    private final ObjectMapper objectMapper;
+    private final ScheduledExecutorService scheduler;
+    private final ConcurrentHashMap<String, ScheduledFuture<?>> pendingCompletions = new ConcurrentHashMap<>();
 
     @Inject
-    public AppConfigService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver) {
+    public AppConfigService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                            Instance<LambdaService> lambdaService, Instance<EventBridgeService> eventBridgeService,
+                            ObjectMapper objectMapper) {
         this.applicationStore = storageFactory.create("appconfig", "appconfig-applications.json", new TypeReference<>() {});
         this.environmentStore = storageFactory.create("appconfig", "appconfig-environments.json", new TypeReference<>() {});
         this.profileStore = storageFactory.create("appconfig", "appconfig-profiles.json", new TypeReference<>() {});
@@ -41,6 +62,21 @@ public class AppConfigService {
         this.extensionStore = storageFactory.create("appconfig", "appconfig-extensions.json", new TypeReference<>() {});
         this.associationStore = storageFactory.create("appconfig", "appconfig-extension-associations.json", new TypeReference<>() {});
         this.regionResolver = regionResolver;
+        this.lambdaService = lambdaService;
+        this.eventBridgeService = eventBridgeService;
+        this.objectMapper = objectMapper;
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "appconfig-deployments");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    @PreDestroy
+    void shutdown() {
+        pendingCompletions.values().forEach(future -> future.cancel(false));
+        pendingCompletions.clear();
+        scheduler.shutdownNow();
     }
 
     // ──────────────────────────── Application ────────────────────────────
@@ -344,30 +380,80 @@ public class AppConfigService {
     // ──────────────────────────── Deployment ────────────────────────────
 
     public Deployment startDeployment(String appId, String envId, Map<String, Object> request) {
-        getEnvironment(appId, envId);
+        Environment env = getEnvironment(appId, envId);
         String profileId = (String) request.get("ConfigurationProfileId");
         String version = (String) request.get("ConfigurationVersion");
         String strategyId = (String) request.get("DeploymentStrategyId");
 
-        getConfigurationProfile(appId, profileId);
-        getDeploymentStrategy(strategyId);
+        ConfigurationProfile profile = getConfigurationProfile(appId, profileId);
+        DeploymentStrategy strategy = getDeploymentStrategy(strategyId);
+
+        String envPrefix = appId + "::" + envId + "::";
+        boolean inFlight = deploymentStore.scan(k -> k.startsWith(envPrefix)).stream()
+                .anyMatch(d -> IN_FLIGHT_STATES.contains(d.getState()));
+        if (inFlight) {
+            throw new AwsException("ConflictException",
+                    "Environment " + envId + " already has a deployment in progress", 409);
+        }
+
+        int nextNumber = deploymentStore.scan(k -> k.startsWith(envPrefix)).stream()
+                .mapToInt(Deployment::getDeploymentNumber)
+                .max()
+                .orElse(0) + 1;
+
+        boolean gradual = strategy.getDeploymentDurationInMinutes() > 0;
+        Instant now = Instant.now();
 
         Deployment deployment = new Deployment();
         deployment.setApplicationId(appId);
         deployment.setEnvironmentId(envId);
         deployment.setConfigurationProfileId(profileId);
+        deployment.setConfigurationName(profile.getName());
         deployment.setConfigurationVersion(version);
         deployment.setDeploymentStrategyId(strategyId);
-        deployment.setDeploymentNumber(deploymentStore.keys().size() + 1);
-        deployment.setState("COMPLETE"); // Synchronous immediate deployment
+        deployment.setDeploymentNumber(nextNumber);
         deployment.setDescription((String) request.get("Description"));
+        deployment.setDeploymentDurationInMinutes(strategy.getDeploymentDurationInMinutes());
+        deployment.setGrowthFactor(strategy.getGrowthFactor());
+        deployment.setFinalBakeTimeInMinutes(strategy.getFinalBakeTimeInMinutes());
+        deployment.setGrowthType(strategy.getGrowthType());
+        deployment.setStartedAt(now.toString());
+        if (gradual) {
+            deployment.setState("DEPLOYING");
+            deployment.setPercentageComplete(0f);
+        } else {
+            deployment.setState("COMPLETE");
+            deployment.setPercentageComplete(100f);
+            deployment.setCompletedAt(now.toString());
+        }
 
-        deploymentStore.put(appId + "::" + envId + "::" + deployment.getDeploymentNumber(), deployment);
+        String key = envPrefix + nextNumber;
+        deploymentStore.put(key, deployment);
 
-        // Update active configuration
-        activeConfigStore.put(envId + "::" + profileId, version);
+        if (gradual) {
+            env.setState("DEPLOYING");
+            environmentStore.put(envId, env);
+            ScheduledFuture<?> future = scheduler.schedule(
+                    () -> completeDeployment(key),
+                    strategy.getDeploymentDurationInMinutes(),
+                    TimeUnit.MINUTES);
+            pendingCompletions.put(key, future);
+        } else {
+            activeConfigStore.put(envId + "::" + profileId, version);
+        }
 
-        LOG.infov("Started deployment for app {0}, env {1}, profile {2}, version {3}. State: COMPLETE", appId, envId, profileId, version);
+        // ON_* actions are fire-and-forget. Run them after this call returns so a
+        // Lambda that started the deployment can finish its request before we
+        // invoke the same function with the extension payload.
+        scheduler.execute(() -> {
+            fireExtensionActions(deployment, "ON_DEPLOYMENT_START");
+            if (!gradual) {
+                fireExtensionActions(deployment, "ON_DEPLOYMENT_COMPLETE");
+            }
+        });
+
+        LOG.infov("Started deployment for app {0}, env {1}, profile {2}, version {3}. State: {4}",
+                appId, envId, profileId, version, deployment.getState());
         return deployment;
     }
 
@@ -382,13 +468,226 @@ public class AppConfigService {
 
     public Deployment stopDeployment(String appId, String envId, int deploymentNumber) {
         Deployment deployment = getDeployment(appId, envId, deploymentNumber);
-        if ("COMPLETE".equals(deployment.getState()) || "ROLLED_BACK".equals(deployment.getState())) {
+        if ("COMPLETE".equals(deployment.getState()) || "ROLLED_BACK".equals(deployment.getState())
+                || "REVERTED".equals(deployment.getState())) {
             throw new AwsException("BadRequestException",
                     "Deployment is already in a terminal state and cannot be stopped", 400);
         }
+        String key = appId + "::" + envId + "::" + deploymentNumber;
+        ScheduledFuture<?> pending = pendingCompletions.remove(key);
+        if (pending != null) {
+            pending.cancel(false);
+        }
         deployment.setState("ROLLED_BACK");
-        deploymentStore.put(appId + "::" + envId + "::" + deploymentNumber, deployment);
+        deployment.setPercentageComplete(0f);
+        deployment.setCompletedAt(Instant.now().toString());
+        deploymentStore.put(key, deployment);
+        markEnvironmentReady(appId, envId);
+        scheduler.execute(() -> fireExtensionActions(deployment, "ON_DEPLOYMENT_ROLLED_BACK"));
         return deployment;
+    }
+
+    private void completeDeployment(String key) {
+        pendingCompletions.remove(key);
+        Deployment deployment = deploymentStore.get(key).orElse(null);
+        if (deployment == null || !IN_FLIGHT_STATES.contains(deployment.getState())) {
+            return;
+        }
+        deployment.setState("COMPLETE");
+        deployment.setPercentageComplete(100f);
+        deployment.setCompletedAt(Instant.now().toString());
+        deploymentStore.put(key, deployment);
+        activeConfigStore.put(deployment.getEnvironmentId() + "::" + deployment.getConfigurationProfileId(),
+                deployment.getConfigurationVersion());
+        markEnvironmentReady(deployment.getApplicationId(), deployment.getEnvironmentId());
+        fireExtensionActions(deployment, "ON_DEPLOYMENT_COMPLETE");
+        LOG.infov("Completed deployment {0}", key);
+    }
+
+    private void markEnvironmentReady(String appId, String envId) {
+        try {
+            Environment env = getEnvironment(appId, envId);
+            env.setState("READY");
+            environmentStore.put(envId, env);
+        } catch (AwsException e) {
+            LOG.debugv("Environment {0} gone while finishing deployment: {1}", envId, e.getMessage());
+        }
+    }
+
+    private void fireExtensionActions(Deployment deployment, String actionPoint) {
+        try {
+            List<MatchedAction> actions = matchingActions(deployment, actionPoint);
+            if (actions.isEmpty()) {
+                return;
+            }
+            Map<String, Object> payload = extensionPayload(deployment, actionPoint, actions.getFirst().parameters());
+            String payloadJson = objectMapper.writeValueAsString(payload);
+            for (MatchedAction action : actions) {
+                dispatchAction(action.uri(), payloadJson, payload);
+            }
+        } catch (Exception e) {
+            LOG.warnv(e, "Failed to fire AppConfig extension actions for {0} on deployment {1}",
+                    actionPoint, deployment.getDeploymentNumber());
+        }
+    }
+
+    private record MatchedAction(String uri, Map<String, String> parameters) {}
+
+    private List<MatchedAction> matchingActions(Deployment deployment, String actionPoint) {
+        Set<String> resourceArns = associatedResourceArns(deployment);
+        List<MatchedAction> matched = new ArrayList<>();
+        for (ExtensionAssociation association : associationStore.scan(k -> true)) {
+            if (association.getResourceArn() == null || !resourceArns.contains(association.getResourceArn())) {
+                continue;
+            }
+            Extension extension = findExtension(association.getExtensionId()).orElse(null);
+            if (extension == null) {
+                continue;
+            }
+            for (Map<String, Object> action : actionsFor(extension, actionPoint)) {
+                Object uri = action.get("Uri");
+                if (uri == null) {
+                    uri = action.get("uri");
+                }
+                if (uri == null) {
+                    continue;
+                }
+                matched.add(new MatchedAction(String.valueOf(uri), associationParameters(association)));
+            }
+        }
+        return matched;
+    }
+
+    private Set<String> associatedResourceArns(Deployment deployment) {
+        String region = regionResolver.getRegion();
+        String account = regionResolver.getAccountId();
+        return Set.of(
+                "arn:aws:appconfig:" + region + ":" + account + ":application/" + deployment.getApplicationId(),
+                "arn:aws:appconfig:" + region + ":" + account + ":application/" + deployment.getApplicationId()
+                        + "/environment/" + deployment.getEnvironmentId(),
+                "arn:aws:appconfig:" + region + ":" + account + ":application/" + deployment.getApplicationId()
+                        + "/configurationprofile/" + deployment.getConfigurationProfileId()
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> actionsFor(Extension extension, String actionPoint) {
+        if (!(extension.getActions() instanceof Map<?, ?> actions)) {
+            return List.of();
+        }
+        Object list = actions.get(actionPoint);
+        if (!(list instanceof List<?> items)) {
+            return List.of();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof Map<?, ?> map) {
+                result.add((Map<String, Object>) map);
+            }
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> associationParameters(ExtensionAssociation association) {
+        if (!(association.getParameters() instanceof Map<?, ?> raw)) {
+            return Map.of();
+        }
+        Map<String, String> parameters = new LinkedHashMap<>();
+        raw.forEach((k, v) -> {
+            if (k != null && v != null) {
+                parameters.put(String.valueOf(k), String.valueOf(v));
+            }
+        });
+        return parameters;
+    }
+
+    private Map<String, Object> extensionPayload(Deployment deployment, String actionPoint,
+                                                 Map<String, String> parameters) {
+        Application app = getApplication(deployment.getApplicationId());
+        Environment env = getEnvironment(deployment.getApplicationId(), deployment.getEnvironmentId());
+        ConfigurationProfile profile = getConfigurationProfile(
+                deployment.getApplicationId(), deployment.getConfigurationProfileId());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("InvocationId", UUID.randomUUID().toString());
+        payload.put("Type", payloadType(actionPoint));
+        payload.put("Application", Map.of("Id", app.getId(), "Name", nullToEmpty(app.getName())));
+        payload.put("Environment", Map.of("Id", env.getId(), "Name", nullToEmpty(env.getName())));
+        payload.put("ConfigurationProfile", Map.of("Id", profile.getId(), "Name", nullToEmpty(profile.getName())));
+        payload.put("DeploymentNumber", deployment.getDeploymentNumber());
+        payload.put("ConfigurationVersion", deployment.getConfigurationVersion());
+        if (deployment.getDescription() != null) {
+            payload.put("Description", deployment.getDescription());
+        }
+        payload.put("Parameters", parameters);
+        return payload;
+    }
+
+    private void dispatchAction(String uri, String payloadJson, Map<String, Object> payload) {
+        if (uri.contains(":lambda:") || uri.contains(":function:")) {
+            invokeLambda(uri, payloadJson);
+            return;
+        }
+        if (uri.contains(":events:") && uri.contains("event-bus/")) {
+            putEventBridgeEvent(uri, payloadJson, payload);
+            return;
+        }
+        LOG.warnv("AppConfig extension action URI is not supported: {0}", uri);
+    }
+
+    private void invokeLambda(String functionArn, String payloadJson) {
+        if (lambdaService.isUnsatisfied()) {
+            LOG.warn("Lambda service is unavailable; skipping AppConfig extension invoke");
+            return;
+        }
+        String region = regionFromArn(functionArn, regionResolver.getRegion());
+        lambdaService.get().invoke(region, functionArn, payloadJson.getBytes(StandardCharsets.UTF_8),
+                InvocationType.Event);
+        LOG.debugv("AppConfig extension invoked Lambda {0}", functionArn);
+    }
+
+    private void putEventBridgeEvent(String eventBusArn, String payloadJson, Map<String, Object> payload) {
+        if (eventBridgeService.isUnsatisfied()) {
+            LOG.warn("EventBridge service is unavailable; skipping AppConfig extension event");
+            return;
+        }
+        String busName = eventBusArn.substring(eventBusArn.indexOf("event-bus/") + "event-bus/".length());
+        String region = regionFromArn(eventBusArn, regionResolver.getRegion());
+        String detailType = eventBridgeDetailType((String) payload.get("Type"));
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("EventBusName", busName);
+        entry.put("Source", "aws.appconfig");
+        entry.put("DetailType", detailType);
+        entry.put("Detail", payloadJson);
+        eventBridgeService.get().putEvents(List.of(entry), region);
+        LOG.debugv("AppConfig extension put EventBridge event on {0} ({1})", busName, detailType);
+    }
+
+    private static String payloadType(String actionPoint) {
+        StringBuilder type = new StringBuilder();
+        for (String part : actionPoint.toLowerCase(Locale.ROOT).split("_")) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            type.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+        }
+        return type.toString();
+    }
+
+    private static String eventBridgeDetailType(String payloadType) {
+        return payloadType.replaceAll("(?<=[a-z])(?=[A-Z])", " ");
+    }
+
+    private static String regionFromArn(String arn, String fallback) {
+        String[] parts = arn.split(":");
+        if (parts.length > 3 && !parts[3].isBlank()) {
+            return parts[3];
+        }
+        return fallback;
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     // ──────────────────────────── Extensions ────────────────────────────

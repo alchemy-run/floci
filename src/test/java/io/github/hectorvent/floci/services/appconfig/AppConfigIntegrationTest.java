@@ -490,4 +490,43 @@ class AppConfigIntegrationTest {
                 .then()
                 .statusCode(204);
     }
+
+    @Test @Order(27)
+    void slowStrategyDeploymentStaysDeployingUntilStopped() {
+        String slowStrategyId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"Name\": \"slow-20m\", \"DeploymentDurationInMinutes\": 20, \"GrowthFactor\": 5, \"FinalBakeTimeInMinutes\": 0, \"GrowthType\": \"LINEAR\"}")
+                .when().post("/deploymentstrategies")
+                .then()
+                .statusCode(201)
+                .extract().path("Id");
+
+        int deploymentNumber = given()
+                .contentType(ContentType.JSON)
+                .body("{\"ConfigurationProfileId\": \"" + profileId + "\", \"ConfigurationVersion\": \"1\", \"DeploymentStrategyId\": \"" + slowStrategyId + "\"}")
+                .when().post("/applications/" + appId + "/environments/" + envId + "/deployments")
+                .then()
+                .statusCode(201)
+                .body("State", equalTo("DEPLOYING"))
+                .body("DeploymentDurationInMinutes", equalTo(20))
+                .extract().path("DeploymentNumber");
+
+        given()
+                .when().get("/applications/" + appId + "/environments/" + envId + "/deployments/" + deploymentNumber)
+                .then()
+                .statusCode(200)
+                .body("State", equalTo("DEPLOYING"));
+
+        given()
+                .when().delete("/applications/" + appId + "/environments/" + envId + "/deployments/" + deploymentNumber)
+                .then()
+                .statusCode(200)
+                .body("State", equalTo("ROLLED_BACK"));
+
+        given()
+                .when().delete("/applications/" + appId + "/environments/" + envId + "/deployments/" + deploymentNumber)
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("BadRequestException"));
+    }
 }

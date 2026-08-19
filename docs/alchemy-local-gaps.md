@@ -101,9 +101,13 @@ Lambda-authorizer data-plane.
 ## AppConfig
 
 Patched in this tree (update/delete, extensions, validate, stop
-deployment). Alchemy now `flociDual`s Application, Environment, Profile,
-Strategy, Deployment, HostedConfigurationVersion, Extension, and
-ExtensionAssociation. Extension actions do not emit EventBridge events.
+deployment, strategy duration, extension action dispatch). Alchemy now
+`flociDual`s Application, Environment, Profile, Strategy, Deployment,
+HostedConfigurationVersion, Extension, and ExtensionAssociation.
+`StartDeployment` stays `DEPLOYING` when `DeploymentDurationInMinutes > 0`
+so `StopDeployment` can roll it back. Associated extension actions invoke
+Lambda (`Event`) and emit EventBridge (`Source=aws.appconfig`) on
+`ON_DEPLOYMENT_START` / `COMPLETE` / `ROLLED_BACK`.
 
 ## WAFv2
 
