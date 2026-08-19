@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
+import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.IpPermission;
@@ -194,7 +195,8 @@ public class Ec2PortForwardManager {
         if (target == null) {
             return false;
         }
-        if (!httpPortMux.register(appPort, publicHost(instance), target.ip())) {
+        String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instance.getInstanceId());
+        if (!httpPortMux.register(appPort, publicHost(instance), target.ip(), containerName)) {
             return false;
         }
         instance.getPublishedPorts().put(appPort, appPort);

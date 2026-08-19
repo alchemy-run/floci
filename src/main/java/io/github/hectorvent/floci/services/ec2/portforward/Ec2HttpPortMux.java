@@ -39,8 +39,8 @@ public class Ec2HttpPortMux {
     private final ContainerLifecycleManager lifecycleManager;
     private final PortAllocator portAllocator;
 
-    /** appPort → hostname → backend IP */
-    private final Map<Integer, Map<String, String>> backends = new ConcurrentHashMap<>();
+    /** appPort → hostname → backend */
+    private final Map<Integer, Map<String, Backend>> backends = new ConcurrentHashMap<>();
 
     @Inject
     public Ec2HttpPortMux(DockerClient dockerClient,
@@ -57,20 +57,25 @@ public class Ec2HttpPortMux {
      * Registers {@code hostname} → {@code backendIp} on {@code appPort}. Creates the
      * mux sidecar the first time the port is claimed. Returns {@code false} when
      * the host port cannot be published.
+     *
+     * <p>Always rewrites nginx config, including when a leftover mux container
+     * is adopted: otherwise Host routing stays pointed at recycled bridge IPs
+     * (the mux itself after Docker reuse) and {@code /health} loops until
+     * {@code worker_connections} is exhausted.
      */
     public synchronized boolean register(int appPort, String hostname, String backendIp) {
+        return register(appPort, hostname, backendIp, null);
+    }
+
+    public synchronized boolean register(int appPort, String hostname, String backendIp,
+                                         String backendContainerName) {
         if (appPort <= 0 || hostname == null || hostname.isBlank()
                 || backendIp == null || backendIp.isBlank()) {
             return false;
         }
-        Map<String, String> routes = backends.computeIfAbsent(appPort, p -> new LinkedHashMap<>());
-        boolean created = routes.isEmpty();
-        routes.put(hostname, backendIp);
-        if (created && !ensureContainer(appPort)) {
-            backends.remove(appPort);
-            return false;
-        }
-        if (!created && !applyConfig(appPort)) {
+        Map<String, Backend> routes = backends.computeIfAbsent(appPort, p -> new LinkedHashMap<>());
+        routes.put(hostname, new Backend(backendIp, backendContainerName));
+        if (!ensureContainer(appPort) || !applyConfig(appPort)) {
             routes.remove(hostname);
             if (routes.isEmpty()) {
                 removeContainer(appPort);
@@ -83,7 +88,7 @@ public class Ec2HttpPortMux {
     }
 
     public synchronized void unregister(int appPort, String hostname) {
-        Map<String, String> routes = backends.get(appPort);
+        Map<String, Backend> routes = backends.get(appPort);
         if (routes == null) {
             return;
         }
@@ -101,32 +106,75 @@ public class Ec2HttpPortMux {
     }
 
     public static String nginxConfig(int appPort, Map<String, String> hostnameToIp) {
+        return nginxConfig(appPort, hostnameToIp, null);
+    }
+
+    /**
+     * @param muxIp when set, any backend that equals the mux container's own
+     *        bridge IP is omitted. Docker recycles IPs onto the mux after an
+     *        instance dies; proxying that address is a self-loop.
+     */
+    public static String nginxConfig(int appPort, Map<String, String> hostnameToIp, String muxIp) {
+        Map<String, String> routes = routesWithoutSelf(hostnameToIp, muxIp);
         StringBuilder http = new StringBuilder();
         http.append("worker_processes 1;\n");
         http.append("error_log /var/log/nginx/error.log warn;\n");
         http.append("pid /tmp/nginx.pid;\n");
-        http.append("events { worker_connections 128; }\n");
+        http.append("events { worker_connections 1024; }\n");
         http.append("http {\n");
         http.append("  access_log off;\n");
-        String defaultIp = hostnameToIp.values().stream().findFirst().orElse("127.0.0.1");
-        for (Map.Entry<String, String> entry : hostnameToIp.entrySet()) {
-            http.append(serverBlock(appPort, entry.getKey(), entry.getValue(), false));
+        http.append("  proxy_connect_timeout 2s;\n");
+        http.append("  proxy_read_timeout 5s;\n");
+        for (Map.Entry<String, String> entry : routes.entrySet()) {
+            http.append(serverBlock(appPort, entry.getKey(), entry.getValue()));
         }
-        http.append(serverBlock(appPort, "_", defaultIp, true));
+        http.append(unknownHostBlock(appPort));
         http.append("}\n");
         return http.toString();
     }
 
-    private static String serverBlock(int appPort, String serverName, String backendIp, boolean defaultServer) {
+    static Map<String, String> routesWithoutSelf(Map<String, String> hostnameToIp, String muxIp) {
+        if (hostnameToIp == null || hostnameToIp.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> filtered = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : hostnameToIp.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank()
+                    || entry.getValue() == null || entry.getValue().isBlank()) {
+                continue;
+            }
+            if (muxIp != null && !muxIp.isBlank() && muxIp.equals(entry.getValue())) {
+                continue;
+            }
+            filtered.put(entry.getKey(), entry.getValue());
+        }
+        return filtered;
+    }
+
+    private static String serverBlock(int appPort, String serverName, String backendIp) {
         return "  server {\n"
-                + "    listen " + appPort + (defaultServer ? " default_server" : "") + ";\n"
-                + "    server_name " + serverName + ";\n"
+                + "    listen " + appPort + ";\n"
+                + "    server_name " + serverName + " " + serverName + ":" + appPort + ";\n"
                 + "    location / {\n"
                 + "      proxy_http_version 1.1;\n"
                 + "      proxy_set_header Host $host;\n"
                 + "      proxy_set_header Connection \"\";\n"
                 + "      proxy_pass http://" + backendIp + ":" + appPort + ";\n"
                 + "    }\n"
+                + "  }\n";
+    }
+
+    /**
+     * Unknown {@code Host} values must 502 — never steal the first backend.
+     * A catch-all {@code proxy_pass} to that IP becomes a self-loop once
+     * Docker recycles the address onto the mux container.
+     */
+    private static String unknownHostBlock(int appPort) {
+        return "  server {\n"
+                + "    listen " + appPort + " default_server;\n"
+                + "    server_name _;\n"
+                + "    default_type text/plain;\n"
+                + "    return 502;\n"
                 + "  }\n";
     }
 
@@ -148,7 +196,7 @@ public class Ec2HttpPortMux {
                     .withLogRotation()
                     .build();
             String containerId = lifecycleManager.create(spec);
-            writeNginxConfig(containerId, nginxConfig(appPort, backends.getOrDefault(appPort, Map.of())));
+            writeNginxConfig(containerId, nginxConfig(appPort, storedHostnameIps(appPort)));
             lifecycleManager.startCreated(containerId, spec);
             return true;
         } catch (Exception e) {
@@ -166,11 +214,68 @@ public class Ec2HttpPortMux {
         }
         try {
             String containerId = found.get().getId();
-            writeNginxConfig(containerId, nginxConfig(appPort, backends.getOrDefault(appPort, Map.of())));
+            String muxIp = inspectContainerIp(containerId);
+            Map<String, String> routes = resolveLiveRoutes(appPort, muxIp);
+            writeNginxConfig(containerId, nginxConfig(appPort, routes, muxIp));
             return reloadNginx(containerId);
         } catch (Exception e) {
             LOG.warnv("Failed to reload EC2 HTTP mux on port {0}: {1}", appPort, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Re-inspects each backend container so a recycled bridge IP cannot stay
+     * pointed at a dead instance (or the mux). Drops hostnames whose guest is gone.
+     */
+    private Map<String, String> resolveLiveRoutes(int appPort, String muxIp) {
+        Map<String, Backend> stored = backends.getOrDefault(appPort, Map.of());
+        Map<String, String> live = new LinkedHashMap<>();
+        for (Map.Entry<String, Backend> entry : stored.entrySet()) {
+            String ip = resolveLiveIp(entry.getValue());
+            if (ip == null || ip.isBlank()) {
+                continue;
+            }
+            if (muxIp != null && muxIp.equals(ip)) {
+                LOG.warnv("EC2 HTTP mux port {0}: dropping {1}; backend IP {2} is the mux itself",
+                        appPort, entry.getKey(), ip);
+                continue;
+            }
+            live.put(entry.getKey(), ip);
+        }
+        return live;
+    }
+
+    private String resolveLiveIp(Backend backend) {
+        if (backend.containerName() != null && !backend.containerName().isBlank()) {
+            var found = lifecycleManager.findByName(backend.containerName());
+            if (found.isPresent()) {
+                String ip = inspectContainerIp(found.get().getId());
+                if (ip != null && !ip.isBlank()) {
+                    return ip;
+                }
+            }
+        }
+        return backend.ip();
+    }
+
+    private String inspectContainerIp(String containerId) {
+        if (containerId == null || containerId.isBlank()) {
+            return null;
+        }
+        try {
+            var inspect = dockerClient.inspectContainerCmd(containerId).exec();
+            if (inspect.getNetworkSettings() == null || inspect.getNetworkSettings().getNetworks() == null) {
+                return null;
+            }
+            return inspect.getNetworkSettings().getNetworks().values().stream()
+                    .map(network -> network != null ? network.getIpAddress() : null)
+                    .filter(ip -> ip != null && !ip.isBlank())
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception e) {
+            LOG.debugv("Could not inspect mux/backend container {0}: {1}", containerId, e.getMessage());
+            return null;
         }
     }
 
@@ -199,6 +304,24 @@ public class Ec2HttpPortMux {
     }
 
     private boolean reloadNginx(String containerId) throws Exception {
+        Exception last = null;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                if (tryReloadNginx(containerId)) {
+                    return true;
+                }
+            } catch (Exception e) {
+                last = e;
+            }
+            Thread.sleep(200);
+        }
+        if (last != null) {
+            throw last;
+        }
+        return false;
+    }
+
+    private boolean tryReloadNginx(String containerId) throws Exception {
         String execId = dockerClient.execCreateCmd(containerId)
                 .withCmd("nginx", "-s", "reload")
                 .withAttachStdout(true)
@@ -222,5 +345,18 @@ public class Ec2HttpPortMux {
         }
         Long exit = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
         return exit != null && exit == 0;
+    }
+
+    private Map<String, String> storedHostnameIps(int appPort) {
+        Map<String, String> ips = new LinkedHashMap<>();
+        for (Map.Entry<String, Backend> entry : backends.getOrDefault(appPort, Map.of()).entrySet()) {
+            if (entry.getValue() != null && entry.getValue().ip() != null) {
+                ips.put(entry.getKey(), entry.getValue().ip());
+            }
+        }
+        return ips;
+    }
+
+    record Backend(String ip, String containerName) {
     }
 }
