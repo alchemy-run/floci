@@ -785,6 +785,75 @@ class SecretsManagerServiceTest {
         assertTrue(passed, "Failed to wait for rotation completion");
     }
 
+    /**
+     * Alchemy's rotation fixture (and AWS's official templates) skip
+     * PutSecretValue when {@code ListSecretVersionIds} already reports the
+     * ClientRequestToken. RotateSecret must not reserve an empty AWSPENDING
+     * row before createSecret, or the function never writes the new value.
+     */
+    @Test
+    void rotateSecret_doesNotReservePendingVersionBeforeCreateSecret() throws Exception {
+        io.github.hectorvent.floci.services.lambda.LambdaService mockLambda =
+                org.mockito.Mockito.mock(io.github.hectorvent.floci.services.lambda.LambdaService.class);
+        String lambdaArn = "arn:aws:lambda:us-east-1:000000000000:function:rotate";
+        String token = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+
+        SecretsManagerService svc = new SecretsManagerService(
+                new InMemoryStorage<String, Secret>(), 30,
+                new io.github.hectorvent.floci.core.common.RegionResolver("us-east-1", "000000000000"),
+                mockLambda, new com.fasterxml.jackson.databind.ObjectMapper());
+
+        svc.createSecret("my-secret", "alchemy-sm-rotation-initial", null, null, null, null, REGION);
+
+        org.mockito.Mockito.when(mockLambda.invoke(org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+                        org.mockito.Mockito.any(byte[].class), org.mockito.Mockito.any()))
+                .thenAnswer(invocation -> {
+                    byte[] payloadBytes = invocation.getArgument(2);
+                    com.fasterxml.jackson.databind.JsonNode payload =
+                            new com.fasterxml.jackson.databind.ObjectMapper().readTree(payloadBytes);
+                    String step = payload.get("Step").asText();
+                    String requestToken = payload.get("ClientRequestToken").asText();
+
+                    switch (step) {
+                        case "createSecret" -> {
+                            boolean exists = svc.listSecretVersionIds("my-secret", REGION)
+                                    .containsKey(requestToken);
+                            if (!exists) {
+                                svc.putSecretValue("my-secret", "alchemy-sm-rotated-new",
+                                        null, requestToken, REGION, List.of("AWSPENDING"));
+                            }
+                        }
+                        case "finishSecret" -> {
+                            SecretVersion current = svc.getSecretValue("my-secret", null, "AWSCURRENT", REGION);
+                            if (!requestToken.equals(current.getVersionId())) {
+                                svc.updateSecretVersionStage("my-secret", requestToken,
+                                        current.getVersionId(), "AWSCURRENT", REGION);
+                            }
+                        }
+                        default -> { }
+                    }
+                    io.github.hectorvent.floci.services.lambda.model.InvokeResult ok =
+                            new io.github.hectorvent.floci.services.lambda.model.InvokeResult();
+                    ok.setStatusCode(200);
+                    return ok;
+                });
+
+        svc.rotateSecret("my-secret", token, lambdaArn, null, true, REGION);
+
+        long end = System.currentTimeMillis() + 2000;
+        boolean passed = false;
+        while (System.currentTimeMillis() < end) {
+            SecretVersion current = svc.getSecretValue("my-secret", null, "AWSCURRENT", REGION);
+            if ("alchemy-sm-rotated-new".equals(current.getSecretString())
+                    && token.equals(current.getVersionId())) {
+                passed = true;
+                break;
+            }
+            Thread.sleep(50);
+        }
+        assertTrue(passed, "createSecret must write AWSPENDING; finishSecret must promote it");
+    }
+
     @Test
     void rotateSecret_previousRotationInProgressThrows() throws Exception {
         io.github.hectorvent.floci.services.lambda.LambdaService mockLambda = org.mockito.Mockito.mock(io.github.hectorvent.floci.services.lambda.LambdaService.class);

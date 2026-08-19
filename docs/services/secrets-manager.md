@@ -16,7 +16,7 @@
 | `ListSecrets` | List all secrets |
 | `DeleteSecret` | Delete a secret (with recovery window) |
 | `RestoreSecret` | - |
-| `RotateSecret` | Trigger secret rotation via a Lambda |
+| `RotateSecret` | Trigger secret rotation via a Lambda. Does not pre-create an empty `AWSPENDING` version — the rotation function's `PutSecretValue` creates it, matching AWS so templates that skip the put when `ListSecretVersionIds` already lists the token still write a value. |
 | `TagResource` | Tag a secret |
 | `UntagResource` | Remove tags |
 | `ListSecretVersionIds` | List all versions of a secret |
