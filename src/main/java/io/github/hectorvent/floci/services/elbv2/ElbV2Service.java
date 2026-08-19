@@ -115,6 +115,25 @@ public class ElbV2Service {
     }
 
     /**
+     * Storage reload (and {@code getOrDefault(..., Map.of())}) can hand back an
+     * immutable inner map. Mutating it throws {@code UnsupportedOperationException}
+     * with a null message — the Query dispatcher surfaces that as
+     * {@code InternalFailure: Unexpected error: null}.
+     */
+    private <V> Map<String, V> mutableRegion(Map<String, Map<String, V>> resources, String region) {
+        Map<String, V> existing = resources.get(region);
+        if (existing instanceof ConcurrentHashMap) {
+            return existing;
+        }
+        ConcurrentHashMap<String, V> copy = new ConcurrentHashMap<>();
+        if (existing != null) {
+            copy.putAll(existing);
+        }
+        resources.put(region, copy);
+        return copy;
+    }
+
+    /**
      * Rebuilds the in-memory indexes from the storage-backed maps. Pure and in-process on purpose:
      * nothing reachable from {@link #initializeStorage()} may call an injected collaborator, because
      * {@link ElbV2DataPlane} calls back into this service and CDI has not registered the instance in
@@ -168,7 +187,7 @@ public class ElbV2Service {
             for (Map.Entry<String, Map<String, Listener>> regionEntry : listeners.entrySet()) {
                 String region = regionEntry.getKey();
                 for (Listener listener : regionEntry.getValue().values()) {
-                    dataPlane.startListener(listener, region, getListenerRules(region, listener.getListenerArn()));
+                    startDataPlane(listener, region);
                 }
             }
         }
@@ -181,7 +200,7 @@ public class ElbV2Service {
                                            List<String> subnets, List<String> securityGroups,
                                            Map<String, String> initialTags) {
         validateName(name, "load balancer");
-        Map<String, LoadBalancer> regionLbs = loadBalancers.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, LoadBalancer> regionLbs = mutableRegion(loadBalancers, region);
         boolean duplicate = regionLbs.values().stream()
                 .anyMatch(lb -> lb.getLoadBalancerName().equals(name));
         if (duplicate) {
@@ -254,7 +273,7 @@ public class ElbV2Service {
     }
 
     public void deleteLoadBalancer(String region, String arn) {
-        Map<String, LoadBalancer> regionLbs = loadBalancers.getOrDefault(region, Map.of());
+        Map<String, LoadBalancer> regionLbs = mutableRegion(loadBalancers, region);
         LoadBalancer lb = regionLbs.remove(arn);
         if (lb == null) {
             return; // AWS silently ignores non-existent LBs on delete
@@ -262,8 +281,8 @@ public class ElbV2Service {
         // cascade: listeners → rules
         List<String> listenerArns = lbToListeners.remove(arn);
         if (listenerArns != null) {
-            Map<String, Listener> regionListeners = listeners.getOrDefault(region, Map.of());
-            Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
+            Map<String, Listener> regionListeners = mutableRegion(listeners, region);
+            Map<String, Rule> regionRules = mutableRegion(rules, region);
             for (String listenerArn : listenerArns) {
                 dataPlane.stopListener(listenerArn);
                 regionListeners.remove(listenerArn);
@@ -373,7 +392,7 @@ public class ElbV2Service {
                                           String matcher, String ipAddressType,
                                           Map<String, String> initialTags) {
         validateName(name, "target group");
-        Map<String, TargetGroup> regionTgs = targetGroups.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, TargetGroup> regionTgs = mutableRegion(targetGroups, region);
         boolean duplicate = regionTgs.values().stream()
                 .anyMatch(tg -> tg.getTargetGroupName().equals(name));
         if (duplicate) {
@@ -454,7 +473,7 @@ public class ElbV2Service {
                     "Target group '" + tg.getTargetGroupName() + "' is currently in use by a listener or rule.", 400);
         }
         healthChecker.stopMonitoring(arn);
-        targetGroups.getOrDefault(region, Map.of()).remove(arn);
+        mutableRegion(targetGroups, region).remove(arn);
         persistRegion(targetGroups, region);
         tgToLbs.remove(arn);
         tags.remove(arn);
@@ -497,7 +516,7 @@ public class ElbV2Service {
                                     Map<String, String> initialTags) {
         requireLoadBalancer(region, lbArn);
 
-        Map<String, Listener> regionListeners = listeners.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, Listener> regionListeners = mutableRegion(listeners, region);
 
         // check duplicate port on same LB
         boolean portExists = regionListeners.values().stream()
@@ -531,7 +550,7 @@ public class ElbV2Service {
 
         // auto-create the default rule
         Rule defaultRule = buildDefaultRule(region, listenerArn, lb, lbId, listenerId, defaultActions);
-        Map<String, Rule> regionRules = rules.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, Rule> regionRules = mutableRegion(rules, region);
         regionRules.put(defaultRule.getRuleArn(), defaultRule);
         rules.put(region, regionRules);
         listenerToRules.computeIfAbsent(listenerArn, k -> new ArrayList<>()).add(defaultRule.getRuleArn());
@@ -542,7 +561,7 @@ public class ElbV2Service {
         if (!initialTags.isEmpty()) {
             tags.put(listenerArn, new LinkedHashMap<>(initialTags));
         }
-        dataPlane.startListener(listener, region, getListenerRules(region, listenerArn));
+        startDataPlane(listener, region);
         return listener;
     }
 
@@ -574,7 +593,7 @@ public class ElbV2Service {
     }
 
     public void deleteListener(String region, String listenerArn) {
-        Map<String, Listener> regionListeners = listeners.getOrDefault(region, Map.of());
+        Map<String, Listener> regionListeners = mutableRegion(listeners, region);
         Listener listener = regionListeners.remove(listenerArn);
         if (listener == null) {
             return;
@@ -582,7 +601,7 @@ public class ElbV2Service {
         dataPlane.stopListener(listenerArn);
         lbToListeners.getOrDefault(listener.getLoadBalancerArn(), List.of()).remove(listenerArn);
 
-        Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
+        Map<String, Rule> regionRules = mutableRegion(rules, region);
         List<String> ruleArns = listenerToRules.remove(listenerArn);
         if (ruleArns != null) {
             ruleArns.forEach(regionRules::remove);
@@ -615,7 +634,12 @@ public class ElbV2Service {
         }
         if (protocol != null)      listener.setProtocol(protocol);
         if (sslPolicy != null)     listener.setSslPolicy(sslPolicy);
-        if (certificates != null)  listener.setCertificates(new ArrayList<>(certificates));
+        if (certificates != null && !certificates.isEmpty()) {
+            // ModifyListener replaces only the default certificate. SNI extras
+            // added via AddListenerCertificates must survive (Alchemy's Listener
+            // reconcile always resends the default cert).
+            replaceDefaultCertificate(listener, certificates.getFirst());
+        }
         if (alpnPolicy != null)    listener.setAlpnPolicy(new ArrayList<>(alpnPolicy));
         if (defaultActions != null) {
             listener.setDefaultActions(new ArrayList<>(defaultActions));
@@ -633,7 +657,7 @@ public class ElbV2Service {
         persistRegion(listeners, region);
         persistRegion(rules, region);
         if (restartDataPlane) {
-            dataPlane.restartListener(requireListener(region, listenerArn), region, getListenerRules(region, listenerArn));
+            restartDataPlane(requireListener(region, listenerArn), region);
         } else if (recompileRules) {
             dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
         }
@@ -649,7 +673,7 @@ public class ElbV2Service {
             throw new AwsException("ValidationError", "Priority must be between 1 and 50000.", 400);
         }
 
-        Map<String, Rule> regionRules = rules.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, Rule> regionRules = mutableRegion(rules, region);
         List<String> existingRuleArns = listenerToRules.getOrDefault(listenerArn, List.of());
         String priorityStr = String.valueOf(priority);
         boolean priorityTaken = existingRuleArns.stream()
@@ -714,7 +738,7 @@ public class ElbV2Service {
     }
 
     public void deleteRule(String region, String ruleArn) {
-        Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
+        Map<String, Rule> regionRules = mutableRegion(rules, region);
         Rule rule = regionRules.get(ruleArn);
         if (rule == null) {
             return;
@@ -879,9 +903,10 @@ public class ElbV2Service {
 
     public void addListenerCertificates(String region, String listenerArn, List<String> certArns) {
         Listener listener = requireListener(region, listenerArn);
+        List<String> certificates = listener.getCertificates();
         for (String certArn : certArns) {
-            if (!listener.getCertificates().contains(certArn)) {
-                listener.getCertificates().add(certArn);
+            if (certArn != null && !certificates.contains(certArn)) {
+                certificates.add(certArn);
             }
         }
         persistRegion(listeners, region);
@@ -889,13 +914,40 @@ public class ElbV2Service {
 
     public void removeListenerCertificates(String region, String listenerArn, List<String> certArns) {
         Listener listener = requireListener(region, listenerArn);
-        listener.getCertificates().removeAll(certArns);
+        List<String> certificates = listener.getCertificates();
+        String defaultCert = certificates.isEmpty() ? null : certificates.getFirst();
+        if (defaultCert != null && certArns != null && certArns.contains(defaultCert)) {
+            throw new AwsException("OperationNotPermitted",
+                    "The default certificate cannot be removed. Use ModifyListener to change it.", 400);
+        }
+        if (certArns != null) {
+            certificates.removeAll(certArns);
+        }
         persistRegion(listeners, region);
     }
 
     public List<String> describeListenerCertificates(String region, String listenerArn) {
         Listener listener = requireListener(region, listenerArn);
         return new ArrayList<>(listener.getCertificates());
+    }
+
+    /**
+     * Index 0 is the default certificate (CreateListener / ModifyListener).
+     * Subsequent entries are SNI extras (AddListenerCertificates).
+     */
+    private static void replaceDefaultCertificate(Listener listener, String defaultCertArn) {
+        List<String> current = listener.getCertificates();
+        List<String> extras = new ArrayList<>();
+        for (int i = 1; i < current.size(); i++) {
+            String extra = current.get(i);
+            if (extra != null && !extra.equals(defaultCertArn)) {
+                extras.add(extra);
+            }
+        }
+        List<String> updated = new ArrayList<>();
+        updated.add(defaultCertArn);
+        updated.addAll(extras);
+        listener.setCertificates(updated);
     }
 
     // ── Trust Stores ──────────────────────────────────────────────────────────
@@ -911,7 +963,7 @@ public class ElbV2Service {
             throw new AwsException("ValidationError",
                     "CaCertificatesBundleS3Bucket and CaCertificatesBundleS3Key are required.", 400);
         }
-        Map<String, TrustStore> regionStores = trustStores.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
+        Map<String, TrustStore> regionStores = mutableRegion(trustStores, region);
         boolean duplicate = regionStores.values().stream().anyMatch(ts -> ts.getName().equals(name));
         if (duplicate) {
             throw new AwsException("DuplicateTrustStoreName",
@@ -998,7 +1050,7 @@ public class ElbV2Service {
             throw new AwsException("TrustStoreInUse",
                     "The specified trust store is currently in use.", 400);
         }
-        Map<String, TrustStore> regionStores = trustStores.getOrDefault(region, Map.of());
+        Map<String, TrustStore> regionStores = mutableRegion(trustStores, region);
         regionStores.remove(arn);
         tags.remove(arn);
         persistRegion(trustStores, region);
@@ -1141,7 +1193,11 @@ public class ElbV2Service {
     private boolean isTrustStoreInUse(String trustStoreArn) {
         for (Map<String, Listener> regionListeners : listeners.values()) {
             for (Listener listener : regionListeners.values()) {
-                String mode = listener.getAttributes().get("mutualAuthentication.trustStoreArn");
+                Map<String, String> attributes = listener.getAttributes();
+                if (attributes == null) {
+                    continue;
+                }
+                String mode = attributes.get("mutualAuthentication.trustStoreArn");
                 if (trustStoreArn.equals(mode)) {
                     return true;
                 }
@@ -1225,6 +1281,32 @@ public class ElbV2Service {
         dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
     }
 
+    /**
+     * Data-plane bind is best-effort. A local HTTP proxy failure (null port,
+     * NLB/TCP/TLS, port conflict, NPE) must not fail CreateListener — that
+     * leaked as {@code InternalFailure: Unexpected error: null}.
+     */
+    private void startDataPlane(Listener listener, String region) {
+        if (dataPlane == null || listener == null) {
+            return;
+        }
+        try {
+            dataPlane.startListener(listener, region, getListenerRules(region, listener.getListenerArn()));
+        } catch (RuntimeException ignored) {
+            // already logged inside ElbV2DataPlane when the real impl is used
+        }
+    }
+
+    private void restartDataPlane(Listener listener, String region) {
+        if (dataPlane == null || listener == null) {
+            return;
+        }
+        try {
+            dataPlane.restartListener(listener, region, getListenerRules(region, listener.getListenerArn()));
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     private List<Rule> getListenerRules(String region, String listenerArn) {
         Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
         return listenerToRules.getOrDefault(listenerArn, List.of()).stream()
@@ -1296,16 +1378,21 @@ public class ElbV2Service {
     }
 
     private void linkTgToLb(Action action, String lbArn) {
-        if ("forward".equals(action.getType())) {
-            if (action.getTargetGroupArn() != null) {
-                tgToLbs.computeIfAbsent(action.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
-                addLoadBalancerReference(action.getTargetGroupArn(), lbArn);
-            }
-            for (Action.TargetGroupTuple t : action.getTargetGroups()) {
-                if (t.getTargetGroupArn() != null) {
-                    tgToLbs.computeIfAbsent(t.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
-                    addLoadBalancerReference(t.getTargetGroupArn(), lbArn);
-                }
+        if (action == null || !"forward".equals(action.getType())) {
+            return;
+        }
+        if (action.getTargetGroupArn() != null) {
+            tgToLbs.computeIfAbsent(action.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
+            addLoadBalancerReference(action.getTargetGroupArn(), lbArn);
+        }
+        List<Action.TargetGroupTuple> tuples = action.getTargetGroups();
+        if (tuples == null) {
+            return;
+        }
+        for (Action.TargetGroupTuple t : tuples) {
+            if (t != null && t.getTargetGroupArn() != null) {
+                tgToLbs.computeIfAbsent(t.getTargetGroupArn(), k -> ConcurrentHashMap.newKeySet()).add(lbArn);
+                addLoadBalancerReference(t.getTargetGroupArn(), lbArn);
             }
         }
     }
@@ -1362,11 +1449,18 @@ public class ElbV2Service {
     }
 
     private static void collectActionTargetGroups(Action action, Set<String> out) {
+        if (action == null) {
+            return;
+        }
         if (action.getTargetGroupArn() != null) {
             out.add(action.getTargetGroupArn());
         }
-        for (Action.TargetGroupTuple t : action.getTargetGroups()) {
-            if (t.getTargetGroupArn() != null) {
+        List<Action.TargetGroupTuple> tuples = action.getTargetGroups();
+        if (tuples == null) {
+            return;
+        }
+        for (Action.TargetGroupTuple t : tuples) {
+            if (t != null && t.getTargetGroupArn() != null) {
                 out.add(t.getTargetGroupArn());
             }
         }

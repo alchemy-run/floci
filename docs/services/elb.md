@@ -44,15 +44,15 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 
 | Action | Description |
 |--------|-------------|
-| CreateListener | Creates a listener and its non-deletable default rule. |
-| DescribeListeners | Lists or returns stored listeners. |
-| ModifyListener | Updates a listener's configuration and default actions. |
+| CreateListener | Creates a listener (ALB HTTP/HTTPS or NLB TCP/TLS/UDP) and its non-deletable default rule. Data-plane bind is best-effort so a local proxy/NPE cannot fail the control-plane call. |
+| DescribeListeners | Lists or returns stored listeners. Certificates on this shape are the default cert only. |
+| ModifyListener | Updates a listener's configuration and default actions. `Certificates` replaces only the default certificate; SNI extras survive. |
 | ModifyListenerAttributes | Updates persisted listener attributes. |
 | DescribeListenerAttributes | Returns attributes stored for a listener. |
 | DeleteListener | Deletes a listener and stops its socket. |
-| AddListenerCertificates | Adds certificates to a listener. |
-| RemoveListenerCertificates | Removes certificates from a listener. |
-| DescribeListenerCertificates | Lists certificates associated with a listener. |
+| AddListenerCertificates | Adds SNI certificates (`IsDefault=false`). |
+| RemoveListenerCertificates | Removes SNI certificates. Removing the default certificate → `OperationNotPermitted`. |
+| DescribeListenerCertificates | Lists certificates with `IsDefault` (index 0 is the default). |
 
 ### Rules
 
@@ -108,6 +108,9 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 - `GetTrustStoreCaCertificatesBundle` returns a synthetic `https://s3.{region}.amazonaws.com/{bucket}/{key}` location (Alchemy only asserts the `https://` prefix).
 - `ModifyCapacityReservation` persists `MinimumLoadBalancerCapacity` on the load balancer. `ResetCapacityReservation=true` clears it.
 - `authenticate-oidc` listener actions are stored and returned on describe. `ClientSecret` is accepted on create/modify and omitted from describe, matching AWS.
+- `CreateListener` for NLB TCP/TLS (and HTTPS with a certificate) is a control-plane success even if the local HTTP proxy cannot bind.
+- Region maps reloaded from storage can be immutable (`Map.of()` / Jackson empty objects). ElbV2 copies them into a `ConcurrentHashMap` before mutate — otherwise `UnsupportedOperationException` (null message) leaked as `InternalFailure: Unexpected error: null`.
+- `DescribeListenerCertificates` marks the CreateListener/ModifyListener certificate as `IsDefault=true` and AddListenerCertificates entries as `IsDefault=false`. `ModifyListener` does not wipe SNI extras.
 
 ## ARN Format
 

@@ -61,8 +61,15 @@ public class Action {
     public String getTargetGroupArn() { return targetGroupArn; }
     public void setTargetGroupArn(String targetGroupArn) { this.targetGroupArn = targetGroupArn; }
 
-    public List<TargetGroupTuple> getTargetGroups() { return targetGroups; }
-    public void setTargetGroups(List<TargetGroupTuple> targetGroups) { this.targetGroups = targetGroups; }
+    public List<TargetGroupTuple> getTargetGroups() {
+        if (targetGroups == null) {
+            targetGroups = new ArrayList<>();
+        }
+        return targetGroups;
+    }
+    public void setTargetGroups(List<TargetGroupTuple> targetGroups) {
+        this.targetGroups = targetGroups != null ? targetGroups : new ArrayList<>();
+    }
 
     public Boolean getStickinessEnabled() { return stickinessEnabled; }
     public void setStickinessEnabled(Boolean stickinessEnabled) { this.stickinessEnabled = stickinessEnabled; }

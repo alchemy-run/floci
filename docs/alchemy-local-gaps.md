@@ -280,10 +280,13 @@ Patched in this tree: `DescribeInsightRules` returns an empty
 ## ELBv2
 
 Patched in this tree (Trust Store CRUD, `ModifyCapacityReservation`,
-authenticate-oidc round-trip). Against current `floci:dev`: 5/9 (LB,
-Listener, Rule, TargetGroup already dual). Alchemy now `flociDual`s
-TrustStore, ListenerCertificate, and TargetGroupAttachment. New ops need
-the image rebuild.
+authenticate-oidc round-trip, CreateListener NLB/TCP/TLS — the
+`InternalFailure: Unexpected error: null` was an immutable region-map
+`UnsupportedOperationException`, not an NPE — SNI `IsDefault` +
+ModifyListener default-cert-only). Alchemy `flociDual`s LB, Listener,
+Rule, TargetGroup, TrustStore, ListenerCertificate, and
+TargetGroupAttachment. Unsigned Query `CreateListener` (NLB/TCP) against
+`alchemy-floci` returns 200.
 
 ## EventBridge
 

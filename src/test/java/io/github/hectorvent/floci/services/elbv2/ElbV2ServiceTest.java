@@ -32,6 +32,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -368,6 +370,113 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void createListenerWhenPersistedRegionMapIsImmutable() throws Exception {
+        String lbArn = service.createLoadBalancer(
+                REGION, "immutable-region-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        var field = ElbV2Service.class.getDeclaredField("listeners");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Map<String, Listener>> persisted = (Map<String, Map<String, Listener>>) field.get(service);
+        persisted.put(REGION, Map.of());
+
+        Action fixed = new Action();
+        fixed.setType("fixed-response");
+        fixed.setFixedResponseStatusCode("200");
+        Listener listener = service.createListener(
+                REGION, lbArn, "HTTP", 80, null, List.of(),
+                List.of(fixed), List.of(), Map.of());
+
+        assertNotNull(listener.getListenerArn());
+        assertEquals(1, service.describeListeners(REGION, lbArn, null).size());
+    }
+
+    @Test
+    void createListenerOnNlbTcpSurvivesDataPlaneNpe() {
+        doThrow(new NullPointerException()).when(dataPlane)
+                .startListener(any(Listener.class), anyString(), anyList());
+        String lbArn = service.createLoadBalancer(
+                REGION, "nlb-tcp", "internal", "network", "ipv4",
+                ALB_SUBNETS, List.of(), Map.of()).getLoadBalancerArn();
+        String tgArn = createTcpTargetGroup("nlb-tcp-tg");
+        Action forward = forwardConfigOnly(tgArn);
+
+        Listener listener = service.createListener(
+                REGION, lbArn, "TCP", 80, null, List.of(),
+                List.of(forward), List.of(), Map.of());
+
+        assertNotNull(listener.getListenerArn());
+        assertTrue(listener.getListenerArn().contains(":listener/net/"));
+        assertEquals("TCP", listener.getProtocol());
+        assertEquals(80, listener.getPort());
+        assertEquals(1, service.describeListeners(REGION, lbArn, null).size());
+    }
+
+    @Test
+    void createListenerHttpsWithCertificateAndNullPortStillPersists() {
+        doThrow(new NullPointerException()).when(dataPlane)
+                .startListener(any(Listener.class), anyString(), anyList());
+        String lbArn = service.createLoadBalancer(
+                REGION, "https-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        Action fixed = new Action();
+        fixed.setType("fixed-response");
+        fixed.setFixedResponseStatusCode("200");
+
+        Listener withCert = service.createListener(
+                REGION, lbArn, "HTTPS", 443, "ELBSecurityPolicy-2016-08",
+                List.of("arn:aws:acm:us-west-2:000000000000:certificate/default"),
+                List.of(fixed), List.of(), Map.of());
+        assertEquals("HTTPS", withCert.getProtocol());
+        assertEquals("arn:aws:acm:us-west-2:000000000000:certificate/default",
+                withCert.getCertificates().getFirst());
+
+        Listener tls = service.createListener(
+                REGION, lbArn, "TLS", 8443, null,
+                List.of("arn:aws:acm:us-west-2:000000000000:certificate/tls"),
+                List.of(fixed), List.of(), Map.of());
+        assertEquals("TLS", tls.getProtocol());
+
+        Listener noPort = service.createListener(
+                REGION, lbArn, "TCP", null, null, List.of(),
+                List.of(fixed), List.of(), Map.of());
+        assertNotNull(noPort.getListenerArn());
+        assertEquals("TCP", noPort.getProtocol());
+    }
+
+    @Test
+    void listenerCertificatesSniAttachDetachPreservesDefault() {
+        String lbArn = service.createLoadBalancer(
+                REGION, "sni-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        Action fixed = new Action();
+        fixed.setType("fixed-response");
+        fixed.setFixedResponseStatusCode("200");
+        String defaultCert = "arn:aws:acm:us-west-2:000000000000:certificate/default";
+        String sniCert = "arn:aws:acm:us-west-2:000000000000:certificate/sni";
+        String listenerArn = service.createListener(
+                REGION, lbArn, "HTTPS", 443, null, List.of(defaultCert),
+                List.of(fixed), List.of(), Map.of()).getListenerArn();
+
+        service.addListenerCertificates(REGION, listenerArn, List.of(sniCert));
+        List<String> attached = service.describeListenerCertificates(REGION, listenerArn);
+        assertEquals(List.of(defaultCert, sniCert), attached);
+
+        service.modifyListener(REGION, listenerArn, "HTTPS", 443, null,
+                List.of(defaultCert), null, null);
+        attached = service.describeListenerCertificates(REGION, listenerArn);
+        assertEquals(List.of(defaultCert, sniCert), attached);
+
+        service.removeListenerCertificates(REGION, listenerArn, List.of(sniCert));
+        attached = service.describeListenerCertificates(REGION, listenerArn);
+        assertEquals(List.of(defaultCert), attached);
+
+        AwsException defaultRemove = assertThrows(AwsException.class,
+                () -> service.removeListenerCertificates(REGION, listenerArn, List.of(defaultCert)));
+        assertEquals("OperationNotPermitted", defaultRemove.getErrorCode());
+    }
+
+    @Test
     void modifyCapacityReservationResetIsNoOpSuccess() {
         String lbArn = service.createLoadBalancer(
                 REGION, "capacity-lb", "internal", "application", "ipv4",
@@ -402,10 +511,26 @@ class ElbV2ServiceTest {
                 "ipv4", Map.of()).getTargetGroupArn();
     }
 
+    private String createTcpTargetGroup(String name) {
+        return service.createTargetGroup(
+                REGION, name, "TCP", null, 80, "vpc-a", "ip",
+                "TCP", "traffic-port", true, "/", 30, 10, 3, 3, "200",
+                "ipv4", Map.of()).getTargetGroupArn();
+    }
+
     private static Action forwardAction(String targetGroupArn) {
         Action action = new Action();
         action.setType("forward");
         action.setTargetGroupArn(targetGroupArn);
+        return action;
+    }
+
+    private static Action forwardConfigOnly(String targetGroupArn) {
+        Action action = new Action();
+        action.setType("forward");
+        Action.TargetGroupTuple tuple = new Action.TargetGroupTuple();
+        tuple.setTargetGroupArn(targetGroupArn);
+        action.setTargetGroups(List.of(tuple));
         return action;
     }
 

@@ -103,14 +103,37 @@ public class ElbV2DataPlane {
     }
 
     public void startListener(Listener listener, String region, List<Rule> rules) {
-        if (config.services().elbv2().mock()) {
+        try {
+            startListenerUnsafe(listener, region, rules);
+        } catch (RuntimeException e) {
+            // Control-plane Create/ModifyListener must not fail because the local
+            // HTTP proxy cannot bind (null port, NLB/TCP/TLS, port-in-use). AWS
+            // CreateListener is a control-plane call; leaking an NPE as
+            // InternalFailure: Unexpected error: null is what blocked ECS NLB/ALB.
+            LOG.errorf(e, "ELBv2 data-plane failed to start listener %s",
+                    listener != null ? listener.getListenerArn() : null);
+        }
+    }
+
+    private void startListenerUnsafe(Listener listener, String region, List<Rule> rules) {
+        if (config == null || config.services() == null || config.services().elbv2() == null
+                || config.services().elbv2().mock()) {
+            return;
+        }
+        if (listener == null || listener.getListenerArn() == null || listener.getPort() == null) {
+            LOG.warnv("Skipping ELBv2 data-plane start: listener={0} port={1}",
+                    listener != null ? listener.getListenerArn() : null,
+                    listener != null ? listener.getPort() : null);
             return;
         }
         String listenerArn = listener.getListenerArn();
-        List<CompiledRule> compiled = compileRules(rules);
+        List<CompiledRule> compiled = compileRules(rules != null ? rules : List.of());
         ruleChains.put(listenerArn, new AtomicReference<>(compiled));
         listenerRegions.put(listenerArn, region);
         ListenerBinding binding = binding(listener, region);
+        if (binding == null) {
+            return;
+        }
         listenerBindings.put(listenerArn, binding);
         listenersByHostAndPort.computeIfAbsent(binding.port(), ignored -> new ConcurrentHashMap<>())
                 .put(binding.host(), listenerArn);
@@ -118,11 +141,27 @@ public class ElbV2DataPlane {
     }
 
     public void restartListener(Listener listener, String region, List<Rule> rules) {
-        if (config.services().elbv2().mock()) {
+        try {
+            restartListenerUnsafe(listener, region, rules);
+        } catch (RuntimeException e) {
+            LOG.errorf(e, "ELBv2 data-plane failed to restart listener %s",
+                    listener != null ? listener.getListenerArn() : null);
+        }
+    }
+
+    private void restartListenerUnsafe(Listener listener, String region, List<Rule> rules) {
+        if (config == null || config.services() == null || config.services().elbv2() == null
+                || config.services().elbv2().mock()) {
+            return;
+        }
+        if (listener == null || listener.getListenerArn() == null) {
             return;
         }
         String listenerArn = listener.getListenerArn();
         ListenerBinding newBinding = binding(listener, region);
+        if (newBinding == null) {
+            return;
+        }
         ListenerBinding oldBinding = listenerBindings.get(listenerArn);
         if (newBinding.equals(oldBinding)) {
             ruleChains.put(listenerArn, new AtomicReference<>(compileRules(rules)));
@@ -140,7 +179,7 @@ public class ElbV2DataPlane {
                 closePortServerIfUnused(oldBinding.port(), listenersByHost);
             }
         }
-        startListener(listener, region, rules);
+        startListenerUnsafe(listener, region, rules);
     }
 
     public void stopListener(String listenerArn) {
@@ -203,8 +242,15 @@ public class ElbV2DataPlane {
     }
 
     private ListenerBinding binding(Listener listener, String region) {
-        LoadBalancer loadBalancer = elbV2Service.getLoadBalancer(region, listener.getLoadBalancerArn());
-        String host = loadBalancer != null ? normalizeHost(loadBalancer.getDnsName()) : listener.getLoadBalancerArn();
+        if (listener == null || listener.getPort() == null) {
+            return null;
+        }
+        LoadBalancer loadBalancer = elbV2Service != null
+                ? elbV2Service.getLoadBalancer(region, listener.getLoadBalancerArn())
+                : null;
+        String host = loadBalancer != null
+                ? normalizeHost(loadBalancer.getDnsName())
+                : listener.getLoadBalancerArn();
         return new ListenerBinding(listener.getPort(), host, listener.getLoadBalancerArn());
     }
 
