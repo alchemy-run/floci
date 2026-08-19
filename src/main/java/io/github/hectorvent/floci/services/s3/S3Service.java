@@ -1282,7 +1282,7 @@ public class S3Service implements Resettable {
 
     public void putObjectRetention(String bucketName, String key, String versionId,
                                    String mode, Instant retainUntil, boolean bypassGovernance) {
-        ensureBucketExists(bucketName);
+        requireObjectLockEnabled(bucketName);
         String storeKey = versionId != null
                 ? versionedKey(bucketName, key, versionId)
                 : objectKey(bucketName, key);
@@ -1317,7 +1317,7 @@ public class S3Service implements Resettable {
     }
 
     public S3Object getObjectRetention(String bucketName, String key, String versionId) {
-        ensureBucketExists(bucketName);
+        requireObjectLockEnabled(bucketName);
         String storeKey = versionId != null
                 ? versionedKey(bucketName, key, versionId)
                 : objectKey(bucketName, key);
@@ -1327,7 +1327,7 @@ public class S3Service implements Resettable {
     }
 
     public void putObjectLegalHold(String bucketName, String key, String versionId, String status) {
-        ensureBucketExists(bucketName);
+        requireObjectLockEnabled(bucketName);
         String storeKey = versionId != null
                 ? versionedKey(bucketName, key, versionId)
                 : objectKey(bucketName, key);
@@ -1340,7 +1340,7 @@ public class S3Service implements Resettable {
     }
 
     public S3Object getObjectLegalHold(String bucketName, String key, String versionId) {
-        ensureBucketExists(bucketName);
+        requireObjectLockEnabled(bucketName);
         String storeKey = versionId != null
                 ? versionedKey(bucketName, key, versionId)
                 : objectKey(bucketName, key);
@@ -2108,8 +2108,11 @@ public class S3Service implements Resettable {
     }
 
     public void restoreObject(String bucketName, String key, String versionId, String restoreXml) {
-        // Validation only - stub implementation
-        getObject(bucketName, key, versionId);
+        S3Object object = getObject(bucketName, key, versionId);
+        if (!isRestorableStorageClass(object.getStorageClass())) {
+            throw new AwsException("InvalidObjectState",
+                    "The operation is not valid for the object's storage class", 403);
+        }
         LOG.infov("Restored object: {0}/{1} (stub)", bucketName, key);
     }
 
@@ -2727,6 +2730,43 @@ public class S3Service implements Resettable {
         }
     }
 
+    private void requireObjectLockEnabled(String bucketName) {
+        Bucket bucket = bucketStore.get(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket",
+                        "The specified bucket does not exist.", 404));
+        if (!bucket.isObjectLockEnabled()) {
+            throw new AwsException("InvalidRequest",
+                    "Bucket is missing Object Lock Configuration", 400);
+        }
+    }
+
+    private static boolean isRestorableStorageClass(String storageClass) {
+        if (storageClass == null || storageClass.isBlank()) {
+            return false;
+        }
+        return switch (storageClass.toUpperCase(java.util.Locale.ROOT)) {
+            case "GLACIER", "GLACIER_IR", "DEEP_ARCHIVE",
+                    "FLEXIBLE_RETRIEVAL", "GLACIER_FLEXIBLE_RETRIEVAL" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * AWS CopyObject with {@code x-amz-metadata-directive: REPLACE} stores
+     * {@code binary/octet-stream} when Content-Type is omitted or is the
+     * {@code application/octet-stream} alias.
+     */
+    static String normalizeReplaceContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return "binary/octet-stream";
+        }
+        String base = contentType.split(";", 2)[0].trim();
+        if (base.isEmpty() || "application/octet-stream".equalsIgnoreCase(base)) {
+            return "binary/octet-stream";
+        }
+        return base;
+    }
+
     private String objectKey(String bucketName, String key) {
         return bucketName + "/" + key;
     }
@@ -2873,8 +2913,8 @@ public class S3Service implements Resettable {
             metadata.putAll(effectiveOptions.getReplacementMetadata());
         }
 
-        String effectiveContentType = replaceMetadata && effectiveOptions.getContentType() != null
-                ? effectiveOptions.getContentType()
+        String effectiveContentType = replaceMetadata
+                ? normalizeReplaceContentType(effectiveOptions.getContentType())
                 : source.getContentType();
         String effectiveStorageClass = effectiveOptions.getStorageClass() != null
                 ? effectiveOptions.getStorageClass()

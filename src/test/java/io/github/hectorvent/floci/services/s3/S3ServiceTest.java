@@ -480,6 +480,71 @@ class S3ServiceTest {
     }
 
     @Test
+    void copyObjectReplaceNormalizesApplicationOctetStreamToBinary() {
+        s3Service.createBucket("source-bucket", "us-east-1");
+        s3Service.createBucket("dest-bucket", "us-east-1");
+        s3Service.putObject("source-bucket", "original.txt", "Content".getBytes(StandardCharsets.UTF_8),
+                "text/plain", null);
+
+        S3Object copy = s3Service.copyObject("source-bucket", "original.txt", "dest-bucket", "copy.txt",
+                "REPLACE", Map.of(), "STANDARD", "application/octet-stream");
+
+        assertEquals("binary/octet-stream", copy.getContentType());
+        assertEquals("binary/octet-stream",
+                s3Service.getObject("dest-bucket", "copy.txt").getContentType());
+    }
+
+    @Test
+    void objectLockOperationsOnPlainBucketThrowInvalidRequest() {
+        s3Service.createBucket("plain-bucket", "us-east-1");
+        s3Service.putObject("plain-bucket", "obj.txt", "data".getBytes(StandardCharsets.UTF_8),
+                "text/plain", null);
+
+        AwsException getRetention = assertThrows(AwsException.class,
+                () -> s3Service.getObjectRetention("plain-bucket", "obj.txt", null));
+        assertEquals("InvalidRequest", getRetention.getErrorCode());
+        assertEquals(400, getRetention.getHttpStatus());
+
+        AwsException putRetention = assertThrows(AwsException.class,
+                () -> s3Service.putObjectRetention("plain-bucket", "obj.txt", null,
+                        "GOVERNANCE", java.time.Instant.parse("2030-01-01T00:00:00Z"), false));
+        assertEquals("InvalidRequest", putRetention.getErrorCode());
+        assertEquals(400, putRetention.getHttpStatus());
+
+        AwsException getHold = assertThrows(AwsException.class,
+                () -> s3Service.getObjectLegalHold("plain-bucket", "obj.txt", null));
+        assertEquals("InvalidRequest", getHold.getErrorCode());
+        assertEquals(400, getHold.getHttpStatus());
+
+        AwsException putHold = assertThrows(AwsException.class,
+                () -> s3Service.putObjectLegalHold("plain-bucket", "obj.txt", null, "ON"));
+        assertEquals("InvalidRequest", putHold.getErrorCode());
+        assertEquals(400, putHold.getHttpStatus());
+    }
+
+    @Test
+    void restoreObjectOnStandardClassThrowsInvalidObjectState() {
+        s3Service.createBucket("restore-bucket", "us-east-1");
+        s3Service.putObject("restore-bucket", "std.txt", "not archived".getBytes(StandardCharsets.UTF_8),
+                "text/plain", null);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> s3Service.restoreObject("restore-bucket", "std.txt", null, "<RestoreRequest/>"));
+        assertEquals("InvalidObjectState", ex.getErrorCode());
+        assertEquals(403, ex.getHttpStatus());
+    }
+
+    @Test
+    void restoreObjectOnGlacierIsAccepted() {
+        s3Service.createBucket("restore-bucket", "us-east-1");
+        s3Service.putObject("restore-bucket", "ice.txt", "archived".getBytes(StandardCharsets.UTF_8),
+                "text/plain", null, "GLACIER", null, null, null);
+
+        assertDoesNotThrow(() ->
+                s3Service.restoreObject("restore-bucket", "ice.txt", null, "<RestoreRequest/>"));
+    }
+
+    @Test
     void copyObjectWithNonASCIIKey() {
         s3Service.createBucket("test-bucket", "us-east-1");
         String nonASCIIKey = "src/テスト画像.png";

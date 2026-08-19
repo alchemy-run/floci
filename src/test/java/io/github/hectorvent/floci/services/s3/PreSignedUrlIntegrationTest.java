@@ -136,6 +136,68 @@ class PreSignedUrlIntegrationTest {
             .body(equalTo("uploaded via presigned PUT"));
     }
 
+    @Test
+    @Order(6)
+    void presignedPutRejectsContentTypeMismatch() {
+        given().when().put("/" + BUCKET).then().statusCode(anyOf(is(200), is(409)));
+        int port = io.restassured.RestAssured.port;
+        String host = "localhost:" + port;
+        String key = "presign-content-type.txt";
+        String path = "/" + BUCKET + "/" + key;
+        String signedFor = "text/plain";
+        String url = sigV4PresignedPut(host, path, signedFor, "test", "test");
+
+        URI uri = URI.create(url);
+        String requestPath = uri.getRawPath() + "?" + uri.getRawQuery();
+
+        given()
+            .urlEncodingEnabled(false)
+            .config(io.restassured.RestAssured.config().encoderConfig(
+                    io.restassured.config.EncoderConfig.encoderConfig()
+                            .appendDefaultContentCharsetToContentTypeIfUndefined(false)))
+            .header("Content-Type", signedFor)
+            .body("matches signed content type")
+        .when()
+            .put(requestPath)
+        .then()
+            .statusCode(200);
+
+        given()
+            .urlEncodingEnabled(false)
+            .config(io.restassured.RestAssured.config().encoderConfig(
+                    io.restassured.config.EncoderConfig.encoderConfig()
+                            .appendDefaultContentCharsetToContentTypeIfUndefined(false)))
+            .header("Content-Type", "application/json")
+            .body("{}")
+        .when()
+            .put(requestPath)
+        .then()
+            .statusCode(403)
+            .body(containsString("SignatureDoesNotMatch"));
+    }
+
+    private static String sigV4PresignedPut(String host, String path, String contentType,
+                                            String accessKey, String secret) {
+        String amzDate = java.time.Instant.now().atOffset(java.time.ZoneOffset.UTC)
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'"));
+        String credential = accessKey + "/" + amzDate.substring(0, 8) + "/us-east-1/s3/aws4_request";
+        String signedHeaders = "content-type;host";
+        java.util.Map<String, String> query = new java.util.LinkedHashMap<>();
+        query.put("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
+        query.put("X-Amz-Credential", credential);
+        query.put("X-Amz-Date", amzDate);
+        query.put("X-Amz-Expires", "900");
+        query.put("X-Amz-SignedHeaders", signedHeaders);
+        String encodedQuery = S3PresignedSignature.encodeQuery(query);
+        String encodedPath = S3PresignedSignature.encodeS3Path(path);
+        String canonicalHeaders = S3PresignedSignature.canonicalHeaders(
+                signedHeaders, host, java.util.Map.of("content-type", contentType));
+        String signature = S3PresignedSignature.signature(
+                "PUT", encodedPath, encodedQuery, canonicalHeaders, signedHeaders,
+                amzDate, S3PresignedSignature.credentialScope(credential), secret);
+        return "http://" + host + path + "?" + encodedQuery + "&X-Amz-Signature=" + signature;
+    }
+
     // --- response-* query parameter overrides on presigned GET/HEAD ---
 
     @Test
@@ -261,6 +323,7 @@ class PreSignedUrlIntegrationTest {
     void cleanUp() {
         given().when().delete("/" + BUCKET + "/secret-file.txt").then().statusCode(204);
         given().when().delete("/" + BUCKET + "/uploaded-via-presign.txt").then().statusCode(204);
+        given().when().delete("/" + BUCKET + "/presign-content-type.txt").then().statusCode(204);
         given().when().delete("/" + BUCKET + "/disposition-file.txt").then().statusCode(204);
         given().when().delete("/" + BUCKET).then().statusCode(204);
     }
