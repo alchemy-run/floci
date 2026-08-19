@@ -252,9 +252,10 @@ public class AutoScalingQueryHandler {
            .elem("MaxSize", String.valueOf(asg.getMaxSize()))
            .elem("DesiredCapacity", String.valueOf(asg.getDesiredCapacity()))
            .elem("DefaultCooldown", String.valueOf(asg.getDefaultCooldown()))
-           .elem("HealthCheckType", asg.getHealthCheckType())
+           .elem("HealthCheckType", asg.getHealthCheckType() != null ? asg.getHealthCheckType() : "EC2")
            .elem("HealthCheckGracePeriod", String.valueOf(asg.getHealthCheckGracePeriod()))
-           .elem("CreatedTime", ISO_FMT.format(asg.getCreatedTime()));
+           .elem("CreatedTime", ISO_FMT.format(
+                   asg.getCreatedTime() != null ? asg.getCreatedTime() : Instant.EPOCH));
 
         if (asg.getLaunchConfigurationName() != null) {
             xml.elem("LaunchConfigurationName", asg.getLaunchConfigurationName());

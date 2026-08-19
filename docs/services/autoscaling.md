@@ -38,9 +38,9 @@ Floci implements the EC2 Auto Scaling API — stored-state management for launch
 | `SetDesiredCapacity` | Updates desired count; reconciler handles scale-out / scale-in within 10 s |
 | `AttachInstances` | Attaches existing EC2 instances to a group; sets lifecycle state to `InService` |
 | `DetachInstances` | Detaches instances from a group; optionally decrements desired capacity |
-| `TerminateInstanceInAutoScalingGroup` | Terminates a specific instance; optionally decrements desired capacity |
+| `TerminateInstanceInAutoScalingGroup` | Terminates a specific instance; optionally decrements desired capacity. A well-formed instance id that belongs to no group is `AccessDenied` (AWS resolves the owning group for resource-level authorization) |
 | `SetInstanceProtection` | Sets `ProtectedFromScaleIn` on named instances; `ValidationError` if an instance is not in the group |
-| `SetInstanceHealth` | Sets `Healthy` / `Unhealthy` on an ASG-tracked instance |
+| `SetInstanceHealth` | Sets `Healthy` / `Unhealthy` on an ASG-tracked instance. Unknown instance id is `AccessDenied`, same as terminate |
 | `EnterStandby` | Moves instances to `Standby`; optionally decrements desired capacity |
 | `ExitStandby` | Returns standby instances to `InService` |
 

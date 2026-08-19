@@ -731,6 +731,7 @@ public class RuntimeApiServer {
     }
 
     private void sendInvocation(RoutingContext ctx, PendingInvocation invocation) {
+        invocation.markDispatched();
         inFlight.put(invocation.getRequestId(), invocation);
 
         byte[] payload = invocation.getPayload();

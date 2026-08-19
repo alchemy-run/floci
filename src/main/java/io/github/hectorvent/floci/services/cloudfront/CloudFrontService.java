@@ -32,6 +32,7 @@ import jakarta.inject.Inject;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +64,8 @@ public class CloudFrontService {
     private final StorageBackend<String, MonitoringSubscription> monitoringStore;
     private final StorageBackend<String, VpcOrigin> vpcOriginStore;
     private final StorageBackend<String, KeyValueStore> kvsStore;
+    /** KVS data-plane keys, keyed by store id → (key → value). */
+    private final StorageBackend<String, Map<String, String>> kvsKeysStore;
     private final String accountId;
     private final String domainSuffix;
     private final ElbV2Service elbV2;
@@ -111,6 +114,8 @@ public class CloudFrontService {
                 new TypeReference<Map<String, VpcOrigin>>() {});
         this.kvsStore = factory.create("cloudfront", "cloudfront-key-value-stores.json",
                 new TypeReference<Map<String, KeyValueStore>>() {});
+        this.kvsKeysStore = factory.create("cloudfront", "cloudfront-kvs-keys.json",
+                new TypeReference<Map<String, Map<String, String>>>() {});
         this.accountId = config.defaultAccountId();
         this.domainSuffix = config.services().cloudfront().domainSuffix();
         this.elbV2 = elbV2;
@@ -1085,6 +1090,7 @@ public class CloudFrontService {
         store.setId(id);
         store.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "key-value-store/" + id).toString());
         store.setStatus("READY");
+        store.setCreatedTime(now);
         store.setLastModifiedTime(now);
         store.setEtag(UUID.randomUUID().toString());
         if (tags != null && !tags.isEmpty()) {
@@ -1123,6 +1129,7 @@ public class CloudFrontService {
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
         kvsStore.delete(existing.getId());
+        kvsKeysStore.delete(existing.getId());
         if (existing.getArn() != null) {
             tagStore.delete(existing.getArn());
         }
@@ -1135,6 +1142,95 @@ public class CloudFrontService {
         }
         all.sort((a, b) -> a.getName().compareTo(b.getName()));
         return paginate(all, marker, maxItems, KeyValueStore::getName);
+    }
+
+    // ── Key Value Store data plane (cloudfront-keyvaluestore) ────────────────
+
+    /**
+     * Resolves a store by its data-plane ARN
+     * ({@code arn:aws:cloudfront::{account}:key-value-store/{id}}).
+     * The data plane reports a missing store as {@code ResourceNotFoundException}
+     * (404), not the control plane's {@code EntityNotFound}.
+     */
+    public KeyValueStore describeKeyValueStoreByArn(String kvsArn) {
+        String id = kvsArn;
+        int slash = kvsArn.lastIndexOf('/');
+        if (slash >= 0) {
+            id = kvsArn.substring(slash + 1);
+        }
+        return kvsStore.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                "Resource was not found.", 404));
+    }
+
+    public Map<String, String> kvsKeys(String kvsArn) {
+        KeyValueStore store = describeKeyValueStoreByArn(kvsArn);
+        return kvsKeysStore.get(store.getId()).map(HashMap::new).orElseGet(HashMap::new);
+    }
+
+    public String kvsGetKey(String kvsArn, String key) {
+        String value = kvsKeys(kvsArn).get(key);
+        if (value == null) {
+            throw new AwsException("ResourceNotFoundException", "Resource was not found.", 404);
+        }
+        return value;
+    }
+
+    public synchronized KeyValueStore kvsPutKey(String kvsArn, String key, String value, String ifMatch) {
+        return kvsMutate(kvsArn, ifMatch, keys -> keys.put(key, value));
+    }
+
+    public synchronized KeyValueStore kvsDeleteKey(String kvsArn, String key, String ifMatch) {
+        return kvsMutate(kvsArn, ifMatch, keys -> {
+            if (keys.remove(key) == null) {
+                throw new AwsException("ResourceNotFoundException", "Resource was not found.", 404);
+            }
+        });
+    }
+
+    /**
+     * Bulk puts + deletes in one atomic step. Deletes of absent keys are
+     * tolerated — UpdateKeys is the bulk-convergence operation, so a caller
+     * re-driving a partially applied batch must not fail on already-gone keys.
+     */
+    public synchronized KeyValueStore kvsUpdateKeys(String kvsArn, String ifMatch,
+                                                     Map<String, String> puts, List<String> deletes) {
+        return kvsMutate(kvsArn, ifMatch, keys -> {
+            if (puts != null) {
+                keys.putAll(puts);
+            }
+            if (deletes != null) {
+                deletes.forEach(keys::remove);
+            }
+        });
+    }
+
+    public long kvsTotalSizeInBytes(String kvsArn) {
+        return kvsKeys(kvsArn).entrySet().stream()
+                .mapToLong(e -> utf8Length(e.getKey()) + utf8Length(e.getValue()))
+                .sum();
+    }
+
+    private KeyValueStore kvsMutate(String kvsArn, String ifMatch,
+                                    java.util.function.Consumer<Map<String, String>> mutation) {
+        KeyValueStore store = describeKeyValueStoreByArn(kvsArn);
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new AwsException("ValidationException", "The If-Match version is required.", 400);
+        }
+        if (!ifMatch.equals(store.getEtag())) {
+            throw new AwsException("ConflictException",
+                    "Pre-Condition failed: the provided ETag does not match the current version.", 409);
+        }
+        Map<String, String> keys = kvsKeysStore.get(store.getId()).map(HashMap::new).orElseGet(HashMap::new);
+        mutation.accept(keys);
+        kvsKeysStore.put(store.getId(), keys);
+        store.setLastModifiedTime(Instant.now());
+        store.setEtag(UUID.randomUUID().toString());
+        kvsStore.put(store.getId(), store);
+        return store;
+    }
+
+    private static long utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

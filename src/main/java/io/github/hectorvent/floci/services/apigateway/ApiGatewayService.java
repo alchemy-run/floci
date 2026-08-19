@@ -261,13 +261,15 @@ public class ApiGatewayService {
         api.setEndpointConfiguration(endpointConfiguration);
         api.setBinaryMediaTypes(readStringList(request.get("binaryMediaTypes")));
 
-        apiStore.put(apiKey(region, api.getId()), api);
-
-        // Create root resource "/"
+        // Create root resource "/" first so the persisted API carries its id
+        // (AWS includes rootResourceId in every RestApi response shape).
         ApiGatewayResource root = new ApiGatewayResource();
         root.setId(shortId(8));
         root.setPath("/");
         resourceStore.put(resourceKey(region, api.getId(), root.getId()), root);
+        api.setRootResourceId(root.getId());
+
+        apiStore.put(apiKey(region, api.getId()), api);
 
         LOG.infov("Created REST API: {0} ({1}) in {2}", name, api.getId(), region);
         return api;

@@ -220,6 +220,9 @@ floci:
       container-idle-timeout-seconds: 300
       region-concurrency-limit: 1000
       unreserved-concurrency-min: 100
+      # One in-flight environment per function. Bursting Function URL callers
+      # wait for it (timeout clock starts at /next, not at enqueue).
+      max-concurrent-containers: 1
       # aws-config-path:                      # Host path to bind-mount (read-only) at /opt/aws-config for real credential discovery
       # extra-hosts:                          # Extra /etc/hosts entries for Lambda containers, "hostname:ip" ("host-gateway" allowed as ip)
       hot-reload:

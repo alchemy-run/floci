@@ -16,6 +16,10 @@
 # `@alchemy.run/floci` pins the `<tag>` ref; bumping that pin in an alchemy
 # release is how a patch reaches users.
 #
+# `uses` is the owner/repo@ref form (not `./.github/workflows/...`) so the
+# caller resolves whether this file is opened from the floci repo or from
+# alchemy's vendor checkout.
+#
 # GHCR creates org packages as private. There is no supported API to flip
 # that; an org admin must make it public once in
 # https://github.com/orgs/alchemy-run/packages/container/package/floci

@@ -413,8 +413,7 @@ public class AutoScalingService {
                 .filter(g -> region.equals(g.getRegion()))
                 .filter(g -> g.getInstances().stream().anyMatch(i -> instanceId.equals(i.getInstanceId())))
                 .findFirst()
-                .orElseThrow(() -> new AwsException("ValidationError",
-                        "Instance '" + instanceId + "' not found in any Auto Scaling group.", 400));
+                .orElseThrow(() -> instanceNotAuthorized("TerminateInstanceInAutoScalingGroup", instanceId));
         asg.getInstances().stream()
                 .filter(i -> instanceId.equals(i.getInstanceId()))
                 .findFirst()
@@ -790,8 +789,7 @@ public class AutoScalingService {
                 .filter(g -> region.equals(g.getRegion()))
                 .filter(g -> findInstanceInGroup(g, instanceId).isPresent())
                 .findFirst()
-                .orElseThrow(() -> new AwsException("ValidationError",
-                        "Instance '" + instanceId + "' not found in any Auto Scaling group.", 400));
+                .orElseThrow(() -> instanceNotAuthorized("SetInstanceHealth", instanceId));
         findInstanceInGroup(asg, instanceId).ifPresent(instance -> instance.setHealthStatus(healthStatus));
         groups.put(asgKey(region, asg.getAutoScalingGroupName()), asg);
     }
@@ -858,6 +856,20 @@ public class AutoScalingService {
     }
 
     // ── Internal helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Instance-scoped writes ({@code SetInstanceHealth}, {@code TerminateInstanceInAutoScalingGroup})
+     * carry no group name. AWS resolves the instance to its owning group for resource-level
+     * authorization; a well-formed id that belongs to no group is an {@code AccessDenied}
+     * (the caller's group-scoped grant does not match), not a {@code ValidationError}.
+     */
+    private static AwsException instanceNotAuthorized(String action, String instanceId) {
+        return new AwsException("AccessDenied",
+                "User is not authorized to perform: autoscaling:" + action
+                        + " because instance '" + instanceId
+                        + "' is not associated with an Auto Scaling group.",
+                403);
+    }
 
     AutoScalingGroup requireGroup(String region, String name) {
         AutoScalingGroup asg = groups.get(asgKey(region, name));

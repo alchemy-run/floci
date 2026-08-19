@@ -675,6 +675,16 @@ class AutoScalingServiceTest {
         AwsException unknown = assertThrows(AwsException.class,
                 () -> service.setInstanceProtection(REGION, "test-asg", List.of("i-missing"), true));
         assertEquals("ValidationError", unknown.getErrorCode());
+
+        AwsException unknownHealth = assertThrows(AwsException.class,
+                () -> service.setInstanceHealth(REGION, "i-00000000000000000", "Unhealthy", true));
+        assertEquals("AccessDenied", unknownHealth.getErrorCode());
+        assertEquals(403, unknownHealth.getHttpStatus());
+
+        AwsException unknownTerminate = assertThrows(AwsException.class,
+                () -> service.terminateInstanceInAutoScalingGroup(REGION, "i-00000000000000000", false));
+        assertEquals("AccessDenied", unknownTerminate.getErrorCode());
+        assertEquals(403, unknownTerminate.getHttpStatus());
     }
 
     @Test

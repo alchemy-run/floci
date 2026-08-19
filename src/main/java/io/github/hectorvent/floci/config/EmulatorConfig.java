@@ -1446,6 +1446,19 @@ public interface EmulatorConfig {
         int unreservedConcurrencyMin();
 
         /**
+         * Max execution environments in flight per function. Excess sync
+         * invokes wait here — before the Lambda timeout clock starts — for a
+         * free environment. AWS would scale out instantly; Floci Docker
+         * cold-starts cannot, and a Function URL burst plus nested emulator
+         * HTTP (the handler calling back into Floci) livelocks the 3s default
+         * timeout. {@code 1} is the emulator-safe default.
+         *
+         * Env var: FLOCI_SERVICES_LAMBDA_MAX_CONCURRENT_CONTAINERS
+         */
+        @WithDefault("1")
+        int maxConcurrentContainers();
+
+        /**
          * Host path to bind-mount (read-only) into Lambda containers at /opt/aws-config.
          * When set, no AWS credential env vars are injected; instead
          * AWS_SHARED_CREDENTIALS_FILE and AWS_CONFIG_FILE are set to point at

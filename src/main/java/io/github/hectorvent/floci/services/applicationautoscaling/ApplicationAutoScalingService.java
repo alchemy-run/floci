@@ -188,7 +188,7 @@ public class ApplicationAutoScalingService {
         requireNamespace(serviceNamespace);
         if (scalableDimension != null && (resourceIds == null || resourceIds.isEmpty())) {
             throw new AwsException("ValidationException",
-                    "A resource ID must be specified when a scalable dimension is specified.", 400);
+                    "Scalable dimension cannot be provided without a resource ID.", 400);
         }
         String prefix = region + "::" + serviceNamespace + "::";
         return targets.scan(k -> k.startsWith(prefix)).stream()
@@ -285,7 +285,7 @@ public class ApplicationAutoScalingService {
         requireNamespace(serviceNamespace);
         if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
             throw new AwsException("ValidationException",
-                    "A resource ID must be specified when a scalable dimension is specified.", 400);
+                    "Scalable dimension cannot be provided without a resource ID.", 400);
         }
         String prefix = region + "::" + serviceNamespace + "::";
         return policies.scan(k -> k.startsWith(prefix)).stream()
@@ -366,7 +366,7 @@ public class ApplicationAutoScalingService {
         requireNamespace(serviceNamespace);
         if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
             throw new AwsException("ValidationException",
-                    "A resource ID must be specified when a scalable dimension is specified.", 400);
+                    "Scalable dimension cannot be provided without a resource ID.", 400);
         }
         String prefix = region + "::" + serviceNamespace + "::";
         return scheduledActions.scan(k -> k.startsWith(prefix)).stream()
@@ -404,7 +404,7 @@ public class ApplicationAutoScalingService {
         requireNamespace(serviceNamespace);
         if (scalableDimension != null && (resourceId == null || resourceId.isBlank())) {
             throw new AwsException("ValidationException",
-                    "A resource ID must be specified when a scalable dimension is specified.", 400);
+                    "Scalable dimension cannot be provided without a resource ID.", 400);
         }
         String prefix = region + "::" + serviceNamespace + "::";
         return activities.scan(k -> k.startsWith(prefix)).stream()

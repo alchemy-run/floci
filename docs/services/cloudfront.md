@@ -118,6 +118,27 @@ CloudFront management-plane emulation. Supports distribution lifecycle, cache po
 | `DeleteKeyValueStore` | DELETE | `/2020-05-31/key-value-store/{Name}` |
 | `ListKeyValueStores` | GET | `/2020-05-31/key-value-store` |
 
+### Key Value Store data plane (`cloudfront-keyvaluestore`)
+
+The KVS data plane is a separate AWS service (restJson1, signed as
+`cloudfront-keyvaluestore`, hosted at `{accountId}.cloudfront-kvs.global.api.aws`;
+with an endpoint override SDKs prefix the account id onto the override host,
+which the embedded DNS wildcard resolves back to Floci). Stores are addressed
+by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
+
+| Operation | Method | Path |
+|---|---|---|
+| `DescribeKeyValueStore` | GET | `/key-value-stores/{KvsARN}` |
+| `ListKeys` | GET | `/key-value-stores/{KvsARN}/keys` |
+| `UpdateKeys` | POST | `/key-value-stores/{KvsARN}/keys` |
+| `GetKey` | GET | `/key-value-stores/{KvsARN}/keys/{Key}` |
+| `PutKey` | PUT | `/key-value-stores/{KvsARN}/keys/{Key}` |
+| `DeleteKey` | DELETE | `/key-value-stores/{KvsARN}/keys/{Key}` |
+
+`UpdateKeys` tolerates deletes of absent keys (bulk convergence); a bare
+`DeleteKey` of a missing key returns `ResourceNotFoundException`. An
+`If-Match` mismatch returns `ConflictException` (409).
+
 ### Continuous Deployment
 
 | Operation | Method | Path |
@@ -296,5 +317,4 @@ aws cloudfront delete-distribution --id E1Z2X3C4V5B6N7 --if-match "$ETAG"
 
 - `TestFunction` execution (function is stored, not executed)
 - Anycast IP lists, distribution tenants, connection groups, trust stores
-- CloudFront KeyValueStore **data plane** (`cloudfront-keyvaluestore`: `GetKey` / `PutKey` / `DeleteKey` / `UpdateKeys` / `ListKeys`) — separate service
 - Actual CDN content delivery and caching

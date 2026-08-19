@@ -364,6 +364,27 @@ class ApplicationAutoScalingServiceTest {
         return action;
     }
 
+    @Test
+    void describeScalingPoliciesRejectsDimensionWithoutResourceId() {
+        AwsException e = assertThrows(AwsException.class,
+                () -> service.describeScalingPolicies(NAMESPACE, null, DIMENSION, null, REGION));
+        assertEquals("ValidationException", e.getErrorCode());
+        assertEquals("Scalable dimension cannot be provided without a resource ID.", e.getMessage());
+    }
+
+    @Test
+    void describeScalingPoliciesFindsAPolicyByNameAlone() {
+        register();
+        service.putScalingPolicy("cpu", "TargetTrackingScaling", NAMESPACE, RESOURCE_ID, DIMENSION,
+                targetTracking(65.0, "ECSServiceAverageCPUUtilization", null), null, REGION);
+
+        List<ScalingPolicy> found = service.describeScalingPolicies(
+                NAMESPACE, null, null, List.of("cpu"), REGION);
+        assertEquals(1, found.size());
+        assertEquals("cpu", found.get(0).getPolicyName());
+        assertEquals(RESOURCE_ID, found.get(0).getResourceId());
+    }
+
     private TargetTrackingConfiguration withCooldowns(TargetTrackingConfiguration config) {
         config.setScaleInCooldown(240);
         config.setScaleOutCooldown(60);

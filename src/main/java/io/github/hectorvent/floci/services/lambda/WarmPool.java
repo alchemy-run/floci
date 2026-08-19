@@ -15,11 +15,13 @@ import org.jboss.logging.Logger;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -42,6 +44,9 @@ public class WarmPool implements ContainerTeardown {
     private final EmulatorConfig config;
     private final int maxPoolSizePerFunction;
     private final ConcurrentHashMap<String, ArrayDeque<ContainerHandle>> pool = new ConcurrentHashMap<>();
+    /** In-flight leases (acquire → release/destroy). Used so destroy without acquire is a no-op. */
+    private final Set<ContainerHandle> leased = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<String, Semaphore> inFlight = new ConcurrentHashMap<>();
     private final ScheduledExecutorService evictionScheduler = Executors.newSingleThreadScheduledExecutor(
             r -> { Thread t = new Thread(r, "warm-pool-evictor"); t.setDaemon(true); return t; });
 
@@ -102,6 +107,16 @@ public class WarmPool implements ContainerTeardown {
      * Otherwise returns a warm container from the pool, or cold-starts a new one.
      */
     public ContainerHandle acquire(LambdaFunction fn) {
+        takeLease(fn.getFunctionName());
+        try {
+            return acquireLeased(fn);
+        } catch (RuntimeException e) {
+            releaseLease(fn.getFunctionName(), null);
+            throw e;
+        }
+    }
+
+    private ContainerHandle acquireLeased(LambdaFunction fn) {
         boolean ephemeral = config != null && config.services().lambda().ephemeral();
         ContainerHandle handle = null;
 
@@ -144,7 +159,33 @@ public class WarmPool implements ContainerTeardown {
             LOG.debugv("Reusing warm container for function: {0}", fn.getFunctionName());
         }
         handle.setState(ContainerState.BUSY);
+        leased.add(handle);
         return handle;
+    }
+
+    private int maxConcurrent() {
+        if (config == null) {
+            return DEFAULT_MAX_POOL_SIZE;
+        }
+        return Math.max(1, config.services().lambda().maxConcurrentContainers());
+    }
+
+    private Semaphore semaphoreFor(String functionName) {
+        return inFlight.computeIfAbsent(functionName, k -> new Semaphore(maxConcurrent()));
+    }
+
+    private void takeLease(String functionName) {
+        semaphoreFor(functionName).acquireUninterruptibly();
+    }
+
+    private void releaseLease(String functionName, ContainerHandle handle) {
+        if (handle != null && !leased.remove(handle)) {
+            return;
+        }
+        Semaphore sem = inFlight.get(functionName);
+        if (sem != null) {
+            sem.release();
+        }
     }
 
     /**
@@ -153,6 +194,14 @@ public class WarmPool implements ContainerTeardown {
      * Otherwise it is returned to the warm pool.
      */
     public void release(ContainerHandle handle) {
+        try {
+            releaseInner(handle);
+        } finally {
+            releaseLease(handle.getFunctionName(), handle);
+        }
+    }
+
+    private void releaseInner(ContainerHandle handle) {
         boolean ephemeral = config != null && config.services().lambda().ephemeral();
         // An extension reporting an init/exit error is fatal to the execution environment in real
         // AWS. RuntimeApiServer already refuses new work at that point; the container is torn down
@@ -207,7 +256,11 @@ public class WarmPool implements ContainerTeardown {
     public void destroyHandle(ContainerHandle handle) {
         LOG.debugv("Destroying timed-out container {0} for function {1}",
                 handle.getContainerId(), handle.getFunctionName());
-        stopQuietly(handle);
+        try {
+            stopQuietly(handle);
+        } finally {
+            releaseLease(handle.getFunctionName(), handle);
+        }
     }
 
     /**

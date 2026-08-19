@@ -92,15 +92,18 @@ public class LambdaExecutorService {
                     null, requestId);
         }
         try {
-            long deadlineMs = System.currentTimeMillis() + (long) fn.getTimeout() * 1000;
-            PendingInvocation invocation = new PendingInvocation(
-                    requestId, payload, deadlineMs, fn.getFunctionArn(),
+            PendingInvocation invocation = PendingInvocation.withExecutionTimeout(
+                    requestId, payload, fn.getTimeout(), fn.getFunctionArn(),
                     new java.util.concurrent.CompletableFuture<>());
 
             handle.getRuntimeApiServer().enqueue(invocation);
 
+            // Queue wait is not part of the function timeout (AWS starts the
+            // clock when /runtime/invocation/next dequeues the event). Bound
+            // the waiter so a stuck runtime cannot hang the HTTP front door.
+            int queueBudgetSeconds = Math.max(60, fn.getTimeout() * 8);
             InvokeResult result = invocation.getResultFuture()
-                    .get(fn.getTimeout() + TIMEOUT_GRACE_SECONDS, TimeUnit.SECONDS);
+                    .get(queueBudgetSeconds + TIMEOUT_GRACE_SECONDS, TimeUnit.SECONDS);
 
             warmPool.release(handle);
             return result;

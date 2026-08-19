@@ -5,6 +5,47 @@ Alchemy runs its live AWS suites against Floci with `ALCHEMY_TEST_DEV=1`
 book for emulator gaps those suites surface. Control-plane CRUD that already
 works is not listed.
 
+> **Evidence caveat (2026-08-18):** every run made through `pnpm
+> test:aws:floci` before this date silently executed against **live AWS** —
+> `Bun.spawn` in `scripts/test-aws-floci.ts` snapshots the environment at
+> process start, so the script's `process.env.ALCHEMY_TEST_DEV = "1"`
+> mutation never reached the spawned test process (fixed by passing
+> `env: { ...process.env }` explicitly). Only runs made with a literal
+> `ALCHEMY_TEST_DEV=1` shell prefix actually hit Floci. Per-service claims
+> below that cite `test:aws:floci` evidence from before the fix are suspect
+> until re-verified against a genuine emulator run.
+
+## Genuine census (first real full run, 2026-08-18)
+
+`pnpm test:aws:floci --retry 0` after the env fix: **635 passed / 253
+failed** across 294 files (at `--concurrency 200` the RPC sidecar spawner
+collapses with mass `WebSocket connection failed`; the script now defaults
+to 64). Verified green in isolation: AutoScaling (incl. all 10 bindings),
+ACM (14/14), ApiGateway RestApi lifecycle, CloudFront KVS bindings.
+
+Failure classes, largest first:
+
+1. **Split-brain suites (not Floci gaps).** The runner includes a service's
+   whole test directory when *any* of its resources is `flociDual`'d. A
+   non-dualized resource in that directory (IAM User/Group/Policy/…,
+   EC2 Instance, …) deploys **live** while the test body's distilled
+   clients are pinned to Floci — list/describe assertions then read an
+   empty emulator. Fixing these means dualizing the resources (and
+   implementing whatever Floci ops they need), not patching handlers
+   blindly. Biggest offenders: IAM (38), EC2 Instance suites.
+2. **Missing IAM Query ops** (needed before IAM resources can dualize):
+   `ListAccountAliases`/aliases CRUD, `GetAccountPasswordPolicy` + CRUD,
+   `ListVirtualMFADevices` + CRUD, `GetServerCertificate` + CRUD,
+   `GetSSHPublicKey` + CRUD, `GetSAMLProvider` + CRUD,
+   `GetOpenIDConnectProvider` + CRUD, credential report, account
+   summary/authorization details, simulate/access-advisor family.
+3. **Per-service handler gaps in already-dualized services** — the true
+   order book: StepFunctions (16), SES (16), ECS (16), CloudFront (13 —
+   KVS data plane now implemented), Glue (12), SecretsManager (11),
+   Cognito (11), ApplicationAutoScaling (9), S3 (8), Batch (7), ELBv2 (6),
+   Kinesis (5), ECR (5), DynamoDB (5), and a long tail. Each needs the
+   standard inner loop against its run-log failures.
+
 ## Policy
 
 - **`UnknownOperationException` / CloudWatch `UnsupportedOperation` = implement the operation.** These are missing handler cases, not environment problems. Add the action to the service handler, store enough in-memory state to satisfy AWS-shaped describe/list/update, write a Floci integration test, and update `docs/services/{service}.md` plus the count in `docs/services/index.md`. Do **not** paper them over with `isLocalEmulator` skips in Alchemy.
@@ -31,11 +72,11 @@ rebuild (old image falls through missing `GetVectorBucketPolicy` to S3).
 
 Patched in this tree (usage-plan get/update, key/authorizer/deployment
 updates, gateway responses, v1 VPC links, ExportApi, cache flush, v2
-domain names, binaryMediaTypes). Alchemy now `flociDual`s RestApi and the
-related v1/v2 resources. Api mappings stay live-only (unimplemented).
-Still missing ReimportApi, routing rules, TestInvokeAuthorizer, docs
-parts, client certificates. DeleteRestApi quota delay and Function URL
-hangs are Lambda/host, not APIGW handlers.
+domain names, binaryMediaTypes, and `rootResourceId` on every RestApi
+response shape — its absence failed alchemy's RestApi precreate). Alchemy
+now `flociDual`s RestApi and the related v1/v2 resources. Api mappings
+stay live-only (unimplemented). Still missing ReimportApi, routing rules,
+TestInvokeAuthorizer, docs parts, client certificates.
 
 ## AppSync
 
@@ -130,7 +171,6 @@ image picks up those handlers:
 |---|---|---|
 | Default subnet `subnet-default-a` missing | Alchemy ASG / LifecycleHook / ScheduledAction | EC2 default-VPC restore; Alchemy `TestNetwork` waits but create still races a missing subnet. |
 | Launch template name not found after create | Alchemy `AutoScalingGroup` / `ScalingPolicy` list | EC2 `DescribeLaunchTemplates` visibility, not an ASG handler gap. |
-| Instance-scoped IAM | Bindings `SetInstanceHealth` / `TerminateInstance` expect `AccessDeniedException` | Floci IAM does not resolve the owning group for a bogus instance id, so the service answers `ValidationError`. |
 
 ## Application Auto Scaling
 

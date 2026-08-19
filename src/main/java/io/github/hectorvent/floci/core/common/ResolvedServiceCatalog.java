@@ -395,7 +395,10 @@ public class ResolvedServiceCatalog {
                         "cloudfront", storageMode(config.storage().services().cloudfront().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.CLOUDFRONT, ServiceProtocol.REST_XML,
                         protocols(ServiceProtocol.REST_XML),
-                        Set.of(), Set.of("cloudfront"), Set.of(), Set.of(CloudFrontController.class)),
+                        // cloudfront-keyvaluestore: the KVS data plane signs with its own scope
+                        Set.of(), Set.of("cloudfront", "cloudfront-keyvaluestore"), Set.of(),
+                        Set.of(CloudFrontController.class,
+                                io.github.hectorvent.floci.services.cloudfront.CloudFrontKvsDataPlaneController.class)),
                 descriptor("appsync", "appsync", config.services().appsync().enabled(), true,
                         "appsync", storageMode(config.storage().services().appsync().mode(), config.storage().mode()),
                         config.storage().services().appsync().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

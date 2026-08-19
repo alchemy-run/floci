@@ -11,9 +11,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -35,6 +40,9 @@ class WarmPoolTest {
         when(services.lambda()).thenReturn(lambda);
         when(lambda.ephemeral()).thenReturn(false);
         when(lambda.containerIdleTimeoutSeconds()).thenReturn(0);
+        // Tests that hold two BUSY handles (seed + compare) need headroom
+        // above the production default of 1.
+        lenient().when(lambda.maxConcurrentContainers()).thenReturn(8);
         return new WarmPool(containerLauncher, config);
     }
 
@@ -295,6 +303,50 @@ class WarmPoolTest {
         verify(containerLauncher, never()).stop(alive);
         // Only the original two cold starts; no extra launch was needed.
         verify(containerLauncher, times(2)).launch(any());
+
+        pool.shutdown();
+    }
+
+    @Test
+    void acquire_waitsForInFlightSlotWhenAtMaxConcurrent() throws Exception {
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.LambdaServiceConfig lambda = mock(EmulatorConfig.LambdaServiceConfig.class);
+        when(config.services()).thenReturn(services);
+        when(services.lambda()).thenReturn(lambda);
+        when(lambda.ephemeral()).thenReturn(false);
+        when(lambda.containerIdleTimeoutSeconds()).thenReturn(0);
+        when(lambda.maxConcurrentContainers()).thenReturn(1);
+        WarmPool pool = new WarmPool(containerLauncher, config);
+        pool.init();
+
+        LambdaFunction fn = mock(LambdaFunction.class);
+        when(fn.getFunctionName()).thenReturn("serial-fn");
+        ContainerHandle firstHandle = new ContainerHandle("cid-1", "serial-fn", null, ContainerState.WARM);
+        ContainerHandle secondHandle = new ContainerHandle("cid-2", "serial-fn", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(firstHandle, secondHandle);
+        when(containerLauncher.isAlive(any())).thenReturn(true);
+
+        ContainerHandle held = pool.acquire(fn);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<ContainerHandle> waited = new AtomicReference<>();
+        Thread waiter = new Thread(() -> {
+            entered.countDown();
+            waited.set(pool.acquire(fn));
+            done.countDown();
+        }, "warm-pool-waiter");
+        waiter.setDaemon(true);
+        waiter.start();
+
+        assertTrue(entered.await(2, TimeUnit.SECONDS));
+        // Still blocked on the in-flight lease — must not have launched a second env.
+        Thread.sleep(150);
+        verify(containerLauncher, times(1)).launch(any());
+
+        pool.release(held);
+        assertTrue(done.await(2, TimeUnit.SECONDS));
+        assertSame(firstHandle, waited.get());
+        verify(containerLauncher, times(1)).launch(any());
 
         pool.shutdown();
     }

@@ -17,6 +17,8 @@ public class RestApi {
     private String name;
     private String description;
     private long createdDate;
+    /** ID of the root "/" resource, included in AWS RestApi responses. */
+    private String rootResourceId;
     private Map<String, String> tags = new HashMap<>();
     private EndpointConfiguration endpointConfiguration;
     private List<String> binaryMediaTypes = new ArrayList<>();
@@ -52,6 +54,14 @@ public class RestApi {
 
     public void setCreatedDate(long createdDate) {
         this.createdDate = createdDate;
+    }
+
+    public String getRootResourceId() {
+        return rootResourceId;
+    }
+
+    public void setRootResourceId(String rootResourceId) {
+        this.rootResourceId = rootResourceId;
     }
 
     public Map<String, String> getTags() {
