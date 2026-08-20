@@ -37,18 +37,20 @@ teardown() {
     domain=$(json_get "$output" '.Certificate.DomainName')
     status=$(json_get "$output" '.Certificate.Status')
     [ "$domain" = "cli-test.example.com" ]
-    [ "$status" = "ISSUED" ]
+    # Real ACM: a freshly requested public certificate stays
+    # PENDING_VALIDATION until its DNS/email validation completes.
+    [ "$status" = "PENDING_VALIDATION" ]
 }
 
-@test "ACM: get certificate" {
+@test "ACM: get certificate rejects pending request" {
     out=$(aws_cmd acm request-certificate --domain-name "cli-test.example.com" --validation-method DNS)
     CERT_ARN=$(json_get "$out" '.CertificateArn')
 
+    # Real ACM: GetCertificate on a pending certificate fails with
+    # RequestInProgressException (the body does not exist yet).
     run aws_cmd acm get-certificate --certificate-arn "$CERT_ARN"
-    assert_success
-    cert=$(json_get "$output" '.Certificate')
-    [ -n "$cert" ]
-    [[ "$cert" =~ "BEGIN CERTIFICATE" ]]
+    assert_failure
+    [[ "$output" =~ "RequestInProgress" ]]
 }
 
 @test "ACM: list certificates" {
