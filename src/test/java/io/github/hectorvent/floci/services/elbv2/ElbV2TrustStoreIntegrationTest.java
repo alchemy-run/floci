@@ -1,6 +1,10 @@
 package io.github.hectorvent.floci.services.elbv2;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.RestAssured;
+import io.restassured.config.EncoderConfig;
+import io.restassured.http.ContentType;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -28,6 +32,13 @@ class ElbV2TrustStoreIntegrationTest {
 
     private static String trustStoreArn;
     private static String loadBalancerArn;
+
+    @BeforeAll
+    static void encodePemAsText() {
+        RestAssured.config = RestAssured.config().encoderConfig(
+                EncoderConfig.encoderConfig()
+                        .encodeContentTypeAs("application/x-pem-file", ContentType.TEXT));
+    }
 
     @Test
     @Order(1)
