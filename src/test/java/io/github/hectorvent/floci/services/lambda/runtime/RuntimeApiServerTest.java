@@ -60,7 +60,13 @@ class RuntimeApiServerTest {
     void tearDown() throws Exception {
         server.stop().get(5, TimeUnit.SECONDS);
         scheduler.shutdownNow();
-        httpClient.close();
+        // NOT close(): JDK HttpClient.close() blocks until every in-flight
+        // exchange completes, and the runtime API's /next is a LONG-POLL — a
+        // test that leaves one parked (or whose exchange was severed by the
+        // server.stop() above) pins close() forever and times out the whole
+        // CI job. Shut down hard and bound the drain instead.
+        httpClient.shutdownNow();
+        httpClient.awaitTermination(java.time.Duration.ofSeconds(5));
         // Await the close rather than firing it and moving on: Vertx.close() is asynchronous, so
         // an unawaited call lets the next test's setUp() create a new Vertx and bind a port while
         // this one's event loops and server sockets are still tearing down. Across a class with
