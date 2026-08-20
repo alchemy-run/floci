@@ -27,6 +27,9 @@ class SesBulkV2IntegrationTest {
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/ses/aws4_request";
 
     private static void createEmailIdentity(String email) {
+        // Idempotent setup: sibling suites in the shared JVM may already have
+        // verified this identity; AWS answers a duplicate CreateEmailIdentity
+        // with 400 AlreadyExistsException, which is just as good here.
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -34,7 +37,8 @@ class SesBulkV2IntegrationTest {
         .when()
             .post("/v2/email/identities")
         .then()
-            .statusCode(200);
+            .statusCode(org.hamcrest.Matchers.anyOf(
+                org.hamcrest.Matchers.is(200), org.hamcrest.Matchers.is(400)));
     }
 
     @Test
