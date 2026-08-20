@@ -3,9 +3,49 @@
 **Protocol:** JSON 1.1
 **Endpoint:** `http://localhost:4566/`
 
-Floci emulates the AWS Glue Data Catalog and Glue Schema Registry, allowing you to manage local data lake metadata and schema-version workflows.
+Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and Glue Schema Registry.
 
 ## Supported Actions
+
+### Jobs
+
+| Action | Description |
+|--------|-------------|
+| CreateJob | Stores a job definition and optional tags. |
+| GetJob | Returns a stored job definition. |
+| GetJobs | Lists stored job definitions. |
+| UpdateJob | Replaces the stored job update payload. |
+| DeleteJob | Deletes a job, its runs, bookmark, and tags. |
+| StartJobRun | Starts a job run (`jr_…` id) that completes immediately as `SUCCEEDED`. |
+| GetJobRun | Returns a stored job run. |
+| GetJobRuns | Lists runs for a job. |
+| BatchStopJobRun | Marks running job runs `STOPPED`. |
+| GetJobBookmark | Returns the stored bookmark, or `EntityNotFoundException` (400) if the job has never run. |
+| ResetJobBookmark | Resets the stored bookmark, or `EntityNotFoundException` (400) if none exists. |
+
+### Crawlers
+
+| Action | Description |
+|--------|-------------|
+| CreateCrawler | Stores a crawler in `READY` state. |
+| GetCrawler | Returns a stored crawler. |
+| GetCrawlers | Lists stored crawlers. |
+| UpdateCrawler | Updates a crawler that is not `RUNNING`. Create/Update accept `Schedule` as a cron string; GetCrawler returns `{ScheduleExpression, State}`. |
+| DeleteCrawler | Deletes a crawler that is not `RUNNING`. |
+| StartCrawler | Sets crawler state to `RUNNING`. |
+| StopCrawler | Sets crawler state to `READY`. Idle crawlers raise `CrawlerNotRunningException` (400). |
+
+### Connections
+
+| Action | Description |
+|--------|-------------|
+| CreateConnection | Stores a connection and optional tags. |
+| GetConnection | Returns a stored connection (`HidePassword` strips `PASSWORD`). |
+| GetConnections | Lists stored connections. |
+| UpdateConnection | Updates a stored connection. |
+| DeleteConnection | Deletes a connection and its tags. |
+
+`TagResource` / `UntagResource` / `GetTags` apply to job, crawler, connection, database, and table ARNs as well as Schema Registry resources.
 
 ### Data Catalog
 
@@ -31,8 +71,15 @@ Floci emulates the AWS Glue Data Catalog and Glue Schema Registry, allowing you 
 
 | Action | Description |
 |--------|-------------|
-| CreatePartition | Creates a partition for a Data Catalog table. |
+| CreatePartition | Creates a partition for a Data Catalog table (`AlreadyExistsException` on duplicate). |
+| GetPartition | Returns a stored partition. |
 | GetPartitions | Lists partitions stored for a Data Catalog table. |
+| UpdatePartition | Updates a stored partition. |
+| DeletePartition | Deletes a stored partition. |
+| BatchCreatePartition | Creates partitions and reports per-item `AlreadyExistsException` errors. |
+| BatchGetPartition | Returns the partitions that exist (missing keys are omitted). |
+| BatchUpdatePartition | Updates partitions and reports per-item `EntityNotFoundException` errors. |
+| BatchDeletePartition | Deletes partitions and reports per-item `EntityNotFoundException` errors. |
 
 #### User-defined Functions
 

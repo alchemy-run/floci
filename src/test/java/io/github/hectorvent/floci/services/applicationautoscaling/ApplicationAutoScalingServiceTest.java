@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.PredefinedMetricSpecification;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTarget;
+import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTargetAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalingPolicy;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.TargetTrackingConfiguration;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
@@ -293,6 +294,198 @@ class ApplicationAutoScalingServiceTest {
         register();
         assertEquals(1, service.describeScalableTargets(NAMESPACE, null, null, REGION).size());
         assertEquals(0, service.describeScalableTargets(NAMESPACE, null, null, "eu-west-1").size());
+    }
+
+    @Test
+    void scheduledActionUpsertPreservesArnAndClearsUnspecifiedTimes() {
+        register();
+        var created = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+                "at(2030-01-01T00:00:00)", "UTC", 1_893_456_000.0, null,
+                capacity(2, null), REGION);
+
+        assertTrue(created.getScheduledActionArn().contains("scheduledAction"));
+        assertEquals(2, created.getScalableTargetAction().getMinCapacity());
+        assertEquals(1_893_456_000.0, created.getStartTime());
+
+        var updated = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+                "at(2030-06-01T00:00:00)", "UTC", null, null,
+                capacity(3, null), REGION);
+
+        assertEquals(created.getScheduledActionArn(), updated.getScheduledActionArn());
+        assertEquals("at(2030-06-01T00:00:00)", updated.getSchedule());
+        assertNull(updated.getStartTime(), "unspecified StartTime must be deleted on update");
+        assertEquals(3, updated.getScalableTargetAction().getMinCapacity());
+        assertEquals(1, service.describeScheduledActions(NAMESPACE, RESOURCE_ID, DIMENSION,
+                List.of("biz-hours"), REGION).size());
+
+        service.deleteScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION, REGION);
+        assertEquals(0, service.describeScheduledActions(NAMESPACE, RESOURCE_ID, DIMENSION,
+                List.of("biz-hours"), REGION).size());
+    }
+
+    @Test
+    void scheduledActionRequiresRegisteredTarget() {
+        AwsException e = assertThrows(AwsException.class, () -> service.putScheduledAction(
+                "orphan", NAMESPACE, RESOURCE_ID, DIMENSION, "rate(1 hour)", null,
+                null, null, capacity(2, null), REGION));
+        assertEquals("ObjectNotFoundException", e.getErrorCode());
+    }
+
+    @Test
+    void deregisterCascadesToScheduledActions() {
+        register();
+        service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+                "cron(0 8 * * ? *)", "UTC", null, null, capacity(2, 10), REGION);
+
+        service.deregisterScalableTarget(NAMESPACE, RESOURCE_ID, DIMENSION, REGION);
+
+        assertEquals(0, service.describeScheduledActions(NAMESPACE, null, null, null, REGION).size());
+    }
+
+    @Test
+    void describeScalingActivitiesReturnsEmptyPageForFreshTarget() {
+        register();
+        assertEquals(0, service.describeScalingActivities(NAMESPACE, RESOURCE_ID, DIMENSION, REGION).size());
+    }
+
+    @Test
+    void predictiveForecastIsDeniedOutsideEcs() {
+        AwsException e = assertThrows(AwsException.class, () -> service.requirePredictiveScalingForecast(
+                "dynamodb", "table/alchemy-probe-nonexistent",
+                "dynamodb:table:ReadCapacityUnits", "alchemy-probe-nonexistent", REGION));
+        assertEquals("AccessDeniedException", e.getErrorCode());
+        assertEquals(400, e.getHttpStatus());
+        assertTrue(e.getMessage().contains("GetPredictiveScalingForecast is not supported"));
+    }
+
+    @Test
+    void registerAcceptsLocalDynamoDbTableResourceIds() {
+        String resourceId = "table/alchemy-local-aas-table";
+        ScalableTarget target = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 5, null, null, Map.of("env", "test"), REGION);
+
+        assertTrue(target.getScalableTargetArn().contains("scalable-target/"));
+        assertEquals("table/alchemy-local-aas-table", target.getResourceId());
+        assertEquals(1, target.getMinCapacity());
+        assertEquals(5, target.getMaxCapacity());
+        assertTrue(target.getRoleArn().contains("AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"));
+        assertEquals(1, service.describeScalableTargets("dynamodb", List.of(resourceId),
+                "dynamodb:table:ReadCapacityUnits", REGION).size());
+    }
+
+    @Test
+    void dynamodbTargetUpdatesInPlaceAndReplacesOnDimensionChange() {
+        String resourceId = "table/alchemy-local-aas-table";
+        String originalArn = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 5, null, null, Map.of("keep", "v1"), REGION).getScalableTargetArn();
+
+        ScalableTarget updated = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 6, null, null, null, REGION);
+        assertEquals(originalArn, updated.getScalableTargetArn());
+        assertEquals(6, updated.getMaxCapacity());
+
+        ScalableTarget write = service.registerScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:WriteCapacityUnits",
+                1, 6, null, null, null, REGION);
+        assertTrue(!originalArn.equals(write.getScalableTargetArn()));
+        assertEquals(1, service.describeScalableTargets("dynamodb", List.of(resourceId),
+                "dynamodb:table:ReadCapacityUnits", REGION).size());
+        assertEquals(1, service.describeScalableTargets("dynamodb", List.of(resourceId),
+                "dynamodb:table:WriteCapacityUnits", REGION).size());
+    }
+
+    @Test
+    void dynamodbTargetTrackingPolicyAndScheduledActionRoundTrip() {
+        String resourceId = "table/alchemy-local-aas-table";
+        service.registerScalableTarget("dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 5, null, null, null, REGION);
+
+        ScalingPolicy policy = service.putScalingPolicy("read-util", "TargetTrackingScaling",
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                targetTracking(70.0, "DynamoDBReadCapacityUtilization", null), null, REGION);
+        assertEquals("TargetTrackingScaling", policy.getPolicyType());
+        assertTrue(policy.getPolicyArn().contains("scalingPolicy"));
+        assertEquals(2, policy.getAlarms().size());
+        assertEquals(1, service.describeScalingPolicies("dynamodb", null, null,
+                List.of("read-util"), REGION).size());
+
+        var action = service.putScheduledAction("far-future", "dynamodb", resourceId,
+                "dynamodb:table:ReadCapacityUnits", "at(2030-01-01T00:00:00)", "UTC",
+                null, null, capacity(2, null), REGION);
+        assertTrue(action.getScheduledActionArn().contains("scheduledAction"));
+        assertEquals(2, action.getScalableTargetAction().getMinCapacity());
+        assertEquals(1, service.describeScheduledActions("dynamodb", null, null,
+                List.of("far-future"), REGION).size());
+        assertEquals(0, service.describeScalingActivities("dynamodb", resourceId,
+                "dynamodb:table:ReadCapacityUnits", REGION).size());
+    }
+
+    @Test
+    void dynamodbDeregisterDeletesPolicySoDestroySeesObjectNotFound() {
+        String resourceId = "table/alchemy-local-aas-table";
+        service.registerScalableTarget("dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                1, 3, null, null, null, REGION);
+        service.putScalingPolicy("orphan", "TargetTrackingScaling",
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits",
+                targetTracking(70.0, "DynamoDBReadCapacityUtilization", null), null, REGION);
+
+        service.deregisterScalableTarget("dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits", REGION);
+
+        assertEquals(0, service.describeScalingPolicies("dynamodb", null, null,
+                List.of("orphan"), REGION).size());
+        AwsException missingPolicy = assertThrows(AwsException.class, () -> service.deleteScalingPolicy(
+                "orphan", "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits", REGION));
+        assertEquals("ObjectNotFoundException", missingPolicy.getErrorCode());
+        AwsException missingTarget = assertThrows(AwsException.class, () -> service.deregisterScalableTarget(
+                "dynamodb", resourceId, "dynamodb:table:ReadCapacityUnits", REGION));
+        assertEquals("ObjectNotFoundException", missingTarget.getErrorCode());
+    }
+
+    private static ScalableTargetAction capacity(Integer min, Integer max) {
+        ScalableTargetAction action = new ScalableTargetAction();
+        action.setMinCapacity(min);
+        action.setMaxCapacity(max);
+        return action;
+    }
+
+    @Test
+    void describeScalingPoliciesRejectsDimensionWithoutResourceId() {
+        AwsException e = assertThrows(AwsException.class,
+                () -> service.describeScalingPolicies(NAMESPACE, null, DIMENSION, null, REGION));
+        assertEquals("ValidationException", e.getErrorCode());
+        assertEquals("Scalable dimension cannot be provided without a resource ID.", e.getMessage());
+    }
+
+    @Test
+    void describeScalingPoliciesFindsAPolicyByNameAlone() {
+        register();
+        service.putScalingPolicy("cpu", "TargetTrackingScaling", NAMESPACE, RESOURCE_ID, DIMENSION,
+                targetTracking(65.0, "ECSServiceAverageCPUUtilization", null), null, REGION);
+
+        List<ScalingPolicy> found = service.describeScalingPolicies(
+                NAMESPACE, null, null, List.of("cpu"), REGION);
+        assertEquals(1, found.size());
+        assertEquals("cpu", found.get(0).getPolicyName());
+        assertEquals(RESOURCE_ID, found.get(0).getResourceId());
+    }
+
+    @Test
+    void describeScalingPoliciesByNameAllowsDimensionWithoutResourceId() {
+        register();
+        service.putScalingPolicy("cpu", "TargetTrackingScaling", NAMESPACE, RESOURCE_ID, DIMENSION,
+                targetTracking(65.0, "ECSServiceAverageCPUUtilization", null), null, REGION);
+
+        List<ScalingPolicy> found = service.describeScalingPolicies(
+                NAMESPACE, null, DIMENSION, List.of("cpu"), REGION);
+        assertEquals(1, found.size());
+        assertEquals("cpu", found.get(0).getPolicyName());
+
+        List<ScalingPolicy> missing = service.describeScalingPolicies(
+                NAMESPACE, null, DIMENSION, List.of("no-such-policy"), REGION);
+        assertEquals(0, missing.size());
     }
 
     private TargetTrackingConfiguration withCooldowns(TargetTrackingConfiguration config) {

@@ -25,17 +25,25 @@ exercise the full Cloud Map control flow locally.
 | `CreatePublicDnsNamespace` | Creates a `DNS_PUBLIC` namespace with a synthetic `HostedZoneId` |
 | `CreatePrivateDnsNamespace` | Creates a `DNS_PRIVATE` namespace; requires `Vpc`, assigns a `HostedZoneId` |
 | `GetNamespace` | Returns a namespace by `Id` |
-| `ListNamespaces` | Lists namespaces in the current region |
+| `ListNamespaces` | Lists namespaces; supports `TYPE` and `NAME` filters |
 | `DeleteNamespace` | Deletes an empty namespace; fails with `ResourceInUse` if it still has services |
+| `UpdateHttpNamespace` | Updates an HTTP namespace description |
+| `UpdatePublicDnsNamespace` | Updates a public DNS namespace description and SOA TTL |
+| `UpdatePrivateDnsNamespace` | Updates a private DNS namespace description and SOA TTL |
 | `CreateService` | Creates a service (optionally under a namespace), tracks revision and instance count |
 | `GetService` | Returns a service by `Id` |
 | `ListServices` | Lists services, optionally filtered by `NamespaceId` |
 | `DeleteService` | Deletes a service with no instances; fails with `ResourceInUse` otherwise |
+| `UpdateService` | Updates description, DNS records, and health-check config |
+| `GetServiceAttributes` | Returns custom service attributes |
+| `UpdateServiceAttributes` | Upserts custom service attribute keys |
+| `DeleteServiceAttributes` | Removes custom service attribute keys |
 | `RegisterInstance` | Registers an instance under a service; requires `InstanceId` and `Attributes`, bumps service revision |
 | `DeregisterInstance` | Removes a registered instance and bumps service revision |
 | `GetInstance` | Returns a registered instance by `ServiceId` and `InstanceId` |
 | `ListInstances` | Lists instances registered under a service |
 | `GetInstancesHealthStatus` | Returns health status keyed by instance id, with optional `Instances` filter |
+| `UpdateInstanceCustomHealthStatus` | Sets `HEALTHY` / `UNHEALTHY` on a registered instance |
 | `DiscoverInstances` | Resolves instances by `NamespaceName` + `ServiceName`, with `HealthStatus` and `QueryParameters` filtering |
 | `DiscoverInstancesRevision` | Returns the current revision for a discovered service |
 | `GetOperation` | Returns an operation by `Id` |

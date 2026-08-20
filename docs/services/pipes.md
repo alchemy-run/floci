@@ -14,6 +14,16 @@
 | `ListPipes` | List all pipes with optional filtering by state and prefix |
 | `StartPipe` | Start a stopped pipe |
 | `StopPipe` | Stop a running pipe |
+| `TagResource` | `POST /tags/{resourceArn}` — add tags to a pipe |
+| `UntagResource` | `DELETE /tags/{resourceArn}?tagKeys=...` — remove tags from a pipe |
+| `ListTagsForResource` | `GET /tags/{resourceArn}` — list tags on a pipe |
+
+Create/update store and describe returns `LogConfiguration` and
+`KmsKeyIdentifier` when supplied.
+
+Lambda targets receive a **bare JSON array** of source records (not the
+`{ "Records": [...] }` Lambda event-source-mapping envelope). SQS source
+records use camelCase (`body`, `eventSource: "aws:sqs"`).
 
 ## Configuration
 

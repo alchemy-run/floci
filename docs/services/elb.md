@@ -16,6 +16,7 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 | ModifyLoadBalancerAttributes | Updates persisted load balancer attributes. |
 | DescribeLoadBalancerAttributes | Returns attributes stored for a load balancer. |
 | DescribeCapacityReservation | Returns the stored capacity reservation fields for a load balancer. |
+| ModifyCapacityReservation | Stores or resets the requested minimum capacity. Reset of a never-set reservation is a no-op success. |
 | SetSecurityGroups | Replaces the security groups associated with a load balancer. |
 | SetSubnets | Replaces the subnets associated with a load balancer. |
 | SetIpAddressType | Updates the IP address type stored for a load balancer. |
@@ -43,15 +44,15 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 
 | Action | Description |
 |--------|-------------|
-| CreateListener | Creates a listener and its non-deletable default rule. |
-| DescribeListeners | Lists or returns stored listeners. |
-| ModifyListener | Updates a listener's configuration and default actions. |
+| CreateListener | Creates a listener (ALB HTTP/HTTPS or NLB TCP/TLS/UDP) and its non-deletable default rule. Data-plane bind is best-effort so a local proxy/NPE cannot fail the control-plane call. |
+| DescribeListeners | Lists or returns stored listeners. Certificates on this shape are the default cert only. |
+| ModifyListener | Updates a listener's configuration and default actions. `Certificates` replaces only the default certificate; SNI extras survive. |
 | ModifyListenerAttributes | Updates persisted listener attributes. |
 | DescribeListenerAttributes | Returns attributes stored for a listener. |
 | DeleteListener | Deletes a listener and stops its socket. |
-| AddListenerCertificates | Adds certificates to a listener. |
-| RemoveListenerCertificates | Removes certificates from a listener. |
-| DescribeListenerCertificates | Lists certificates associated with a listener. |
+| AddListenerCertificates | Adds SNI certificates (`IsDefault=false`). |
+| RemoveListenerCertificates | Removes SNI certificates. Removing the default certificate → `OperationNotPermitted`. |
+| DescribeListenerCertificates | Lists certificates with `IsDefault` (index 0 is the default). |
 
 ### Rules
 
@@ -78,6 +79,17 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 | DescribeSSLPolicies | Returns Floci's pre-seeded standard SSL policy list. |
 | DescribeAccountLimits | Returns standard default ELBv2 account limits. |
 
+### Trust Stores
+
+| Action | Description |
+|--------|-------------|
+| CreateTrustStore | Creates a trust store from an S3 CA certificate bundle (PEM). Missing bundle → `CaCertificatesBundleNotFound`; invalid PEM → `InvalidCaCertificatesBundle`. |
+| DescribeTrustStores | Lists or returns stored trust stores by ARN or name. |
+| ModifyTrustStore | Replaces the CA certificate bundle on an existing trust store. |
+| DeleteTrustStore | Deletes a trust store that is not referenced by a listener. |
+| GetTrustStoreCaCertificatesBundle | Returns an HTTPS `Location` for the stored CA bundle. |
+| GetTrustStoreRevocationContent | Returns an HTTPS `Location` for a stored revocation, or `RevocationIdNotFound`. |
+
 ## Behavior Notes
 
 - Load balancer, target group, listener, rule, and tag state is persisted through Floci storage and rebuilt on service startup.
@@ -92,6 +104,13 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 - `DescribeSSLPolicies` returns a pre-seeded list of standard AWS SSL policies (`ELBSecurityPolicy-*`).
 - `DescribeAccountLimits` returns standard default limits (e.g., 50 load balancers per region, 100 target groups, etc.).
 - `routing.http.preserve_host_header.enabled` (default `false`) controls whether the original client Host header is forwarded to targets unchanged, or replaced with the target's `host:port`.
+- Trust stores become `ACTIVE` as soon as the S3 CA bundle is readable and contains at least one `BEGIN CERTIFICATE` block. Floci does not asynchronously validate X.509 v3 constraints.
+- `GetTrustStoreCaCertificatesBundle` returns a synthetic `https://s3.{region}.amazonaws.com/{bucket}/{key}` location (Alchemy only asserts the `https://` prefix).
+- `ModifyCapacityReservation` persists `MinimumLoadBalancerCapacity` on the load balancer. `ResetCapacityReservation=true` clears it.
+- `authenticate-oidc` listener actions are stored and returned on describe. `ClientSecret` is accepted on create/modify and omitted from describe, matching AWS.
+- `CreateListener` for NLB TCP/TLS (and HTTPS with a certificate) is a control-plane success even if the local HTTP proxy cannot bind.
+- Region maps reloaded from storage can be immutable (`Map.of()` / Jackson empty objects). ElbV2 copies them into a `ConcurrentHashMap` before mutate — otherwise `UnsupportedOperationException` (null message) leaked as `InternalFailure: Unexpected error: null`.
+- `DescribeListenerCertificates` marks the CreateListener/ModifyListener certificate as `IsDefault=true` and AddListenerCertificates entries as `IsDefault=false`. `ModifyListener` does not wipe SNI extras.
 
 ## ARN Format
 
@@ -100,6 +119,7 @@ arn:aws:elasticloadbalancing:{region}:{account-id}:loadbalancer/app/{name}/{hex1
 arn:aws:elasticloadbalancing:{region}:{account-id}:targetgroup/{name}/{hex16}
 arn:aws:elasticloadbalancing:{region}:{account-id}:listener/app/{lb-name}/{lb-id}/{hex16}
 arn:aws:elasticloadbalancing:{region}:{account-id}:listener-rule/app/{lb-name}/{lb-id}/{listener-id}/{hex16}
+arn:aws:elasticloadbalancing:{region}:{account-id}:truststore/{name}/{hex16}
 ```
 
 ## Examples

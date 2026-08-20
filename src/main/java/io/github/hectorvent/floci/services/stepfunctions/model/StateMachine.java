@@ -18,12 +18,18 @@ public class StateMachine {
     private String type = "STANDARD";
     private String status = "ACTIVE";
     private double creationDate;
+    private String revisionId;
+    private boolean tracingEnabled;
+    private String loggingLevel = "OFF";
+    private boolean includeExecutionData;
+    private String loggingDestinationsJson;
     private Map<String, String> tags = new HashMap<>();
     private int versionCounter = 0;
     private List<StateMachineVersion> versions = new ArrayList<>();
 
     public StateMachine() {
         this.creationDate = System.currentTimeMillis() / 1000.0;
+        this.revisionId = java.util.UUID.randomUUID().toString();
     }
 
     public String getStateMachineArn() { return stateMachineArn; }
@@ -46,6 +52,21 @@ public class StateMachine {
 
     public double getCreationDate() { return creationDate; }
     public void setCreationDate(double creationDate) { this.creationDate = creationDate; }
+
+    public String getRevisionId() { return revisionId; }
+    public void setRevisionId(String revisionId) { this.revisionId = revisionId; }
+
+    public boolean isTracingEnabled() { return tracingEnabled; }
+    public void setTracingEnabled(boolean tracingEnabled) { this.tracingEnabled = tracingEnabled; }
+
+    public String getLoggingLevel() { return loggingLevel; }
+    public void setLoggingLevel(String loggingLevel) { this.loggingLevel = loggingLevel; }
+
+    public boolean isIncludeExecutionData() { return includeExecutionData; }
+    public void setIncludeExecutionData(boolean includeExecutionData) { this.includeExecutionData = includeExecutionData; }
+
+    public String getLoggingDestinationsJson() { return loggingDestinationsJson; }
+    public void setLoggingDestinationsJson(String loggingDestinationsJson) { this.loggingDestinationsJson = loggingDestinationsJson; }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }

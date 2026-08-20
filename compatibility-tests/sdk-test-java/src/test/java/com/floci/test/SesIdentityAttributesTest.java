@@ -187,11 +187,13 @@ class SesIdentityAttributesTest {
                     .filter(i -> email.equals(i.identityName())).findFirst().orElseThrow();
             IdentityInfo domainIdentity = identities.stream()
                     .filter(i -> domain.equals(i.identityName())).findFirst().orElseThrow();
-            // Regression: VerificationStatus used to be null in the list response.
-            assertThat(emailIdentity.verificationStatus()).isEqualTo(VerificationStatus.SUCCESS);
+            // AWS CreateEmailIdentity leaves both email and domain PENDING until
+            // the verification link (email) or DNS record (domain) is confirmed.
+            // Floci matches that: v2 create is pending; v1 VerifyEmailIdentity is
+            // the confirm path. SendingEnabled is true only after SUCCESS.
+            assertThat(emailIdentity.verificationStatus()).isEqualTo(VerificationStatus.PENDING);
             assertThat(domainIdentity.verificationStatus()).isEqualTo(VerificationStatus.PENDING);
-            // SendingEnabled tracks verification status on AWS: SUCCESS -> true, PENDING -> false.
-            assertThat(emailIdentity.sendingEnabled()).isTrue();
+            assertThat(emailIdentity.sendingEnabled()).isFalse();
             assertThat(domainIdentity.sendingEnabled()).isFalse();
         } finally {
             sesV2.deleteEmailIdentity(DeleteEmailIdentityRequest.builder().emailIdentity(email).build());

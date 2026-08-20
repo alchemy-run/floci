@@ -43,6 +43,13 @@ Floci Lambda runs your function code locally inside real Docker containers - clo
 | `PutFunctionConcurrency` | Set reserved concurrent executions |
 | `GetFunctionConcurrency` | Get reserved concurrent executions |
 | `DeleteFunctionConcurrency` | Clear reserved concurrent executions |
+| `GetAccountSettings` | Account-level code-size and concurrency limits plus usage |
+| `InvokeWithResponseStream` | Invoke and return an AWS event-stream of `PayloadChunk` + `InvokeComplete` |
+| `PublishLayerVersion` / `GetLayerVersion` / `GetLayerVersionByArn` / `ListLayers` / `ListLayerVersions` / `DeleteLayerVersion` | In-memory layer store |
+| `PutFunctionEventInvokeConfig` / `GetFunctionEventInvokeConfig` / `UpdateFunctionEventInvokeConfig` / `DeleteFunctionEventInvokeConfig` / `ListFunctionEventInvokeConfigs` | Per-function and per-qualifier async invoke config |
+| `GetDurableExecution` / `ListDurableExecutionsByFunction` / `GetDurableExecutionHistory` / `StopDurableExecution` | Durable execution management plane (see [Durable Executions](#durable-executions)) |
+| `CheckpointDurableExecution` / `GetDurableExecutionState` | Durable execution checkpoint data plane spoken by the Durable Execution SDK from inside the function |
+| `SendDurableExecutionCallbackSuccess` / `SendDurableExecutionCallbackFailure` / `SendDurableExecutionCallbackHeartbeat` | Complete or heart-beat a `waitForCallback` operation |
 
 ## Hot-Reloading via Reactive S3 Sync
 
@@ -162,20 +169,122 @@ services:
     drain window `Σreserved-inflight + unreserved-inflight` can briefly
     exceed `region-concurrency-limit`.
 
-Function URLs are also reachable directly on `/{proxy:.*}` under the Lambda URL controller, which routes the request into the normal `Invoke` path.
+Function URLs are also reachable directly on `/{proxy:.*}` under the Lambda URL controller, which routes the request into the normal `Invoke` path. The URL controller waits for the container on a dedicated pool so a nested emulator call (the function talking back to Floci) can still be served. In-flight Docker environments per function are capped by `floci.services.lambda.max-concurrent-containers` (default 4 — must be ≥ 2 so a service that synchronously re-invokes the function serving the current request, e.g. a Cognito trigger, cannot self-deadlock); excess sync invokes wait for a free environment *before* the Lambda timeout clock starts.
 
-**Stubbed:** `ListLayers` and `ListLayerVersions` return empty arrays. No layer storage exists.
+`AddPermission` persists `Condition` from `SourceArn`, `SourceAccount`,
+`FunctionUrlAuthType` (`StringEquals.lambda:FunctionUrlAuthType`), and
+`InvokedViaFunctionUrl` (`Bool.lambda:InvokedViaFunctionUrl`). `GetPolicy`
+returns the stored statement unchanged.
+
+`UpdateFunctionCode` accepts `Architectures` (Alchemy updates architecture
+on that API, not `UpdateFunctionConfiguration`).
+
+A function with `VpcConfig` creates one Hyperplane ENI per subnet
+(`InterfaceType=lambda`, description `AWS Lambda VPC ENI-…`) and deletes
+those ENIs on `DeleteFunction`.
+
+`UpdateFunctionUrlConfig` Cors `MaxAge` is optional — a missing value
+defaults to `0` instead of unboxing a null `Integer`. Cors
+`AllowCredentials` is omitted from the JSON when false (AWS shape).
+
+Function URLs with `AuthType=AWS_IAM` return HTTP 403 for unsigned
+requests at the URL edge (no container invoke). Unsigned
+`RESPONSE_STREAM` GETs would otherwise hang waiting on the runtime.
+
+Internal Extensions API registrations emit an AWS-shaped
+`EXTENSION Name: "…" State: Ready` line onto the function's CloudWatch
+log stream (name quoted so CloudWatch phrase filters match). On each
+successful `/runtime/invocation/{id}/response`, the Runtime API also
+writes `"ALCHEMY_REQUEST_FINALIZED"` so substring `FilterLogEvents`
+matches the quoted Insights-style pattern.
 
 ## Not Implemented
 
 These AWS Lambda operations have no handler in Floci. Calls will return `404` or an error:
 
-- Layers (`PublishLayerVersion`, `DeleteLayerVersion`, `GetLayerVersion`, `GetLayerVersionByArn`, `AddLayerVersionPermission`, `RemoveLayerVersionPermission`, `GetLayerVersionPolicy`)
+- Layer resource policies (`AddLayerVersionPermission`, `RemoveLayerVersionPermission`, `GetLayerVersionPolicy`)
 - Provisioned concurrency (`PutProvisionedConcurrencyConfig`, `GetProvisionedConcurrencyConfig`, `ListProvisionedConcurrencyConfigs`, `DeleteProvisionedConcurrencyConfig`)
-- Dead-letter, async invoke config, and event invoke config operations
-- `InvokeWithResponseStream`
 - Code signing management (only `GetFunctionCodeSigningConfig` is wired; there is no `PutFunctionCodeSigningConfig` or `CreateCodeSigningConfig`)
-- Account and regional settings (`GetAccountSettings`)
+
+## Durable Executions
+
+Floci emulates AWS Lambda Durable Functions (API version `2025-12-01`):
+checkpointed orchestrations that suspend on durable waits and resume in a
+fresh invocation. The implementation lives in
+`services/lambda/durable/` and targets the runtime protocol spoken by
+`@aws/durable-execution-sdk-js` (`withDurableExecution`).
+
+### Lifecycle
+
+1. **Start** — an `Invoke` carrying the `X-Amz-Durable-Execution-Name` header
+   registers a durable execution instead of invoking directly. The response is
+   `202` with the new (or existing, see idempotency below) execution ARN in
+   the `X-Amz-Durable-Execution-Arn` header. The operation log opens with an
+   `EXECUTION` operation whose `ExecutionDetails.InputPayload` carries the raw
+   request payload, and the function is invoked asynchronously with the
+   durable invocation envelope: `{ DurableExecutionArn, CheckpointToken,
+   UpdatedOperationIds, InitialExecutionState: { Operations } }`. The full log
+   is always inlined (no `NextMarker` pagination), so the SDK never needs the
+   paginated `GetDurableExecutionState` at init.
+2. **Checkpoint** — from inside the invocation the SDK records operation
+   transitions with `CheckpointDurableExecution` (`STEP` `START`/`SUCCEED`/
+   `FAIL`/`RETRY`, `WAIT` `START`, `CALLBACK` `START`, `CHAINED_INVOKE` `START`,
+   `CONTEXT` ops, and `EXECUTION SUCCEED` for oversized results). Each update
+   is applied to the log and the response returns the full refreshed state,
+   which the SDK merges into its replay map. The `CheckpointToken` is minted
+   per invocation and validated on every data-plane call — a stale token is
+   rejected with `400`. A `CHAINED_INVOKE START` starts a child durable
+   execution against `ChainedInvokeOptions.FunctionName` (reusing the durable
+   Invoke path); when the child reaches a terminal status the parent op is
+   completed with `ChainedInvokeDetails.Result` / `Error` and the parent is
+   resumed.
+3. **Suspend** — a `WAIT START` update stamps
+   `WaitDetails.ScheduledEndTimestamp = now + WaitSeconds` and arms a Vert.x
+   one-shot timer. When only timed operations remain, the SDK returns a
+   `PENDING` invocation envelope and the invocation ends; no container is held
+   during the wait.
+4. **Resume** — when the timer fires, the wait flips to `SUCCEEDED` (a step
+   retry flips `PENDING → READY`, a callback completion/timeout flips to
+   `SUCCEEDED`/`FAILED`/`TIMED_OUT`) and the function is re-invoked with the
+   full log plus `UpdatedOperationIds`, so the SDK replays memoized results
+   and continues. If a timer fires while an invocation is in flight, the
+   resume is queued and dispatched when the invocation returns; there is never
+   more than one invocation in flight per execution.
+5. **Finish** — a `SUCCEEDED`/`FAILED` invocation envelope finalizes the
+   execution's status, `Result`, or `Error`. Invocation-level failures
+   (function error payloads, container crashes) are retried up to 3 attempts
+   with a 1s delay before the execution is failed with
+   `Lambda.InvocationError`.
+
+### Idempotency
+
+Execution names are unique per function: re-invoking with the same
+`X-Amz-Durable-Execution-Name` and the same payload reattaches to the existing
+execution (`202` with the same ARN, no new invocation); a different payload is
+rejected with `DurableExecutionAlreadyStartedException` (`409`). Executions
+are function-scoped — deleting the function (via `LambdaService.deleteFunction`,
+the shared path used by the `DeleteFunction` API, CloudFormation, and
+replacement deletes) drops its executions, so a recreated function starts fresh.
+
+### Emulation notes
+
+- Execution ARNs are minted as
+  `arn:aws:lambda:{region}:{account}:durable-execution:{function}:{name}:{suffix}`.
+- Timestamps are serialized as epoch seconds, matching the AWS wire format.
+- `ExecutionTimeout` / `RetentionPeriodInDays` from `DurableConfig` are
+  accepted but not enforced: executions never time out server-side. They are
+  retained until the function is deleted.
+- Execution records persist through the Lambda `StorageFactory` backend
+  (`lambda-durable-executions.json` under `FLOCI_STORAGE_PERSISTENT_PATH`,
+  `/app/data` in the Docker image, when storage mode is `hybrid`/`persistent`/
+  `wal` — Alchemy's container sets `FLOCI_STORAGE_MODE=hybrid`). On startup
+  Floci scans running executions and re-arms WAIT / RETRY / callback-timeout
+  deadlines (firing immediately if the deadline already passed) and resumes
+  in-flight chained invokes. The in-process Vert.x timers themselves are not
+  persisted; they are reconstructed from the store.
+- `GetDurableExecutionHistory` synthesizes events from the operation log
+  (`ExecutionStarted`, `StepSucceeded`, `WaitStarted`, `ChainedInvokeSucceeded`,
+  ...) rather than keeping a separate event journal.
 
 ## Configuration
 
@@ -324,9 +433,12 @@ When `aws-config-path` is set:
 
 - The host path is bind-mounted **read-only** into each Lambda container at `/opt/aws-config`
 - `AWS_SHARED_CREDENTIALS_FILE` and `AWS_CONFIG_FILE` env vars are set so the SDK discovers credentials regardless of the container's HOME directory
-- No `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` env vars are injected
+- If the function has an execution role, Floci still injects the minted `ASIA…` session. Env vars win in the SDK chain, so in-container calls sign as the role (not the host `test` root). The mount is only consulted when those env vars are absent.
 
-When unset (default), Floci reads credentials from its own environment and falls back to `test`/`test`/`test`.
+When unset (default):
+
+- If the function has an execution role, Floci mints an `ASIA…` session mapped to that role and injects those credentials. In-container SDK calls are then that role principal — scoped IAM denials (`ses:SendEmail` on an outsider From, `kms:GetKeyRotationStatus` when unbound) can fire without turning on global IAM enforcement.
+- Otherwise Floci reads credentials from its own environment and falls back to `test`/`test`/`test` (the root bypass).
 
 !!! tip "Routing specific services to real AWS"
     To keep some services on Floci while others hit real AWS, clear the global endpoint and set service-specific overrides in your function's `--environment`:
@@ -434,8 +546,9 @@ execution time. The
 applied to the HTTP response and stripped from the body. URLs with the
 default `BUFFERED` mode still assemble the full body first, with the same
 prelude handling. The `InvokeWithResponseStream` management endpoint
-(`/2021-11-15/.../response-streaming-invocations`, AWS event-stream
-framing) is not yet routed.
+(`/2021-11-15/.../response-streaming-invocations`) is routed and returns
+an `application/vnd.amazon.eventstream` of `PayloadChunk` then
+`InvokeComplete`.
 
 ### Event source mapping tags
 

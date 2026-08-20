@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.apigateway;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,16 +26,21 @@ import io.github.hectorvent.floci.services.apigateway.model.BasePathMapping;
 import io.github.hectorvent.floci.services.apigateway.model.MethodSetting;
 import io.github.hectorvent.floci.services.apigateway.model.CustomDomain;
 import io.github.hectorvent.floci.services.apigateway.model.Deployment;
+import io.github.hectorvent.floci.services.apigateway.model.GatewayResponse;
 import io.github.hectorvent.floci.services.apigateway.model.Integration;
 import io.github.hectorvent.floci.services.apigateway.model.IntegrationResponse;
 import io.github.hectorvent.floci.services.apigateway.model.MethodConfig;
 import io.github.hectorvent.floci.services.apigateway.model.MethodResponse;
 import io.github.hectorvent.floci.services.apigateway.model.Model;
+import io.github.hectorvent.floci.services.apigateway.model.QuotaSettings;
 import io.github.hectorvent.floci.services.apigateway.model.RequestValidator;
 import io.github.hectorvent.floci.services.apigateway.model.RestApi;
 import io.github.hectorvent.floci.services.apigateway.model.Stage;
+import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlan;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlanKey;
+import io.github.hectorvent.floci.services.apigateway.model.V2DomainName;
+import io.github.hectorvent.floci.services.apigateway.model.VpcLink;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
@@ -61,6 +67,9 @@ public class ApiGatewayService {
     private final StorageBackend<String, Account> accountStore;
     private final StorageBackend<String, CustomDomain> domainStore;
     private final StorageBackend<String, BasePathMapping> basePathMappingStore;
+    private final StorageBackend<String, GatewayResponse> gatewayResponseStore;
+    private final StorageBackend<String, VpcLink> vpcLinkStore;
+    private final StorageBackend<String, V2DomainName> v2DomainStore;
 
     // Constants
     private static final String EPC_KEY = "endpointConfiguration";
@@ -106,6 +115,15 @@ public class ApiGatewayService {
                 new TypeReference<>() {
                 });
         this.basePathMappingStore = storageFactory.create("apigateway", "apigateway-mappings.json",
+                new TypeReference<>() {
+                });
+        this.gatewayResponseStore = storageFactory.create("apigateway", "apigateway-gatewayresponses.json",
+                new TypeReference<>() {
+                });
+        this.vpcLinkStore = storageFactory.create("apigateway", "apigateway-vpclinks.json",
+                new TypeReference<>() {
+                });
+        this.v2DomainStore = storageFactory.create("apigateway", "apigateway-v2-domains.json",
                 new TypeReference<>() {
                 });
     }
@@ -242,14 +260,17 @@ public class ApiGatewayService {
         }
 
         api.setEndpointConfiguration(endpointConfiguration);
+        api.setBinaryMediaTypes(readStringList(request.get("binaryMediaTypes")));
 
-        apiStore.put(apiKey(region, api.getId()), api);
-
-        // Create root resource "/"
+        // Create root resource "/" first so the persisted API carries its id
+        // (AWS includes rootResourceId in every RestApi response shape).
         ApiGatewayResource root = new ApiGatewayResource();
         root.setId(shortId(8));
         root.setPath("/");
         resourceStore.put(resourceKey(region, api.getId(), root.getId()), root);
+        api.setRootResourceId(root.getId());
+
+        apiStore.put(apiKey(region, api.getId()), api);
 
         LOG.infov("Created REST API: {0} ({1}) in {2}", name, api.getId(), region);
         return api;
@@ -287,6 +308,8 @@ public class ApiGatewayService {
         stageStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(stageStore::delete);
         modelStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(modelStore::delete);
         requestValidatorStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(requestValidatorStore::delete);
+        authorizerStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(authorizerStore::delete);
+        gatewayResponseStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(gatewayResponseStore::delete);
         LOG.infov("Deleted REST API: {0} in {1}", apiId, region);
     }
 
@@ -488,6 +511,23 @@ public class ApiGatewayService {
         deploymentStore.delete(deploymentKey(region, apiId, deploymentId));
     }
 
+    public Deployment updateDeployment(String region, String apiId, String deploymentId,
+                                       List<Map<String, String>> patchOperations) {
+        Deployment existing = getDeployment(region, apiId, deploymentId);
+        String description = existing.description();
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                String path = op.getOrDefault("path", "");
+                if ("/description".equals(path)) {
+                    description = "remove".equals(op.get("op")) ? null : op.get("value");
+                }
+            }
+        }
+        Deployment updated = new Deployment(existing.id(), description, existing.createdDate());
+        deploymentStore.put(deploymentKey(region, apiId, deploymentId), updated);
+        return updated;
+    }
+
     // ──────────────────────────── Stages ────────────────────────────
 
     public Stage createStage(String region, String apiId, Map<String, Object> request) {
@@ -667,6 +707,28 @@ public class ApiGatewayService {
         authorizerStore.delete(authorizerKey(region, apiId, authorizerId));
     }
 
+    public Authorizer updateAuthorizer(String region, String apiId, String authorizerId,
+                                       List<Map<String, String>> patchOperations) {
+        Authorizer authorizer = getAuthorizer(region, apiId, authorizerId);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                if (!"replace".equals(op.get("op")) && !"add".equals(op.get("op"))) continue;
+                String path = op.getOrDefault("path", "");
+                String value = op.get("value");
+                switch (path) {
+                    case "/name" -> authorizer.setName(value);
+                    case "/authorizerUri" -> authorizer.setAuthorizerUri(value);
+                    case "/identitySource" -> authorizer.setIdentitySource(value);
+                    case "/authorizerResultTtlInSeconds" -> authorizer.setAuthorizerResultTtlInSeconds(value);
+                    case "/type" -> authorizer.setType(value);
+                    default -> { }
+                }
+            }
+        }
+        authorizerStore.put(authorizerKey(region, apiId, authorizerId), authorizer);
+        return authorizer;
+    }
+
     // ──────────────────────────── API Keys ────────────────────────────
 
     public ApiKey createApiKey(String region, Map<String, Object> request) {
@@ -704,6 +766,25 @@ public class ApiGatewayService {
         apiKeyStore.delete(apiKeyGlobalKey(region, apiKeyId));
     }
 
+    public ApiKey updateApiKey(String region, String apiKeyId, List<Map<String, String>> patchOperations) {
+        ApiKey key = getApiKey(region, apiKeyId);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                String opType = op.get("op");
+                String path = op.getOrDefault("path", "");
+                String value = op.get("value");
+                if ("/name".equals(path) && !"remove".equals(opType)) {
+                    key.setName(value);
+                } else if ("/enabled".equals(path) && !"remove".equals(opType)) {
+                    key.setEnabled(Boolean.parseBoolean(value));
+                }
+            }
+        }
+        key.setLastUpdatedDate(System.currentTimeMillis() / 1000L);
+        apiKeyStore.put(apiKeyGlobalKey(region, apiKeyId), key);
+        return key;
+    }
+
     // ──────────────────────────── Usage Plans ────────────────────────────
 
     public UsagePlan createUsagePlan(String region, Map<String, Object> request) {
@@ -718,6 +799,13 @@ public class ApiGatewayService {
             for (Map<String, Object> as : apiStages) {
                 plan.getApiStages().add(new UsagePlan.ApiStage((String) as.get("apiId"), (String) as.get("stage")));
             }
+        }
+        plan.setThrottle(readThrottle(request.get("throttle")));
+        plan.setQuota(readQuota(request.get("quota")));
+        if (request.get("tags") instanceof Map<?, ?> rawTags) {
+            Map<String, String> tags = new HashMap<>();
+            rawTags.forEach((key, value) -> tags.put(String.valueOf(key), String.valueOf(value)));
+            plan.setTags(tags);
         }
 
         usagePlanStore.put(usagePlanKey(region, plan.getId()), plan);
@@ -738,6 +826,45 @@ public class ApiGatewayService {
     public void deleteUsagePlan(String region, String usagePlanId) {
         getUsagePlan(region, usagePlanId);
         usagePlanStore.delete(usagePlanKey(region, usagePlanId));
+    }
+
+    public UsagePlan updateUsagePlan(String region, String usagePlanId, List<Map<String, String>> patchOperations) {
+        UsagePlan plan = getUsagePlan(region, usagePlanId);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                String opType = op.get("op");
+                String path = op.getOrDefault("path", "");
+                String value = op.get("value");
+                if ("/description".equals(path)) {
+                    plan.setDescription("remove".equals(opType) ? null : value);
+                } else if ("/name".equals(path) && !"remove".equals(opType)) {
+                    plan.setName(value);
+                } else if (path.startsWith("/throttle/")) {
+                    if (plan.getThrottle() == null) {
+                        ThrottleSettings created = new ThrottleSettings();
+                        created.setBurstLimit(null);
+                        created.setRateLimit(null);
+                        plan.setThrottle(created);
+                    }
+                    applyThrottlePatch(plan.getThrottle(), path, opType, value);
+                    if ("remove".equals(opType) && plan.getThrottle().getBurstLimit() == null
+                            && plan.getThrottle().getRateLimit() == null) {
+                        plan.setThrottle(null);
+                    }
+                } else if (path.startsWith("/quota/")) {
+                    if (plan.getQuota() == null) {
+                        plan.setQuota(new QuotaSettings());
+                    }
+                    applyQuotaPatch(plan.getQuota(), path, opType, value);
+                    if ("remove".equals(opType) && plan.getQuota().getLimit() == null
+                            && plan.getQuota().getOffset() == null && plan.getQuota().getPeriod() == null) {
+                        plan.setQuota(null);
+                    }
+                }
+            }
+        }
+        usagePlanStore.put(usagePlanKey(region, usagePlanId), plan);
+        return plan;
     }
 
     // ──────────────────────────── Usage Plan Keys ────────────────────────────
@@ -773,6 +900,38 @@ public class ApiGatewayService {
     public void deleteUsagePlanKey(String region, String usagePlanId, String keyId) {
         getUsagePlanKey(region, usagePlanId, keyId);
         usagePlanKeyStore.delete(usagePlanKeyPathKey(region, usagePlanId, keyId));
+    }
+
+    public record UsageSnapshot(
+            String usagePlanId,
+            String startDate,
+            String endDate,
+            Map<String, List<List<Integer>>> values
+    ) {}
+
+    public UsageSnapshot getUsage(String region, String usagePlanId, String keyId,
+                                  String startDate, String endDate) {
+        UsagePlan plan = getUsagePlan(region, usagePlanId);
+        if (startDate == null || startDate.isBlank() || endDate == null || endDate.isBlank()) {
+            throw new AwsException("BadRequestException",
+                    "startDate and endDate are required", 400);
+        }
+        Map<String, List<List<Integer>>> values = new LinkedHashMap<>();
+        if (keyId != null && !keyId.isBlank()) {
+            values.put(keyId, List.of(List.of(0, 0)));
+        }
+        return new UsageSnapshot(plan.getId(), startDate, endDate, values);
+    }
+
+    public UsageSnapshot updateUsage(String region, String usagePlanId, String keyId,
+                                     List<Map<String, String>> patchOperations) {
+        UsagePlan plan = getUsagePlan(region, usagePlanId);
+        getUsagePlanKey(region, usagePlanId, keyId);
+        if (plan.getQuota() == null || plan.getQuota().getLimit() == null) {
+            throw new AwsException("BadRequestException",
+                    "Usage plan does not have a quota limit", 400);
+        }
+        return new UsageSnapshot(plan.getId(), null, null, Map.of(keyId, List.of(List.of(0, 0))));
     }
 
     // ──────────────────────────── Request Validators ────────────────────────────
@@ -873,6 +1032,27 @@ public class ApiGatewayService {
         return domainStore.scan(k -> k.startsWith(prefix));
     }
 
+    public CustomDomain updateDomainName(String region, String domainName,
+                                         List<Map<String, String>> patchOperations) {
+        CustomDomain domain = getDomainName(region, domainName);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                if (!"replace".equals(op.get("op")) && !"add".equals(op.get("op"))) continue;
+                String path = op.getOrDefault("path", "");
+                String value = op.get("value");
+                switch (path) {
+                    case "/certificateArn" -> domain.setCertificateArn(value);
+                    case "/certificateName" -> domain.setCertificateName(value);
+                    case "/regionalCertificateArn" -> domain.setRegionalCertificateArn(value);
+                    case "/securityPolicy" -> domain.setSecurityPolicy(value);
+                    default -> { }
+                }
+            }
+        }
+        domainStore.put(domainKey(region, domainName), domain);
+        return domain;
+    }
+
     public void deleteDomainName(String region, String domainName) {
         getDomainName(region, domainName);
         domainStore.delete(domainKey(region, domainName));
@@ -905,6 +1085,25 @@ public class ApiGatewayService {
         getDomainName(region, domainName);
         String prefix = region + "::" + domainName + "::";
         return basePathMappingStore.scan(k -> k.startsWith(prefix));
+    }
+
+    public BasePathMapping updateBasePathMapping(String region, String domainName, String basePath,
+                                                 List<Map<String, String>> patchOperations) {
+        BasePathMapping mapping = getBasePathMapping(region, domainName, basePath);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                if (!"replace".equals(op.get("op")) && !"add".equals(op.get("op"))) continue;
+                String path = op.getOrDefault("path", "");
+                String value = op.get("value");
+                if ("/restApiId".equals(path)) {
+                    mapping.setRestApiId(value);
+                } else if ("/stage".equals(path)) {
+                    mapping.setStage(value);
+                }
+            }
+        }
+        basePathMappingStore.put(mappingKey(region, domainName, mapping.getBasePath()), mapping);
+        return mapping;
     }
 
     public void deleteBasePathMapping(String region, String domainName, String basePath) {
@@ -1004,11 +1203,21 @@ public class ApiGatewayService {
         RestApi api = getRestApi(region, apiId);
         if (patchOperations != null) {
             for (Map<String, String> op : patchOperations) {
-                if (!"replace" .equals(op.get("op"))) continue;
+                String opType = op.get("op");
                 String path = op.getOrDefault("path", "");
                 String value = op.get("value");
-                if ("/name" .equals(path)) api.setName(value);
-                else if ("/description" .equals(path)) api.setDescription(value);
+                if ("/name".equals(path) && !"remove".equals(opType)) {
+                    api.setName(value);
+                } else if ("/description".equals(path)) {
+                    api.setDescription("remove".equals(opType) ? null : value);
+                } else if (path.startsWith("/binaryMediaTypes/")) {
+                    String mediaType = decodeJsonPointerSegment(path.substring("/binaryMediaTypes/".length()));
+                    if ("remove".equals(opType)) {
+                        api.getBinaryMediaTypes().remove(mediaType);
+                    } else if (!api.getBinaryMediaTypes().contains(mediaType)) {
+                        api.getBinaryMediaTypes().add(mediaType);
+                    }
+                }
             }
         }
         apiStore.put(apiKey(region, apiId), api);
@@ -1601,6 +1810,175 @@ public class ApiGatewayService {
         }
     }
 
+    // ──────────────────────────── Gateway Responses ────────────────────────────
+
+    public GatewayResponse putGatewayResponse(String region, String apiId, String responseType,
+                                              Map<String, Object> request) {
+        getRestApi(region, apiId);
+        GatewayResponse response = new GatewayResponse();
+        response.setResponseType(responseType);
+        response.setStatusCode(request.get("statusCode") != null
+                ? String.valueOf(request.get("statusCode"))
+                : defaultStatusCode(responseType));
+        response.setResponseParameters(readStringMap(request.get("responseParameters")));
+        response.setResponseTemplates(readStringMap(request.get("responseTemplates")));
+        response.setDefaultResponse(false);
+        gatewayResponseStore.put(gatewayResponseKey(region, apiId, responseType), response);
+        return response;
+    }
+
+    public GatewayResponse getGatewayResponse(String region, String apiId, String responseType) {
+        getRestApi(region, apiId);
+        return gatewayResponseStore.get(gatewayResponseKey(region, apiId, responseType))
+                .orElseGet(() -> defaultGatewayResponse(responseType));
+    }
+
+    public List<GatewayResponse> getGatewayResponses(String region, String apiId) {
+        getRestApi(region, apiId);
+        String prefix = region + "::" + apiId + "::";
+        return gatewayResponseStore.scan(k -> k.startsWith(prefix));
+    }
+
+    public void deleteGatewayResponse(String region, String apiId, String responseType) {
+        getRestApi(region, apiId);
+        String key = gatewayResponseKey(region, apiId, responseType);
+        if (gatewayResponseStore.get(key).isEmpty()) {
+            throw new AwsException("NotFoundException", "Gateway response not found", 404);
+        }
+        gatewayResponseStore.delete(key);
+    }
+
+    // ──────────────────────────── VPC Links (v1) ────────────────────────────
+
+    public VpcLink createVpcLink(String region, Map<String, Object> request) {
+        VpcLink link = new VpcLink();
+        link.setId(shortId(10));
+        link.setName((String) request.get("name"));
+        link.setDescription((String) request.get("description"));
+        link.setTargetArns(readStringList(request.get("targetArns")));
+        link.setStatus("AVAILABLE");
+        if (request.get("tags") instanceof Map<?, ?> rawTags) {
+            Map<String, String> tags = new HashMap<>();
+            rawTags.forEach((key, value) -> tags.put(String.valueOf(key), String.valueOf(value)));
+            link.setTags(tags);
+        }
+        vpcLinkStore.put(vpcLinkKey(region, link.getId()), link);
+        LOG.infov("Created VPC link {0}", link.getId());
+        return link;
+    }
+
+    public VpcLink getVpcLink(String region, String vpcLinkId) {
+        return vpcLinkStore.get(vpcLinkKey(region, vpcLinkId))
+                .orElseThrow(() -> new AwsException("NotFoundException", "Invalid VPC Link identifier specified", 404));
+    }
+
+    public List<VpcLink> getVpcLinks(String region) {
+        String prefix = region + "::";
+        return vpcLinkStore.scan(k -> k.startsWith(prefix));
+    }
+
+    public VpcLink updateVpcLink(String region, String vpcLinkId, List<Map<String, String>> patchOperations) {
+        VpcLink link = getVpcLink(region, vpcLinkId);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                if (!"replace".equals(op.get("op")) && !"add".equals(op.get("op"))) continue;
+                String path = op.getOrDefault("path", "");
+                String value = op.get("value");
+                if ("/name".equals(path)) {
+                    link.setName(value);
+                } else if ("/description".equals(path)) {
+                    link.setDescription(value);
+                }
+            }
+        }
+        vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
+        return link;
+    }
+
+    public void deleteVpcLink(String region, String vpcLinkId) {
+        getVpcLink(region, vpcLinkId);
+        vpcLinkStore.delete(vpcLinkKey(region, vpcLinkId));
+    }
+
+    // ──────────────────────────── v2 Domain Names ────────────────────────────
+
+    public V2DomainName createV2DomainName(String region, Map<String, Object> request) {
+        String domainName = (String) request.get("domainName");
+        if (domainName == null || domainName.isBlank()) {
+            throw new AwsException("BadRequestException", "domainName is required", 400);
+        }
+        if (v2DomainStore.get(v2DomainKey(region, domainName)).isPresent()) {
+            throw new AwsException("ConflictException", "Domain name already exists", 409);
+        }
+        V2DomainName domain = new V2DomainName();
+        domain.setDomainName(domainName);
+        domain.setDomainNameArn("arn:aws:apigateway:" + region + "::/domainnames/" + domainName);
+        domain.setRoutingMode((String) request.getOrDefault("routingMode", "API_MAPPING_ONLY"));
+        domain.setApiMappingSelectionExpression("$request.basepath");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> configs = (List<Map<String, Object>>) request.get("domainNameConfigurations");
+        if (configs != null) {
+            for (Map<String, Object> config : configs) {
+                Map<String, Object> copy = new HashMap<>(config);
+                copy.putIfAbsent("endpointType", "REGIONAL");
+                copy.putIfAbsent("securityPolicy", "TLS_1_2");
+                copy.putIfAbsent("domainNameStatus", "AVAILABLE");
+                copy.putIfAbsent("apiGatewayDomainName", "d-" + shortId(10) + ".execute-api." + region + ".amazonaws.com");
+                copy.putIfAbsent("hostedZoneId", "Z2FDTNDATAQYW2");
+                domain.getDomainNameConfigurations().add(copy);
+            }
+        }
+        if (request.get("mutualTlsAuthentication") instanceof Map<?, ?> mtls) {
+            Map<String, Object> copy = new HashMap<>();
+            mtls.forEach((key, value) -> copy.put(String.valueOf(key), value));
+            domain.setMutualTlsAuthentication(copy);
+        }
+        if (request.get("tags") instanceof Map<?, ?> rawTags) {
+            Map<String, String> tags = new HashMap<>();
+            rawTags.forEach((key, value) -> tags.put(String.valueOf(key), String.valueOf(value)));
+            domain.setTags(tags);
+        }
+        v2DomainStore.put(v2DomainKey(region, domainName), domain);
+        return domain;
+    }
+
+    public V2DomainName getV2DomainName(String region, String domainName) {
+        return v2DomainStore.get(v2DomainKey(region, domainName))
+                .orElseThrow(() -> new AwsException("NotFoundException", "The domain name specified does not exist", 404));
+    }
+
+    public List<V2DomainName> getV2DomainNames(String region) {
+        String prefix = region + "::";
+        return v2DomainStore.scan(k -> k.startsWith(prefix));
+    }
+
+    public V2DomainName updateV2DomainName(String region, String domainName, Map<String, Object> request) {
+        V2DomainName domain = getV2DomainName(region, domainName);
+        if (request.containsKey("routingMode") && request.get("routingMode") != null) {
+            domain.setRoutingMode((String) request.get("routingMode"));
+        }
+        if (request.containsKey("domainNameConfigurations")) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> configs = (List<Map<String, Object>>) request.get("domainNameConfigurations");
+            domain.setDomainNameConfigurations(configs != null ? new ArrayList<>(configs) : new ArrayList<>());
+        }
+        v2DomainStore.put(v2DomainKey(region, domainName), domain);
+        return domain;
+    }
+
+    public void deleteV2DomainName(String region, String domainName) {
+        getV2DomainName(region, domainName);
+        v2DomainStore.delete(v2DomainKey(region, domainName));
+    }
+
+    public void flushStageCache(String region, String apiId, String stageName) {
+        getStage(region, apiId, stageName);
+    }
+
+    public void flushStageAuthorizersCache(String region, String apiId, String stageName) {
+        getStage(region, apiId, stageName);
+    }
+
     // ──────────────────────────── Key helpers ────────────────────────────
 
     private String apiKey(String region, String apiId) {
@@ -1655,7 +2033,129 @@ public class ApiGatewayService {
         return region + "::" + domainName + "::" + basePath;
     }
 
+    private String gatewayResponseKey(String region, String apiId, String responseType) {
+        return region + "::" + apiId + "::" + responseType;
+    }
+
+    private String vpcLinkKey(String region, String vpcLinkId) {
+        return region + "::" + vpcLinkId;
+    }
+
+    private String v2DomainKey(String region, String domainName) {
+        return region + "::" + domainName;
+    }
+
     private static String shortId(int length) {
         return UUID.randomUUID().toString().replace("-", "").substring(0, length);
+    }
+
+    private static String decodeJsonPointerSegment(String segment) {
+        return segment.replace("~1", "/").replace("~0", "~");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> readStringList(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return new ArrayList<>();
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null) {
+                values.add(String.valueOf(item));
+            }
+        }
+        return values;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> readStringMap(Object raw) {
+        Map<String, String> values = new HashMap<>();
+        if (raw instanceof Map<?, ?> map) {
+            map.forEach((key, value) -> {
+                if (key != null && value != null) {
+                    values.put(String.valueOf(key), String.valueOf(value));
+                }
+            });
+        }
+        return values;
+    }
+
+    private static ThrottleSettings readThrottle(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
+        }
+        ThrottleSettings throttle = new ThrottleSettings();
+        throttle.setBurstLimit(null);
+        throttle.setRateLimit(null);
+        if (map.get("burstLimit") instanceof Number n) {
+            throttle.setBurstLimit(n.intValue());
+        } else if (map.get("burstLimit") != null) {
+            throttle.setBurstLimit(Integer.parseInt(String.valueOf(map.get("burstLimit"))));
+        }
+        if (map.get("rateLimit") instanceof Number n) {
+            throttle.setRateLimit(n.doubleValue());
+        } else if (map.get("rateLimit") != null) {
+            throttle.setRateLimit(Double.parseDouble(String.valueOf(map.get("rateLimit"))));
+        }
+        return throttle;
+    }
+
+    private static QuotaSettings readQuota(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
+        }
+        QuotaSettings quota = new QuotaSettings();
+        if (map.get("limit") instanceof Number n) {
+            quota.setLimit(n.intValue());
+        } else if (map.get("limit") != null) {
+            quota.setLimit(Integer.parseInt(String.valueOf(map.get("limit"))));
+        }
+        if (map.get("offset") instanceof Number n) {
+            quota.setOffset(n.intValue());
+        } else if (map.get("offset") != null) {
+            quota.setOffset(Integer.parseInt(String.valueOf(map.get("offset"))));
+        }
+        if (map.get("period") != null) {
+            quota.setPeriod(String.valueOf(map.get("period")));
+        }
+        return quota;
+    }
+
+    private static void applyThrottlePatch(ThrottleSettings throttle, String path, String opType, String value) {
+        if ("/throttle/burstLimit".equals(path)) {
+            throttle.setBurstLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/throttle/rateLimit".equals(path)) {
+            throttle.setRateLimit("remove".equals(opType) || value == null ? null : Double.parseDouble(value));
+        }
+    }
+
+    private static void applyQuotaPatch(QuotaSettings quota, String path, String opType, String value) {
+        if ("/quota/limit".equals(path)) {
+            quota.setLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/quota/offset".equals(path)) {
+            quota.setOffset("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/quota/period".equals(path)) {
+            quota.setPeriod("remove".equals(opType) ? null : value);
+        }
+    }
+
+    private static GatewayResponse defaultGatewayResponse(String responseType) {
+        GatewayResponse response = new GatewayResponse();
+        response.setResponseType(responseType);
+        response.setStatusCode(defaultStatusCode(responseType));
+        response.setDefaultResponse(true);
+        return response;
+    }
+
+    private static String defaultStatusCode(String responseType) {
+        return switch (responseType) {
+            case "DEFAULT_4XX", "BAD_REQUEST_BODY", "BAD_REQUEST_PARAMETERS" -> "400";
+            case "UNAUTHORIZED" -> "401";
+            case "ACCESS_DENIED", "WAF_FILTERED" -> "403";
+            case "RESOURCE_NOT_FOUND" -> "404";
+            case "DEFAULT_5XX", "API_CONFIGURATION_ERROR", "AUTHORIZER_FAILURE",
+                    "AUTHORIZER_CONFIGURATION_ERROR", "INTEGRATION_FAILURE", "INTEGRATION_TIMEOUT" -> "500";
+            default -> "500";
+        };
     }
 }

@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.pipes;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamService;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
@@ -57,6 +58,20 @@ class PipesPollerTest {
         when(config.effectiveBaseUrl()).thenReturn("http://localhost:4566");
         poller = new PipesPoller(vertx, sqsService, kinesisService, dynamoDbStreamService,
                 kafkaConsumerManager, targetInvoker, new PipesFilterMatcher(MAPPER), MAPPER, config);
+    }
+
+    @Test
+    void wrapPipeBatchEmitsBareArrayNotEsmEnvelope() throws Exception {
+        ObjectNode record = MAPPER.createObjectNode();
+        record.put("eventSource", "aws:sqs");
+        record.put("body", "hello");
+        String json = PipesPoller.wrapPipeBatch(MAPPER, List.of(record));
+        JsonNode node = MAPPER.readTree(json);
+        assertTrue(node.isArray());
+        assertEquals(1, node.size());
+        assertEquals("aws:sqs", node.get(0).path("eventSource").asText());
+        assertEquals("hello", node.get(0).path("body").asText());
+        assertFalse(node.has("Records"));
     }
 
     @Test

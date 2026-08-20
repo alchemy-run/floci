@@ -19,6 +19,16 @@ Floci Batch implements the AWS Batch control plane for local integration tests. 
 | `SubmitJob` | `POST /v1/submitjob` | Submit a local Batch job |
 | `DescribeJobs` | `POST /v1/describejobs` | Describe jobs by job ID |
 | `ListJobs` | `POST /v1/listjobs` | List jobs by queue, status, AWS `filters`, and pagination |
+| `UpdateComputeEnvironment` | `POST /v1/updatecomputeenvironment` | Update compute environment state, resources, or service role |
+| `DeleteComputeEnvironment` | `POST /v1/deletecomputeenvironment` | Delete a disabled compute environment |
+| `UpdateJobQueue` | `POST /v1/updatejobqueue` | Update queue state, priority, or compute environment order |
+| `DeleteJobQueue` | `POST /v1/deletejobqueue` | Delete a disabled job queue |
+| `CancelJob` | `POST /v1/canceljob` | Fail a non-terminal job as cancelled |
+| `TerminateJob` | `POST /v1/terminatejob` | Fail a non-terminal job as terminated |
+| `GetJobQueueSnapshot` | `POST /v1/getjobqueuesnapshot` | Return the `RUNNABLE` front of a queue |
+| `TagResource` | `POST /v1/tagresource` | Tag a compute environment, queue, or job definition |
+| `UntagResource` | `POST /v1/untagresource` | Remove tags from a Batch resource |
+| `ListTagsForResource` | `POST /v1/listtagsforresource` | List tags on a Batch resource |
 
 ## Runner Modes
 
@@ -26,7 +36,7 @@ Batch uses `floci.services.batch.runner-mode`.
 
 | Value | Behavior |
 |---|---|
-| `immediate` | Default. `SubmitJob` persists the job, records lifecycle timestamps, creates one successful attempt, and returns after the job is `SUCCEEDED`. |
+| `immediate` | Default. `SubmitJob` persists the job and records lifecycle timestamps. When `immediate-complete` is `true` (Floci's own tests), it creates one successful attempt and returns after the job is `SUCCEEDED`. When `false` (Alchemy Docker image), the job is left `RUNNABLE` so `CancelJob` / `TerminateJob` can still fail it after submit returns. |
 | `docker` | Starts one Docker container per attempt from the job-definition image, passes resolved command and environment values, applies `MEMORY` resource requirements as Docker memory limits, captures a CloudWatch Logs stream name, and sets `SUCCEEDED` or `FAILED` from the container exit code. Timed-out jobs fail without retry, matching AWS Batch timeout behavior. |
 
 `process` mode is not implemented.
@@ -90,15 +100,16 @@ IAM roles, VPC fields, Fargate declarations, log configuration, storage, and res
 |---|---|---|
 | `FLOCI_SERVICES_BATCH_ENABLED` | `true` | Enable or disable Batch |
 | `FLOCI_SERVICES_BATCH_RUNNER_MODE` | `immediate` | `immediate` or `docker` |
+| `FLOCI_SERVICES_BATCH_IMMEDIATE_COMPLETE` | `true` (tests) / `false` (image) | When `immediate`, finish jobs to `SUCCEEDED` before `SubmitJob` returns |
 | `FLOCI_SERVICES_BATCH_DOCKER_NETWORK` | *(unset)* | Docker network for Batch containers |
 | `FLOCI_STORAGE_SERVICES_BATCH_MODE` | *(inherits global)* | Optional storage mode override |
 | `FLOCI_STORAGE_SERVICES_BATCH_FLUSH_INTERVAL_MS` | `5000` | Persistent storage flush interval |
 
 ## Limitations
 
-- No IAM enforcement.
+- No IAM enforcement. `AWSBatchServiceRole` is seeded so Alchemy Bindings can attach it to an unmanaged CE service role.
 - No VPC/subnet/security-group simulation.
 - No AWS-faithful capacity scheduling.
 - No array job fan-out or multi-node jobs.
-- `CancelJob` and `TerminateJob` are not implemented.
+- `CancelJob` / `TerminateJob` are no-ops on already-terminal (`SUCCEEDED`/`FAILED`) jobs and do not interrupt an in-flight Docker attempt.
 - EventBridge input transformers work through the existing EventBridge target input path; full Batch-specific input-transformer parity is not implemented.

@@ -507,6 +507,76 @@ class SnsServiceTest {
     }
 
     @Test
+    void addPermission_appendsSidToTopicPolicy() {
+        Topic topic = snsService.createTopic("perm-topic", null, null, REGION);
+        snsService.addPermission(topic.getTopicArn(), "FixturePublishPermission",
+                List.of(ACCOUNT), List.of("Publish"), REGION);
+        String policy = snsService.getTopicAttributes(topic.getTopicArn(), REGION).get("Policy");
+        assertTrue(policy.contains("FixturePublishPermission"));
+        assertTrue(policy.contains("SNS:Publish"));
+        assertTrue(policy.contains("__default_statement_ID"));
+    }
+
+    @Test
+    void removePermission_dropsSidFromTopicPolicy() {
+        Topic topic = snsService.createTopic("perm-topic", null, null, REGION);
+        snsService.addPermission(topic.getTopicArn(), "FixturePublishPermission",
+                List.of(ACCOUNT), List.of("Publish"), REGION);
+        snsService.removePermission(topic.getTopicArn(), "FixturePublishPermission", REGION);
+        String policy = snsService.getTopicAttributes(topic.getTopicArn(), REGION).get("Policy");
+        assertFalse(policy.contains("FixturePublishPermission"));
+        assertTrue(policy.contains("__default_statement_ID"));
+    }
+
+    @Test
+    void addPermission_duplicateLabelRejected() {
+        Topic topic = snsService.createTopic("perm-topic", null, null, REGION);
+        snsService.addPermission(topic.getTopicArn(), "FixturePublishPermission",
+                List.of(ACCOUNT), List.of("Publish"), REGION);
+        AwsException e = assertThrows(AwsException.class,
+                () -> snsService.addPermission(topic.getTopicArn(), "FixturePublishPermission",
+                        List.of(ACCOUNT), List.of("Publish"), REGION));
+        assertEquals("InvalidParameter", e.getErrorCode());
+    }
+
+    @Test
+    void setAndGetSmsAttributes() {
+        assertEquals("Promotional", snsService.getSmsAttributes(REGION).get("DefaultSMSType"));
+        snsService.setSmsAttributes(Map.of("DefaultSMSType", "Transactional"), REGION);
+        assertEquals("Transactional", snsService.getSmsAttributes(REGION).get("DefaultSMSType"));
+    }
+
+    @Test
+    void checkIfPhoneNumberIsOptedOut_defaultsFalse() {
+        assertFalse(snsService.isPhoneNumberOptedOut("+15555550100", REGION));
+        assertTrue(snsService.listPhoneNumbersOptedOut(REGION).isEmpty());
+    }
+
+    @Test
+    void createSmsSandboxPhoneNumber_rejectsMalformed() {
+        AwsException e = assertThrows(AwsException.class,
+                () -> snsService.createSmsSandboxPhoneNumber("not-a-phone-number", REGION));
+        assertEquals("InvalidParameter", e.getErrorCode());
+    }
+
+    @Test
+    void verifyAndDeleteSmsSandboxPhoneNumber_unregisteredIsResourceNotFound() {
+        AwsException verify = assertThrows(AwsException.class,
+                () -> snsService.verifySmsSandboxPhoneNumber("+15555550100", "000000", REGION));
+        assertEquals("ResourceNotFound", verify.getErrorCode());
+        AwsException delete = assertThrows(AwsException.class,
+                () -> snsService.deleteSmsSandboxPhoneNumber("+15555550100", REGION));
+        assertEquals("ResourceNotFound", delete.getErrorCode());
+    }
+
+    @Test
+    void smsSandboxAccountIsInSandboxAndListsAreEmpty() {
+        assertTrue(snsService.isInSmsSandbox());
+        assertTrue(snsService.listOriginationNumbers().isEmpty());
+        assertTrue(snsService.listSmsSandboxPhoneNumbers(REGION).isEmpty());
+    }
+
+    @Test
     void filterPolicy_messageAttributes_unchanged() {
         Subscription sub = subscriptionWithPolicy("{\"event\":[\"order\"]}", null);
         Map<String, io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue> matching = Map.of(

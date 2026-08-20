@@ -18,6 +18,8 @@ public class BatchComputeEnvironment {
     private String status;
     private String statusReason;
     private Map<String, Object> computeResources = new HashMap<>();
+    private Integer unmanagedvCpus;
+    private String ecsClusterArn;
     private String serviceRole;
     private Map<String, String> tags = new HashMap<>();
     private long createdAt;
@@ -78,6 +80,22 @@ public class BatchComputeEnvironment {
 
     public void setComputeResources(Map<String, Object> computeResources) {
         this.computeResources = computeResources != null ? computeResources : new HashMap<>();
+    }
+
+    public Integer getUnmanagedvCpus() {
+        return unmanagedvCpus;
+    }
+
+    public void setUnmanagedvCpus(Integer unmanagedvCpus) {
+        this.unmanagedvCpus = unmanagedvCpus;
+    }
+
+    public String getEcsClusterArn() {
+        return ecsClusterArn;
+    }
+
+    public void setEcsClusterArn(String ecsClusterArn) {
+        this.ecsClusterArn = ecsClusterArn;
     }
 
     public String getServiceRole() {

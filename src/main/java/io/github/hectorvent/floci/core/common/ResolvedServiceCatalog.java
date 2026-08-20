@@ -14,6 +14,8 @@ import io.github.hectorvent.floci.services.iot.IotController;
 import io.github.hectorvent.floci.services.iot.IotDataController;
 import io.github.hectorvent.floci.services.pipes.PipesController;
 import io.github.hectorvent.floci.services.lambda.LambdaController;
+import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
+import io.github.hectorvent.floci.services.lambda.microvm.MicrovmEndpointProxyController;
 import io.github.hectorvent.floci.services.opensearch.OpenSearchController;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontController;
 import io.github.hectorvent.floci.services.route53.Route53Controller;
@@ -39,12 +41,15 @@ public class ResolvedServiceCatalog {
      * directory-bucket requests as {@code s3express} while the actions, ARNs and condition keys
      * remain {@code s3}; the IoT Jobs Data Plane signs as {@code iot-jobs-data} while its actions
      * are {@code iot:} ({@code iot:DescribeJobExecution} and peers in the Service Authorization
-     * Reference). Keep this minimal: every entry suppresses a distinct IAM namespace.
+     * Reference); SES v1 signs as {@code email} and SES v2 as {@code sesv2} while IAM actions
+     * remain {@code ses:}. Keep this minimal: every entry suppresses a distinct IAM namespace.
      */
     private static final java.util.Map<String, String> CREDENTIAL_SCOPE_ALIASES =
             java.util.Map.of(
                     "s3express", "s3",
-                    "iot-jobs-data", "iot");
+                    "iot-jobs-data", "iot",
+                    "email", "ses",
+                    "sesv2", "ses");
 
     private final ServiceCatalog catalog;
 
@@ -82,7 +87,9 @@ public class ResolvedServiceCatalog {
                         "lambda", storageMode(config.storage().services().lambda().mode(), config.storage().mode()),
                         config.storage().services().lambda().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("lambda"), Set.of(), Set.of(LambdaController.class)),
+                        Set.of(), Set.of("lambda"), Set.of(),
+                        Set.of(LambdaController.class, MicrovmController.class,
+                                MicrovmEndpointProxyController.class)),
                 descriptor("apigateway", "apigateway", config.services().apigateway().enabled(), true,
                         "apigateway", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
@@ -192,10 +199,15 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON, ServiceProtocol.JSON, ServiceProtocol.QUERY),
                         Set.of("AWSCognitoIdentityProviderService."), Set.of("cognito-idp"), Set.of(),
                         Set.of(CognitoOAuthController.class, CognitoWellKnownController.class)),
+                descriptor("cognito-identity", "cognito", config.services().cognito().enabled(), true,
+                        "cognito", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSCognitoIdentityService."), Set.of("cognito-identity"), Set.of(),
+                        Set.of()),
                 descriptor("states", "stepfunctions", config.services().stepfunctions().enabled(), true,
                         "stepfunctions", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON, ServiceProtocol.CBOR),
-                        Set.of("AWSStepFunctions."), Set.of("states"), Set.of("SFN"), Set.of()),
+                        Set.of("AWSStepFunctions.", "AmazonStatesService."), Set.of("states"), Set.of("SFN"), Set.of()),
                 descriptor("cloudformation", "cloudformation", config.services().cloudformation().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),
@@ -395,7 +407,10 @@ public class ResolvedServiceCatalog {
                         "cloudfront", storageMode(config.storage().services().cloudfront().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.CLOUDFRONT, ServiceProtocol.REST_XML,
                         protocols(ServiceProtocol.REST_XML),
-                        Set.of(), Set.of("cloudfront"), Set.of(), Set.of(CloudFrontController.class)),
+                        // cloudfront-keyvaluestore: the KVS data plane signs with its own scope
+                        Set.of(), Set.of("cloudfront", "cloudfront-keyvaluestore"), Set.of(),
+                        Set.of(CloudFrontController.class,
+                                io.github.hectorvent.floci.services.cloudfront.CloudFrontKvsDataPlaneController.class)),
                 descriptor("appsync", "appsync", config.services().appsync().enabled(), true,
                         "appsync", storageMode(config.storage().services().appsync().mode(), config.storage().mode()),
                         config.storage().services().appsync().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

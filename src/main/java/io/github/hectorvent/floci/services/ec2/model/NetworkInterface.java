@@ -22,6 +22,7 @@ public class NetworkInterface {
     private boolean sourceDestCheck = true;
     private String availabilityZone;
     private String interfaceType = "interface";
+    private String region;
     private List<GroupIdentifier> groups = new ArrayList<>();
     private NetworkInterfaceAttachment attachment;
     private List<Tag> tagSet = new ArrayList<>();
@@ -67,6 +68,9 @@ public class NetworkInterface {
 
     public String getInterfaceType() { return interfaceType; }
     public void setInterfaceType(String interfaceType) { this.interfaceType = interfaceType; }
+
+    public String getRegion() { return region; }
+    public void setRegion(String region) { this.region = region; }
 
     public NetworkInterfaceAttachment getAttachment() { return attachment; }
     public void setAttachment(NetworkInterfaceAttachment attachment) { this.attachment = attachment; }

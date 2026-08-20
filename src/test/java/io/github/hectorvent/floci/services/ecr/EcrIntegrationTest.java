@@ -134,6 +134,22 @@ class EcrIntegrationTest {
     }
 
     @Test
+    @Order(6)
+    void doubleHyphenRepoNameSucceedsLikeAws() {
+        given()
+            .header("X-Amz-Target", PREFIX + "CreateRepository")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "aws-ecs-service-image-form--task" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("repository.repositoryName", equalTo("aws-ecs-service-image-form--task"));
+    }
+
+    @Test
     @Order(7)
     void getAuthorizationToken() {
         String token = given()
@@ -146,6 +162,7 @@ class EcrIntegrationTest {
             .statusCode(200)
             .body("authorizationData[0].authorizationToken", not(emptyString()))
             .body("authorizationData[0].proxyEndpoint", startsWith("http"))
+            .body("authorizationData[0].proxyEndpoint", containsString(".ecr."))
             .body("authorizationData[0].expiresAt", notNullValue())
             .extract().jsonPath().getString("authorizationData[0].authorizationToken");
 
@@ -177,6 +194,179 @@ class EcrIntegrationTest {
 
     @Test
     @Order(9)
+    void putImageScanningConfiguration() {
+        given()
+            .header("X-Amz-Target", PREFIX + "PutImageScanningConfiguration")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "imageScanningConfiguration": { "scanOnPush": true } }
+                """.formatted(REPO))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("repositoryName", equalTo(REPO))
+            .body("imageScanningConfiguration.scanOnPush", equalTo(true));
+    }
+
+    @Test
+    @Order(10)
+    void registryPolicyRoundTrip() {
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
+        given()
+            .header("X-Amz-Target", PREFIX + "PutRegistryPolicy")
+            .contentType(CT)
+            .body("{\"policyText\": " + toJsonString(policy) + "}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("registryId", not(emptyString()))
+            .body("policyText", equalTo(policy));
+
+        given()
+            .header("X-Amz-Target", PREFIX + "GetRegistryPolicy")
+            .contentType(CT)
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("policyText", equalTo(policy));
+
+        given()
+            .header("X-Amz-Target", PREFIX + "DeleteRegistryPolicy")
+            .contentType(CT)
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", PREFIX + "GetRegistryPolicy")
+            .contentType(CT)
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("RegistryPolicyNotFoundException"));
+    }
+
+    @Test
+    @Order(11)
+    void layerUploadPutImageAndScan() {
+        byte[] layer = "floci-it-layer\n".repeat(8).getBytes();
+        String layerDigest = sha256(layer);
+        String uploadId = given()
+            .header("X-Amz-Target", PREFIX + "InitiateLayerUpload")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s" }
+                """.formatted(REPO))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("uploadId", not(emptyString()))
+            .body("partSize", greaterThan(0))
+            .extract().jsonPath().getString("uploadId");
+
+        given()
+            .header("X-Amz-Target", PREFIX + "UploadLayerPart")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "uploadId": "%s", "partFirstByte": 0, "partLastByte": %d, "layerPartBlob": "%s" }
+                """.formatted(REPO, uploadId, layer.length - 1, java.util.Base64.getEncoder().encodeToString(layer)))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("lastByteReceived", equalTo(layer.length - 1));
+
+        given()
+            .header("X-Amz-Target", PREFIX + "CompleteLayerUpload")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "uploadId": "%s", "layerDigests": ["%s"] }
+                """.formatted(REPO, uploadId, layerDigest))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("layerDigest", equalTo(layerDigest));
+
+        String manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.docker.distribution.manifest.v2+json\","
+                + "\"config\":{\"mediaType\":\"application/vnd.docker.container.image.v1+json\",\"size\":2,\"digest\":\"sha256:00\"},"
+                + "\"layers\":[{\"mediaType\":\"application/vnd.docker.image.rootfs.diff.tar.gzip\",\"size\":"
+                + layer.length + ",\"digest\":\"" + layerDigest + "\"}]}";
+
+        given()
+            .header("X-Amz-Target", PREFIX + "PutImage")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "imageManifest": %s, "imageManifestMediaType": "application/vnd.docker.distribution.manifest.v2+json", "imageTag": "it" }
+                """.formatted(REPO, toJsonString(manifest)))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("image.imageId.imageTag", equalTo("it"))
+            .body("image.imageId.imageDigest", startsWith("sha256:"));
+
+        given()
+            .header("X-Amz-Target", PREFIX + "GetDownloadUrlForLayer")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "layerDigest": "%s" }
+                """.formatted(REPO, layerDigest))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("downloadUrl", startsWith("https://"))
+            .body("layerDigest", equalTo(layerDigest));
+
+        given()
+            .header("X-Amz-Target", PREFIX + "BatchCheckLayerAvailability")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "layerDigests": ["%s"] }
+                """.formatted(REPO, layerDigest))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("layers[0].layerAvailability", equalTo("AVAILABLE"));
+
+        given()
+            .header("X-Amz-Target", PREFIX + "StartImageScan")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "imageId": { "imageTag": "it" } }
+                """.formatted(REPO))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("UnsupportedImageTypeException"));
+
+        given()
+            .header("X-Amz-Target", PREFIX + "DescribeImageScanFindings")
+            .contentType(CT)
+            .body("""
+                { "repositoryName": "%s", "imageId": { "imageTag": "it" } }
+                """.formatted(REPO))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ScanNotFoundException"));
+    }
+
+    @Test
+    @Order(12)
     void deleteRepositoryForce() {
         given()
             .header("X-Amz-Target", PREFIX + "DeleteRepository")
@@ -201,5 +391,18 @@ class EcrIntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("RepositoryNotFoundException"));
+    }
+
+    private static String toJsonString(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    private static String sha256(byte[] data) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(data);
+            return "sha256:" + java.util.HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

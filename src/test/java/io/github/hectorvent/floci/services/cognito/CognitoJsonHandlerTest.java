@@ -458,6 +458,67 @@ class CognitoJsonHandlerTest {
         return request;
     }
 
+    @Test
+    void describeMissingUserPoolDomainReturnsEmptyDescription() {
+        ObjectNode request = mapper.createObjectNode();
+        request.put("Domain", "does-not-exist");
+        Response response = handler.handle("DescribeUserPoolDomain", request, "us-east-1");
+        assertEquals(200, response.getStatus());
+        JsonNode body = (JsonNode) response.getEntity();
+        assertTrue(body.get("DomainDescription").isObject());
+        assertFalse(body.get("DomainDescription").has("UserPoolId"));
+    }
+
+    @Test
+    void identityProviderAndRiskConfigurationThroughHandler() {
+        ObjectNode poolReq = mapper.createObjectNode();
+        poolReq.put("PoolName", "handler-idp-pool");
+        JsonNode poolBody = (JsonNode) handler.handle("CreateUserPool", poolReq, "us-east-1").getEntity();
+        String poolId = poolBody.get("UserPool").get("Id").asText();
+
+        ObjectNode createIdp = mapper.createObjectNode();
+        createIdp.put("UserPoolId", poolId);
+        createIdp.put("ProviderName", "corporate-oidc");
+        createIdp.put("ProviderType", "OIDC");
+        createIdp.putObject("ProviderDetails").put("oidc_issuer", "https://accounts.google.com");
+        createIdp.putObject("AttributeMapping").put("email", "email");
+        JsonNode created = (JsonNode) handler.handle("CreateIdentityProvider", createIdp, "us-east-1").getEntity();
+        assertEquals("OIDC", created.get("IdentityProvider").get("ProviderType").asText());
+
+        ObjectNode describeIdp = mapper.createObjectNode();
+        describeIdp.put("UserPoolId", poolId);
+        describeIdp.put("ProviderName", "corporate-oidc");
+        JsonNode described = (JsonNode) handler.handle("DescribeIdentityProvider", describeIdp, "us-east-1").getEntity();
+        assertEquals("https://accounts.google.com",
+                described.get("IdentityProvider").get("ProviderDetails").get("oidc_issuer").asText());
+
+        ObjectNode createDomain = mapper.createObjectNode();
+        createDomain.put("UserPoolId", poolId);
+        createDomain.put("Domain", "handler-auth");
+        JsonNode domainCreated = (JsonNode) handler.handle("CreateUserPoolDomain", createDomain, "us-east-1").getEntity();
+        assertTrue(domainCreated.get("CloudFrontDomain").asText().endsWith(".cloudfront.net"));
+
+        ObjectNode describeDomain = mapper.createObjectNode();
+        describeDomain.put("Domain", "handler-auth");
+        JsonNode domainDescribed = (JsonNode) handler.handle("DescribeUserPoolDomain", describeDomain, "us-east-1").getEntity();
+        assertEquals("ACTIVE", domainDescribed.get("DomainDescription").get("Status").asText());
+        assertEquals(poolId, domainDescribed.get("DomainDescription").get("UserPoolId").asText());
+
+        ObjectNode setRisk = mapper.createObjectNode();
+        setRisk.put("UserPoolId", poolId);
+        setRisk.putObject("CompromisedCredentialsRiskConfiguration")
+                .putObject("Actions").put("EventAction", "BLOCK");
+        JsonNode riskSet = (JsonNode) handler.handle("SetRiskConfiguration", setRisk, "us-east-1").getEntity();
+        assertEquals("BLOCK", riskSet.get("RiskConfiguration")
+                .get("CompromisedCredentialsRiskConfiguration").get("Actions").get("EventAction").asText());
+
+        ObjectNode describeRisk = mapper.createObjectNode();
+        describeRisk.put("UserPoolId", poolId);
+        JsonNode riskDescribed = (JsonNode) handler.handle("DescribeRiskConfiguration", describeRisk, "us-east-1").getEntity();
+        assertEquals("BLOCK", riskDescribed.get("RiskConfiguration")
+                .get("CompromisedCredentialsRiskConfiguration").get("Actions").get("EventAction").asText());
+    }
+
     private Set<String> schemaNames(JsonNode pool) {
         return StreamSupport.stream(
                         Spliterators.spliteratorUnknownSize(pool.get("SchemaAttributes").elements(), 0), false)

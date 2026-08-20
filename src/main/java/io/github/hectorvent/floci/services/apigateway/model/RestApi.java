@@ -4,7 +4,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -15,8 +17,11 @@ public class RestApi {
     private String name;
     private String description;
     private long createdDate;
+    /** ID of the root "/" resource, included in AWS RestApi responses. */
+    private String rootResourceId;
     private Map<String, String> tags = new HashMap<>();
     private EndpointConfiguration endpointConfiguration;
+    private List<String> binaryMediaTypes = new ArrayList<>();
 
 
     public String getId() {
@@ -51,6 +56,14 @@ public class RestApi {
         this.createdDate = createdDate;
     }
 
+    public String getRootResourceId() {
+        return rootResourceId;
+    }
+
+    public void setRootResourceId(String rootResourceId) {
+        this.rootResourceId = rootResourceId;
+    }
+
     public Map<String, String> getTags() {
         return tags;
     }
@@ -65,5 +78,13 @@ public class RestApi {
 
     public void setEndpointConfiguration(EndpointConfiguration endpointConfiguration) {
         this.endpointConfiguration = endpointConfiguration;
+    }
+
+    public List<String> getBinaryMediaTypes() {
+        return binaryMediaTypes;
+    }
+
+    public void setBinaryMediaTypes(List<String> binaryMediaTypes) {
+        this.binaryMediaTypes = binaryMediaTypes != null ? binaryMediaTypes : new ArrayList<>();
     }
 }

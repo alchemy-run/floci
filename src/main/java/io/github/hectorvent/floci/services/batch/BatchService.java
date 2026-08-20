@@ -120,6 +120,13 @@ public class BatchService {
         env.setStatus("VALID");
         env.setStatusReason("Compute environment is available");
         env.setComputeResources(map(request.path("computeResources")));
+        if (request.hasNonNull("unmanagedvCpus")) {
+            env.setUnmanagedvCpus(request.path("unmanagedvCpus").asInt());
+        }
+        if ("MANAGED".equals(type)) {
+            env.setEcsClusterArn(AwsArnUtils.Arn.of("ecs", region, regionResolver.getAccountId(),
+                    "cluster/" + name).toString());
+        }
         env.setServiceRole(textOrNull(request, "serviceRole"));
         env.setTags(stringMap(request.path("tags")));
         validateTags(env.getTags());
@@ -175,9 +182,10 @@ public class BatchService {
         }
         List<BatchComputeEnvironmentOrder> orders = computeEnvironmentOrder(request.path("computeEnvironmentOrder"));
         for (BatchComputeEnvironmentOrder order : orders) {
-            BatchComputeEnvironment env = resolveComputeEnvironment(order.getComputeEnvironment());
+            BatchComputeEnvironment env = resolveComputeEnvironmentOptional(order.getComputeEnvironment())
+                    .orElseThrow(() -> client("Compute environment must be created and valid before attaching"));
             if (!"VALID".equals(env.getStatus())) {
-                throw client("Compute environment is not VALID: " + order.getComputeEnvironment());
+                throw client("Compute environment must be created and valid before attaching");
             }
         }
 
@@ -369,8 +377,10 @@ public class BatchService {
         putJob(job);
         if (shouldRunDocker()) {
             Thread.startVirtualThread(() -> runJob(job.getAccountId(), job.getJobId()));
-        } else {
+        } else if (immediateComplete()) {
             runJob(job.getAccountId(), job.getJobId());
+        } else {
+            queueImmediateJob(job);
         }
 
         ObjectNode out = objectMapper.createObjectNode();
@@ -438,6 +448,189 @@ public class BatchService {
         return out;
     }
 
+    public synchronized ObjectNode updateComputeEnvironment(JsonNode request) {
+        BatchComputeEnvironment env = resolveComputeEnvironment(requiredText(request, "computeEnvironment"));
+        if (request.hasNonNull("state")) {
+            env.setState(request.path("state").asText());
+        }
+        if (request.hasNonNull("computeResources")) {
+            env.setComputeResources(map(request.path("computeResources")));
+        }
+        if (request.hasNonNull("serviceRole")) {
+            env.setServiceRole(request.path("serviceRole").asText());
+        }
+        if (request.hasNonNull("unmanagedvCpus")) {
+            env.setUnmanagedvCpus(request.path("unmanagedvCpus").asInt());
+        }
+        computeEnvironmentStore.put(env.getComputeEnvironmentArn(), env);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("computeEnvironmentName", env.getComputeEnvironmentName());
+        out.put("computeEnvironmentArn", env.getComputeEnvironmentArn());
+        return out;
+    }
+
+    public synchronized ObjectNode deleteComputeEnvironment(JsonNode request) {
+        BatchComputeEnvironment env = resolveComputeEnvironment(requiredText(request, "computeEnvironment"));
+        if ("ENABLED".equals(env.getState())) {
+            throw client("Compute environment must be DISABLED before deletion: " + env.getComputeEnvironmentName());
+        }
+        boolean attached = jobQueueStore.scan(k -> true).stream()
+                .anyMatch(queue -> queue.getComputeEnvironmentOrder().stream()
+                        .anyMatch(order -> matchesComputeEnvironment(env, order.getComputeEnvironment())));
+        if (attached) {
+            throw client("Cannot delete compute-environment/" + env.getComputeEnvironmentName()
+                    + ": found existing JobQueue relationship");
+        }
+        computeEnvironmentStore.delete(env.getComputeEnvironmentArn());
+        return objectMapper.createObjectNode();
+    }
+
+    public synchronized ObjectNode updateJobQueue(JsonNode request) {
+        BatchJobQueue queue = resolveJobQueue(requiredText(request, "jobQueue"));
+        if (request.hasNonNull("state")) {
+            queue.setState(request.path("state").asText());
+        }
+        if (request.hasNonNull("priority")) {
+            queue.setPriority(request.path("priority").asInt());
+        }
+        if (request.hasNonNull("computeEnvironmentOrder")) {
+            List<BatchComputeEnvironmentOrder> orders = computeEnvironmentOrder(request.path("computeEnvironmentOrder"));
+            for (BatchComputeEnvironmentOrder order : orders) {
+                resolveComputeEnvironment(order.getComputeEnvironment());
+            }
+            queue.setComputeEnvironmentOrder(orders);
+        }
+        jobQueueStore.put(queue.getJobQueueArn(), queue);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("jobQueueName", queue.getJobQueueName());
+        out.put("jobQueueArn", queue.getJobQueueArn());
+        return out;
+    }
+
+    public synchronized ObjectNode deleteJobQueue(JsonNode request) {
+        BatchJobQueue queue = resolveJobQueue(requiredText(request, "jobQueue"));
+        if ("ENABLED".equals(queue.getState())) {
+            throw client("Job queue must be DISABLED before deletion: " + queue.getJobQueueName());
+        }
+        jobQueueStore.delete(queue.getJobQueueArn());
+        return objectMapper.createObjectNode();
+    }
+
+    public synchronized ObjectNode cancelJob(JsonNode request) {
+        BatchJob job = getJob(requiredText(request, "jobId"))
+                .orElseThrow(() -> client("Job not found: " + request.path("jobId").asText()));
+        if (!isTerminal(job)) {
+            job.setStatus(BatchStatus.FAILED.name());
+            job.setStatusReason(text(request, "reason", "Job cancelled by user"));
+            job.setStoppedAt(now());
+            putJob(job);
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    public synchronized ObjectNode terminateJob(JsonNode request) {
+        BatchJob job = getJob(requiredText(request, "jobId"))
+                .orElseThrow(() -> client("Job not found: " + request.path("jobId").asText()));
+        if (!isTerminal(job)) {
+            job.setStatus(BatchStatus.FAILED.name());
+            job.setStatusReason(text(request, "reason", "Job terminated by user"));
+            job.setStoppedAt(now());
+            putJob(job);
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    public ObjectNode getJobQueueSnapshot(JsonNode request) {
+        BatchJobQueue queue = resolveJobQueue(requiredText(request, "jobQueue"));
+        ArrayNode jobs = objectMapper.createArrayNode();
+        jobStore.scan(k -> true).stream()
+                .filter(job -> queue.getJobQueueArn().equals(job.getJobQueue()))
+                .filter(job -> BatchStatus.RUNNABLE.name().equals(job.getStatus()))
+                .sorted(Comparator.comparingLong(BatchJob::getCreatedAt))
+                .limit(100)
+                .forEach(job -> {
+                    ObjectNode entry = objectMapper.createObjectNode();
+                    entry.put("jobArn", job.getJobArn());
+                    entry.put("earliestTimeAtPosition", job.getCreatedAt());
+                    jobs.add(entry);
+                });
+        ObjectNode front = objectMapper.createObjectNode();
+        front.set("jobs", jobs);
+        front.put("lastUpdatedAt", now());
+        ObjectNode out = objectMapper.createObjectNode();
+        out.set("frontOfQueue", front);
+        return out;
+    }
+
+    public synchronized ObjectNode tagResource(JsonNode request) {
+        String arn = requiredText(request, "resourceArn");
+        Map<String, String> tags = stringMap(request.path("tags"));
+        validateTags(tags);
+        applyTags(arn, tags, null);
+        return objectMapper.createObjectNode();
+    }
+
+    public synchronized ObjectNode untagResource(JsonNode request) {
+        String arn = requiredText(request, "resourceArn");
+        List<String> keys = stringList(request.path("tagKeys"));
+        applyTags(arn, Map.of(), keys);
+        return objectMapper.createObjectNode();
+    }
+
+    public ObjectNode listTagsForResource(JsonNode request) {
+        String arn = requiredText(request, "resourceArn");
+        ObjectNode out = objectMapper.createObjectNode();
+        out.set("tags", objectMapper.valueToTree(readTags(arn)));
+        return out;
+    }
+
+    private void applyTags(String arn, Map<String, String> upsert, List<String> removed) {
+        Optional<BatchComputeEnvironment> env = resolveComputeEnvironmentOptional(arn);
+        if (env.isPresent()) {
+            Map<String, String> tags = new LinkedHashMap<>(env.get().getTags());
+            mergeTags(tags, upsert, removed);
+            validateTags(tags);
+            env.get().setTags(tags);
+            computeEnvironmentStore.put(env.get().getComputeEnvironmentArn(), env.get());
+            return;
+        }
+        Optional<BatchJobQueue> queue = resolveJobQueueOptional(arn);
+        if (queue.isPresent()) {
+            Map<String, String> tags = new LinkedHashMap<>(queue.get().getTags());
+            mergeTags(tags, upsert, removed);
+            validateTags(tags);
+            queue.get().setTags(tags);
+            jobQueueStore.put(queue.get().getJobQueueArn(), queue.get());
+            return;
+        }
+        Optional<BatchJobDefinition> definition = resolveJobDefinitionOptional(arn, true);
+        if (definition.isPresent()) {
+            Map<String, String> tags = new LinkedHashMap<>(definition.get().getTags());
+            mergeTags(tags, upsert, removed);
+            validateTags(tags);
+            definition.get().setTags(tags);
+            putJobDefinition(definition.get());
+            return;
+        }
+        throw client("Resource not found: " + arn);
+    }
+
+    private Map<String, String> readTags(String arn) {
+        return resolveComputeEnvironmentOptional(arn).map(BatchComputeEnvironment::getTags)
+                .or(() -> resolveJobQueueOptional(arn).map(BatchJobQueue::getTags))
+                .or(() -> resolveJobDefinitionOptional(arn, true).map(BatchJobDefinition::getTags))
+                .orElseThrow(() -> client("Resource not found: " + arn));
+    }
+
+    private void mergeTags(Map<String, String> tags, Map<String, String> upsert, List<String> removed) {
+        if (upsert != null) {
+            tags.putAll(upsert);
+        }
+        if (removed != null) {
+            removed.forEach(tags::remove);
+        }
+    }
+
     public void submitFromEventBridge(String jobQueueArn, String jobDefinition, String jobName,
                                       Map<String, String> parameters, JsonNode retryStrategy, String region) {
         ObjectNode request = objectMapper.createObjectNode();
@@ -500,6 +693,27 @@ public class BatchService {
         return "docker".equalsIgnoreCase(config.services().batch().runnerMode());
     }
 
+    private boolean immediateComplete() {
+        return config.services().batch().immediateComplete();
+    }
+
+    private void queueImmediateJob(BatchJob job) {
+        job.setStatus(BatchStatus.PENDING.name());
+        putJob(job);
+        job.setStatus(BatchStatus.RUNNABLE.name());
+        job.setStatusReason("Job is ready to run");
+        putJob(job);
+    }
+
+    private static boolean isTerminal(BatchJob job) {
+        return BatchStatus.SUCCEEDED.name().equals(job.getStatus())
+                || BatchStatus.FAILED.name().equals(job.getStatus());
+    }
+
+    private static boolean matchesComputeEnvironment(BatchComputeEnvironment env, String ref) {
+        return env.getComputeEnvironmentArn().equals(ref) || env.getComputeEnvironmentName().equals(ref);
+    }
+
     private BatchRunResult immediateSuccess(BatchJob job) {
         long started = job.getStartedAt() != null ? job.getStartedAt() : now();
         sleepQuietly();
@@ -509,7 +723,7 @@ public class BatchService {
 
     private synchronized boolean finishAttempt(String accountId, String jobId, BatchRunResult result, boolean finalAttempt) {
         BatchJob job = getJobForAccount(accountId, jobId).orElse(null);
-        if (job == null) {
+        if (job == null || isTerminal(job)) {
             return true;
         }
         BatchAttemptContainer container = new BatchAttemptContainer();
@@ -565,7 +779,7 @@ public class BatchService {
 
     private synchronized void transition(String accountId, String jobId, BatchStatus status, String reason, boolean started) {
         BatchJob job = getJobForAccount(accountId, jobId).orElse(null);
-        if (job == null) {
+        if (job == null || isTerminal(job)) {
             return;
         }
         job.setStatus(status.name());
@@ -587,7 +801,8 @@ public class BatchService {
     }
 
     private BatchJobQueue resolveJobQueue(String ref) {
-        return resolveJobQueueOptional(ref).orElseThrow(() -> client("Job queue not found: " + ref));
+        return resolveJobQueueOptional(ref).orElseThrow(() ->
+                client("job-queue/" + resourceName(ref, "job-queue/") + " does not exist"));
     }
 
     private Optional<BatchJobQueue> resolveJobQueueOptional(String ref) {
@@ -605,7 +820,8 @@ public class BatchService {
 
     private BatchComputeEnvironment resolveComputeEnvironment(String ref) {
         return resolveComputeEnvironmentOptional(ref)
-                .orElseThrow(() -> client("Compute environment not found: " + ref));
+                .orElseThrow(() -> client("compute-environment/" + resourceName(ref, "compute-environment/")
+                        + " does not exist"));
     }
 
     private Optional<BatchComputeEnvironment> resolveComputeEnvironmentOptional(String ref) {
@@ -875,6 +1091,12 @@ public class BatchService {
         detail.put("statusReason", env.getStatusReason());
         if (env.getComputeResources() != null && !env.getComputeResources().isEmpty()) {
             detail.set("computeResources", objectMapper.valueToTree(env.getComputeResources()));
+        }
+        if (env.getUnmanagedvCpus() != null) {
+            detail.put("unmanagedvCpus", env.getUnmanagedvCpus());
+        }
+        if (env.getEcsClusterArn() != null) {
+            detail.put("ecsClusterArn", env.getEcsClusterArn());
         }
         if (env.getServiceRole() != null) {
             detail.put("serviceRole", env.getServiceRole());
@@ -1176,6 +1398,24 @@ public class BatchService {
 
     private String arn(String region, String resource) {
         return AwsArnUtils.Arn.of("batch", region, regionResolver.getAccountId(), resource).toString();
+    }
+
+    private String resourceName(String ref, String prefix) {
+        if (ref == null || ref.isBlank()) {
+            return "";
+        }
+        if (ref.startsWith("arn:")) {
+            try {
+                String resource = AwsArnUtils.parse(ref).resource();
+                if (resource.startsWith(prefix)) {
+                    return resource.substring(prefix.length());
+                }
+                return resource;
+            } catch (IllegalArgumentException e) {
+                return ref;
+            }
+        }
+        return ref;
     }
 
     private long now() {

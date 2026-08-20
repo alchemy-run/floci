@@ -623,9 +623,14 @@ public class ApiGatewayV2JsonHandler {
         node.put("CreatedDate", s.getCreatedDate() / 1000.0);
         node.put("LastUpdatedDate", s.getLastUpdatedDate() / 1000.0);
         if (s.getDeploymentId() != null) node.put("DeploymentId", s.getDeploymentId());
+        if (s.getDescription() != null) node.put("Description", s.getDescription());
         if (s.getStageVariables() != null) {
             ObjectNode stageVariables = node.putObject("StageVariables");
             s.getStageVariables().forEach(stageVariables::put);
+        }
+        if (s.getTags() != null && !s.getTags().isEmpty()) {
+            ObjectNode tagsNode = node.putObject("Tags");
+            s.getTags().forEach(tagsNode::put);
         }
         return node;
     }

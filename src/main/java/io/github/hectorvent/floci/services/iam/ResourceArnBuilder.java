@@ -3,6 +3,14 @@ package io.github.hectorvent.floci.services.iam;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.container.ContainerRequestContext;
+import org.jboss.logging.Logger;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Constructs the target resource ARN for a request so the policy evaluator
@@ -13,6 +21,12 @@ import jakarta.ws.rs.container.ContainerRequestContext;
  */
 @ApplicationScoped
 public class ResourceArnBuilder {
+
+    private static final Logger LOG = Logger.getLogger(ResourceArnBuilder.class);
+
+    /** SES v2 / v1 From address in a JSON body. */
+    private static final Pattern FROM_EMAIL_JSON =
+            Pattern.compile("\"FromEmailAddress\"\\s*:\\s*\"([^\"]+)\"");
 
     public String build(String credentialScope, ContainerRequestContext ctx,
                         String region, String accountId) {
@@ -27,6 +41,7 @@ public class ResourceArnBuilder {
             case "secretsmanager" -> buildSecretsManagerArn(ctx, region, accountId);
             case "ssm"            -> buildSsmArn(ctx, region, accountId);
             case "kms"            -> buildKmsArn(path, region, accountId);
+            case "ses"            -> buildSesIdentityArn(ctx, region, accountId);
             default               -> "*";
         };
     }
@@ -102,6 +117,62 @@ public class ResourceArnBuilder {
         String keyId = extractSegmentAfter(path, "keys");
         if (keyId == null) return AwsArnUtils.Arn.of("kms", region, accountId, "key/*").toString();
         return AwsArnUtils.Arn.of("kms", region, accountId, "key/" + keyId).toString();
+    }
+
+    // ── SES ──────────────────────────────────────────────────────────────────────
+    /**
+     * SES authorizes send against the identity of the From address
+     * ({@code arn:aws:ses:region:account:identity/user@domain}), not the domain
+     * identity the binding was declared on. Domain-scoped policies therefore
+     * also grant {@code identity/*@domain}.
+     */
+    private String buildSesIdentityArn(ContainerRequestContext ctx, String region, String accountId) {
+        String from = firstFormParam(ctx, "FromEmailAddress");
+        if (from == null || from.isBlank()) {
+            from = firstFormParam(ctx, "Source");
+        }
+        if (from == null || from.isBlank()) {
+            from = extractFromEmailAddressFromBody(ctx);
+        }
+        from = extractEmail(from);
+        if (from == null || from.isBlank()) {
+            return AwsArnUtils.Arn.of("ses", region, accountId, "identity/*").toString();
+        }
+        return AwsArnUtils.Arn.of("ses", region, accountId, "identity/" + from).toString();
+    }
+
+    private String extractFromEmailAddressFromBody(ContainerRequestContext ctx) {
+        InputStream in = ctx.getEntityStream();
+        if (in == null) {
+            return null;
+        }
+        byte[] body;
+        try {
+            body = in.readAllBytes();
+        } catch (IOException e) {
+            LOG.debugv(e, "Failed to buffer SES body for IAM resource ARN");
+            return null;
+        }
+        ctx.setEntityStream(new ByteArrayInputStream(body));
+        if (body.length == 0) {
+            return null;
+        }
+        Matcher m = FROM_EMAIL_JSON.matcher(new String(body, StandardCharsets.UTF_8));
+        return m.find() ? m.group(1) : null;
+    }
+
+    /** Strips a display-name wrapper: {@code "Ada" <ada@example.com>} → {@code ada@example.com}. */
+    static String extractEmail(String from) {
+        if (from == null || from.isBlank()) {
+            return from;
+        }
+        String trimmed = from.trim();
+        int lt = trimmed.lastIndexOf('<');
+        int gt = trimmed.lastIndexOf('>');
+        if (lt >= 0 && gt > lt) {
+            return trimmed.substring(lt + 1, gt).trim();
+        }
+        return trimmed;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -504,7 +504,17 @@ class IamServiceLinkedRoleIntegrationTest {
         String roleName = "AWSServiceRoleForProtectprobe";
         String readOnly = "arn:aws:iam::aws:policy/ReadOnlyAccess";
 
-        refusedAsUnmodifiable("UpdateRole", "RoleName", roleName, "Description", "hijacked");
+        // AWS lets UpdateRole change an SLR description; MaxSessionDuration stays service-owned.
+        given()
+            .formParam("Action", "UpdateRole")
+            .formParam("RoleName", roleName)
+            .formParam("Description", "managed description")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+        refusedAsUnmodifiable("UpdateRole", "RoleName", roleName, "MaxSessionDuration", "7200");
         refusedAsUnmodifiable("UpdateAssumeRolePolicy", "RoleName", roleName,
                 "PolicyDocument", "{\"Version\":\"2012-10-17\",\"Statement\":[]}");
         refusedAsUnmodifiable("DetachRolePolicy", "RoleName", roleName, "PolicyArn", readOnly);

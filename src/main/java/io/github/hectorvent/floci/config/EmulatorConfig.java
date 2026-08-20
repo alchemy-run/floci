@@ -719,6 +719,15 @@ public interface EmulatorConfig {
         @WithDefault("immediate")
         String runnerMode();
 
+        /**
+         * When runner-mode is {@code immediate}, complete submitted jobs to
+         * {@code SUCCEEDED} before {@code SubmitJob} returns. Alchemy's binding
+         * tests cancel/terminate after submit, so the Docker image sets this
+         * {@code false} and leaves jobs {@code RUNNABLE}.
+         */
+        @WithDefault("true")
+        boolean immediateComplete();
+
         Optional<String> dockerNetwork();
     }
 
@@ -1444,6 +1453,20 @@ public interface EmulatorConfig {
          */
         @WithDefault("100")
         int unreservedConcurrencyMin();
+
+        /**
+         * Max execution environments in flight per function. Excess sync
+         * invokes wait here — before the Lambda timeout clock starts — for a
+         * free environment. AWS would scale out instantly; Floci Docker
+         * cold-starts cannot, so the cap bounds cold-start storms. It must be
+         * at least 2: services that synchronously re-invoke the SAME function
+         * that is serving the current request (Cognito triggers invoking the
+         * host Lambda, recursive handlers) self-deadlock at 1.
+         *
+         * Env var: FLOCI_SERVICES_LAMBDA_MAX_CONCURRENT_CONTAINERS
+         */
+        @WithDefault("4")
+        int maxConcurrentContainers();
 
         /**
          * Host path to bind-mount (read-only) into Lambda containers at /opt/aws-config.

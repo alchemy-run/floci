@@ -56,6 +56,7 @@ quarkus:
       - --initialize-at-run-time=io.github.hectorvent.floci.services.cloudfront.CloudFrontService
       - --initialize-at-run-time=io.github.hectorvent.floci.services.emr.EmrService
       - --initialize-at-run-time=io.github.hectorvent.floci.services.elasticbeanstalk.ElasticBeanstalkService
+      - --initialize-at-run-time=graphql.util.IdGenerator
 
 
 floci:
@@ -173,7 +174,7 @@ floci:
     cors-allow-private-network: false
 
   tls:
-    enabled: false                     # FLOCI_TLS_ENABLED (default: false)
+    enabled: false                     # FLOCI_TLS_ENABLED (default: false; the Docker image sets FLOCI_TLS_ENABLED=true so Lambda can reach sync-states.{region}:443)
     # cert-path: ""                    # FLOCI_TLS_CERT_PATH (PEM certificate file)
     # key-path: ""                     # FLOCI_TLS_KEY_PATH (PEM private key file)
     self-signed: true                  # FLOCI_TLS_SELF_SIGNED — auto-generate a self-signed cert if no cert-path provided
@@ -219,6 +220,11 @@ floci:
       container-idle-timeout-seconds: 300
       region-concurrency-limit: 1000
       unreserved-concurrency-min: 100
+      # In-flight environment cap per function. Bursting callers wait for a
+      # free environment (timeout clock starts at /next, not at enqueue).
+      # Must be >= 2: a service that synchronously re-invokes the function
+      # currently serving a request (Cognito triggers) deadlocks at 1.
+      max-concurrent-containers: 4
       # aws-config-path:                      # Host path to bind-mount (read-only) at /opt/aws-config for real credential discovery
       # extra-hosts:                          # Extra /etc/hosts entries for Lambda containers, "hostname:ip" ("host-gateway" allowed as ip)
       hot-reload:
@@ -414,6 +420,8 @@ floci:
     batch:
       enabled: true
       runner-mode: immediate
+      # Leave jobs RUNNABLE so CancelJob/TerminateJob can still act after SubmitJob.
+      immediate-complete: false
       # docker-network: floci-network
     codedeploy:
       enabled: true

@@ -140,13 +140,15 @@ class AcmPaginationTest {
     @Test
     @Order(5)
     void emptyListReturnsNoNextToken() {
-        // List with a filter that matches nothing
+        // REVOKED + an unused key type: sibling suites may leave revoked RSA-2048
+        // certs in the shared store, so status-only is not an empty filter.
         given()
             .header("X-Amz-Target", "CertificateManager.ListCertificates")
             .contentType(ACM_CONTENT_TYPE)
             .body("""
                 {
-                    "CertificateStatuses": ["REVOKED"]
+                    "CertificateStatuses": ["REVOKED"],
+                    "Includes": { "keyTypes": ["EC-secp521r1"] }
                 }
                 """)
         .when()

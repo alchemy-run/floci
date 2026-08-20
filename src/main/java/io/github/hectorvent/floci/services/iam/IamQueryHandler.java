@@ -36,19 +36,25 @@ public class IamQueryHandler {
     private final IamService iamService;
     private final IamPolicyEvaluator policyEvaluator;
     private final AccountResolver accountResolver;
+    private final IamExtendedQueryHandler extendedHandler;
 
     @Inject
     public IamQueryHandler(IamService iamService, IamPolicyEvaluator policyEvaluator,
-                           AccountResolver accountResolver) {
+                           AccountResolver accountResolver, IamExtendedQueryHandler extendedHandler) {
         this.iamService = iamService;
         this.policyEvaluator = policyEvaluator;
         this.accountResolver = accountResolver;
+        this.extendedHandler = extendedHandler;
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params, String authorization) {
         LOG.debugv("IAM action: {0}", action);
 
         try {
+            var extended = extendedHandler.handle(action, params);
+            if (extended.isPresent()) {
+                return extended.get();
+            }
             return switch (action) {
             // Users
             case "CreateUser" -> handleCreateUser(params);
@@ -59,13 +65,6 @@ public class IamQueryHandler {
             case "TagUser" -> handleTagUser(params);
             case "UntagUser" -> handleUntagUser(params);
             case "ListUserTags" -> handleListUserTags(params);
-            case "ListMFADevices" -> handleListMFADevices(params);
-            case "GetLoginProfile" -> handleGetLoginProfile(params);
-
-            // Identity providers & server certificates (read-only, not modeled)
-            case "ListSAMLProviders" -> handleListSAMLProviders(params);
-            case "ListOpenIDConnectProviders" -> handleListOpenIDConnectProviders(params);
-            case "ListServerCertificates" -> handleListServerCertificates(params);
 
             // Groups
             case "CreateGroup" -> handleCreateGroup(params);
@@ -143,7 +142,6 @@ public class IamQueryHandler {
             case "DeleteAccessKey" -> handleDeleteAccessKey(params, authorization);
             case "ListAccessKeys" -> handleListAccessKeys(params, authorization);
             case "UpdateAccessKey" -> handleUpdateAccessKey(params);
-            case "GetAccessKeyLastUsed" -> handleGetAccessKeyLastUsed(params);
 
             // Instance Profiles
             case "CreateInstanceProfile" -> handleCreateInstanceProfile(params);
@@ -255,56 +253,6 @@ public class IamQueryHandler {
         String result = new XmlBuilder().start("Tags").raw(tagsXml(tags)).end("Tags")
                 .elem("IsTruncated", false).build();
         return Response.ok(AwsQueryResponse.envelope("ListUserTags", AwsNamespaces.IAM, result)).build();
-    }
-
-    private Response handleListMFADevices(MultivaluedMap<String, String> params) {
-        // MFA device state is not modeled; return the wire-accurate empty result
-        // (MFADevices list + IsTruncated=false). Real AWS returns NoSuchEntity
-        // (HTTP 404) for an unknown user — Floci returns an empty list regardless.
-        String result = new XmlBuilder()
-                .start("MFADevices").end("MFADevices")
-                .elem("IsTruncated", false)
-                .build();
-        return Response.ok(AwsQueryResponse.envelope("ListMFADevices", AwsNamespaces.IAM, result)).build();
-    }
-
-    private Response handleGetLoginProfile(MultivaluedMap<String, String> params) {
-        // Login profiles (console passwords) are not modeled. Per the IAM API,
-        // GetLoginProfile returns NoSuchEntity (HTTP 404) when a user has no console
-        // password — a documented, expected result that callers branch on. We must
-        // return that exact error, not an empty 200 or an UnsupportedOperation 400,
-        // which clients would treat as a real failure rather than "no profile".
-        String userName = getParam(params, "UserName");
-        return AwsQueryResponse.error("NoSuchEntity",
-                "Login Profile for User " + (userName != null ? userName : "") + " cannot be found.",
-                AwsNamespaces.IAM, 404);
-    }
-
-    private Response handleListSAMLProviders(MultivaluedMap<String, String> params) {
-        // SAML identity providers are not modeled; return the wire-accurate empty
-        // list (ListSAMLProviders is not paginated — no Marker/IsTruncated).
-        String result = new XmlBuilder()
-                .start("SAMLProviderList").end("SAMLProviderList")
-                .build();
-        return Response.ok(AwsQueryResponse.envelope("ListSAMLProviders", AwsNamespaces.IAM, result)).build();
-    }
-
-    private Response handleListOpenIDConnectProviders(MultivaluedMap<String, String> params) {
-        // OIDC identity providers are not modeled; return the wire-accurate empty
-        // list (ListOpenIDConnectProviders is not paginated).
-        String result = new XmlBuilder()
-                .start("OpenIDConnectProviderList").end("OpenIDConnectProviderList")
-                .build();
-        return Response.ok(AwsQueryResponse.envelope("ListOpenIDConnectProviders", AwsNamespaces.IAM, result)).build();
-    }
-
-    private Response handleListServerCertificates(MultivaluedMap<String, String> params) {
-        // Server certificates are not modeled; return an empty paginated list.
-        String result = new XmlBuilder()
-                .start("ServerCertificateMetadataList").end("ServerCertificateMetadataList")
-                .elem("IsTruncated", false)
-                .build();
-        return Response.ok(AwsQueryResponse.envelope("ListServerCertificates", AwsNamespaces.IAM, result)).build();
     }
 
     // =========================================================================
@@ -761,30 +709,14 @@ public class IamQueryHandler {
         return Response.ok(AwsQueryResponse.envelopeNoResult("UpdateAccessKey", AwsNamespaces.IAM)).build();
     }
 
-    private Response handleGetAccessKeyLastUsed(MultivaluedMap<String, String> params) {
-        // Access-key usage is not modeled, so return the IAM API's documented
-        // "never used" shape: an AccessKeyLastUsed with ServiceName=N/A and Region=N/A
-        // and NO LastUsedDate. UserName is optional and its type is non-empty
-        // (length 1-128); since the emulator exposes no AccessKeyId→UserName lookup,
-        // the element is omitted rather than emitted empty — an empty string could be
-        // rejected by a strict client, and callers that need the owner already have it
-        // from the preceding ListAccessKeys call.
-        String result = new XmlBuilder()
-                .start("AccessKeyLastUsed")
-                .elem("ServiceName", "N/A")
-                .elem("Region", "N/A")
-                .end("AccessKeyLastUsed")
-                .build();
-        return Response.ok(AwsQueryResponse.envelope("GetAccessKeyLastUsed", AwsNamespaces.IAM, result)).build();
-    }
-
     // =========================================================================
     // Instance Profiles
     // =========================================================================
 
     private Response handleCreateInstanceProfile(MultivaluedMap<String, String> params) {
         InstanceProfile profile = iamService.createInstanceProfile(
-                getParam(params, "InstanceProfileName"), getParam(params, "Path"));
+                getParam(params, "InstanceProfileName"), getParam(params, "Path"),
+                extractTags(params));
         String result = new XmlBuilder().start("InstanceProfile").raw(instanceProfileXml(profile)).end("InstanceProfile").build();
         return Response.ok(AwsQueryResponse.envelope("CreateInstanceProfile", AwsNamespaces.IAM, result)).build();
     }
@@ -985,7 +917,9 @@ public class IamQueryHandler {
                 xml.start("member").raw(roleXml(role)).end("member");
             } catch (AwsException ignored) {}
         }
-        return xml.end("Roles").build();
+        return xml.end("Roles")
+                .start("Tags").raw(tagsXml(p.getTags())).end("Tags")
+                .build();
     }
 
     private String attachedPoliciesXml(List<IamPolicy> policyList) {

@@ -22,6 +22,9 @@ class SnsMobilePushTest {
 
     private static final String REGION = "us-east-1";
     private static final String ACCOUNT = "000000000000";
+    private static final String VALID_GCM_CREDENTIAL = "AIzaSyDummyFlociGcmServerKeyForTests00";
+    private static final Map<String, String> VALID_GCM_ATTRS =
+            Map.of("PlatformCredential", VALID_GCM_CREDENTIAL);
 
     private SnsService snsService;
 
@@ -52,8 +55,19 @@ class SnsMobilePushTest {
     @Test
     void createPlatformApplication_gcmReturnsArn() {
         PlatformApplication app = snsService.createPlatformApplication(
-                "android-app", "GCM", Map.of("PlatformCredential", "fake-key"), REGION);
+                "android-app", "GCM", VALID_GCM_ATTRS, REGION);
         assertEquals("arn:aws:sns:us-east-1:000000000000:app/GCM/android-app", app.getArn());
+    }
+
+    @Test
+    void createPlatformApplication_rejectsFakeGcmCredentials() {
+        AwsException e = assertThrows(AwsException.class,
+                () -> snsService.createPlatformApplication(
+                        "android-app", "GCM",
+                        Map.of("PlatformCredential", "invalid-api-key-probe"), REGION));
+        assertEquals("InvalidParameter", e.getErrorCode());
+        assertEquals(400, e.getHttpStatus());
+        assertTrue(e.getMessage().contains("Platform credentials are invalid"));
     }
 
     @Test
@@ -116,7 +130,7 @@ class SnsMobilePushTest {
 
     @Test
     void createPlatformEndpoint_androidReturnsEndpointArn() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint endpoint = snsService.createPlatformEndpoint(
                 app.getArn(), "fcm-registration-token-xyz", null, Map.of(), REGION);
         assertTrue(endpoint.getArn().contains(":endpoint/GCM/android-app/"));
@@ -188,7 +202,7 @@ class SnsMobilePushTest {
 
     @Test
     void publish_androidDirectToEndpointCapturesPayload() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint endpoint = snsService.createPlatformEndpoint(
                 app.getArn(), "fcm-token", null, Map.of(), REGION);
 
@@ -205,7 +219,7 @@ class SnsMobilePushTest {
     @Test
     void publish_jsonStructureResolvesPlatformSpecificPayload() {
         PlatformApplication iosApp = snsService.createPlatformApplication("ios-app", "APNS", Map.of(), REGION);
-        PlatformApplication andApp = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication andApp = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint iosEndpoint = snsService.createPlatformEndpoint(iosApp.getArn(), "ios-token", null, Map.of(), REGION);
         PlatformEndpoint andEndpoint = snsService.createPlatformEndpoint(andApp.getArn(), "fcm-token", null, Map.of(), REGION);
 

@@ -11,9 +11,11 @@ public class Stage {
     private String stageName;
     private String deploymentId;
     private boolean autoDeploy;
+    private String description;
     private long createdDate;
     private long lastUpdatedDate;
     private Map<String, String> stageVariables;
+    private Map<String, String> tags;
 
     public Stage() {}
 
@@ -26,6 +28,9 @@ public class Stage {
     public boolean isAutoDeploy() { return autoDeploy; }
     public void setAutoDeploy(boolean autoDeploy) { this.autoDeploy = autoDeploy; }
 
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+
     public long getCreatedDate() { return createdDate; }
     public void setCreatedDate(long createdDate) { this.createdDate = createdDate; }
 
@@ -34,4 +39,7 @@ public class Stage {
 
     public Map<String, String> getStageVariables() { return stageVariables; }
     public void setStageVariables(Map<String, String> stageVariables) { this.stageVariables = stageVariables; }
+
+    public Map<String, String> getTags() { return tags; }
+    public void setTags(Map<String, String> tags) { this.tags = tags; }
 }

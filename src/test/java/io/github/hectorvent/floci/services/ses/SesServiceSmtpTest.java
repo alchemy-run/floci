@@ -53,6 +53,7 @@ class SesServiceSmtpTest {
                 smtpRelay,
                 new ObjectMapper(),
                 Clock.systemUTC());
+        service.verifyEmailIdentity("from@example.com", "us-east-1");
     }
 
     @Test

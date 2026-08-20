@@ -26,6 +26,21 @@ class SesBulkV2IntegrationTest {
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/ses/aws4_request";
 
+    private static void createEmailIdentity(String email) {
+        // Idempotent setup: sibling suites in the shared JVM may already have
+        // verified this identity; AWS answers a duplicate CreateEmailIdentity
+        // with 400 AlreadyExistsException, which is just as good here.
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"EmailIdentity\": \"" + email + "\"}")
+        .when()
+            .post("/v2/email/identities")
+        .then()
+            .statusCode(org.hamcrest.Matchers.anyOf(
+                org.hamcrest.Matchers.is(200), org.hamcrest.Matchers.is(400)));
+    }
+
     @Test
     @Order(1)
     void createTemplate() {
@@ -51,6 +66,8 @@ class SesBulkV2IntegrationTest {
     @Test
     @Order(2)
     void sendBulkEmail_storedTemplate_perEntryReplacement() {
+        createEmailIdentity("bulk@example.com");
+        createEmailIdentity("bulk2@example.com");
         String firstId = given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -147,6 +164,7 @@ class SesBulkV2IntegrationTest {
     @Test
     @Order(3)
     void sendBulkEmail_inlineTemplateContent() {
+        createEmailIdentity("inline@example.com");
         String messageId = given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -459,5 +477,34 @@ class SesBulkV2IntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("MessageRejected"));
+    }
+
+    @Test
+    @Order(9)
+    void sendBulkEmail_unverifiedSender_entryMessageRejected() {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {
+                  "FromEmailAddress": "nobody@unverified-bulk.example.com",
+                  "DefaultContent": {
+                    "Template": {
+                      "TemplateName": "v2-bulk-welcome",
+                      "TemplateData": "{\\"name\\":\\"Ada\\",\\"team\\":\\"floci\\"}"
+                    }
+                  },
+                  "BulkEmailEntries": [
+                    {"Destination": {"ToAddresses": ["alice@example.com"]}}
+                  ]
+                }
+                """)
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(200)
+            .body("BulkEmailEntryResults", hasSize(1))
+            .body("BulkEmailEntryResults[0].Status", equalTo("MESSAGE_REJECTED"))
+            .body("BulkEmailEntryResults[0].Error", notNullValue());
     }
 }

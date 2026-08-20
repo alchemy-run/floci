@@ -94,7 +94,12 @@ final class CognitoStandardAttributes {
             } else if (name != null && byName.containsKey(name)) {
                 byName.put(name, attr);
             } else if (name != null) {
-                custom.add(attr);
+                Map<String, Object> copy = new LinkedHashMap<>(attr);
+                if (!name.startsWith("dev:")) {
+                    boolean developerOnly = Boolean.TRUE.equals(attr.get("DeveloperOnlyAttribute"));
+                    copy.put("Name", (developerOnly ? "dev:" : "custom:") + name);
+                }
+                custom.add(copy);
             }
         }
 

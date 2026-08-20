@@ -91,11 +91,105 @@ CloudFront management-plane emulation. Supports distribution lifecycle, cache po
 | Operation | Method | Path |
 |---|---|---|
 | `CreateFunction` | POST | `/2020-05-31/function` |
-| `DescribeFunction` | GET | `/2020-05-31/function/{Name}` |
+| `GetFunction` | GET | `/2020-05-31/function/{Name}` |
+| `DescribeFunction` | GET | `/2020-05-31/function/{Name}/describe` |
 | `UpdateFunction` | PUT | `/2020-05-31/function/{Name}` |
 | `PublishFunction` | POST | `/2020-05-31/function/{Name}/publish` |
 | `DeleteFunction` | DELETE | `/2020-05-31/function/{Name}` |
 | `ListFunctions` | GET | `/2020-05-31/function` |
+
+### VPC Origins
+
+| Operation | Method | Path |
+|---|---|---|
+| `CreateVpcOrigin` | POST | `/2020-05-31/vpc-origin` |
+| `GetVpcOrigin` | GET | `/2020-05-31/vpc-origin/{Id}` |
+| `UpdateVpcOrigin` | PUT | `/2020-05-31/vpc-origin/{Id}` |
+| `DeleteVpcOrigin` | DELETE | `/2020-05-31/vpc-origin/{Id}` |
+| `ListVpcOrigins` | GET | `/2020-05-31/vpc-origin` |
+
+### Key Value Stores
+
+| Operation | Method | Path |
+|---|---|---|
+| `CreateKeyValueStore` | POST | `/2020-05-31/key-value-store` |
+| `DescribeKeyValueStore` | GET | `/2020-05-31/key-value-store/{Name}` |
+| `UpdateKeyValueStore` | PUT | `/2020-05-31/key-value-store/{Name}` |
+| `DeleteKeyValueStore` | DELETE | `/2020-05-31/key-value-store/{Name}` |
+| `ListKeyValueStores` | GET | `/2020-05-31/key-value-store` |
+
+### Key Value Store data plane (`cloudfront-keyvaluestore`)
+
+The KVS data plane is a separate AWS service (restJson1, signed as
+`cloudfront-keyvaluestore`, hosted at `{accountId}.cloudfront-kvs.global.api.aws`;
+with an endpoint override SDKs prefix the account id onto the override host,
+which the embedded DNS wildcard resolves back to Floci). Stores are addressed
+by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
+
+| Operation | Method | Path |
+|---|---|---|
+| `DescribeKeyValueStore` | GET | `/key-value-stores/{KvsARN}` |
+| `ListKeys` | GET | `/key-value-stores/{KvsARN}/keys` |
+| `UpdateKeys` | POST | `/key-value-stores/{KvsARN}/keys` |
+| `GetKey` | GET | `/key-value-stores/{KvsARN}/keys/{Key}` |
+| `PutKey` | PUT | `/key-value-stores/{KvsARN}/keys/{Key}` |
+| `DeleteKey` | DELETE | `/key-value-stores/{KvsARN}/keys/{Key}` |
+
+`UpdateKeys` tolerates deletes of absent keys (bulk convergence); a bare
+`DeleteKey` of a missing key returns `ResourceNotFoundException`. An
+`If-Match` mismatch returns `ConflictException` (409).
+
+### Continuous Deployment
+
+| Operation | Method | Path |
+|---|---|---|
+| `CreateContinuousDeploymentPolicy` | POST | `/2020-05-31/continuous-deployment-policy` |
+| `GetContinuousDeploymentPolicy` | GET | `/2020-05-31/continuous-deployment-policy/{Id}` |
+| `UpdateContinuousDeploymentPolicy` | PUT | `/2020-05-31/continuous-deployment-policy/{Id}` |
+| `DeleteContinuousDeploymentPolicy` | DELETE | `/2020-05-31/continuous-deployment-policy/{Id}` |
+| `ListContinuousDeploymentPolicies` | GET | `/2020-05-31/continuous-deployment-policy` |
+| `CopyDistribution` | POST | `/2020-05-31/distribution/{PrimaryDistributionId}/copy` |
+
+### Public Keys and Key Groups
+
+| Operation | Method | Path |
+|---|---|---|
+| `CreatePublicKey` | POST | `/2020-05-31/public-key` |
+| `GetPublicKey` | GET | `/2020-05-31/public-key/{Id}` |
+| `GetPublicKeyConfig` | GET | `/2020-05-31/public-key/{Id}/config` |
+| `UpdatePublicKey` | PUT | `/2020-05-31/public-key/{Id}/config` |
+| `DeletePublicKey` | DELETE | `/2020-05-31/public-key/{Id}` |
+| `ListPublicKeys` | GET | `/2020-05-31/public-key` |
+| `CreateKeyGroup` | POST | `/2020-05-31/key-group` |
+| `GetKeyGroup` | GET | `/2020-05-31/key-group/{Id}` |
+| `GetKeyGroupConfig` | GET | `/2020-05-31/key-group/{Id}/config` |
+| `UpdateKeyGroup` | PUT | `/2020-05-31/key-group/{Id}` |
+| `DeleteKeyGroup` | DELETE | `/2020-05-31/key-group/{Id}` |
+| `ListKeyGroups` | GET | `/2020-05-31/key-group` |
+
+### Realtime Log Configs
+
+| Operation | Method | Path |
+|---|---|---|
+| `CreateRealtimeLogConfig` | POST | `/2020-05-31/realtime-log-config` |
+| `GetRealtimeLogConfig` | POST | `/2020-05-31/get-realtime-log-config` |
+| `UpdateRealtimeLogConfig` | PUT | `/2020-05-31/realtime-log-config` |
+| `DeleteRealtimeLogConfig` | POST | `/2020-05-31/delete-realtime-log-config` |
+| `ListRealtimeLogConfigs` | GET | `/2020-05-31/realtime-log-config` |
+
+### Streaming, Field-Level Encryption, Monitoring
+
+| Operation | Method | Path |
+|---|---|---|
+| `CreateStreamingDistribution` | POST | `/2020-05-31/streaming-distribution` |
+| `GetStreamingDistribution` | GET | `/2020-05-31/streaming-distribution/{Id}` |
+| `UpdateStreamingDistribution` | PUT | `/2020-05-31/streaming-distribution/{Id}/config` |
+| `DeleteStreamingDistribution` | DELETE | `/2020-05-31/streaming-distribution/{Id}` |
+| `CreateFieldLevelEncryptionConfig` | POST | `/2020-05-31/field-level-encryption` |
+| `CreateFieldLevelEncryptionProfile` | POST | `/2020-05-31/field-level-encryption-profile` |
+| `CreateMonitoringSubscription` | POST | `/2020-05-31/distributions/{DistributionId}/monitoring-subscription` |
+| `GetMonitoringSubscription` | GET | `/2020-05-31/distributions/{DistributionId}/monitoring-subscription` |
+| `DeleteMonitoringSubscription` | DELETE | `/2020-05-31/distributions/{DistributionId}/monitoring-subscription` |
 
 ### Tagging
 
@@ -115,9 +209,16 @@ CloudFront management-plane emulation. Supports distribution lifecycle, cache po
 - `DeleteDistribution` returns `DistributionNotDisabled` (409) if `Enabled` is `true` in the config.
 - All mutating operations (`PUT`, `DELETE`) require an `If-Match` header containing the current `ETag`. A missing or incorrect `ETag` returns `InvalidIfMatchVersion` (400).
 - All `GET` and `POST` (create) responses include an `ETag` response header.
-- All list-type sub-elements in XML follow CloudFront's `<Quantity>N</Quantity><Items>...</Items>` wrapper pattern.
+- List operations emit the list envelope as the XML root (`CachePolicyList`, `FunctionList`, `KeyGroupList`, …) because distilled marks those structs as the HTTP payload — not a `List*Result` wrapper.
+- Nested CloudFront collections (origins, behaviors, KVS associations) use `<Quantity>` + `<Items>`. Exceptions that distilled models as flat arrays: `KeyGroupConfig.Items` is `<Items><PublicKey>…</PublicKey></Items>` (no Quantity), and `RealtimeLogConfig` `Fields` / `EndPoints` are flat `<Field>` / `<EndPoint>` children.
+- Publishing a CloudFront Function copies DEVELOPMENT to LIVE and leaves DEVELOPMENT in place so `DescribeFunction(Stage=DEVELOPMENT)` and delete-by-development-ETag keep working.
 - OAI `CallerReference` uniqueness is enforced — duplicate `CallerReference` values return `CloudFrontOriginAccessIdentityAlreadyExists` (409).
 - `AssociateAlias` attaches a CNAME alias to the target distribution's config.
+- VPC origins are immediately `Deployed`. `CreateVpcOrigin` rejects an ELB ARN that does not resolve to a load balancer in Floci's ELBv2 store with `InvalidArgument` (400).
+- Key value stores are immediately `READY`. ARNs use `arn:aws:cloudfront::{account}:key-value-store/{id}`.
+- `FunctionConfig.KeyValueStoreAssociations` is stored and returned on create/describe/list.
+- `DescribeFunction` is `GET /function/{Name}/describe` (AWS path). `GET /function/{Name}` remains `GetFunction`.
+- Cache / origin-request / response-headers policy configs are stored as the submitted XML subtree and echoed on get/list so TTL, CORS, and header settings round-trip.
 
 ## Configuration
 
@@ -185,6 +286,9 @@ aws cloudfront create-origin-access-control \
     "SigningProtocol": "sigv4"
   }'
 
+# Create a key value store
+aws cloudfront create-key-value-store --name my-store --comment "route metadata"
+
 # Create a cache policy
 aws cloudfront create-cache-policy --cache-policy-config '{
   "Name": "my-cache-policy",
@@ -211,15 +315,8 @@ ETAG=$(aws cloudfront get-distribution --id E1Z2X3C4V5B6N7 \
 aws cloudfront delete-distribution --id E1Z2X3C4V5B6N7 --if-match "$ETAG"
 ```
 
-## Not Supported (Phase 2)
+## Not Supported
 
-- Continuous deployment policies (`CreateContinuousDeploymentPolicy`, etc.)
-- `CopyDistribution` (staging distributions)
-- Real-time log configs (`CreateRealtimeLogConfig`, etc.)
-- Field-level encryption (`CreateFieldLevelEncryptionConfig`, etc.)
-- Public keys and key groups (`CreatePublicKey`, `CreateKeyGroup`, etc.)
 - `TestFunction` execution (function is stored, not executed)
-- Streaming distributions (RTMP — deprecated by AWS)
-- VPC origins, Anycast IP lists, key value stores
-- Monitoring subscriptions
+- Anycast IP lists, distribution tenants, connection groups, trust stores
 - Actual CDN content delivery and caching

@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.lambda.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
@@ -55,6 +56,7 @@ public class LambdaUrlConfig {
     @RegisterForReflection
     public static class Cors {
         @JsonProperty("AllowCredentials")
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
         private boolean allowCredentials;
 
         @JsonProperty("AllowHeaders")

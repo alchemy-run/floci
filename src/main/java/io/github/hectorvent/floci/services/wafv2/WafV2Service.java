@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.wafv2.model.ApiKey;
 import io.github.hectorvent.floci.services.wafv2.model.IpSet;
 import io.github.hectorvent.floci.services.wafv2.model.RegexPatternSet;
 import io.github.hectorvent.floci.services.wafv2.model.RuleGroup;
@@ -14,8 +15,10 @@ import io.github.hectorvent.floci.services.wafv2.model.WebAcl;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -36,8 +39,10 @@ public class WafV2Service {
     private final StorageBackend<String, String> loggingStore;
     private final StorageBackend<String, String> associationStore;
     private final StorageBackend<String, String> policyStore;
+    private final StorageBackend<String, ApiKey> apiKeyStore;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
+    private final SecureRandom random = new SecureRandom();
 
     @Inject
     public WafV2Service(StorageFactory storageFactory, RegionResolver regionResolver,
@@ -56,6 +61,8 @@ public class WafV2Service {
                 new TypeReference<Map<String, String>>() {});
         this.policyStore = storageFactory.create("wafv2", "wafv2-policies.json",
                 new TypeReference<Map<String, String>>() {});
+        this.apiKeyStore = storageFactory.create("wafv2", "wafv2-api-keys.json",
+                new TypeReference<Map<String, ApiKey>>() {});
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -325,61 +332,160 @@ public class WafV2Service {
         policyStore.delete(resourceArn);
     }
 
+    // ──────────────────────────── API keys ────────────────────────────
+
+    public ApiKey createApiKey(String scope, List<String> tokenDomains) {
+        validateScope(scope);
+        if (tokenDomains == null || tokenDomains.isEmpty()) {
+            throw new AwsException("WAFInvalidParameterException", "TokenDomains is required.", 400);
+        }
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        ApiKey key = new ApiKey();
+        key.setApiKey(token);
+        key.setScope(scope);
+        key.setTokenDomains(new ArrayList<>(tokenDomains));
+        key.setCreationTime(Instant.now());
+        key.setVersion(1);
+        apiKeyStore.put(key(scope, token), key);
+        return key;
+    }
+
+    public ApiKey getDecryptedApiKey(String scope, String apiKey) {
+        return requireApiKey(scope, apiKey);
+    }
+
+    public List<ApiKey> listApiKeys(String scope) {
+        validateScope(scope);
+        List<ApiKey> result = new ArrayList<>();
+        for (ApiKey key : apiKeyStore.scan(k -> true)) {
+            if (scope.equals(key.getScope())) {
+                result.add(key);
+            }
+        }
+        return result;
+    }
+
+    public void deleteApiKey(String scope, String apiKey) {
+        requireApiKey(scope, apiKey);
+        apiKeyStore.delete(key(scope, apiKey));
+    }
+
+    private ApiKey requireApiKey(String scope, String apiKey) {
+        validateScope(scope);
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new AwsException("WAFInvalidParameterException", "APIKey is required.", 400);
+        }
+        return apiKeyStore.get(key(scope, apiKey)).orElseThrow(() -> new AwsException(
+                "WAFNonexistentItemException",
+                "AWS WAF couldn't perform the operation because your resource doesn't exist.",
+                404));
+    }
+
+    // ──────────────────────────── Managed catalog ────────────────────────────
+
+    public List<ManagedRuleCatalog.Group> listAvailableManagedRuleGroups(String scope) {
+        validateScope(scope);
+        return ManagedRuleCatalog.list(null);
+    }
+
+    public ManagedRuleCatalog.Group describeManagedRuleGroup(String vendorName, String name, String scope) {
+        validateScope(scope);
+        return ManagedRuleCatalog.require(vendorName, name);
+    }
+
+    public ManagedRuleCatalog.Group listAvailableManagedRuleGroupVersions(
+            String vendorName, String name, String scope) {
+        validateScope(scope);
+        return ManagedRuleCatalog.require(vendorName, name);
+    }
+
+    public List<ManagedRuleCatalog.Group> describeManagedProducts(String scope, String vendorName) {
+        validateScope(scope);
+        return ManagedRuleCatalog.list(vendorName);
+    }
+
+    // ──────────────────────────── Read-only analytics ────────────────────────────
+
+    public WebAcl requireWebAclByArn(String webAclArn) {
+        if (webAclArn == null || webAclArn.isBlank()) {
+            throw new AwsException("WAFInvalidParameterException", "WebACL ARN is required.", 400);
+        }
+        WebAcl acl = scanArn(webAclStore, webAclArn);
+        if (acl == null) {
+            throw new AwsException("WAFNonexistentItemException",
+                    "AWS WAF couldn't perform the operation because your resource doesn't exist.",
+                    404);
+        }
+        return acl;
+    }
+
+    public WebAcl requireWebAcl(String scope, String id) {
+        return require(webAclStore, scope, id);
+    }
+
     // ──────────────────────────── Tags ────────────────────────────
 
     public Map<String, String> listTagsForResource(String resourceArn) {
-        return taggable(resourceArn).getTags();
+        return tagsOf(findResource(resourceArn));
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags) {
-        Object resource = taggable(resourceArn);
-        applyTagged(resource, r -> r.getTags().putAll(tags));
+        applyTagged(findResource(resourceArn), existing -> existing.putAll(tags));
     }
 
     public void untagResource(String resourceArn, List<String> keys) {
-        Object resource = taggable(resourceArn);
-        applyTagged(resource, r -> keys.forEach(r.getTags()::remove));
+        applyTagged(findResource(resourceArn), existing -> keys.forEach(existing::remove));
     }
 
     // ──────────────────────────── Helpers ────────────────────────────
 
-    private interface Tagged { Map<String, String> getTags(); }
-
-    private Tagged taggable(String resourceArn) {
+    private Object findResource(String resourceArn) {
         if (resourceArn == null) {
             throw new AwsException("WAFInvalidParameterException", "ResourceARN is required.", 400);
         }
         WebAcl acl = scanArn(webAclStore, resourceArn);
         if (acl != null) {
-            return acl::getTags;
+            return acl;
         }
         IpSet ip = scanArn(ipSetStore, resourceArn);
         if (ip != null) {
-            return ip::getTags;
+            return ip;
         }
         RegexPatternSet rx = scanArn(regexStore, resourceArn);
         if (rx != null) {
-            return rx::getTags;
+            return rx;
         }
         RuleGroup rg = scanArn(ruleGroupStore, resourceArn);
         if (rg != null) {
-            return rg::getTags;
+            return rg;
         }
         throw new AwsException("WAFNonexistentItemException", "Resource not found: " + resourceArn, 404);
     }
 
-    private void applyTagged(Object resource, java.util.function.Consumer<Tagged> mutation) {
+    private Map<String, String> tagsOf(Object resource) {
         if (resource instanceof WebAcl a) {
-            mutation.accept(a::getTags);
+            return a.getTags();
+        }
+        if (resource instanceof IpSet i) {
+            return i.getTags();
+        }
+        if (resource instanceof RegexPatternSet r) {
+            return r.getTags();
+        }
+        return ((RuleGroup) resource).getTags();
+    }
+
+    private void applyTagged(Object resource, java.util.function.Consumer<Map<String, String>> mutation) {
+        mutation.accept(tagsOf(resource));
+        if (resource instanceof WebAcl a) {
             webAclStore.put(key(a.getScope(), a.getId()), a);
         } else if (resource instanceof IpSet i) {
-            mutation.accept(i::getTags);
             ipSetStore.put(key(i.getScope(), i.getId()), i);
         } else if (resource instanceof RegexPatternSet r) {
-            mutation.accept(r::getTags);
             regexStore.put(key(r.getScope(), r.getId()), r);
         } else if (resource instanceof RuleGroup g) {
-            mutation.accept(g::getTags);
             ruleGroupStore.put(key(g.getScope(), g.getId()), g);
         }
     }

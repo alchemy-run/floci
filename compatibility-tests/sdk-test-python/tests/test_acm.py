@@ -28,7 +28,11 @@ class TestACMCertificateLifecycle:
             acm_client.delete_certificate(CertificateArn=arn)
 
     def test_describe_certificate(self, acm_client):
-        """Test DescribeCertificate returns certificate details."""
+        """Test DescribeCertificate returns certificate details.
+
+        Real ACM: a freshly requested public certificate stays
+        PENDING_VALIDATION until its DNS/email validation completes.
+        """
         response = acm_client.request_certificate(DomainName="describe.example.com")
         arn = response["CertificateArn"]
 
@@ -36,20 +40,27 @@ class TestACMCertificateLifecycle:
             response = acm_client.describe_certificate(CertificateArn=arn)
             cert = response["Certificate"]
             assert cert["DomainName"] == "describe.example.com"
-            assert cert["Status"] == "ISSUED"
+            assert cert["Status"] == "PENDING_VALIDATION"
             assert cert["Type"] == "AMAZON_ISSUED"
         finally:
             acm_client.delete_certificate(CertificateArn=arn)
 
     def test_get_certificate(self, acm_client):
-        """Test GetCertificate returns certificate body in PEM format."""
+        """Test GetCertificate rejects a still-pending certificate.
+
+        Real ACM: GetCertificate on a pending certificate fails with
+        RequestInProgressException (the body does not exist yet).
+        """
         response = acm_client.request_certificate(DomainName="get.example.com")
         arn = response["CertificateArn"]
 
         try:
-            response = acm_client.get_certificate(CertificateArn=arn)
-            assert response["Certificate"]
-            assert "BEGIN CERTIFICATE" in response["Certificate"]
+            with pytest.raises(ClientError) as exc_info:
+                acm_client.get_certificate(CertificateArn=arn)
+            assert (
+                exc_info.value.response["Error"]["Code"]
+                == "RequestInProgressException"
+            )
         finally:
             acm_client.delete_certificate(CertificateArn=arn)
 

@@ -5,6 +5,8 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.kms.KmsService;
+import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.ssm.model.Parameter;
 import io.github.hectorvent.floci.services.ssm.model.ParameterHistory;
 import io.github.hectorvent.floci.services.ssm.model.PatchBaselineIdentity;
@@ -20,14 +22,17 @@ import java.util.*;
 public class SsmService {
 
     private static final Logger LOG = Logger.getLogger(SsmService.class);
+    static final String AWS_MANAGED_SSM_ALIAS = "alias/aws/ssm";
 
     private final StorageBackend<String, Parameter> parameterStore;
     private final StorageBackend<String, List<ParameterHistory>> historyStore;
     private final int maxParameterHistory;
     private final RegionResolver regionResolver;
+    private final KmsService kmsService;
 
     @Inject
-    public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver) {
+    public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
+                      KmsService kmsService) {
         this(
                 storageFactory.create("ssm", "ssm-parameters.json",
                         new TypeReference<>() {
@@ -36,7 +41,8 @@ public class SsmService {
                         new TypeReference<>() {
                         }),
                 config.services().ssm().maxParameterHistory(),
-                regionResolver
+                regionResolver,
+                kmsService
         );
     }
 
@@ -53,10 +59,18 @@ public class SsmService {
     SsmService(StorageBackend<String, Parameter> parameterStore,
                StorageBackend<String, List<ParameterHistory>> historyStore,
                int maxParameterHistory, RegionResolver regionResolver) {
+        this(parameterStore, historyStore, maxParameterHistory, regionResolver, null);
+    }
+
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               int maxParameterHistory, RegionResolver regionResolver,
+               KmsService kmsService) {
         this.parameterStore = parameterStore;
         this.historyStore = historyStore;
         this.maxParameterHistory = maxParameterHistory;
         this.regionResolver = regionResolver;
+        this.kmsService = kmsService;
     }
 
     /**
@@ -64,6 +78,16 @@ public class SsmService {
      * Returns the version number.
      */
     public long putParameter(String name, String value, String type, String description, boolean overwrite, String region) {
+        return putParameter(name, value, type, description, overwrite, region, Map.of(), null, null, null, null);
+    }
+
+    /**
+     * Create or update a parameter, optionally applying create-time tags and
+     * metadata (tier, KMS key, allowed pattern, data type).
+     */
+    public long putParameter(String name, String value, String type, String description, boolean overwrite,
+                             String region, Map<String, String> tags, String tier, String keyId,
+                             String allowedPattern, String dataType) {
         String storageKey = regionKey(region, name);
         Parameter existing = parameterStore.get(storageKey).orElse(null);
 
@@ -73,13 +97,58 @@ public class SsmService {
                     400);
         }
 
+        if (existing != null && overwrite && tags != null && !tags.isEmpty()) {
+            throw new AwsException("ValidationException",
+                    "Invalid request: Tags and Overwrite can't be used together. Remove the Tags parameter from your request if you want to overwrite an existing parameter.",
+                    400);
+        }
+
+        String resolvedType = type != null ? type : (existing != null ? existing.getType() : "String");
+        if (allowedPattern != null && !allowedPattern.isBlank() && value != null) {
+            try {
+                if (!value.matches(allowedPattern)) {
+                    throw new AwsException("ParameterPatternMismatchException",
+                            "The parameter value does not match the allowed pattern.",
+                            400);
+                }
+            } catch (java.util.regex.PatternSyntaxException e) {
+                throw new AwsException("ValidationException",
+                        "The allowed pattern is not a valid regular expression.",
+                        400);
+            }
+        }
+
         long version = (existing != null) ? existing.getVersion() + 1 : 1;
 
-        Parameter parameter = new Parameter(name, value, type != null ? type : "String");
+        Parameter parameter = new Parameter(name, value, resolvedType);
         parameter.setVersion(version);
-        parameter.setDescription(description);
-        parameter.setArn(regionResolver.buildArn("ssm", region, "parameter" + name));
+        parameter.setDescription(description != null ? description : (existing != null ? existing.getDescription() : null));
+        parameter.setArn(existing != null && existing.getArn() != null
+                ? existing.getArn()
+                : regionResolver.buildArn("ssm", region, parameterResource(name)));
         parameter.setLastModifiedDate(Instant.now());
+        parameter.setTier(tier != null ? tier : (existing != null && existing.getTier() != null ? existing.getTier() : "Standard"));
+        parameter.setAllowedPattern(allowedPattern != null ? allowedPattern
+                : (existing != null ? existing.getAllowedPattern() : null));
+        parameter.setDataType(dataType != null ? dataType
+                : (existing != null && existing.getDataType() != null ? existing.getDataType() : "text"));
+        if ("SecureString".equals(resolvedType)) {
+            String resolvedKeyId = keyId != null ? keyId
+                    : (existing != null && existing.getKeyId() != null ? existing.getKeyId() : AWS_MANAGED_SSM_ALIAS);
+            parameter.setKeyId(resolvedKeyId);
+            ensureAwsManagedSsmKey(resolvedKeyId, region);
+        } else {
+            parameter.setKeyId(null);
+        }
+
+        Map<String, String> resolvedTags = new HashMap<>();
+        if (existing != null && existing.getTags() != null) {
+            resolvedTags.putAll(existing.getTags());
+        }
+        if (tags != null) {
+            resolvedTags.putAll(tags);
+        }
+        parameter.setTags(resolvedTags);
 
         parameterStore.put(storageKey, parameter);
         addHistory(storageKey, parameter);
@@ -89,8 +158,7 @@ public class SsmService {
     }
 
     public Parameter getParameter(String name, String region) {
-        String storageKey = regionKey(region, name);
-        return parameterStore.get(storageKey)
+        return findParameter(name, region)
                 .orElseThrow(() -> new AwsException("ParameterNotFound",
                         "Parameter " + name + " not found.", 400));
     }
@@ -98,7 +166,7 @@ public class SsmService {
     public List<Parameter> getParameters(List<String> names, String region) {
         List<Parameter> result = new ArrayList<>();
         for (String name : names) {
-            parameterStore.get(regionKey(region, name)).ifPresent(result::add);
+            findParameter(name, region).ifPresent(result::add);
         }
         return result;
     }
@@ -170,39 +238,111 @@ public class SsmService {
         });
     }
 
-    public void labelParameterVersion(String name, long parameterVersion, List<String> labels, String region) {
+    /**
+     * Attach labels to a parameter version. When {@code parameterVersion} is
+     * null, the latest version is used (AWS default). A label is unique per
+     * parameter: applying it here removes it from any other version.
+     * Returns the version that was labeled.
+     */
+    public long labelParameterVersion(String name, Long parameterVersion, List<String> labels, String region) {
+        String storageKey = regionKey(region, name);
+        Parameter current = parameterStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("ParameterNotFound",
+                        "Parameter " + name + " not found.", 400));
+
+        long version = parameterVersion != null ? parameterVersion : current.getVersion();
+
+        List<ParameterHistory> history = new ArrayList<>(historyStore.get(storageKey)
+                .orElse(List.of()));
+
+        boolean found = false;
+        for (ParameterHistory h : history) {
+            if (h.getVersion() == version) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            throw new AwsException("ParameterVersionNotFound", "Parameter version " + version + " not found.", 400);
+        }
+
+        Set<String> applying = new HashSet<>();
+        for (String label : labels) {
+            if (isValidLabel(label)) {
+                applying.add(label);
+            }
+        }
+
+        for (ParameterHistory h : history) {
+            List<String> existing = h.getLabels() != null ? new ArrayList<>(h.getLabels()) : new ArrayList<>();
+            if (h.getVersion() == version) {
+                for (String label : applying) {
+                    if (!existing.contains(label)) {
+                        existing.add(label);
+                    }
+                }
+            } else {
+                existing.removeAll(applying);
+            }
+            h.setLabels(existing);
+        }
+
+        historyStore.put(storageKey, history);
+        LOG.infov("Labeled parameter {0} version {1} with labels {2}", name, version, applying);
+        return version;
+    }
+
+    /**
+     * Remove labels from a specific parameter version. Labels that were
+     * present are returned in {@code removedLabels}; labels that were not
+     * on that version go in {@code invalidLabels}.
+     */
+    public UnlabelResult unlabelParameterVersion(String name, long parameterVersion, List<String> labels, String region) {
         String storageKey = regionKey(region, name);
         if (parameterStore.get(storageKey).isEmpty()) {
             throw new AwsException("ParameterNotFound",
                     "Parameter " + name + " not found.", 400);
         }
 
-        List<ParameterHistory> history = historyStore.get(storageKey)
-                .orElse(List.of());
+        List<ParameterHistory> history = new ArrayList<>(historyStore.get(storageKey)
+                .orElse(List.of()));
 
-        history = new ArrayList<>(history);
-
-        boolean found = false;
+        ParameterHistory target = null;
         for (ParameterHistory h : history) {
             if (h.getVersion() == parameterVersion) {
-                List<String> existing = h.getLabels() != null ? new ArrayList<>(h.getLabels()) : new ArrayList<>();
-                for (String label : labels) {
-                    if (!existing.contains(label)) {
-                        existing.add(label);
-                    }
-                }
-                h.setLabels(existing);
-                found = true;
+                target = h;
                 break;
             }
         }
-
-        if (!found) {
+        if (target == null) {
             throw new AwsException("ParameterVersionNotFound", "Parameter version " + parameterVersion + " not found.", 400);
         }
 
+        List<String> existing = target.getLabels() != null ? new ArrayList<>(target.getLabels()) : new ArrayList<>();
+        List<String> removed = new ArrayList<>();
+        List<String> invalid = new ArrayList<>();
+        for (String label : labels) {
+            if (existing.remove(label)) {
+                removed.add(label);
+            } else {
+                invalid.add(label);
+            }
+        }
+        target.setLabels(existing);
         historyStore.put(storageKey, history);
-        LOG.infov("Labeled parameter {0} version {1} with labels {2}", name, parameterVersion, labels);
+        LOG.infov("Unlabeled parameter {0} version {1}: removed {2}", name, parameterVersion, removed);
+        return new UnlabelResult(removed, invalid);
+    }
+
+    public record UnlabelResult(List<String> removedLabels, List<String> invalidLabels) {
+    }
+
+    private static boolean isValidLabel(String label) {
+        if (label == null || label.isBlank() || label.length() > 100) {
+            return false;
+        }
+        String lower = label.toLowerCase(Locale.ROOT);
+        return !lower.startsWith("aws") && !lower.startsWith("ssm");
     }
 
     public void addTagsToResource(String resourceId, Map<String, String> tags, String region) {
@@ -318,8 +458,66 @@ public class SsmService {
                         "No default patch baseline exists for operating system " + os, 400));
     }
 
+    /**
+     * AWS lazily creates {@code alias/aws/ssm} on the first SecureString that
+     * uses the default key. Seed that alias in KMS so DescribeKey resolves a
+     * real {@code arn:aws:kms:...:key/...}.
+     */
+    void ensureAwsManagedSsmKey(String keyId, String region) {
+        if (kmsService == null || keyId == null) {
+            return;
+        }
+        if (!AWS_MANAGED_SSM_ALIAS.equals(keyId) && !keyId.endsWith(":" + AWS_MANAGED_SSM_ALIAS)) {
+            return;
+        }
+        try {
+            kmsService.describeKey(AWS_MANAGED_SSM_ALIAS, region);
+            return;
+        } catch (AwsException e) {
+            if (!"NotFoundException".equals(e.getErrorCode())) {
+                throw e;
+            }
+        }
+        try {
+            KmsKey key = kmsService.createKey(
+                    "Default key that protects my SSM SecureString parameters when no other key is defined",
+                    region);
+            kmsService.createAlias(AWS_MANAGED_SSM_ALIAS, key.getKeyId(), region);
+        } catch (AwsException e) {
+            if (!"AlreadyExistsException".equals(e.getErrorCode())) {
+                throw e;
+            }
+        }
+    }
+
     private static String regionKey(String region, String name) {
         return region + "::" + name;
+    }
+
+    /**
+     * AWS GetParameter treats {@code MyParam} and {@code /MyParam} as the same
+     * name. ECS secret {@code valueFrom} ARNs always extract a leading slash
+     * ({@code arn:...:parameter/MyParam} → {@code /MyParam}), so a PutParameter
+     * of the unrooted name must still resolve.
+     */
+    private Optional<Parameter> findParameter(String name, String region) {
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        Optional<Parameter> found = parameterStore.get(regionKey(region, name));
+        if (found.isPresent()) {
+            return found;
+        }
+        String aliased = name.startsWith("/") ? name.substring(1) : "/" + name;
+        if (aliased.isBlank() || aliased.equals(name)) {
+            return Optional.empty();
+        }
+        return parameterStore.get(regionKey(region, aliased));
+    }
+
+    /** AWS ARN resource is always {@code parameter/<name-without-leading-slash>}. */
+    static String parameterResource(String name) {
+        return name.startsWith("/") ? "parameter" + name : "parameter/" + name;
     }
 
     private void addHistory(String storageKey, Parameter parameter) {

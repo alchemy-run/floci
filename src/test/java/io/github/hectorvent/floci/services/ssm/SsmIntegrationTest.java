@@ -363,6 +363,184 @@ class SsmIntegrationTest {
     }
 
     @Test
+    void putParameter_withTags_visibleViaListTagsAndDescribe() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "Name": "/alchemy/tagged",
+                    "Value": "v1",
+                    "Type": "String",
+                    "Description": "tagged param",
+                    "Tier": "Standard",
+                    "Tags": [
+                        {"Key": "Environment", "Value": "test"}
+                    ]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Version", equalTo(1))
+            .body("Tier", equalTo("Standard"));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.ListTagsForResource")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "ResourceType": "Parameter", "ResourceId": "/alchemy/tagged" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("TagList.find { it.Key == 'Environment' }.Value", equalTo("test"));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.DescribeParameters")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "ParameterFilters": [
+                        {"Key": "Name", "Option": "Equals", "Values": ["/alchemy/tagged"]}
+                    ]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameters[0].Description", equalTo("tagged param"))
+            .body("Parameters[0].Tier", equalTo("Standard"))
+            .body("Parameters[0].ARN", containsString(":parameter/alchemy/tagged"));
+    }
+
+    @Test
+    void putParameter_tagsWithOverwrite_rejected() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/alchemy/overwrite-tags", "Value": "v1", "Type": "String" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "Name": "/alchemy/overwrite-tags",
+                    "Value": "v2",
+                    "Type": "String",
+                    "Overwrite": true,
+                    "Tags": [{"Key": "k", "Value": "v"}]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void labelAndUnlabelParameterVersion() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/alchemy/label-cycle", "Value": "v1", "Type": "String" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.LabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/alchemy/label-cycle", "Labels": ["current"] }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ParameterVersion", equalTo(1))
+            .body("InvalidLabels.size()", equalTo(0));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.UnlabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "Name": "/alchemy/label-cycle",
+                    "ParameterVersion": 1,
+                    "Labels": ["current"]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("RemovedLabels", contains("current"))
+            .body("InvalidLabels.size()", equalTo(0));
+    }
+
+    @Test
+    void putSecureStringSeedsAwsManagedKmsAlias() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "Name": "/app/secure",
+                    "Value": "super-secret",
+                    "Type": "SecureString"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Version", equalTo(1));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "Name": "/app/secure",
+                    "WithDecryption": true
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.Type", equalTo("SecureString"))
+            .body("Parameter.Value", equalTo("super-secret"));
+
+        given()
+            .header("X-Amz-Target", "TrentService.DescribeKey")
+            .contentType("application/x-amz-json-1.1")
+            .body("""
+                { "KeyId": "alias/aws/ssm" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("KeyMetadata.Arn", containsString(":key/"));
+    }
+
+    @Test
     void unsupportedOperation() {
         given()
             .header("X-Amz-Target", "AmazonSSM.UnsupportedAction")

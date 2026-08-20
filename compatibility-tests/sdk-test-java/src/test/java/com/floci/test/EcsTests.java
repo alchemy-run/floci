@@ -658,39 +658,35 @@ class EcsTests {
 
     @Test
     @Order(35)
-    @DisplayName("UpdateTaskProtection - enable protection")
+    @DisplayName("UpdateTaskProtection - standalone RunTask is TASK_NOT_VALID")
     void updateTaskProtection() {
-        List<ProtectedTask> protectedTasks = ecs.updateTaskProtection(
+        // Scale-in protection is only valid for service-managed tasks on AWS.
+        // This suite's task comes from RunTask (@Order 30); CreateService is later.
+        UpdateTaskProtectionResponse response = ecs.updateTaskProtection(
                 UpdateTaskProtectionRequest.builder()
                         .cluster(clusterName)
                         .tasks(task.taskArn())
                         .protectionEnabled(true)
                         .expiresInMinutes(60)
-                        .build()).protectedTasks();
+                        .build());
 
-        assertThat(protectedTasks).hasSize(1);
-        assertThat(protectedTasks.get(0).protectionEnabled()).isTrue();
-        assertThat(protectedTasks.get(0).expirationDate()).isNotNull();
+        assertThat(response.protectedTasks()).isEmpty();
+        assertThat(response.failures()).hasSize(1);
+        assertThat(response.failures().get(0).reason()).isEqualTo("TASK_NOT_VALID");
     }
 
     @Test
     @Order(36)
-    @DisplayName("GetTaskProtection - verify protection")
+    @DisplayName("GetTaskProtection - standalone RunTask is TASK_NOT_VALID")
     void getTaskProtection() {
-        List<ProtectedTask> protectedTasks = ecs.getTaskProtection(GetTaskProtectionRequest.builder()
+        GetTaskProtectionResponse response = ecs.getTaskProtection(GetTaskProtectionRequest.builder()
                 .cluster(clusterName)
                 .tasks(task.taskArn())
-                .build()).protectedTasks();
-
-        assertThat(protectedTasks).hasSize(1);
-        assertThat(protectedTasks.get(0).protectionEnabled()).isTrue();
-
-        // Disable protection
-        ecs.updateTaskProtection(UpdateTaskProtectionRequest.builder()
-                .cluster(clusterName)
-                .tasks(task.taskArn())
-                .protectionEnabled(false)
                 .build());
+
+        assertThat(response.protectedTasks()).isEmpty();
+        assertThat(response.failures()).hasSize(1);
+        assertThat(response.failures().get(0).reason()).isEqualTo("TASK_NOT_VALID");
     }
 
     @Test

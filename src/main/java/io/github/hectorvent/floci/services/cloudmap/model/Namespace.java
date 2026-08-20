@@ -25,6 +25,7 @@ public class Namespace {
     private String region;
     private String vpc;
     private String hostedZoneId;
+    private long soaTtl = 15;
     private Map<String, String> tags = new HashMap<>();
 
     public Namespace() {}
@@ -61,6 +62,9 @@ public class Namespace {
 
     public String getHostedZoneId() { return hostedZoneId; }
     public void setHostedZoneId(String hostedZoneId) { this.hostedZoneId = hostedZoneId; }
+
+    public long getSoaTtl() { return soaTtl; }
+    public void setSoaTtl(long soaTtl) { this.soaTtl = soaTtl; }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }

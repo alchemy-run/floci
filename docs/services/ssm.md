@@ -9,15 +9,16 @@
 
 | Action | Description |
 |---|---|
-| `PutParameter` | Create or update a parameter |
+| `PutParameter` | Create or update a parameter. Create-time `Tags` persist (AWS rejects `Tags` together with `Overwrite=true`). Stores `Tier`, `KeyId`, `AllowedPattern`, `DataType`. `SecureString` defaults `KeyId` to `alias/aws/ssm` and lazily seeds that AWS-managed KMS alias (so `DescribeKey(alias/aws/ssm)` returns a `:key/` ARN). Response includes `Version` and `Tier`. |
 | `GetParameter` | Get a single parameter by name |
 | `GetParameters` | Get multiple parameters by name |
 | `GetParametersByPath` | Get all parameters under a path prefix |
 | `DeleteParameter` | Delete a parameter |
 | `DeleteParameters` | Delete multiple parameters |
 | `GetParameterHistory` | List all versions of a parameter |
-| `DescribeParameters` | List parameters with optional filters |
-| `LabelParameterVersion` | Attach a label to a specific version |
+| `DescribeParameters` | List parameters with optional filters (returns `Tier`, `KeyId`, `AllowedPattern`, `ARN`) |
+| `LabelParameterVersion` | Attach a label to a version (defaults to latest when `ParameterVersion` is omitted; labels are unique per parameter) |
+| `UnlabelParameterVersion` | Remove labels from a specific version (`RemovedLabels` / `InvalidLabels`) |
 | `AddTagsToResource` | Tag a parameter |
 | `ListTagsForResource` | List tags on a parameter |
 | `RemoveTagsFromResource` | Remove tags from a parameter |
@@ -96,4 +97,4 @@ aws ssm send-command --endpoint-url $AWS_ENDPOINT_URL \
 All AWS parameter types are accepted: `String`, `StringList`, `SecureString`.
 
 !!! note
-    `SecureString` parameters are stored as-is without actual KMS encryption in Floci. The type is preserved and returned correctly, but the value is not encrypted at rest.
+    `SecureString` parameters are stored as-is without actual KMS encryption in Floci. The type is preserved and returned correctly, but the value is not encrypted at rest. The first `SecureString` that uses the default key creates `alias/aws/ssm` in KMS so callers can resolve `keyArn`.

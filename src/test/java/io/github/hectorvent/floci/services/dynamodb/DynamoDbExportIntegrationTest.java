@@ -60,6 +60,17 @@ class DynamoDbExportIntegrationTest {
                 """.formatted(TABLE_NAME))
             .when().post("/").then().statusCode(200);
 
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.UpdateContinuousBackups")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "%s",
+                    "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true}
+                }
+                """.formatted(TABLE_NAME))
+            .when().post("/").then().statusCode(200);
+
         // Insert 3 items
         putItem("{\"pk\": {\"S\": \"user-1\"}, \"sk\": {\"S\": \"order-001\"}, \"total\": {\"N\": \"99\"}}");
         putItem("{\"pk\": {\"S\": \"user-2\"}, \"sk\": {\"S\": \"order-002\"}, \"total\": {\"N\": \"55\"}}");

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -17,6 +19,7 @@ public class FunctionConfiguration {
     private String functionVersion;
     private String functionArn;
     private String code;
+    private Map<String, Object> runtime;
 
     public String getFunctionId() { return functionId; }
     public void setFunctionId(String functionId) { this.functionId = functionId; }
@@ -44,4 +47,7 @@ public class FunctionConfiguration {
 
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
+
+    public Map<String, Object> getRuntime() { return runtime; }
+    public void setRuntime(Map<String, Object> runtime) { this.runtime = runtime; }
 }

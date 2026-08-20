@@ -115,6 +115,13 @@ class CognitoStandardAttributesTest {
     }
 
     @Test
+    void mergePrefixesUnprefixedCustomAttributeNames() {
+        List<Map<String, Object>> result = CognitoStandardAttributes.merge(List.of(
+                Map.of("Name", "tenantId", "AttributeDataType", "String", "Mutable", true)));
+        assertEquals("custom:tenantId", result.get(20).get("Name"));
+    }
+
+    @Test
     void mergeWithMultipleCustomAttributesAppendsAllInOrder() {
         List<Map<String, Object>> schema = List.of(
                 Map.of("Name", "custom:tenant_id", "AttributeDataType", "String"),

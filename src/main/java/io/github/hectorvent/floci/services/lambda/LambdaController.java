@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.lambda;
 
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
+import io.github.hectorvent.floci.services.lambda.durable.model.DurableExecution;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
@@ -46,12 +48,15 @@ public class LambdaController {
     private static final Logger LOG = Logger.getLogger(LambdaController.class);
 
     private final LambdaService lambdaService;
+    private final LambdaDurableService durableService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public LambdaController(LambdaService lambdaService, RegionResolver regionResolver, ObjectMapper objectMapper) {
+    public LambdaController(LambdaService lambdaService, LambdaDurableService durableService,
+                            RegionResolver regionResolver, ObjectMapper objectMapper) {
         this.lambdaService = lambdaService;
+        this.durableService = durableService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -82,9 +87,10 @@ public class LambdaController {
     @Path("/functions/{functionName}")
     public Response getFunction(@Context HttpHeaders headers,
                                 @Context UriInfo uriInfo,
-                                @PathParam("functionName") String functionName) {
+                                @PathParam("functionName") String functionName,
+                                @QueryParam("Qualifier") String qualifier) {
         String region = regionResolver.resolveRegion(headers);
-        LambdaFunction fn = lambdaService.getFunction(region, functionName);
+        LambdaFunction fn = lambdaService.getFunction(region, functionName, qualifier);
 
         ObjectNode root = objectMapper.createObjectNode();
         root.set("Configuration", objectMapper.valueToTree(buildFunctionConfiguration(fn)));
@@ -128,9 +134,10 @@ public class LambdaController {
     @GET
     @Path("/functions/{functionName}/configuration")
     public Response getFunctionConfiguration(@Context HttpHeaders headers,
-                                              @PathParam("functionName") String functionName) {
+                                              @PathParam("functionName") String functionName,
+                                              @QueryParam("Qualifier") String qualifier) {
         String region = regionResolver.resolveRegion(headers);
-        LambdaFunction fn = lambdaService.getFunction(region, functionName);
+        LambdaFunction fn = lambdaService.getFunction(region, functionName, qualifier);
         return Response.ok(buildFunctionConfiguration(fn)).build();
     }
 
@@ -179,9 +186,10 @@ public class LambdaController {
     @DELETE
     @Path("/functions/{functionName}")
     public Response deleteFunction(@Context HttpHeaders headers,
-                                   @PathParam("functionName") String functionName) {
+                                   @PathParam("functionName") String functionName,
+                                   @QueryParam("Qualifier") String qualifier) {
         String region = regionResolver.resolveRegion(headers);
-        lambdaService.deleteFunction(region, functionName);
+        lambdaService.deleteFunction(region, functionName, qualifier);
         return Response.noContent().build();
     }
 
@@ -212,10 +220,22 @@ public class LambdaController {
     @Consumes(MediaType.WILDCARD)
     public Response invoke(@Context HttpHeaders headers,
                            @PathParam("functionName") String functionName,
+                           @QueryParam("Qualifier") String qualifier,
                            byte[] payload) {
         String region = regionResolver.resolveRegion(headers);
         String invocationTypeHeader = headers.getHeaderString("X-Amz-Invocation-Type");
         InvocationType type = InvocationType.parse(invocationTypeHeader);
+
+        // A durable Invoke (X-Amz-Durable-Execution-Name) starts or reattaches
+        // to a named durable execution instead of invoking directly.
+        String durableExecutionName = headers.getHeaderString("X-Amz-Durable-Execution-Name");
+        if (durableExecutionName != null && !durableExecutionName.isBlank()) {
+            DurableExecution execution = durableService.startExecution(
+                    region, functionName, qualifier, durableExecutionName, payload);
+            return Response.status(202)
+                    .header("X-Amz-Durable-Execution-Arn", execution.getExecutionArn())
+                    .build();
+        }
 
         int payloadSize = payload != null ? payload.length : 0;
         if (type == InvocationType.Event && payloadSize > ASYNC_REQUEST_LIMIT) {
@@ -552,11 +572,14 @@ public class LambdaController {
 
     @SuppressWarnings("unchecked")
     private Map<String, Double> extractRoutingConfig(Map<String, Object> rc) {
+        // AWS UpdateAlias REPLACES routing when RoutingConfig is present:
+        // an empty object (or empty AdditionalVersionWeights) CLEARS it.
+        // Return null only when the key is absent ("leave unchanged"); an
+        // empty map signals the service to clear.
         if (rc == null) return null;
         Object weights = rc.get("AdditionalVersionWeights");
-        if (!(weights instanceof Map)) return null;
+        if (!(weights instanceof Map)) return new java.util.HashMap<>();
         Map<String, Object> raw = (Map<String, Object>) weights;
-        if (raw.isEmpty()) return null;
         java.util.Map<String, Double> result = new java.util.HashMap<>();
         raw.forEach((k, v) -> result.put(k, ((Number) v).doubleValue()));
         return result;

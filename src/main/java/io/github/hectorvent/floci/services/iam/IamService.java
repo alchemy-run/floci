@@ -158,7 +158,7 @@ public class IamService implements SessionAccountLookup {
         for (AwsManagedPolicies.ManagedPolicyDef def : AwsManagedPolicies.POLICIES) {
             String arn = def.arn();
             catalog.put(arn, new IamPolicy("ANPA" + randomId(16), def.name(), def.path(), arn,
-                    def.description(), AwsManagedPolicies.PERMISSIVE_DOCUMENT));
+                    def.description(), def.document()));
         }
         return catalog;
     }
@@ -559,7 +559,12 @@ public class IamService implements SessionAccountLookup {
 
     public void updateRole(String roleName, String description, int maxSessionDuration) {
         IamRole role = getRole(roleName);
-        requireNotServiceLinked(role, roleName);
+        // AWS lets UpdateRole change a service-linked role's description (the
+        // only SLR field IAM itself will edit). MaxSessionDuration on an SLR
+        // is service-owned — reject that the same way DeleteRole is rejected.
+        if (role.isServiceLinkedRole() && maxSessionDuration > 0) {
+            requireNotServiceLinked(role, roleName);
+        }
         if (description != null) role.setDescription(description);
         if (maxSessionDuration > 0) role.setMaxSessionDuration(maxSessionDuration);
         roles.put(roleName, role);
@@ -1092,6 +1097,11 @@ public class IamService implements SessionAccountLookup {
     // =========================================================================
 
     public InstanceProfile createInstanceProfile(String instanceProfileName, String path) {
+        return createInstanceProfile(instanceProfileName, path, null);
+    }
+
+    public InstanceProfile createInstanceProfile(String instanceProfileName, String path,
+                                                 Map<String, String> tags) {
         if (instanceProfiles.get(instanceProfileName).isPresent()) {
             throw new AwsException("EntityAlreadyExists",
                     "Instance profile " + instanceProfileName + " already exists.", 409);
@@ -1100,9 +1110,28 @@ public class IamService implements SessionAccountLookup {
         String normalizedPath = normalizePath(path);
         String arn = iamArn("instance-profile", normalizedPath, instanceProfileName);
         InstanceProfile profile = new InstanceProfile(profileId, instanceProfileName, normalizedPath, arn);
+        if (tags != null) {
+            profile.getTags().putAll(tags);
+        }
         instanceProfiles.put(instanceProfileName, profile);
         LOG.infov("Created instance profile: {0}", instanceProfileName);
         return profile;
+    }
+
+    public void tagInstanceProfile(String instanceProfileName, Map<String, String> newTags) {
+        InstanceProfile profile = getInstanceProfile(instanceProfileName);
+        profile.getTags().putAll(newTags);
+        instanceProfiles.put(instanceProfileName, profile);
+    }
+
+    public void untagInstanceProfile(String instanceProfileName, List<String> tagKeys) {
+        InstanceProfile profile = getInstanceProfile(instanceProfileName);
+        tagKeys.forEach(profile.getTags()::remove);
+        instanceProfiles.put(instanceProfileName, profile);
+    }
+
+    public Map<String, String> listInstanceProfileTags(String instanceProfileName) {
+        return getInstanceProfile(instanceProfileName).getTags();
     }
 
     public InstanceProfile getInstanceProfile(String instanceProfileName) {
@@ -1181,6 +1210,45 @@ public class IamService implements SessionAccountLookup {
     // =========================================================================
     // IAM Enforcement — session tracking and policy collection
     // =========================================================================
+
+    /**
+     * Temporary credentials minted for a Lambda (or other) execution role so the
+     * container signs as that role principal instead of the {@code test} root bypass.
+     */
+    public record RoleSessionCredentials(String accessKeyId, String secretAccessKey, String sessionToken) {}
+
+    /**
+     * Mints a non-expiring assumed-role session mapped to {@code roleArn}. The role
+     * need not exist yet — policy collection happens at evaluation time — so a
+     * subsequent {@code PutRolePolicy} is visible to the same credentials.
+     */
+    public RoleSessionCredentials mintRoleSession(String roleArn) {
+        if (roleArn == null || roleArn.isBlank()) {
+            throw new IllegalArgumentException("roleArn is required");
+        }
+        String accessKeyId = TEMPORARY_ACCESS_KEY_PREFIX + randomId(16);
+        String secretKey = randomSecret(40);
+        String sessionToken = randomSecret(200);
+        registerSession(accessKeyId, secretKey, roleArn, null, null);
+        LOG.infov("Minted execution-role session {0} for {1}", accessKeyId, roleArn);
+        return new RoleSessionCredentials(accessKeyId, secretKey, sessionToken);
+    }
+
+    /**
+     * {@code true} when {@code accessKeyId} is a live assumed-role session (has a
+     * role ARN and has not expired). User access keys and unknown keys are {@code false}.
+     */
+    public boolean isAssumedRoleSession(String accessKeyId) {
+        Optional<SessionCredential> sessionOpt = findSessionForCallerContext(accessKeyId);
+        if (sessionOpt.isEmpty()) {
+            return false;
+        }
+        SessionCredential session = sessionOpt.get();
+        if (session.getExpiration() != null && session.getExpiration().isBefore(Instant.now())) {
+            return false;
+        }
+        return session.getRoleArn() != null && !session.getRoleArn().isBlank();
+    }
 
     /**
      * Stores an assumed-role session so the enforcement filter can resolve its policies.

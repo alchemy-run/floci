@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
+import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lambda.launcher.ContainerLauncher;
 import io.github.hectorvent.floci.services.lambda.launcher.ImageResolver;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
@@ -251,7 +252,8 @@ class LambdaImageConfigTest {
             LaunchedContainerAwsEnv awsEnv = new LaunchedContainerAwsEnv(reachableEndpoint);
             launcher = new ContainerLauncher(containerBuilder, lifecycleManager, logStreamer, imageResolver,
                     runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
-                    mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv);
+                    mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv,
+                    mock(IamService.class));
 
             when(runtimeApiServerFactory.create()).thenReturn(runtimeApiServer);
             when(runtimeApiServer.getPort()).thenReturn(9000);

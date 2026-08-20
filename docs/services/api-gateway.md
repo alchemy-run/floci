@@ -49,31 +49,55 @@ duplicate override IDs.
 | **Method Responses** | PutMethodResponse, GetMethodResponse |
 | **Integrations** | PutIntegration, GetIntegration, UpdateIntegration, DeleteIntegration |
 | **Integration Responses** | PutIntegrationResponse, GetIntegrationResponse |
-| **Deployments** | CreateDeployment, GetDeployments |
-| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage |
-| **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers |
-| **API Keys** | CreateApiKey, GetApiKeys |
-| **Usage Plans** | CreateUsagePlan, GetUsagePlans, DeleteUsagePlan |
+| **Deployments** | CreateDeployment, GetDeployment, GetDeployments, UpdateDeployment, DeleteDeployment |
+| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, FlushStageCache, FlushStageAuthorizersCache |
+| **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers, UpdateAuthorizer, DeleteAuthorizer |
+| **API Keys** | CreateApiKey, GetApiKey, GetApiKeys, UpdateApiKey, DeleteApiKey |
+| **Usage Plans** | CreateUsagePlan, GetUsagePlan, GetUsagePlans, UpdateUsagePlan, DeleteUsagePlan, GetUsage, UpdateUsage |
 | **Usage Plan Keys** | CreateUsagePlanKey, GetUsagePlanKey, GetUsagePlanKeys, DeleteUsagePlanKey |
 | **Request Validators** | CreateRequestValidator, GetRequestValidator, GetRequestValidators, DeleteRequestValidator |
 | **Models** | CreateModel, GetModel, GetModels, DeleteModel |
-| **Domain Names** | CreateDomainName, GetDomainName, GetDomainNames, DeleteDomainName |
-| **Base Path Mappings** | CreateBasePathMapping, GetBasePathMapping, GetBasePathMappings, DeleteBasePathMapping |
+| **Domain Names** | CreateDomainName, GetDomainName, GetDomainNames, UpdateDomainName, DeleteDomainName |
+| **Base Path Mappings** | CreateBasePathMapping, GetBasePathMapping, GetBasePathMappings, UpdateBasePathMapping, DeleteBasePathMapping |
+| **Gateway Responses** | PutGatewayResponse, GetGatewayResponse, GetGatewayResponses, DeleteGatewayResponse |
+| **VPC Links** | CreateVpcLink, GetVpcLink, GetVpcLinks, UpdateVpcLink, DeleteVpcLink |
 | **Account** | GetAccount, UpdateAccount |
 | **Tags** | TagResource, UntagResource, GetTags (ListTagsForResource) |
+
+`CreateRestApi` / `UpdateRestApi` persist `binaryMediaTypes` (JSON Pointer `/binaryMediaTypes/{type}`). Usage plans persist `throttle` and `quota`. `GetResources` / `GetResource` return `resourceMethods` (empty objects, or full method snapshots when `embed=methods`). `GetUsage` returns an AWS-shaped empty `values` map; `UpdateUsage` is `BadRequestException` when the plan has no quota. Flush-cache operations are no-ops after the stage is confirmed to exist.
+
+### Execute-API virtual host {#execute-api-virtual-host}
+
+Alchemy tests (and real AWS clients) invoke deployed APIs at
+`https://{apiId}.execute-api.{region}.amazonaws.com/{stage}/{path}` (REST) or
+`https://{apiId}.execute-api.{region}.amazonaws.com/{path}` (HTTP `$default`).
+The gateway accepts those Host headers on `:4566` and rewrites them to
+`/execute-api/{apiId}/{stage}/{path}`, the same path-style dispatcher used by
+`/_user_request_` and `/_aws/execute-api/`. HTTP `$default` omits the stage from
+the URL; a first-segment match against an existing named stage wins.
+
+WebSocket clients connect at `ws://localhost:4566/ws/{apiId}/{stage}` or
+via the advertised AWS host
+`wss://{apiId}.execute-api.{region}.amazonaws.com/{stage}` (TLS SAN +
+embedded DNS + the Vert.x virtual-host upgrade handler). Lambda env
+values that carry those invoke URLs are rewritten to the path-style
+`wss://127.0.0.1:{port}/ws/{apiId}/{stage}` so a host-side `ws` client
+(which cannot use Floci DNS) can dial them. `@connections` POSTs from
+inside Lambda are rewritten onto
+`https://localhost.floci.io:{port}/execute-api/{apiId}/{stage}` so they
+do not fall through to S3's catch-all `POST /{bucket}/{key}`.
+
+v2 stages persist `description` and `tags`. `TagResource` / `GetTags` /
+`UntagResource` accept stage ARNs (`…/apis/{apiId}/stages/{stageName}`) as
+well as API ARNs.
 
 ### Not Implemented
 
 These management-plane operations have no handler in v1. Calls will return `404` or an error:
 
-- Deployment detail and lifecycle: `GetDeployment`, `UpdateDeployment`, `DeleteDeployment`
-- Authorizer lifecycle: `UpdateAuthorizer`, `DeleteAuthorizer`, `TestInvokeAuthorizer`
-- API key detail: `GetApiKey`, `UpdateApiKey`, `DeleteApiKey`, `ImportApiKeys`
-- Usage plan detail: `GetUsagePlan`, `UpdateUsagePlan`
+- `TestInvokeAuthorizer`, `ImportApiKeys`
 - Model updates and templates: `UpdateModel`, `GetModelTemplate`
-- Gateway Responses (the entire family: `PutGatewayResponse`, `GetGatewayResponse`, etc.)
 - Documentation parts and versions (the entire family, 10 operations)
-- VPC Links (5 operations)
 - Client Certificates (5 operations)
 - `GetExport` / `ImportDocumentationParts`
 
@@ -158,9 +182,13 @@ Both HTTP and WebSocket protocol types are fully supported, including the WebSoc
 | **Integrations** | CreateIntegration, GetIntegration, GetIntegrations, UpdateIntegration, DeleteIntegration |
 | **Integration Responses** | CreateIntegrationResponse, GetIntegrationResponse, GetIntegrationResponses, UpdateIntegrationResponse, DeleteIntegrationResponse |
 | **Authorizers** | CreateAuthorizer, GetAuthorizer, GetAuthorizers, UpdateAuthorizer, DeleteAuthorizer |
-| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage |
+| **Stages** | CreateStage, GetStage, GetStages, UpdateStage, DeleteStage, ResetAuthorizersCache |
 | **Deployments** | CreateDeployment, GetDeployment, GetDeployments, UpdateDeployment, DeleteDeployment |
 | **Models** | CreateModel, GetModel, GetModels, UpdateModel, DeleteModel |
+| **VPC Links** | CreateVpcLink, GetVpcLink, GetVpcLinks, UpdateVpcLink, DeleteVpcLink |
+| **Domain Names** | CreateDomainName, GetDomainName, GetDomainNames, UpdateDomainName, DeleteDomainName |
+| **CORS** | DeleteCorsConfiguration |
+| **Export** | ExportApi (OAS30 JSON) |
 | **Tags** | TagResource, UntagResource, GetTags |
 
 ### WebSocket Data-Plane {#websocket-data-plane}
@@ -217,9 +245,9 @@ DELETE /execute-api/{apiId}/{stageName}/@connections/{connectionId}  — Disconn
 
 ### Not Implemented
 
-- `ReimportApi`, `ExportApi`, `GetApiMapping`, `CreateApiMapping`, `DeleteApiMapping`
-- `GetDomainName`, `CreateDomainName`, `DeleteDomainName`
-- `CreateVpcLink`, `GetVpcLink`, `GetVpcLinks`, `UpdateVpcLink`, `DeleteVpcLink`
+- `ReimportApi`, `GetApiMapping`, `CreateApiMapping`, `DeleteApiMapping`
+- Domain-name routing rules
+- Real VPC connectivity behind a VPC link (control-plane CRUD is emulated; links become `AVAILABLE` immediately)
 
 ### Examples
 

@@ -11,19 +11,49 @@ The management plane allows you to create and manage applications, environments,
 - `CreateApplication`
 - `GetApplication`
 - `ListApplications`
+- `UpdateApplication`
 - `DeleteApplication`
 - `CreateEnvironment`
 - `GetEnvironment`
 - `ListEnvironments`
+- `UpdateEnvironment`
+- `DeleteEnvironment`
 - `CreateConfigurationProfile`
 - `GetConfigurationProfile`
 - `ListConfigurationProfiles`
+- `UpdateConfigurationProfile`
+- `DeleteConfigurationProfile`
+- `ValidateConfiguration`
 - `CreateHostedConfigurationVersion`
 - `GetHostedConfigurationVersion`
+- `ListHostedConfigurationVersions`
+- `DeleteHostedConfigurationVersion`
 - `CreateDeploymentStrategy`
 - `GetDeploymentStrategy`
-- `StartDeployment`
+- `ListDeploymentStrategies`
+- `UpdateDeploymentStrategy`
+- `DeleteDeploymentStrategy`
+- `StartDeployment` — honors `DeploymentDurationInMinutes`. A strategy with duration `0` completes immediately (`COMPLETE`); a positive duration stays `DEPLOYING` until the duration elapses or `StopDeployment` rolls it back. Instant completions still fire `ON_DEPLOYMENT_START` then `ON_DEPLOYMENT_COMPLETE`.
 - `GetDeployment`
+- `StopDeployment` — in-flight (`DEPLOYING` / `BAKING` / `VALIDATING`) deployments transition to `ROLLED_BACK` and fire `ON_DEPLOYMENT_ROLLED_BACK`. Terminal states return `BadRequestException`.
+- `CreateExtension`
+- `GetExtension`
+- `ListExtensions`
+- `UpdateExtension`
+- `DeleteExtension`
+- `CreateExtensionAssociation`
+- `GetExtensionAssociation`
+- `ListExtensionAssociations`
+- `UpdateExtensionAssociation`
+- `DeleteExtensionAssociation`
+
+On deployment start / complete / rollback, Floci fires associated extension actions:
+
+- **Lambda** (`arn:aws:lambda:…:function:…`) — async `InvocationType.Event` with the AWS extension payload (`InvocationId`, `Type` such as `OnDeploymentComplete`, `Application` / `Environment` / `ConfigurationProfile` objects, `DeploymentNumber`).
+- **EventBridge** (`arn:aws:events:…:event-bus/…`) — `PutEvents` with `Source=aws.appconfig` and `DetailType` like `On Deployment Complete`.
+
+Associations on the application, environment, or configuration profile all match. `ON_*` actions are fire-and-forget and run after `StartDeployment` / `StopDeployment` returns so a Lambda that started the rollout can finish before it is invoked again.
+- `TagResource` / `UntagResource` / `ListTagsForResource` (applications, environments, profiles, strategies, extensions, associations)
 
 ## Data Plane (AppConfigData) {#data-plane}
 

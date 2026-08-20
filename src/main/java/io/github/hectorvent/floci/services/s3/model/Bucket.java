@@ -28,6 +28,9 @@ public class Bucket {
     private String publicAccessBlockConfiguration; // XML string
     private String ownershipControlsConfiguration; // XML string
     private String requestPaymentPayer; // "BucketOwner" (default) or "Requester"; null until first PUT
+    private String accelerateStatus; // null (never set), "Enabled", or "Suspended"
+    private String replicationConfiguration; // raw PutBucketReplication XML; null if none
+    private Map<String, String> intelligentTieringConfigurations; // id → configuration XML
     private String region;
     private WebsiteConfiguration websiteConfiguration;
 
@@ -107,6 +110,24 @@ public class Bucket {
 
     public String getRequestPaymentPayer() { return requestPaymentPayer; }
     public void setRequestPaymentPayer(String requestPaymentPayer) { this.requestPaymentPayer = requestPaymentPayer; }
+
+    public String getAccelerateStatus() { return accelerateStatus; }
+    public void setAccelerateStatus(String accelerateStatus) { this.accelerateStatus = accelerateStatus; }
+
+    public String getReplicationConfiguration() { return replicationConfiguration; }
+    public void setReplicationConfiguration(String replicationConfiguration) {
+        this.replicationConfiguration = replicationConfiguration;
+    }
+
+    public Map<String, String> getIntelligentTieringConfigurations() {
+        if (intelligentTieringConfigurations == null) {
+            intelligentTieringConfigurations = new HashMap<>();
+        }
+        return intelligentTieringConfigurations;
+    }
+    public void setIntelligentTieringConfigurations(Map<String, String> intelligentTieringConfigurations) {
+        this.intelligentTieringConfigurations = intelligentTieringConfigurations;
+    }
 
     public String getRegion() { return region; }
     public void setRegion(String region) { this.region = region; }

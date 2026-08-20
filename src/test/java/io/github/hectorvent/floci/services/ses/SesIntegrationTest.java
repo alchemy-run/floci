@@ -224,6 +224,16 @@ class SesIntegrationTest {
         // raw MIME message contains a From: header.
         given()
             .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", authorization("email"))
+            .formParam("Action", "VerifyEmailIdentity")
+            .formParam("EmailAddress", "sender@example.com")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
             .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/email/aws4_request")
             .formParam("Action", "SendRawEmail")
             .formParam("Destinations.member.1", "recipient@example.com")
@@ -425,6 +435,16 @@ class SesIntegrationTest {
 
         given()
             .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", authorization("email"))
+            .formParam("Action", "VerifyEmailIdentity")
+            .formParam("EmailAddress", "sender@example.com")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
             .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/email/aws4_request")
             .formParam("Action", "SendEmail")
             .formParam("Source", "sender@example.com")
@@ -468,7 +488,7 @@ class SesIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body(not(containsString("example.com")));
+            .body(not(containsString("<member>example.com</member>")));
     }
 
     @Test

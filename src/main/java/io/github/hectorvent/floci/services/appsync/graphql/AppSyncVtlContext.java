@@ -23,7 +23,7 @@ public class AppSyncVtlContext {
             String authType,
             ObjectMapper objectMapper
     ) {
-        this.contextMap = buildContextMap(arguments, source, identity, request, info, stash, prev, result);
+        this.contextMap = buildContextMap(arguments, source, identity, request, info, stash, prev, result, null);
         this.appendedErrors = new ArrayList<>();
         this.util = new AppSyncUtil(objectMapper);
         this.util.setErrorList(this.appendedErrors);
@@ -33,7 +33,7 @@ public class AppSyncVtlContext {
     private AppSyncVtlContext(Builder builder) {
         this.contextMap = buildContextMap(
                 builder.arguments, builder.source, builder.identity, builder.request,
-                builder.info, builder.stash, builder.prev, builder.result);
+                builder.info, builder.stash, builder.prev, builder.result, builder.env);
         this.appendedErrors = new ArrayList<>();
         this.util = new AppSyncUtil(builder.objectMapper);
         this.util.setErrorList(this.appendedErrors);
@@ -48,9 +48,12 @@ public class AppSyncVtlContext {
             Map<String, Object> info,
             Map<String, Object> stash,
             Map<String, Object> prev,
-            Object result) {
+            Object result,
+            Map<String, Object> env) {
+        Map<String, Object> args = arguments != null ? arguments : Map.of();
         Map<String, Object> map = new HashMap<>();
-        map.put("arguments", arguments != null ? arguments : Map.of());
+        map.put("arguments", args);
+        map.put("args", args);
         map.put("source", source != null ? source : Map.of());
         map.put("result", result);
         map.put("identity", identity != null ? identity : Map.of());
@@ -58,6 +61,7 @@ public class AppSyncVtlContext {
         map.put("stash", stash != null ? stash : new HashMap<>());
         map.put("prev", prev);
         map.put("info", info != null ? info : Map.of());
+        map.put("env", env != null ? env : Map.of());
         map.put("error", null);
         return map;
     }
@@ -88,6 +92,7 @@ public class AppSyncVtlContext {
         private Map<String, Object> stash;
         private Map<String, Object> prev;
         private Object result;
+        private Map<String, Object> env;
         private String authType;
 
         Builder(ObjectMapper objectMapper) {
@@ -131,6 +136,11 @@ public class AppSyncVtlContext {
 
         public Builder result(Object result) {
             this.result = result;
+            return this;
+        }
+
+        public Builder env(Map<String, Object> env) {
+            this.env = env;
             return this;
         }
 

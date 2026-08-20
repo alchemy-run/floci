@@ -26,6 +26,19 @@
 | `TagResource` | Tag a topic |
 | `UntagResource` | Remove tags from a topic |
 | `ListTagsForResource` | List tags on a topic |
+| `AddPermission` | Append a labeled statement to the topic policy |
+| `RemovePermission` | Remove a labeled statement from the topic policy |
+| `GetSMSAttributes` | Read account-level SMS attributes |
+| `SetSMSAttributes` | Set account-level SMS attributes (e.g. `DefaultSMSType`) |
+| `CheckIfPhoneNumberIsOptedOut` | Check whether a number is opted out of SMS |
+| `ListPhoneNumbersOptedOut` | List opted-out SMS numbers |
+| `OptInPhoneNumber` | Opt a number back in (no-op if it was never opted out) |
+| `ListOriginationNumbers` | List origination numbers (empty in Floci) |
+| `GetSMSSandboxAccountStatus` | Report whether the account is in the SMS sandbox (`IsInSandbox=true`) |
+| `ListSMSSandboxPhoneNumbers` | List sandbox destination numbers |
+| `CreateSMSSandboxPhoneNumber` | Register an E.164 number in the sandbox (`InvalidParameter` if malformed) |
+| `VerifySMSSandboxPhoneNumber` | Mark a sandbox number verified (`ResourceNotFound` if unregistered) |
+| `DeleteSMSSandboxPhoneNumber` | Remove a sandbox number (`ResourceNotFound` if unregistered) |
 | `CreatePlatformApplication` | Create a mobile push platform app (iOS or Android) |
 | `DeletePlatformApplication` | Delete a platform app and its endpoints |
 | `GetPlatformApplicationAttributes` | Read platform app attributes |
@@ -97,6 +110,11 @@ made — every push is captured in memory so tests can assert what would have be
 **Supported platforms:** `APNS`, `APNS_SANDBOX`, `GCM`, `FCM`. Any other platform
 value returns `InvalidParameter`.
 
+`GCM` / `FCM` require a plausible `PlatformCredential` (length ≥ 24, not an
+obvious fake such as `invalid-api-key-probe`). AWS's typed
+`InvalidParameter` / "Platform credentials are invalid" is returned otherwise.
+APNS still accepts any credential because Floci does not talk to Apple.
+
 ### End-to-end flow
 
 ```bash
@@ -151,6 +169,13 @@ Two ways to make `Publish` fail with `EndpointDisabledException`:
 |---|---|---|---|
 | `CreatePlatformApplication` | Missing `Name` | `InvalidParameter` | 400 |
 | `CreatePlatformApplication` | Unsupported `Platform` (e.g. `WNS`, `ADM`) | `InvalidParameter` | 400 |
+| `CreatePlatformApplication` | Fake / implausible GCM or FCM `PlatformCredential` | `InvalidParameter` | 400 |
+| `AddPermission` | Unknown topic | `NotFound` | 404 |
+| `AddPermission` | Duplicate `Label` | `InvalidParameter` | 400 |
+| `RemovePermission` | Unknown `Label` | `InvalidParameter` | 400 |
+| `CreateSMSSandboxPhoneNumber` | Not E.164 | `InvalidParameter` | 400 |
+| `VerifySMSSandboxPhoneNumber` | Unregistered number | `ResourceNotFound` | 404 |
+| `DeleteSMSSandboxPhoneNumber` | Unregistered number | `ResourceNotFound` | 404 |
 | `CreatePlatformEndpoint` | Missing `Token` | `InvalidParameter` | 400 |
 | `CreatePlatformEndpoint` | Unknown `PlatformApplicationArn` | `NotFound` | 404 |
 | `CreatePlatformEndpoint` | Same `Token`, different `CustomUserData` or attrs | `InvalidParameter` | 400 |

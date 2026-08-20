@@ -18,6 +18,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -567,6 +570,152 @@ class RdsQueryHandlerTest {
     }
 
     @Test
+    void modifyDbParameterGroup_acceptsDistilledParameterXmlNamePrefix() {
+        DbParameterGroup group = new DbParameterGroup("pg1", "mysql8.4", "test group");
+        when(service.modifyDbParameterGroup(eq("pg1"), eq(java.util.Map.of(
+                "time_zone", "Australia/Sydney", "max_connections", "150"))))
+                .thenReturn(group);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBParameterGroupName", "pg1");
+        p.add("Parameters.Parameter.1.ParameterName", "time_zone");
+        p.add("Parameters.Parameter.1.ParameterValue", "Australia/Sydney");
+        p.add("Parameters.Parameter.1.ApplyMethod", "immediate");
+        p.add("Parameters.Parameter.2.ParameterName", "max_connections");
+        p.add("Parameters.Parameter.2.ParameterValue", "150");
+        handler.handle("ModifyDBParameterGroup", p);
+
+        verify(service).modifyDbParameterGroup("pg1", java.util.Map.of(
+                "time_zone", "Australia/Sydney", "max_connections", "150"));
+    }
+
+    @Test
+    void resetDbParameterGroup_acceptsDistilledParameterXmlNamePrefix() {
+        DbParameterGroup group = new DbParameterGroup("pg1", "mysql8.4", "test group");
+        when(service.resetDbParameterGroup(eq("pg1"), eq(false), eq(List.of("max_connections"))))
+                .thenReturn(group);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBParameterGroupName", "pg1");
+        p.add("ResetAllParameters", "false");
+        p.add("Parameters.Parameter.1.ParameterName", "max_connections");
+        p.add("Parameters.Parameter.1.ApplyMethod", "immediate");
+        handler.handle("ResetDBParameterGroup", p);
+
+        verify(service).resetDbParameterGroup("pg1", false, List.of("max_connections"));
+    }
+
+    @Test
+    void describeDbParameters_returnsUserSourceParameters() {
+        DbParameterGroup group = new DbParameterGroup("pg1", "mysql8.4", "test group");
+        group.getParameters().put("time_zone", "Australia/Sydney");
+        when(service.getDbParameterGroup("pg1")).thenReturn(group);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBParameterGroupName", "pg1");
+        p.add("Source", "user");
+        Response response = handler.handle("DescribeDBParameters", p);
+
+        String body = (String) response.getEntity();
+        assertEquals(200, response.getStatus());
+        assertTrue(body.contains("<ParameterName>time_zone</ParameterName>"));
+        assertTrue(body.contains("<ParameterValue>Australia/Sydney</ParameterValue>"));
+        assertTrue(body.contains("<Source>user</Source>"));
+    }
+
+    @Test
+    void createDbInstance_rejectsPasswordWithForbiddenCharacters() {
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "alchemy-audit-probe-instance");
+        p.add("Engine", "postgres");
+        p.add("MasterUsername", "alchemy");
+        p.add("MasterUserPassword", "bad@pass word1");
+        Response response = handler.handle("CreateDBInstance", p);
+
+        assertEquals(400, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("InvalidParameterValue"), body);
+        assertTrue(body.contains("MasterUserPassword"), body);
+        verify(service, never()).createDbInstance(any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyBoolean(),
+                any(), any(), any(), any());
+    }
+
+    @Test
+    void createDbInstance_rejectsBackupRetentionOver35() {
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "alchemy-audit-probe-instance");
+        p.add("Engine", "postgres");
+        p.add("MasterUsername", "alchemy");
+        p.add("MasterUserPassword", "ValidPassw0rd");
+        p.add("BackupRetentionPeriod", "60");
+        Response response = handler.handle("CreateDBInstance", p);
+
+        assertEquals(400, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("InvalidParameterValue"), body);
+        assertTrue(body.toLowerCase().contains("retention"), body);
+        verify(service, never()).createDbInstance(any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyBoolean(),
+                any(), any(), any(), any());
+    }
+
+    @Test
+    void createDbCluster_rejectsPasswordWithForbiddenCharacters() {
+        MultivaluedMap<String, String> p = params();
+        p.add("DBClusterIdentifier", "alchemy-audit-probe");
+        p.add("Engine", "aurora-postgresql");
+        p.add("MasterUsername", "alchemy");
+        p.add("MasterUserPassword", "bad@pass word1");
+        Response response = handler.handle("CreateDBCluster", p);
+
+        assertEquals(400, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("InvalidParameterValue"), body);
+        assertTrue(body.contains("MasterUserPassword"), body);
+        verify(service, never()).createDbCluster(any(), any(), any(), any(), any(), any(),
+                anyBoolean(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void createDbCluster_rejectsBackupRetentionOver35() {
+        MultivaluedMap<String, String> p = params();
+        p.add("DBClusterIdentifier", "alchemy-audit-probe");
+        p.add("Engine", "aurora-postgresql");
+        p.add("MasterUsername", "alchemy");
+        p.add("MasterUserPassword", "ValidPassw0rd");
+        p.add("BackupRetentionPeriod", "60");
+        Response response = handler.handle("CreateDBCluster", p);
+
+        assertEquals(400, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("InvalidParameterValue"), body);
+        assertTrue(body.toLowerCase().contains("retention"), body);
+        verify(service, never()).createDbCluster(any(), any(), any(), any(), any(), any(),
+                anyBoolean(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void applyPendingMaintenanceAction_missingResourceReturnsResourceNotFoundFault() {
+        when(service.applyPendingMaintenanceAction(
+                "arn:aws:rds:us-east-1:000000000000:cluster:alchemy-nonexistent-rds-cluster-probe"))
+                .thenThrow(new AwsException("ResourceNotFoundFault",
+                        "The resource identified by ResourceIdentifier arn:aws:rds:us-east-1:000000000000:cluster:alchemy-nonexistent-rds-cluster-probe does not exist.",
+                        404));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceIdentifier",
+                "arn:aws:rds:us-east-1:000000000000:cluster:alchemy-nonexistent-rds-cluster-probe");
+        p.add("ApplyAction", "system-update");
+        p.add("OptInType", "next-maintenance");
+        Response response = handler.handle("ApplyPendingMaintenanceAction", p);
+
+        assertEquals(404, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<Code>ResourceNotFoundFault</Code>"), body);
+    }
+
+    @Test
     void describeDbParameters_requiresParameterGroupName() {
         Response response = handler.handle("DescribeDBParameters", params());
 
@@ -889,6 +1038,42 @@ class RdsQueryHandlerTest {
         group.setSubnetIds(List.of("subnet-a", "subnet-b"));
         group.setSubnetAvailabilityZones(Map.of("subnet-a", "us-east-1a", "subnet-b", "us-east-1b"));
         return group;
+    }
+
+    @Test
+    void describeDbClusterEndpoints_listsEndpoints() {
+        io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint endpoint =
+                new io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint();
+        endpoint.setDbClusterEndpointIdentifier("reader");
+        endpoint.setDbClusterIdentifier("cluster-1");
+        endpoint.setCustomEndpointType("READER");
+        when(service.listDbClusterEndpoints(null, null)).thenReturn(List.of(endpoint));
+
+        Response response = handler.handle("DescribeDBClusterEndpoints", params());
+
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<DBClusterEndpoint>"));
+        assertTrue(body.contains("<DBClusterEndpointIdentifier>reader</DBClusterEndpointIdentifier>"));
+    }
+
+    @Test
+    void deleteDbSnapshot_missingReturnsNotFound() {
+        when(service.getDbSnapshot("missing")).thenThrow(new AwsException("DBSnapshotNotFound",
+                "DBSnapshot missing not found.", 404));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBSnapshotIdentifier", "missing");
+        Response response = handler.handle("DeleteDBSnapshot", p);
+
+        assertEquals(404, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("DBSnapshotNotFound"));
+    }
+
+    @Test
+    void describeEvents_returnsEmptyList() {
+        Response response = handler.handle("DescribeEvents", params());
+        assertEquals(200, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<Events>"));
     }
 
     private static DbCluster makeCluster(String id) {

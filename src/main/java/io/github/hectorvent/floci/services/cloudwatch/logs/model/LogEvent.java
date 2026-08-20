@@ -8,6 +8,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 public class LogEvent {
 
     private String eventId;
+    private String logGroupName;
+    private String logStreamName;
     private long timestamp;
     private String message;
     private long ingestionTime;
@@ -22,6 +24,12 @@ public class LogEvent {
 
     public String getEventId() { return eventId; }
     public void setEventId(String eventId) { this.eventId = eventId; }
+
+    public String getLogGroupName() { return logGroupName; }
+    public void setLogGroupName(String logGroupName) { this.logGroupName = logGroupName; }
+
+    public String getLogStreamName() { return logStreamName; }
+    public void setLogStreamName(String logStreamName) { this.logStreamName = logStreamName; }
 
     public long getTimestamp() { return timestamp; }
     public void setTimestamp(long timestamp) { this.timestamp = timestamp; }

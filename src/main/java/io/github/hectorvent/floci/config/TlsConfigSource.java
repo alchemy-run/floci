@@ -52,7 +52,19 @@ public class TlsConfigSource implements ConfigSource {
     // host.docker.internal: how Lambda containers reach Floci when it runs on the host (not in a container).
     private static final List<String> DEFAULT_SAN_HOSTNAMES = List.of(
             "localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
-            "localhost.floci.io", "*.localhost.floci.io", "host.docker.internal");
+            "localhost.floci.io", "*.localhost.floci.io", "host.docker.internal",
+            // StartSyncExecution's Smithy hostPrefix "sync-" → sync-states.{region}.amazonaws.com
+            "sync-states.us-east-1.amazonaws.com",
+            "sync-states-fips.us-east-1.amazonaws.com",
+            "*.us-east-1.amazonaws.com",
+            // GraphQL data plane: {apiId}.appsync-api.{region}.amazonaws.com
+            // (*.us-east-1.amazonaws.com is a single-label wildcard and does not match this.)
+            "*.appsync-api.us-east-1.amazonaws.com",
+            // API Gateway invoke / @connections: {apiId}.execute-api.{region}.amazonaws.com
+            "*.execute-api.us-east-1.amazonaws.com",
+            // Lambda MicroVM endpoints: {microvmId}.lambda-microvm.{region}.localhost.floci.io
+            // (*.localhost.floci.io is a single-label wildcard and does not match this.)
+            "*.lambda-microvm.us-east-1.localhost.floci.io");
 
     private final Map<String, String> properties = new HashMap<>();
 

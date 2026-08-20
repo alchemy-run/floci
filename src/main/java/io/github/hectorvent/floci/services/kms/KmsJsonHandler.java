@@ -53,11 +53,15 @@ public class KmsJsonHandler {
             case "ReEncrypt" -> handleReEncrypt(request, region);
             case "GenerateDataKey" -> handleGenerateDataKey(request, region);
             case "GenerateDataKeyWithoutPlaintext" -> handleGenerateDataKeyWithoutPlaintext(request, region);
+            case "GenerateDataKeyPair" -> handleGenerateDataKeyPair(request, region);
+            case "GenerateDataKeyPairWithoutPlaintext" -> handleGenerateDataKeyPairWithoutPlaintext(request, region);
+            case "DeriveSharedSecret" -> handleDeriveSharedSecret(request, region);
             case "Sign" -> handleSign(request, region);
             case "Verify" -> handleVerify(request, region);
             case "GenerateMac" -> handleGenerateMac(request, region);
             case "VerifyMac" -> handleVerifyMac(request, region);
             case "CreateAlias" -> handleCreateAlias(request, region);
+            case "UpdateAlias" -> handleUpdateAlias(request, region);
             case "DeleteAlias" -> handleDeleteAlias(request, region);
             case "ListAliases" -> handleListAliases(request, region);
             case "ScheduleKeyDeletion" -> handleScheduleKeyDeletion(request, region);
@@ -91,7 +95,8 @@ public class KmsJsonHandler {
         Map<String, String> tags = new HashMap<>();
         request.path("Tags").forEach(t -> tags.put(t.path("TagKey").asText(), t.path("TagValue").asText()));
         rejectUnknownReservedTags(tags,"TagException");
-        KmsKey key = service.createKey(description, keyUsage, keySpec, policy, tags, region);
+        boolean multiRegion = request.path("MultiRegion").asBoolean(false);
+        KmsKey key = service.createKey(description, keyUsage, keySpec, policy, tags, multiRegion, region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("KeyMetadata", addKeyMetadata(key));
         return Response.ok(response).build();
@@ -348,10 +353,13 @@ public class KmsJsonHandler {
         KmsMessageType messageType = KmsMessageType.fromString(request.path("MessageType").asText("RAW"));
 
         boolean valid = service.verify(keyId, message, signature, algorithm, messageType, region);
+        if (!valid) {
+            throw new AwsException("KMSInvalidSignatureException", "The signature is not valid.", 400);
+        }
 
         ObjectNode response = objectMapper.createObjectNode();
         response.put("KeyId", service.describeKey(keyId, region).getArn());
-        response.put("SignatureValid", valid);
+        response.put("SignatureValid", true);
         response.put("SigningAlgorithm", algorithm);
         return Response.ok(response).build();
     }
@@ -387,6 +395,11 @@ public class KmsJsonHandler {
 
     private Response handleCreateAlias(JsonNode request, String region) {
         service.createAlias(request.path("AliasName").asText(), request.path("TargetKeyId").asText(), region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleUpdateAlias(JsonNode request, String region) {
+        service.updateAlias(request.path("AliasName").asText(), request.path("TargetKeyId").asText(), region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -501,14 +514,21 @@ public class KmsJsonHandler {
 
     private Response handleGetKeyRotationStatus(JsonNode request, String region) {
         String keyId = request.path("KeyId").asText();
-        boolean enabled = service.getKeyRotationStatus(keyId, region);
+        KmsService.KeyRotationStatus status = service.getKeyRotationStatus(keyId, region);
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("KeyRotationEnabled", enabled);
+        response.put("KeyRotationEnabled", status.keyRotationEnabled());
+        if (status.rotationPeriodInDays() != null) {
+            response.put("RotationPeriodInDays", status.rotationPeriodInDays());
+        }
         return Response.ok(response).build();
     }
 
     private Response handleEnableKeyRotation(JsonNode request, String region) {
-        service.enableKeyRotation(request.path("KeyId").asText(), region);
+        Integer period = request.path("RotationPeriodInDays").isMissingNode()
+                || request.path("RotationPeriodInDays").isNull()
+                ? null
+                : request.path("RotationPeriodInDays").asInt();
+        service.enableKeyRotation(request.path("KeyId").asText(), period, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -564,6 +584,7 @@ public class KmsJsonHandler {
         keyMetadata.put("KeyState", k.getKeyState());
         keyMetadata.put("Origin", "AWS_KMS");
         keyMetadata.put("KeyManager", "CUSTOMER");
+        keyMetadata.put("MultiRegion", k.isMultiRegion());
         keyMetadata.put("CustomerMasterKeySpec", k.getKeySpec().name());
         keyMetadata.put("KeySpec", k.getKeySpec().name());
         addAlgorithms(k, keyMetadata);
@@ -603,6 +624,51 @@ public class KmsJsonHandler {
         } else if (KmsKeyUsage.GENERATE_VERIFY_MAC == key.getKeyUsage()
                 && key.getKeySpec().getKeyType() == KmsKeySpec.KeyType.HMAC) {
                     response.putArray("MacAlgorithms").add(key.getKeySpec().getAlgorithm().getFirst().getAlgName());
-            }
+        } else if (KmsKeyUsage.KEY_AGREEMENT == key.getKeyUsage()) {
+            response.putArray("KeyAgreementAlgorithms").add("ECDH");
+        }
+    }
+
+    private Response handleGenerateDataKeyPair(JsonNode request, String region) {
+        Map<String, Object> result = generateDataKeyPair(request, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("KeyId", (String) result.get("KeyId"));
+        response.put("KeyPairSpec", (String) result.get("KeyPairSpec"));
+        response.put("PublicKey", Base64.getEncoder().encodeToString((byte[]) result.get("PublicKey")));
+        response.put("PrivateKeyPlaintext", Base64.getEncoder().encodeToString((byte[]) result.get("PrivateKeyPlaintext")));
+        response.put("PrivateKeyCiphertextBlob", Base64.getEncoder().encodeToString((byte[]) result.get("PrivateKeyCiphertextBlob")));
+        return Response.ok(response).build();
+    }
+
+    private Response handleGenerateDataKeyPairWithoutPlaintext(JsonNode request, String region) {
+        Map<String, Object> result = generateDataKeyPair(request, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("KeyId", (String) result.get("KeyId"));
+        response.put("KeyPairSpec", (String) result.get("KeyPairSpec"));
+        response.put("PublicKey", Base64.getEncoder().encodeToString((byte[]) result.get("PublicKey")));
+        response.put("PrivateKeyCiphertextBlob", Base64.getEncoder().encodeToString((byte[]) result.get("PrivateKeyCiphertextBlob")));
+        return Response.ok(response).build();
+    }
+
+    private Map<String, Object> generateDataKeyPair(JsonNode request, String region) {
+        return service.generateDataKeyPair(
+                request.path("KeyId").asText(),
+                request.path("KeyPairSpec").asText(null),
+                readEncryptionContext(request.path("EncryptionContext")),
+                region);
+    }
+
+    private Response handleDeriveSharedSecret(JsonNode request, String region) {
+        byte[] publicKey = decodeBlob(request, "PublicKey");
+        KmsService.DeriveSharedSecretResult result = service.deriveSharedSecret(
+                request.path("KeyId").asText(),
+                publicKey,
+                request.path("KeyAgreementAlgorithm").asText(null),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("KeyId", result.keyArn());
+        response.put("KeyAgreementAlgorithm", result.algorithm());
+        response.put("SharedSecret", Base64.getEncoder().encodeToString(result.sharedSecret()));
+        return Response.ok(response).build();
     }
 }

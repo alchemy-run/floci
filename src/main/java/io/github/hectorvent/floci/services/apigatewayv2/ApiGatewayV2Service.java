@@ -126,6 +126,21 @@ public class ApiGatewayV2Service {
                 .orElseThrow(() -> new AwsException("NotFoundException", "Invalid API id specified", 404));
     }
 
+    public String resolveApiRegion(String preferredRegion, String apiId) {
+        if (apiStore.get(apiKey(preferredRegion, apiId)).isPresent()) {
+            return preferredRegion;
+        }
+        return apiStore.keys().stream()
+                .filter(k -> {
+                    int first = k.indexOf("::");
+                    int last = k.lastIndexOf("::");
+                    return first >= 0 && first == last && k.substring(first + 2).equals(apiId);
+                })
+                .map(k -> k.substring(0, k.indexOf("::")))
+                .findFirst()
+                .orElse(preferredRegion);
+    }
+
     public List<Api> getApis(String region) {
         String prefix = region + "::";
         return apiStore.scan(k -> k.startsWith(prefix));
@@ -527,12 +542,19 @@ public class ApiGatewayV2Service {
         stage.setStageName((String) request.getOrDefault("stageName", "$default"));
         stage.setDeploymentId((String) request.get("deploymentId"));
         stage.setAutoDeploy(Boolean.parseBoolean(String.valueOf(request.getOrDefault("autoDeploy", "false"))));
+        stage.setDescription((String) request.get("description"));
         stage.setCreatedDate(System.currentTimeMillis());
         stage.setLastUpdatedDate(System.currentTimeMillis());
 
         @SuppressWarnings("unchecked")
         Map<String, String> stageVariables = (Map<String, String>) request.get("stageVariables");
         stage.setStageVariables(stageVariables);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> tags = (Map<String, String>) request.get("tags");
+        if (tags != null) {
+            stage.setTags(new java.util.HashMap<>(ReservedTags.stripApiGatewayReservedTags(tags)));
+        }
 
         stageStore.put(stageKey(region, apiId, stage.getStageName()), stage);
         LOG.infov("Created stage: {0} for API {1}", stage.getStageName(), apiId);
@@ -569,6 +591,15 @@ public class ApiGatewayV2Service {
             @SuppressWarnings("unchecked")
             Map<String, String> stageVariables = (Map<String, String>) request.get("stageVariables");
             stage.setStageVariables(stageVariables);
+        }
+        if (request.containsKey("description")) {
+            Object description = request.get("description");
+            stage.setDescription(description != null ? String.valueOf(description) : null);
+        }
+        if (request.containsKey("tags") && request.get("tags") != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> tags = (Map<String, String>) request.get("tags");
+            stage.setTags(new java.util.HashMap<>(ReservedTags.stripApiGatewayReservedTags(tags)));
         }
 
         stage.setLastUpdatedDate(System.currentTimeMillis());
@@ -857,6 +888,15 @@ public class ApiGatewayV2Service {
         return vpcLinkStore.scan(k -> k.startsWith(prefix));
     }
 
+    public VpcLink updateVpcLink(String region, String vpcLinkId, Map<String, Object> request) {
+        VpcLink link = getVpcLink(region, vpcLinkId);
+        if (request.containsKey("name") && request.get("name") != null) {
+            link.setName((String) request.get("name"));
+        }
+        vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
+        return link;
+    }
+
     public void deleteVpcLink(String region, String vpcLinkId) {
         getVpcLink(region, vpcLinkId);
         vpcLinkStore.delete(vpcLinkKey(region, vpcLinkId));
@@ -865,12 +905,17 @@ public class ApiGatewayV2Service {
     // ──────────────────────────── Standalone Tagging ────────────────────────────
 
     /**
-     * Parses an API Gateway v2 resource ARN and returns a two-element array
-     * [region, apiId]. Throws BadRequestException if the ARN is malformed.
+     * Parses an API Gateway v2 resource ARN.
      *
-     * Expected format: arn:aws:apigateway:{region}::/apis/{apiId}
+     * <p>Supported shapes:
+     * {@code arn:aws:apigateway:{region}::/apis/{apiId}},
+     * {@code arn:aws:apigateway:{region}::/apis/{apiId}/stages/{stageName}},
+     * {@code arn:aws:apigateway:{region}::/domainnames/{name}},
+     * {@code arn:aws:apigateway:{region}::/vpclinks/{id}}.
      */
-    private String[] parseArn(String resourceArn) {
+    private record ResourceRef(String region, String kind, String apiId, String childId) {}
+
+    private ResourceRef parseResourceArn(String resourceArn) {
         if (resourceArn == null || resourceArn.isBlank()) {
             throw new AwsException("BadRequestException", "ResourceArn must not be blank", 400);
         }
@@ -882,49 +927,86 @@ public class ApiGatewayV2Service {
                     "Invalid ResourceArn format: " + resourceArn, 400);
         }
         String region = arn.region();
-        String resource = arn.resource(); // e.g. "/apis/abc1234567"
-        int lastSlash = resource.lastIndexOf('/');
-        if (lastSlash < 0 || lastSlash == resource.length() - 1) {
-            throw new AwsException("BadRequestException",
-                    "Cannot extract apiId from ResourceArn: " + resourceArn, 400);
+        String resource = arn.resource();
+        String path = resource.startsWith("/") ? resource.substring(1) : resource;
+        String[] parts = path.split("/");
+        if (parts.length >= 2 && "apis".equals(parts[0])) {
+            String apiId = parts[1];
+            if (parts.length >= 4 && "stages".equals(parts[2])) {
+                return new ResourceRef(region, "stage", apiId, parts[3]);
+            }
+            return new ResourceRef(region, "api", apiId, null);
         }
-        String apiId = resource.substring(lastSlash + 1);
-        return new String[]{region, apiId};
+        if (parts.length >= 2 && "domainnames".equals(parts[0])) {
+            return new ResourceRef(region, "domain", null, parts[1]);
+        }
+        if (parts.length >= 2 && "vpclinks".equals(parts[0])) {
+            return new ResourceRef(region, "vpclink", null, parts[1]);
+        }
+        throw new AwsException("BadRequestException",
+                "Cannot extract resource from ResourceArn: " + resourceArn, 400);
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags) {
         ReservedTags.rejectApiGatewayReservedTagsOnUpdate(tags);
-        String[] parsed = parseArn(resourceArn);
-        String region = parsed[0];
-        String apiId  = parsed[1];
-        Api api = getApi(region, apiId);
+        ResourceRef ref = parseResourceArn(resourceArn);
+        Map<String, String> existing = tagsFor(ref);
         if (tags != null && !tags.isEmpty()) {
-            if (api.getTags() == null) {
-                api.setTags(new java.util.HashMap<>());
-            }
-            api.getTags().putAll(tags);
+            existing.putAll(tags);
         }
-        apiStore.put(apiKey(region, apiId), api);
+        storeTags(ref, existing);
     }
 
     public void untagResource(String resourceArn, List<String> tagKeys) {
-        String[] parsed = parseArn(resourceArn);
-        String region = parsed[0];
-        String apiId  = parsed[1];
-        Api api = getApi(region, apiId);
-        if (tagKeys != null && api.getTags() != null) {
-            tagKeys.forEach(k -> api.getTags().remove(k));
+        ResourceRef ref = parseResourceArn(resourceArn);
+        Map<String, String> existing = tagsFor(ref);
+        if (tagKeys != null) {
+            tagKeys.forEach(existing::remove);
         }
-        apiStore.put(apiKey(region, apiId), api);
+        storeTags(ref, existing);
     }
 
     public Map<String, String> getTags(String resourceArn) {
-        String[] parsed = parseArn(resourceArn);
-        String region = parsed[0];
-        String apiId  = parsed[1];
-        Api api = getApi(region, apiId);
-        Map<String, String> tags = api.getTags();
-        return (tags != null) ? new java.util.HashMap<>(tags) : java.util.Collections.emptyMap();
+        return new java.util.HashMap<>(tagsFor(parseResourceArn(resourceArn)));
+    }
+
+    private Map<String, String> tagsFor(ResourceRef ref) {
+        return switch (ref.kind()) {
+            case "api" -> {
+                Api api = getApi(ref.region(), ref.apiId());
+                yield api.getTags() != null ? api.getTags() : new java.util.HashMap<>();
+            }
+            case "stage" -> {
+                Stage stage = getStage(ref.region(), ref.apiId(), ref.childId());
+                yield stage.getTags() != null ? stage.getTags() : new java.util.HashMap<>();
+            }
+            case "vpclink" -> {
+                VpcLink link = getVpcLink(ref.region(), ref.childId());
+                yield link.getTags() != null ? link.getTags() : new java.util.HashMap<>();
+            }
+            default -> new java.util.HashMap<>();
+        };
+    }
+
+    private void storeTags(ResourceRef ref, Map<String, String> tags) {
+        switch (ref.kind()) {
+            case "api" -> {
+                Api api = getApi(ref.region(), ref.apiId());
+                api.setTags(tags);
+                apiStore.put(apiKey(ref.region(), ref.apiId()), api);
+            }
+            case "stage" -> {
+                Stage stage = getStage(ref.region(), ref.apiId(), ref.childId());
+                stage.setTags(tags);
+                stageStore.put(stageKey(ref.region(), ref.apiId(), ref.childId()), stage);
+            }
+            case "vpclink" -> {
+                VpcLink link = getVpcLink(ref.region(), ref.childId());
+                link.setTags(tags);
+                vpcLinkStore.put(vpcLinkKey(ref.region(), ref.childId()), link);
+            }
+            default -> { }
+        }
     }
 
     // ──────────────────────────── Key helpers ────────────────────────────

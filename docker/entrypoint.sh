@@ -61,6 +61,32 @@ EOF
     fi
 fi
 
+# Native images are supposed to expose the Graal binary as /app/application
+# (Dockerfile.native copies *-runner there). Dockerfile.native-package used
+# to COPY the build artifacts in place, leaving only /app/floci-*-runner
+# while CMD still pointed at /app/application. Resolve either path.
+resolve_native_bin() {
+    if [ -x /app/application ]; then
+        printf '%s\n' /app/application
+        return 0
+    fi
+    for f in /app/*-runner; do
+        if [ -x "$f" ]; then
+            printf '%s\n' "$f"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Image CMD is /app/application; rewrite if packaging left only *-runner.
+if [ "${1:-}" = "/app/application" ] && [ ! -x /app/application ]; then
+    if runner="$(resolve_native_bin)"; then
+        shift
+        set -- "$runner" "$@"
+    fi
+fi
+
 # Fall back to the image's default command when invoked with no arguments.
 # Some tooling re-executes this entrypoint directly with an empty argv —
 # Testcontainers' LocalStackContainer does exactly that via its starter
@@ -68,10 +94,10 @@ fi
 # and exit 0 without ever starting the emulator. LocalStack's entrypoint
 # ignores its argv entirely, so this keeps drop-in parity.
 # The default matches the CMD of the image variant: native images ship
-# /app/application, JVM images ship /app/quarkus-app/quarkus-run.jar.
+# /app/application (or floci-*-runner), JVM images ship quarkus-run.jar.
 if [ $# -eq 0 ]; then
-    if [ -x /app/application ]; then
-        set -- /app/application -Dquarkus.http.host=0.0.0.0
+    if runner="$(resolve_native_bin)"; then
+        set -- "$runner" -Dquarkus.http.host=0.0.0.0
     else
         set -- java -jar /app/quarkus-app/quarkus-run.jar -Dquarkus.http.host=0.0.0.0
     fi

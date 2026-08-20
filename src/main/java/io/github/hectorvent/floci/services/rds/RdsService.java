@@ -18,12 +18,16 @@ import io.github.hectorvent.floci.services.rds.container.RdsContainerHandle;
 import io.github.hectorvent.floci.services.rds.container.RdsContainerManager;
 import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import io.github.hectorvent.floci.services.rds.model.DbCluster;
+import io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
+import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceStatus;
 import io.github.hectorvent.floci.services.rds.model.DbParameterGroup;
+import io.github.hectorvent.floci.services.rds.model.DbSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbSubnetGroup;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
@@ -81,6 +85,9 @@ public class RdsService implements Resettable {
     private final StorageBackend<String, DbParameterGroup> parameterGroups;
     private final StorageBackend<String, DbClusterParameterGroup> clusterParameterGroups;
     private final StorageBackend<String, DbSubnetGroup> subnetGroups;
+    private final StorageBackend<String, DbClusterEndpoint> clusterEndpoints;
+    private final StorageBackend<String, DbSnapshot> snapshots;
+    private final StorageBackend<String, DbClusterSnapshot> clusterSnapshots;
     private final RdsContainerManager containerManager;
     private final RdsProxyManager proxyManager;
     private final Ec2Service ec2Service;
@@ -118,6 +125,12 @@ public class RdsService implements Resettable {
                 new TypeReference<Map<String, DbClusterParameterGroup>>() {});
         this.subnetGroups = storageFactory.create("rds", "rds-subnet-groups.json",
                 new TypeReference<Map<String, DbSubnetGroup>>() {});
+        this.clusterEndpoints = storageFactory.create("rds", "rds-cluster-endpoints.json",
+                new TypeReference<Map<String, DbClusterEndpoint>>() {});
+        this.snapshots = storageFactory.create("rds", "rds-snapshots.json",
+                new TypeReference<Map<String, DbSnapshot>>() {});
+        this.clusterSnapshots = storageFactory.create("rds", "rds-cluster-snapshots.json",
+                new TypeReference<Map<String, DbClusterSnapshot>>() {});
     }
 
     RdsService(RdsContainerManager containerManager,
@@ -159,6 +172,9 @@ public class RdsService implements Resettable {
         this.parameterGroups = parameterGroups;
         this.clusterParameterGroups = clusterParameterGroups;
         this.subnetGroups = subnetGroups;
+        this.clusterEndpoints = new InMemoryStorage<>();
+        this.snapshots = new InMemoryStorage<>();
+        this.clusterSnapshots = new InMemoryStorage<>();
     }
 
     public void restorePersistedRuntime() {
@@ -391,6 +407,61 @@ public class RdsService implements Resettable {
         return instance;
     }
 
+    /**
+     * Apply a pending maintenance action. Floci has no real maintenance window,
+     * so an existing resource is a no-op that echoes the identifier. A missing
+     * ARN is {@code ResourceNotFoundFault} — the typed tag Alchemy bindings
+     * decode for {@code ApplyPendingMaintenanceAction}.
+     */
+    public String applyPendingMaintenanceAction(String resourceIdentifier) {
+        if (resourceIdentifier == null || resourceIdentifier.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "ResourceIdentifier is required.", 400);
+        }
+        if (!resourceExists(resourceIdentifier)) {
+            throw new AwsException("ResourceNotFoundFault",
+                    "The resource identified by ResourceIdentifier " + resourceIdentifier + " does not exist.",
+                    404);
+        }
+        return resourceIdentifier;
+    }
+
+    private boolean resourceExists(String resourceName) {
+        String type = "db";
+        String id = resourceName;
+        if (resourceName.startsWith("arn:")) {
+            AwsArnUtils.Arn arn;
+            try {
+                arn = AwsArnUtils.parse(resourceName);
+            } catch (IllegalArgumentException malformed) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            if (!"rds".equals(arn.service())) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            String resource = arn.resource();
+            int sep = resource.indexOf(':');
+            if (sep < 0) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            type = resource.substring(0, sep);
+            id = resource.substring(sep + 1);
+        }
+        return switch (type) {
+            case "db" -> instances.get(id).isPresent();
+            case "cluster" -> clusters.get(id).isPresent();
+            case "subgrp" -> subnetGroups.get(id).isPresent();
+            case "pg" -> parameterGroups.get(id).isPresent();
+            case "cluster-pg" -> clusterParameterGroups.get(id).isPresent();
+            case "cluster-endpoint" -> clusterEndpoints.get(id).isPresent();
+            case "snapshot" -> snapshots.get(id).isPresent();
+            case "cluster-snapshot" -> clusterSnapshots.get(id).isPresent();
+            default -> false;
+        };
+    }
+
     public Map<String, String> listTagsForResource(String resourceName) {
         return Map.copyOf(resolveTagHandle(resourceName).tags());
     }
@@ -468,6 +539,41 @@ public class RdsService implements Resettable {
                 yield new TagHandle(group.getTags(), updated -> {
                     group.setTags(updated);
                     subnetGroups.put(resourceId, group);
+                });
+            }
+            case "pg" -> {
+                DbParameterGroup group = getDbParameterGroup(resourceId);
+                yield new TagHandle(group.getTags(), updated -> {
+                    group.setTags(updated);
+                    parameterGroups.put(resourceId, group);
+                });
+            }
+            case "cluster-pg" -> {
+                DbClusterParameterGroup group = getDbClusterParameterGroup(resourceId);
+                yield new TagHandle(group.getTags(), updated -> {
+                    group.setTags(updated);
+                    clusterParameterGroups.put(resourceId, group);
+                });
+            }
+            case "cluster-endpoint" -> {
+                DbClusterEndpoint endpoint = getDbClusterEndpoint(resourceId);
+                yield new TagHandle(endpoint.getTags(), updated -> {
+                    endpoint.setTags(updated);
+                    clusterEndpoints.put(resourceId, endpoint);
+                });
+            }
+            case "snapshot" -> {
+                DbSnapshot snapshot = getDbSnapshot(resourceId);
+                yield new TagHandle(snapshot.getTags(), updated -> {
+                    snapshot.setTags(updated);
+                    snapshots.put(resourceId, snapshot);
+                });
+            }
+            case "cluster-snapshot" -> {
+                DbClusterSnapshot snapshot = getDbClusterSnapshot(resourceId);
+                yield new TagHandle(snapshot.getTags(), updated -> {
+                    snapshot.setTags(updated);
+                    clusterSnapshots.put(resourceId, snapshot);
                 });
             }
             // Valid RDS resource types Floci does not model yet (og, pg, snapshot, ...) — taggable
@@ -874,6 +980,7 @@ public class RdsService implements Resettable {
                     "DB parameter group " + name + " already exists.", 400);
         }
         DbParameterGroup group = new DbParameterGroup(name, family, description);
+        group.setDbParameterGroupArn(regionResolver.buildArn("rds", regionResolver.getRegion(), "pg:" + name));
         parameterGroups.put(name, group);
         return group;
     }
@@ -904,6 +1011,17 @@ public class RdsService implements Resettable {
         DbParameterGroup group = getDbParameterGroup(name);
         if (parameters != null) {
             group.getParameters().putAll(parameters);
+        }
+        parameterGroups.put(name, group);
+        return group;
+    }
+
+    public DbParameterGroup resetDbParameterGroup(String name, boolean resetAll, Collection<String> parameterNames) {
+        DbParameterGroup group = getDbParameterGroup(name);
+        if (resetAll) {
+            group.getParameters().clear();
+        } else if (parameterNames != null) {
+            parameterNames.forEach(group.getParameters()::remove);
         }
         parameterGroups.put(name, group);
         return group;
@@ -954,6 +1072,8 @@ public class RdsService implements Resettable {
                     "DB cluster parameter group " + name + " already exists.", 400);
         }
         DbClusterParameterGroup group = new DbClusterParameterGroup(name, family, description);
+        group.setDbClusterParameterGroupArn(
+                regionResolver.buildArn("rds", regionResolver.getRegion(), "cluster-pg:" + name));
         clusterParameterGroups.put(name, group);
         return group;
     }
@@ -1043,6 +1163,193 @@ public class RdsService implements Resettable {
         }
         clusterParameterGroups.put(name, group);
         return group;
+    }
+
+    public DbClusterParameterGroup resetDbClusterParameterGroup(String name, boolean resetAll,
+                                                               Collection<String> parameterNames) {
+        if (managedClusterParameterGroup(name) != null) {
+            throw new AwsException("InvalidDBParameterGroupState",
+                    "The default DB cluster parameter group cannot be modified.", 400);
+        }
+        DbClusterParameterGroup group = getDbClusterParameterGroup(name);
+        if (resetAll) {
+            group.getParameters().clear();
+        } else if (parameterNames != null) {
+            parameterNames.forEach(group.getParameters()::remove);
+        }
+        clusterParameterGroups.put(name, group);
+        return group;
+    }
+
+    // ── Cluster endpoints ─────────────────────────────────────────────────────
+
+    public DbClusterEndpoint createDbClusterEndpoint(String identifier, String clusterId,
+                                                     String endpointType, List<String> staticMembers,
+                                                     List<String> excludedMembers, Map<String, String> tags) {
+        if (identifier == null || identifier.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "DBClusterEndpointIdentifier is required.", 400);
+        }
+        getDbCluster(clusterId);
+        if (clusterEndpoints.get(identifier).isPresent()) {
+            throw new AwsException("DBClusterEndpointAlreadyExistsFault",
+                    "DB cluster endpoint " + identifier + " already exists.", 400);
+        }
+        String region = regionResolver.getRegion();
+        DbClusterEndpoint endpoint = new DbClusterEndpoint();
+        endpoint.setDbClusterEndpointIdentifier(identifier);
+        endpoint.setDbClusterIdentifier(clusterId);
+        endpoint.setCustomEndpointType(endpointType != null ? endpointType : "ANY");
+        endpoint.setStaticMembers(staticMembers);
+        endpoint.setExcludedMembers(excludedMembers);
+        endpoint.setEndpoint(identifier + ".cluster-custom." + region + ".rds.amazonaws.com");
+        endpoint.setDbClusterEndpointArn(
+                regionResolver.buildArn("rds", region, "cluster-endpoint:" + identifier));
+        if (tags != null) {
+            endpoint.setTags(tags);
+        }
+        clusterEndpoints.put(identifier, endpoint);
+        return endpoint;
+    }
+
+    public DbClusterEndpoint getDbClusterEndpoint(String identifier) {
+        return clusterEndpoints.get(identifier).orElseThrow(() ->
+                new AwsException("DBClusterEndpointNotFoundFault",
+                        "DBClusterEndpoint " + identifier + " not found.", 400));
+    }
+
+    public Collection<DbClusterEndpoint> listDbClusterEndpoints(String clusterId, String identifier) {
+        return clusterEndpoints.scan(k -> true).stream()
+                .filter(e -> clusterId == null || clusterId.isBlank() || clusterId.equals(e.getDbClusterIdentifier()))
+                .filter(e -> identifier == null || identifier.isBlank()
+                        || identifier.equals(e.getDbClusterEndpointIdentifier()))
+                .toList();
+    }
+
+    public DbClusterEndpoint modifyDbClusterEndpoint(String identifier, String endpointType,
+                                                     List<String> staticMembers, List<String> excludedMembers) {
+        DbClusterEndpoint endpoint = getDbClusterEndpoint(identifier);
+        if (endpointType != null) {
+            endpoint.setCustomEndpointType(endpointType);
+        }
+        if (staticMembers != null) {
+            endpoint.setStaticMembers(staticMembers);
+        }
+        if (excludedMembers != null) {
+            endpoint.setExcludedMembers(excludedMembers);
+        }
+        clusterEndpoints.put(identifier, endpoint);
+        return endpoint;
+    }
+
+    public void deleteDbClusterEndpoint(String identifier) {
+        getDbClusterEndpoint(identifier);
+        clusterEndpoints.delete(identifier);
+    }
+
+    // ── Snapshots ─────────────────────────────────────────────────────────────
+
+    public DbSnapshot createDbSnapshot(String snapshotId, String instanceId) {
+        DbInstance instance = getDbInstance(instanceId);
+        if (snapshots.get(snapshotId).isPresent()) {
+            throw new AwsException("DBSnapshotAlreadyExists",
+                    "DB snapshot " + snapshotId + " already exists.", 400);
+        }
+        DbSnapshot snapshot = new DbSnapshot();
+        snapshot.setDbSnapshotIdentifier(snapshotId);
+        snapshot.setDbInstanceIdentifier(instanceId);
+        snapshot.setEngine(instance.getEngine() != null ? instance.getEngine().name().toLowerCase() : "postgres");
+        snapshot.setDbSnapshotArn(regionResolver.buildArn("rds", regionResolver.getRegion(), "snapshot:" + snapshotId));
+        snapshots.put(snapshotId, snapshot);
+        return snapshot;
+    }
+
+    public DbSnapshot getDbSnapshot(String snapshotId) {
+        return snapshots.get(snapshotId).orElseThrow(() ->
+                new AwsException("DBSnapshotNotFound",
+                        "DBSnapshot " + snapshotId + " not found.", 404));
+    }
+
+    public Collection<DbSnapshot> listDbSnapshots(String snapshotId, String instanceId) {
+        if (snapshotId != null && !snapshotId.isBlank()) {
+            return snapshots.get(snapshotId).map(List::of).orElse(List.of());
+        }
+        return snapshots.scan(k -> true).stream()
+                .filter(s -> instanceId == null || instanceId.isBlank()
+                        || instanceId.equals(s.getDbInstanceIdentifier()))
+                .toList();
+    }
+
+    public void deleteDbSnapshot(String snapshotId) {
+        getDbSnapshot(snapshotId);
+        snapshots.delete(snapshotId);
+    }
+
+    public DbSnapshot copyDbSnapshot(String sourceId, String targetId) {
+        DbSnapshot source = getDbSnapshot(sourceId);
+        if (snapshots.get(targetId).isPresent()) {
+            throw new AwsException("DBSnapshotAlreadyExists",
+                    "DB snapshot " + targetId + " already exists.", 400);
+        }
+        DbSnapshot copy = new DbSnapshot();
+        copy.setDbSnapshotIdentifier(targetId);
+        copy.setDbInstanceIdentifier(source.getDbInstanceIdentifier());
+        copy.setEngine(source.getEngine());
+        copy.setDbSnapshotArn(regionResolver.buildArn("rds", regionResolver.getRegion(), "snapshot:" + targetId));
+        snapshots.put(targetId, copy);
+        return copy;
+    }
+
+    public DbClusterSnapshot createDbClusterSnapshot(String snapshotId, String clusterId) {
+        DbCluster cluster = getDbCluster(clusterId);
+        if (clusterSnapshots.get(snapshotId).isPresent()) {
+            throw new AwsException("DBClusterSnapshotAlreadyExistsFault",
+                    "DB cluster snapshot " + snapshotId + " already exists.", 400);
+        }
+        DbClusterSnapshot snapshot = new DbClusterSnapshot();
+        snapshot.setDbClusterSnapshotIdentifier(snapshotId);
+        snapshot.setDbClusterIdentifier(clusterId);
+        snapshot.setEngine(cluster.getEngine() != null ? cluster.getEngine().name().toLowerCase() : "aurora-postgresql");
+        snapshot.setDbClusterSnapshotArn(
+                regionResolver.buildArn("rds", regionResolver.getRegion(), "cluster-snapshot:" + snapshotId));
+        clusterSnapshots.put(snapshotId, snapshot);
+        return snapshot;
+    }
+
+    public DbClusterSnapshot getDbClusterSnapshot(String snapshotId) {
+        return clusterSnapshots.get(snapshotId).orElseThrow(() ->
+                new AwsException("DBClusterSnapshotNotFoundFault",
+                        "DBClusterSnapshot " + snapshotId + " not found.", 404));
+    }
+
+    public Collection<DbClusterSnapshot> listDbClusterSnapshots(String snapshotId, String clusterId) {
+        if (snapshotId != null && !snapshotId.isBlank()) {
+            return clusterSnapshots.get(snapshotId).map(List::of).orElse(List.of());
+        }
+        return clusterSnapshots.scan(k -> true).stream()
+                .filter(s -> clusterId == null || clusterId.isBlank()
+                        || clusterId.equals(s.getDbClusterIdentifier()))
+                .toList();
+    }
+
+    public void deleteDbClusterSnapshot(String snapshotId) {
+        getDbClusterSnapshot(snapshotId);
+        clusterSnapshots.delete(snapshotId);
+    }
+
+    public DbClusterSnapshot copyDbClusterSnapshot(String sourceId, String targetId) {
+        DbClusterSnapshot source = getDbClusterSnapshot(sourceId);
+        if (clusterSnapshots.get(targetId).isPresent()) {
+            throw new AwsException("DBClusterSnapshotAlreadyExistsFault",
+                    "DB cluster snapshot " + targetId + " already exists.", 400);
+        }
+        DbClusterSnapshot copy = new DbClusterSnapshot();
+        copy.setDbClusterSnapshotIdentifier(targetId);
+        copy.setDbClusterIdentifier(source.getDbClusterIdentifier());
+        copy.setEngine(source.getEngine());
+        copy.setDbClusterSnapshotArn(
+                regionResolver.buildArn("rds", regionResolver.getRegion(), "cluster-snapshot:" + targetId));
+        clusterSnapshots.put(targetId, copy);
+        return copy;
     }
 
     // ── Password validation callbacks ─────────────────────────────────────────

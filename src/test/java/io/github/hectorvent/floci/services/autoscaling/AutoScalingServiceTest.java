@@ -614,6 +614,86 @@ class AutoScalingServiceTest {
                         .getLaunchTemplateSpecification().getLaunchTemplateId());
     }
 
+    @Test
+    void scheduledActionRoundTripAndMissingGroupIsValidationError() {
+        var created = service.putScheduledUpdateGroupAction(REGION, "test-asg", "morning",
+                "0 9 * * *", null, null, "America/New_York", 0, 3, 1);
+
+        assertTrue(created.getScheduledActionArn().startsWith("arn:aws:autoscaling:"));
+        assertEquals("0 9 * * *", created.getRecurrence());
+        assertEquals(1, service.describeScheduledActions(REGION, "test-asg", List.of("morning")).size());
+
+        service.putScheduledUpdateGroupAction(REGION, "test-asg", "morning",
+                "0 18 * * *", null, null, "America/New_York", 0, 3, 2);
+        assertEquals("0 18 * * *",
+                service.describeScheduledActions(REGION, "test-asg", List.of("morning")).getFirst().getRecurrence());
+        assertEquals(created.getScheduledActionArn(),
+                service.describeScheduledActions(REGION, "test-asg", List.of("morning")).getFirst().getScheduledActionArn());
+
+        service.deleteScheduledAction(REGION, "test-asg", "morning");
+        assertEquals(0, service.describeScheduledActions(REGION, "test-asg", List.of("morning")).size());
+
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.describeScheduledActions(REGION, "gone-asg", List.of("morning")));
+        assertEquals("ValidationError", missing.getErrorCode());
+        assertTrue(missing.getMessage().contains("not found"));
+    }
+
+    @Test
+    void executePolicyRejectsUnknownPolicyAndRecordsActivityForKnown() {
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.executePolicy(REGION, "test-asg", "alchemy-test-bogus-policy"));
+        assertEquals("ValidationError", missing.getErrorCode());
+
+        service.putScalingPolicy(REGION, "test-asg", "scale-out", "SimpleScaling",
+                "ChangeInCapacity", 1, 30, null, null);
+        service.executePolicy(REGION, "test-asg", "scale-out");
+        assertFalse(service.describeScalingActivities(REGION, "test-asg").isEmpty());
+    }
+
+    @Test
+    void instanceProtectionHealthAndStandbyMutateStoredState() {
+        AutoScalingGroupFixture.addInstance(service, REGION, "test-asg", "i-standby",
+                "InService", "lt-original", "1");
+
+        service.setInstanceProtection(REGION, "test-asg", List.of("i-standby"), true);
+        assertTrue(service.describeAutoScalingInstances(REGION, List.of("i-standby"))
+                .getFirst().isProtectedFromScaleIn());
+
+        service.setInstanceHealth(REGION, "i-standby", "Unhealthy", true);
+        assertEquals("Unhealthy", service.describeAutoScalingInstances(REGION, List.of("i-standby"))
+                .getFirst().getHealthStatus());
+
+        service.enterStandby(REGION, "test-asg", List.of("i-standby"), false);
+        assertEquals("Standby", service.describeAutoScalingInstances(REGION, List.of("i-standby"))
+                .getFirst().getLifecycleState());
+
+        service.exitStandby(REGION, "test-asg", List.of("i-standby"));
+        assertEquals("InService", service.describeAutoScalingInstances(REGION, List.of("i-standby"))
+                .getFirst().getLifecycleState());
+
+        AwsException unknown = assertThrows(AwsException.class,
+                () -> service.setInstanceProtection(REGION, "test-asg", List.of("i-missing"), true));
+        assertEquals("ValidationError", unknown.getErrorCode());
+
+        AwsException unknownHealth = assertThrows(AwsException.class,
+                () -> service.setInstanceHealth(REGION, "i-00000000000000000", "Unhealthy", true));
+        assertEquals("AccessDenied", unknownHealth.getErrorCode());
+        assertEquals(403, unknownHealth.getHttpStatus());
+
+        AwsException unknownTerminate = assertThrows(AwsException.class,
+                () -> service.terminateInstanceInAutoScalingGroup(REGION, "i-00000000000000000", false));
+        assertEquals("AccessDenied", unknownTerminate.getErrorCode());
+        assertEquals(403, unknownTerminate.getHttpStatus());
+    }
+
+    @Test
+    void cancelInstanceRefreshWithoutActiveRefreshIsNotFound() {
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.cancelInstanceRefresh(REGION, "test-asg"));
+        assertEquals("ActiveInstanceRefreshNotFound", missing.getErrorCode());
+    }
+
     private void createWithMixedInstancesPolicy(String name, MixedInstancesPolicy policy) {
         service.createAutoScalingGroup(REGION,
                 name,

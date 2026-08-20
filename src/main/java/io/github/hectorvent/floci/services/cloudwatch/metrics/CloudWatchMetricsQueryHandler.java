@@ -44,6 +44,7 @@ public class CloudWatchMetricsQueryHandler {
             case "ListTagsForResource" -> handleListTagsForResource(params, region);
             case "TagResource" -> handleTagResource(params, region);
             case "UntagResource" -> handleUntagResource(params, region);
+            case "DescribeInsightRules" -> handleDescribeInsightRules();
             default -> AwsQueryResponse.error("UnsupportedOperation",
                     "Operation " + action + " is not supported by CloudWatch Query.", AwsNamespaces.CW, 400);
         };
@@ -458,6 +459,11 @@ public class CloudWatchMetricsQueryHandler {
                 return null;
             }
         }
+    }
+
+    private Response handleDescribeInsightRules() {
+        String result = new XmlBuilder().start("InsightRules").end("InsightRules").build();
+        return Response.ok(AwsQueryResponse.envelope("DescribeInsightRules", AwsNamespaces.CW, result)).build();
     }
 
     private int parseIntParam(MultivaluedMap<String, String> params, String name, int defaultValue) {

@@ -13,6 +13,9 @@ public class LogGroup {
     private String logGroupName;
     private long createdTime;
     private Integer retentionInDays;
+    private Boolean deletionProtectionEnabled;
+    private String logGroupClass;
+    private String kmsKeyId;
     private Map<String, String> tags = new HashMap<>();
 
     public LogGroup() {}
@@ -25,6 +28,15 @@ public class LogGroup {
 
     public Integer getRetentionInDays() { return retentionInDays; }
     public void setRetentionInDays(Integer retentionInDays) { this.retentionInDays = retentionInDays; }
+
+    public Boolean getDeletionProtectionEnabled() { return deletionProtectionEnabled; }
+    public void setDeletionProtectionEnabled(Boolean deletionProtectionEnabled) { this.deletionProtectionEnabled = deletionProtectionEnabled; }
+
+    public String getLogGroupClass() { return logGroupClass; }
+    public void setLogGroupClass(String logGroupClass) { this.logGroupClass = logGroupClass; }
+
+    public String getKmsKeyId() { return kmsKeyId; }
+    public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }

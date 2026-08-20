@@ -794,6 +794,60 @@ class AutoScalingIntegrationTest {
     // ── Cleanup ───────────────────────────────────────────────────────────────
 
     @Test
+    @Order(31)
+    void scheduledActionAndExecutePolicy() {
+        given()
+                .formParam("Action", "PutScheduledUpdateGroupAction")
+                .formParam("AutoScalingGroupName", "my-asg")
+                .formParam("ScheduledActionName", "morning")
+                .formParam("Recurrence", "0 9 * * *")
+                .formParam("TimeZone", "America/New_York")
+                .formParam("MinSize", "0")
+                .formParam("MaxSize", "3")
+                .formParam("DesiredCapacity", "1")
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .body(containsString("PutScheduledUpdateGroupActionResponse"));
+
+        given()
+                .formParam("Action", "DescribeScheduledActions")
+                .formParam("AutoScalingGroupName", "my-asg")
+                .formParam("ScheduledActionNames.member.1", "morning")
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .body(containsString("<ScheduledActionName>morning</ScheduledActionName>"))
+                .body(containsString("<Recurrence>0 9 * * *</Recurrence>"))
+                .body(containsString("<DesiredCapacity>1</DesiredCapacity>"));
+
+        given()
+                .formParam("Action", "ExecutePolicy")
+                .formParam("AutoScalingGroupName", "my-asg")
+                .formParam("PolicyName", "missing-policy")
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(400)
+                .body(containsString("ValidationError"));
+
+        given()
+                .formParam("Action", "DeleteScheduledAction")
+                .formParam("AutoScalingGroupName", "my-asg")
+                .formParam("ScheduledActionName", "morning")
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200);
+    }
+
+    @Test
     @Order(32)
     void deleteAutoScalingGroup() {
         given()

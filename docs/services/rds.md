@@ -37,9 +37,29 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 | `DeleteDBClusterParameterGroup` | - |
 | `ModifyDBClusterParameterGroup` | - |
 | `DescribeDBClusterParameters` | - |
-| `DescribeDBSnapshots` | - |
-| `DescribeDBProxies` | - |
-| `DescribeDBClusterSnapshots` | - |
+| `DescribeDBSnapshots` | List instance snapshots |
+| `CreateDBSnapshot` | Create a manual instance snapshot |
+| `DeleteDBSnapshot` | Delete a manual instance snapshot |
+| `CopyDBSnapshot` | Copy an instance snapshot |
+| `DescribeDBProxies` | List DB proxies (empty until proxies are modeled) |
+| `DescribeDBClusterSnapshots` | List cluster snapshots |
+| `CreateDBClusterSnapshot` | Create a manual cluster snapshot |
+| `DeleteDBClusterSnapshot` | Delete a manual cluster snapshot |
+| `CopyDBClusterSnapshot` | Copy a cluster snapshot |
+| `DescribeDBClusterEndpoints` | List custom cluster endpoints |
+| `CreateDBClusterEndpoint` | Create a custom cluster endpoint |
+| `ModifyDBClusterEndpoint` | Update a custom cluster endpoint |
+| `DeleteDBClusterEndpoint` | Delete a custom cluster endpoint |
+| `ResetDBParameterGroup` | Reset user parameters on a DB parameter group |
+| `ResetDBClusterParameterGroup` | Reset user parameters on a cluster parameter group |
+| `DescribeEvents` | List RDS events (empty locally) |
+| `DescribePendingMaintenanceActions` | List pending maintenance (empty locally) |
+| `ApplyPendingMaintenanceAction` | Opt in to pending maintenance; missing ARN is `ResourceNotFoundFault` |
+| `StartDBInstance` | Return the instance unchanged |
+| `StopDBInstance` | Return the instance unchanged |
+| `StartDBCluster` | Return the cluster unchanged |
+| `StopDBCluster` | Return the cluster unchanged |
+| `FailoverDBCluster` | Return the cluster unchanged |
 | `AddTagsToResource` | Add tags to a DB resource |
 | `ListTagsForResource` | List tags for a DB resource |
 | `RemoveTagsFromResource` | Remove tags from a DB resource |

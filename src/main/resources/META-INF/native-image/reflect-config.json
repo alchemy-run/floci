@@ -1,5 +1,11 @@
 [
   {
+    "name": "io.github.hectorvent.floci.services.appsync.graphql.ReturnDirective",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
     "name": "io.github.hectorvent.floci.services.apigateway.VtlTemplateEngine$InputVariable",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,

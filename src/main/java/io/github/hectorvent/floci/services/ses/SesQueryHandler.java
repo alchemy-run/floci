@@ -16,6 +16,9 @@ import io.github.hectorvent.floci.services.ses.model.EventDestination;
 import io.github.hectorvent.floci.services.ses.model.Identity;
 import io.github.hectorvent.floci.services.ses.model.KinesisFirehoseDestination;
 import io.github.hectorvent.floci.services.ses.model.MessageTag;
+import io.github.hectorvent.floci.services.ses.model.ReceiptAction;
+import io.github.hectorvent.floci.services.ses.model.ReceiptFilter;
+import io.github.hectorvent.floci.services.ses.model.ReceiptRule;
 import io.github.hectorvent.floci.services.ses.model.ReceiptRuleSet;
 import io.github.hectorvent.floci.services.ses.model.SnsDestination;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -62,6 +65,7 @@ public class SesQueryHandler {
                 case "GetIdentityVerificationAttributes" -> handleGetIdentityVerificationAttributes(params, region);
                 case "SendEmail" -> handleSendEmail(params, region);
                 case "SendRawEmail" -> handleSendRawEmail(params, region);
+                case "SendBounce" -> handleSendBounce(params, region);
                 case "GetSendQuota" -> handleGetSendQuota(region);
                 case "GetSendStatistics" -> handleGetSendStatistics(region);
                 case "GetAccountSendingEnabled" -> handleGetAccountSendingEnabled(region);
@@ -125,6 +129,14 @@ public class SesQueryHandler {
                 case "DeleteReceiptRuleSet" -> handleDeleteReceiptRuleSet(params, region);
                 case "SetActiveReceiptRuleSet" -> handleSetActiveReceiptRuleSet(params, region);
                 case "DescribeActiveReceiptRuleSet" -> handleDescribeActiveReceiptRuleSet(region);
+                case "CreateReceiptRule" -> handleCreateReceiptRule(params, region);
+                case "DescribeReceiptRule" -> handleDescribeReceiptRule(params, region);
+                case "UpdateReceiptRule" -> handleUpdateReceiptRule(params, region);
+                case "DeleteReceiptRule" -> handleDeleteReceiptRule(params, region);
+                case "SetReceiptRulePosition" -> handleSetReceiptRulePosition(params, region);
+                case "CreateReceiptFilter" -> handleCreateReceiptFilter(params, region);
+                case "ListReceiptFilters" -> handleListReceiptFilters(region);
+                case "DeleteReceiptFilter" -> handleDeleteReceiptFilter(params, region);
                 default -> AwsQueryResponse.error("UnsupportedOperation",
                         "Operation " + action + " is not supported by SES.", AwsNamespaces.SES, 400);
             };
@@ -192,6 +204,15 @@ public class SesQueryHandler {
         }
         xml.end("VerificationAttributes");
         return Response.ok(AwsQueryResponse.envelope("GetIdentityVerificationAttributes", AwsNamespaces.SES, xml.build())).build();
+    }
+
+    private Response handleSendBounce(MultivaluedMap<String, String> params, String region) {
+        String bounceId = sesService.sendBounce(
+                getParam(params, "BounceSender"),
+                getParam(params, "OriginalMessageId"),
+                region);
+        String result = new XmlBuilder().elem("MessageId", bounceId).build();
+        return Response.ok(AwsQueryResponse.envelope("SendBounce", AwsNamespaces.SES, result)).build();
     }
 
     private Response handleSendEmail(MultivaluedMap<String, String> params, String region) {
@@ -922,7 +943,7 @@ public class SesQueryHandler {
         ReceiptRuleSet ruleSet = sesService.describeReceiptRuleSet(getParam(params, "RuleSetName"), region);
         XmlBuilder xml = new XmlBuilder();
         writeReceiptRuleSetMetadata(xml, ruleSet);
-        xml.start("Rules").end("Rules");
+        writeReceiptRules(xml, ruleSet.getRules());
         return Response.ok(AwsQueryResponse.envelope(
                 "DescribeReceiptRuleSet", AwsNamespaces.SES, xml.build())).build();
     }
@@ -958,7 +979,7 @@ public class SesQueryHandler {
         // When no rule set is active AWS returns an empty result (no Metadata element).
         if (active != null) {
             writeReceiptRuleSetMetadata(xml, active);
-            xml.start("Rules").end("Rules");
+            writeReceiptRules(xml, active.getRules());
         }
         return Response.ok(AwsQueryResponse.envelope(
                 "DescribeActiveReceiptRuleSet", AwsNamespaces.SES, xml.build())).build();
@@ -974,6 +995,271 @@ public class SesQueryHandler {
         xml.elem("Name", ruleSet.getName());
         if (ruleSet.getCreatedTimestamp() != null) {
             xml.elem("CreatedTimestamp", ruleSet.getCreatedTimestamp().toString());
+        }
+    }
+
+    private Response handleCreateReceiptRule(MultivaluedMap<String, String> params, String region) {
+        String ruleSetName = requireParam(params, "RuleSetName");
+        String after = getParam(params, "After");
+        ReceiptRule rule = readReceiptRule(params, "Rule");
+        sesService.createReceiptRule(ruleSetName, after, rule, region);
+        return Response.ok(AwsQueryResponse.envelopeEmptyResult(
+                "CreateReceiptRule", AwsNamespaces.SES)).build();
+    }
+
+    private Response handleDescribeReceiptRule(MultivaluedMap<String, String> params, String region) {
+        ReceiptRule rule = sesService.describeReceiptRule(
+                requireParam(params, "RuleSetName"), requireParam(params, "RuleName"), region);
+        XmlBuilder xml = new XmlBuilder();
+        xml.start("Rule");
+        writeReceiptRuleFields(xml, rule);
+        xml.end("Rule");
+        return Response.ok(AwsQueryResponse.envelope(
+                "DescribeReceiptRule", AwsNamespaces.SES, xml.build())).build();
+    }
+
+    private Response handleUpdateReceiptRule(MultivaluedMap<String, String> params, String region) {
+        String ruleSetName = requireParam(params, "RuleSetName");
+        ReceiptRule rule = readReceiptRule(params, "Rule");
+        sesService.updateReceiptRule(ruleSetName, rule, region);
+        return Response.ok(AwsQueryResponse.envelopeEmptyResult(
+                "UpdateReceiptRule", AwsNamespaces.SES)).build();
+    }
+
+    private Response handleDeleteReceiptRule(MultivaluedMap<String, String> params, String region) {
+        sesService.deleteReceiptRule(
+                requireParam(params, "RuleSetName"), requireParam(params, "RuleName"), region);
+        return Response.ok(AwsQueryResponse.envelopeEmptyResult(
+                "DeleteReceiptRule", AwsNamespaces.SES)).build();
+    }
+
+    private Response handleSetReceiptRulePosition(MultivaluedMap<String, String> params, String region) {
+        sesService.setReceiptRulePosition(
+                requireParam(params, "RuleSetName"),
+                requireParam(params, "RuleName"),
+                getParam(params, "After"),
+                region);
+        return Response.ok(AwsQueryResponse.envelopeEmptyResult(
+                "SetReceiptRulePosition", AwsNamespaces.SES)).build();
+    }
+
+    private Response handleCreateReceiptFilter(MultivaluedMap<String, String> params, String region) {
+        sesService.createReceiptFilter(
+                requireParam(params, "Filter.Name"),
+                requireParam(params, "Filter.IpFilter.Policy"),
+                requireParam(params, "Filter.IpFilter.Cidr"),
+                region);
+        return Response.ok(AwsQueryResponse.envelopeEmptyResult(
+                "CreateReceiptFilter", AwsNamespaces.SES)).build();
+    }
+
+    private Response handleListReceiptFilters(String region) {
+        XmlBuilder xml = new XmlBuilder().start("Filters");
+        for (ReceiptFilter filter : sesService.listReceiptFilters(region)) {
+            xml.start("member")
+                    .elem("Name", filter.getName())
+                    .start("IpFilter")
+                    .elem("Policy", filter.getPolicy())
+                    .elem("Cidr", filter.getCidr())
+                    .end("IpFilter")
+                    .end("member");
+        }
+        xml.end("Filters");
+        return Response.ok(AwsQueryResponse.envelope(
+                "ListReceiptFilters", AwsNamespaces.SES, xml.build())).build();
+    }
+
+    private Response handleDeleteReceiptFilter(MultivaluedMap<String, String> params, String region) {
+        sesService.deleteReceiptFilter(requireParam(params, "FilterName"), region);
+        return Response.ok(AwsQueryResponse.envelopeEmptyResult(
+                "DeleteReceiptFilter", AwsNamespaces.SES)).build();
+    }
+
+    private ReceiptRule readReceiptRule(MultivaluedMap<String, String> params, String prefix) {
+        ReceiptRule rule = new ReceiptRule();
+        rule.setName(getParam(params, prefix + ".Name"));
+        String enabled = getParam(params, prefix + ".Enabled");
+        if (enabled != null) {
+            rule.setEnabled(Boolean.parseBoolean(enabled));
+        }
+        String scan = getParam(params, prefix + ".ScanEnabled");
+        if (scan != null) {
+            rule.setScanEnabled(Boolean.parseBoolean(scan));
+        }
+        rule.setTlsPolicy(getParam(params, prefix + ".TlsPolicy"));
+        rule.setRecipients(extractMembers(params, prefix + ".Recipients"));
+        List<ReceiptAction> actions = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            String actionPrefix = prefix + ".Actions.member." + i;
+            if (!hasReceiptAction(params, actionPrefix)) {
+                break;
+            }
+            actions.add(readReceiptAction(params, actionPrefix));
+        }
+        rule.setActions(actions);
+        return rule;
+    }
+
+    private static boolean hasReceiptAction(MultivaluedMap<String, String> params, String prefix) {
+        return params.keySet().stream().anyMatch(k -> k.startsWith(prefix + "."));
+    }
+
+    private ReceiptAction readReceiptAction(MultivaluedMap<String, String> params, String prefix) {
+        ReceiptAction action = new ReceiptAction();
+        if (getParam(params, prefix + ".AddHeaderAction.HeaderName") != null
+                || getParam(params, prefix + ".AddHeaderAction.HeaderValue") != null) {
+            ReceiptAction.AddHeaderAction add = new ReceiptAction.AddHeaderAction();
+            add.setHeaderName(getParam(params, prefix + ".AddHeaderAction.HeaderName"));
+            add.setHeaderValue(getParam(params, prefix + ".AddHeaderAction.HeaderValue"));
+            action.setAddHeaderAction(add);
+        }
+        if (getParam(params, prefix + ".StopAction.Scope") != null) {
+            ReceiptAction.StopAction stop = new ReceiptAction.StopAction();
+            stop.setScope(getParam(params, prefix + ".StopAction.Scope"));
+            stop.setTopicArn(getParam(params, prefix + ".StopAction.TopicArn"));
+            action.setStopAction(stop);
+        }
+        if (getParam(params, prefix + ".S3Action.BucketName") != null) {
+            ReceiptAction.S3Action s3 = new ReceiptAction.S3Action();
+            s3.setBucketName(getParam(params, prefix + ".S3Action.BucketName"));
+            s3.setTopicArn(getParam(params, prefix + ".S3Action.TopicArn"));
+            s3.setObjectKeyPrefix(getParam(params, prefix + ".S3Action.ObjectKeyPrefix"));
+            s3.setKmsKeyArn(getParam(params, prefix + ".S3Action.KmsKeyArn"));
+            s3.setIamRoleArn(getParam(params, prefix + ".S3Action.IamRoleArn"));
+            action.setS3Action(s3);
+        }
+        if (getParam(params, prefix + ".BounceAction.SmtpReplyCode") != null
+                || getParam(params, prefix + ".BounceAction.Sender") != null) {
+            ReceiptAction.BounceAction bounce = new ReceiptAction.BounceAction();
+            bounce.setSmtpReplyCode(getParam(params, prefix + ".BounceAction.SmtpReplyCode"));
+            bounce.setStatusCode(getParam(params, prefix + ".BounceAction.StatusCode"));
+            bounce.setMessage(getParam(params, prefix + ".BounceAction.Message"));
+            bounce.setSender(getParam(params, prefix + ".BounceAction.Sender"));
+            bounce.setTopicArn(getParam(params, prefix + ".BounceAction.TopicArn"));
+            action.setBounceAction(bounce);
+        }
+        if (getParam(params, prefix + ".LambdaAction.FunctionArn") != null) {
+            ReceiptAction.LambdaAction lambda = new ReceiptAction.LambdaAction();
+            lambda.setFunctionArn(getParam(params, prefix + ".LambdaAction.FunctionArn"));
+            lambda.setTopicArn(getParam(params, prefix + ".LambdaAction.TopicArn"));
+            lambda.setInvocationType(getParam(params, prefix + ".LambdaAction.InvocationType"));
+            action.setLambdaAction(lambda);
+        }
+        if (getParam(params, prefix + ".SNSAction.TopicArn") != null) {
+            ReceiptAction.SnsAction sns = new ReceiptAction.SnsAction();
+            sns.setTopicArn(getParam(params, prefix + ".SNSAction.TopicArn"));
+            sns.setEncoding(getParam(params, prefix + ".SNSAction.Encoding"));
+            action.setSnsAction(sns);
+        }
+        if (getParam(params, prefix + ".WorkmailAction.OrganizationArn") != null) {
+            ReceiptAction.WorkmailAction workmail = new ReceiptAction.WorkmailAction();
+            workmail.setOrganizationArn(getParam(params, prefix + ".WorkmailAction.OrganizationArn"));
+            workmail.setTopicArn(getParam(params, prefix + ".WorkmailAction.TopicArn"));
+            action.setWorkmailAction(workmail);
+        }
+        if (getParam(params, prefix + ".ConnectAction.InstanceARN") != null) {
+            ReceiptAction.ConnectAction connect = new ReceiptAction.ConnectAction();
+            connect.setInstanceArn(getParam(params, prefix + ".ConnectAction.InstanceARN"));
+            connect.setIamRoleArn(getParam(params, prefix + ".ConnectAction.IAMRoleARN"));
+            action.setConnectAction(connect);
+        }
+        return action;
+    }
+
+    private void writeReceiptRules(XmlBuilder xml, List<ReceiptRule> rules) {
+        xml.start("Rules");
+        if (rules != null) {
+            for (ReceiptRule rule : rules) {
+                xml.start("member");
+                writeReceiptRuleFields(xml, rule);
+                xml.end("member");
+            }
+        }
+        xml.end("Rules");
+    }
+
+    private void writeReceiptRuleFields(XmlBuilder xml, ReceiptRule rule) {
+        xml.elem("Name", rule.getName());
+        if (rule.getEnabled() != null) {
+            xml.elem("Enabled", String.valueOf(rule.getEnabled()));
+        }
+        xml.elem("TlsPolicy", rule.getTlsPolicy());
+        xml.start("Recipients");
+        if (rule.getRecipients() != null) {
+            for (String recipient : rule.getRecipients()) {
+                xml.elem("member", recipient);
+            }
+        }
+        xml.end("Recipients");
+        xml.start("Actions");
+        if (rule.getActions() != null) {
+            for (ReceiptAction action : rule.getActions()) {
+                xml.start("member");
+                writeReceiptAction(xml, action);
+                xml.end("member");
+            }
+        }
+        xml.end("Actions");
+        if (rule.getScanEnabled() != null) {
+            xml.elem("ScanEnabled", String.valueOf(rule.getScanEnabled()));
+        }
+    }
+
+    private static void writeReceiptAction(XmlBuilder xml, ReceiptAction action) {
+        if (action.getAddHeaderAction() != null) {
+            xml.start("AddHeaderAction")
+                    .elem("HeaderName", action.getAddHeaderAction().getHeaderName())
+                    .elem("HeaderValue", action.getAddHeaderAction().getHeaderValue())
+                    .end("AddHeaderAction");
+        }
+        if (action.getStopAction() != null) {
+            xml.start("StopAction")
+                    .elem("Scope", action.getStopAction().getScope())
+                    .elem("TopicArn", action.getStopAction().getTopicArn())
+                    .end("StopAction");
+        }
+        if (action.getS3Action() != null) {
+            xml.start("S3Action")
+                    .elem("TopicArn", action.getS3Action().getTopicArn())
+                    .elem("BucketName", action.getS3Action().getBucketName())
+                    .elem("ObjectKeyPrefix", action.getS3Action().getObjectKeyPrefix())
+                    .elem("KmsKeyArn", action.getS3Action().getKmsKeyArn())
+                    .elem("IamRoleArn", action.getS3Action().getIamRoleArn())
+                    .end("S3Action");
+        }
+        if (action.getBounceAction() != null) {
+            xml.start("BounceAction")
+                    .elem("TopicArn", action.getBounceAction().getTopicArn())
+                    .elem("SmtpReplyCode", action.getBounceAction().getSmtpReplyCode())
+                    .elem("StatusCode", action.getBounceAction().getStatusCode())
+                    .elem("Message", action.getBounceAction().getMessage())
+                    .elem("Sender", action.getBounceAction().getSender())
+                    .end("BounceAction");
+        }
+        if (action.getLambdaAction() != null) {
+            xml.start("LambdaAction")
+                    .elem("TopicArn", action.getLambdaAction().getTopicArn())
+                    .elem("FunctionArn", action.getLambdaAction().getFunctionArn())
+                    .elem("InvocationType", action.getLambdaAction().getInvocationType())
+                    .end("LambdaAction");
+        }
+        if (action.getSnsAction() != null) {
+            xml.start("SNSAction")
+                    .elem("TopicArn", action.getSnsAction().getTopicArn())
+                    .elem("Encoding", action.getSnsAction().getEncoding())
+                    .end("SNSAction");
+        }
+        if (action.getWorkmailAction() != null) {
+            xml.start("WorkmailAction")
+                    .elem("TopicArn", action.getWorkmailAction().getTopicArn())
+                    .elem("OrganizationArn", action.getWorkmailAction().getOrganizationArn())
+                    .end("WorkmailAction");
+        }
+        if (action.getConnectAction() != null) {
+            xml.start("ConnectAction")
+                    .elem("InstanceARN", action.getConnectAction().getInstanceArn())
+                    .elem("IAMRoleARN", action.getConnectAction().getIamRoleArn())
+                    .end("ConnectAction");
         }
     }
 

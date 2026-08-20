@@ -475,6 +475,92 @@ class Route53IntegrationTest {
 
     @Test
     @Order(20)
+    void privateZone_vpcAssociateAndQueryLogging() {
+        String createBody = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                  <Name>private.internal</Name>
+                  <CallerReference>ref-private</CallerReference>
+                  <HostedZoneConfig>
+                    <PrivateZone>true</PrivateZone>
+                  </HostedZoneConfig>
+                  <VPC>
+                    <VPCId>vpc-aaaa1111</VPCId>
+                    <VPCRegion>us-west-2</VPCRegion>
+                  </VPC>
+                </CreateHostedZoneRequest>
+                """;
+        String loc = given()
+                .contentType(XML).body(createBody)
+                .when().post("/2013-04-01/hostedzone")
+                .then().statusCode(201)
+                .extract().header("Location");
+        String privateId = loc.substring(loc.lastIndexOf('/') + 1);
+
+        given().when().get("/2013-04-01/hostedzone/" + privateId)
+                .then().statusCode(200)
+                .body(containsString("vpc-aaaa1111"));
+
+        given().contentType(XML).body("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <AssociateVPCWithHostedZoneRequest>
+                  <VPC><VPCId>vpc-bbbb2222</VPCId><VPCRegion>us-west-2</VPCRegion></VPC>
+                </AssociateVPCWithHostedZoneRequest>
+                """)
+                .when().post("/2013-04-01/hostedzone/" + privateId + "/associatevpc")
+                .then().statusCode(200);
+
+        given().when().get("/2013-04-01/hostedzone/" + privateId)
+                .then().statusCode(200)
+                .body(containsString("vpc-bbbb2222"));
+
+        given().when()
+                .queryParam("vpcid", "vpc-aaaa1111")
+                .queryParam("vpcregion", "us-west-2")
+                .get("/2013-04-01/hostedzonesbyvpc")
+                .then().statusCode(200)
+                .body(containsString(privateId));
+
+        given().contentType(XML).body("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <UpdateHostedZoneCommentRequest>
+                  <Comment>updated comment</Comment>
+                </UpdateHostedZoneCommentRequest>
+                """)
+                .when().post("/2013-04-01/hostedzone/" + privateId)
+                .then().statusCode(200)
+                .body(containsString("updated comment"));
+
+        String qlcId = given().contentType(XML).body("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <CreateQueryLoggingConfigRequest>
+                  <HostedZoneId>%s</HostedZoneId>
+                  <CloudWatchLogsLogGroupArn>arn:aws:logs:us-east-1:000000000000:log-group:r53</CloudWatchLogsLogGroupArn>
+                </CreateQueryLoggingConfigRequest>
+                """.formatted(privateId))
+                .when().post("/2013-04-01/queryloggingconfig")
+                .then().statusCode(201)
+                .extract().xmlPath()
+                .getString("CreateQueryLoggingConfigResponse.QueryLoggingConfig.Id");
+
+        given().when().get("/2013-04-01/queryloggingconfig")
+                .then().statusCode(200)
+                .body(containsString(qlcId));
+
+        given().when()
+                .queryParam("hostedzoneid", privateId)
+                .queryParam("recordname", "private.internal.")
+                .queryParam("recordtype", "NS")
+                .get("/2013-04-01/testdnsanswer")
+                .then().statusCode(200)
+                .body("TestDNSAnswerResponse.ResponseCode", equalTo("NOERROR"));
+
+        given().delete("/2013-04-01/queryloggingconfig/" + qlcId).then().statusCode(200);
+        given().delete("/2013-04-01/hostedzone/" + privateId).then().statusCode(200);
+    }
+
+    @Test
+    @Order(21)
     void getAccountLimit_returnsValue() {
         given()
                 .when().get("/2013-04-01/accountlimit/MAX_HOSTED_ZONES_BY_OWNER")
@@ -482,5 +568,137 @@ class Route53IntegrationTest {
                 .statusCode(200)
                 .body("GetAccountLimitResponse.Limit.Type", equalTo("MAX_HOSTED_ZONES_BY_OWNER"))
                 .body("GetAccountLimitResponse.Limit.Value", equalTo("500"));
+    }
+
+    @Test
+    @Order(22)
+    void listHostedZonesByName_maxItems1ReturnsExactMatchDespiteLexEarlierZones() {
+        String leftover = createZone("zzz.aaa.example", "ref-lex-earlier");
+        String target = createZone("alchemy-ecs-domain-test.example", "ref-ecs-domain");
+
+        given()
+                .queryParam("dnsname", "alchemy-ecs-domain-test.example.")
+                .queryParam("maxitems", "1")
+                .when().get("/2013-04-01/hostedzonesbyname")
+                .then()
+                .statusCode(200)
+                .body("ListHostedZonesByNameResponse.HostedZones.HostedZone.Name",
+                        equalTo("alchemy-ecs-domain-test.example."))
+                .body("ListHostedZonesByNameResponse.HostedZones.HostedZone.Id",
+                        equalTo("/hostedzone/" + target))
+                .body("ListHostedZonesByNameResponse.HostedZones.HostedZone.Config.PrivateZone",
+                        equalTo("false"));
+
+        given().delete("/2013-04-01/hostedzone/" + leftover).then().statusCode(200);
+        given().delete("/2013-04-01/hostedzone/" + target).then().statusCode(200);
+    }
+
+    @Test
+    @Order(23)
+    void getHealthCheckLastFailureReason_returnsEmptyObservations() {
+        String body = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <CreateHealthCheckRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                  <CallerReference>hc-fail-reason</CallerReference>
+                  <HealthCheckConfig>
+                    <Type>HTTP</Type>
+                    <IPAddress>1.1.1.1</IPAddress>
+                    <Port>80</Port>
+                    <ResourcePath>/</ResourcePath>
+                    <RequestInterval>30</RequestInterval>
+                    <FailureThreshold>3</FailureThreshold>
+                  </HealthCheckConfig>
+                </CreateHealthCheckRequest>
+                """;
+        String loc = given()
+                .contentType(XML).body(body)
+                .when().post("/2013-04-01/healthcheck")
+                .then().statusCode(201)
+                .extract().header("Location");
+        String id = loc.substring(loc.lastIndexOf('/') + 1);
+
+        String xml = given()
+                .when().get("/2013-04-01/healthcheck/" + id + "/lastfailurereason")
+                .then()
+                .statusCode(200)
+                .contentType(XML)
+                .extract().body().asString();
+
+        assertThat(xml, containsString("<HealthCheckObservations"));
+        assertThat(xml, containsString("<HealthCheckObservation>"));
+        assertThat(xml, containsString("<StatusReport>"));
+
+        given().delete("/2013-04-01/healthcheck/" + id).then().statusCode(200);
+    }
+
+    @Test
+    @Order(24)
+    void changeResourceRecordSets_weightedFailoverRoundTrip() {
+        String zoneId = createZone("alchemy-route53-routing.alchemy.", "ref-routing-it");
+        String change = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                  <ChangeBatch>
+                    <Changes>
+                      <Change>
+                        <Action>CREATE</Action>
+                        <ResourceRecordSet>
+                          <Name>api.alchemy-route53-routing.alchemy.</Name>
+                          <Type>A</Type>
+                          <SetIdentifier>blue</SetIdentifier>
+                          <Weight>90</Weight>
+                          <TTL>60</TTL>
+                          <ResourceRecords><ResourceRecord><Value>1.2.3.4</Value></ResourceRecord></ResourceRecords>
+                        </ResourceRecordSet>
+                      </Change>
+                      <Change>
+                        <Action>CREATE</Action>
+                        <ResourceRecordSet>
+                          <Name>api.alchemy-route53-routing.alchemy.</Name>
+                          <Type>A</Type>
+                          <SetIdentifier>green</SetIdentifier>
+                          <Weight>10</Weight>
+                          <TTL>60</TTL>
+                          <ResourceRecords><ResourceRecord><Value>5.6.7.8</Value></ResourceRecord></ResourceRecords>
+                        </ResourceRecordSet>
+                      </Change>
+                    </Changes>
+                  </ChangeBatch>
+                </ChangeResourceRecordSetsRequest>
+                """;
+        given().contentType(XML).body(change)
+                .when().post("/2013-04-01/hostedzone/" + zoneId + "/rrset")
+                .then().statusCode(200);
+
+        String listed = given()
+                .when().get("/2013-04-01/hostedzone/" + zoneId + "/rrset")
+                .then().statusCode(200)
+                .extract().body().asString();
+        assertThat(listed, containsString("<SetIdentifier>blue</SetIdentifier>"));
+        assertThat(listed, containsString("<Weight>90</Weight>"));
+        assertThat(listed, containsString("<SetIdentifier>green</SetIdentifier>"));
+        assertThat(listed, containsString("<Weight>10</Weight>"));
+
+        String delete = change.replace("<Action>CREATE</Action>", "<Action>DELETE</Action>");
+        given().contentType(XML).body(delete)
+                .when().post("/2013-04-01/hostedzone/" + zoneId + "/rrset")
+                .then().statusCode(200);
+        given().delete("/2013-04-01/hostedzone/" + zoneId).then().statusCode(200);
+    }
+
+    private static String createZone(String name, String callerRef) {
+        String loc = given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                          <Name>%s</Name>
+                          <CallerReference>%s</CallerReference>
+                        </CreateHostedZoneRequest>
+                        """.formatted(name, callerRef))
+                .when().post("/2013-04-01/hostedzone")
+                .then().statusCode(201)
+                .extract().header("Location");
+        return loc.substring(loc.lastIndexOf('/') + 1);
     }
 }

@@ -31,6 +31,7 @@ public class Service {
     private String region;
     private long revision;
     private Map<String, String> tags = new HashMap<>();
+    private Map<String, String> attributes = new HashMap<>();
 
     public Service() {}
 
@@ -80,4 +81,7 @@ public class Service {
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
+
+    public Map<String, String> getAttributes() { return attributes; }
+    public void setAttributes(Map<String, String> attributes) { this.attributes = attributes; }
 }

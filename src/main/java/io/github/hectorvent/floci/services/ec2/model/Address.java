@@ -17,6 +17,8 @@ public class Address {
     private String associationId;
     private String networkInterfaceId;
     private String privateIpAddress;
+    private String publicIpv4Pool = "amazon";
+    private String networkBorderGroup;
     private String region;
     private List<Tag> tags = new ArrayList<>();
 
@@ -42,6 +44,12 @@ public class Address {
 
     public String getPrivateIpAddress() { return privateIpAddress; }
     public void setPrivateIpAddress(String privateIpAddress) { this.privateIpAddress = privateIpAddress; }
+
+    public String getPublicIpv4Pool() { return publicIpv4Pool; }
+    public void setPublicIpv4Pool(String publicIpv4Pool) { this.publicIpv4Pool = publicIpv4Pool; }
+
+    public String getNetworkBorderGroup() { return networkBorderGroup; }
+    public void setNetworkBorderGroup(String networkBorderGroup) { this.networkBorderGroup = networkBorderGroup; }
 
     public String getRegion() { return region; }
     public void setRegion(String region) { this.region = region; }

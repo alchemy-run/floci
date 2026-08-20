@@ -202,7 +202,8 @@ class IamManagedPolicyAccountScopeTest {
         // the attached managed policy's document for a non-default-account principal.
         CallerContext caller = service.resolvePrincipalContext(
                 "arn:aws:iam::" + REQUEST_ACCT + ":user/app-user");
-        assertTrue(caller.identityPolicies().contains(AwsManagedPolicies.PERMISSIVE_DOCUMENT));
+        assertTrue(caller.identityPolicies().contains(
+                AwsManagedPolicies.documentFor("AWSLambdaBasicExecutionRole")));
 
         // Control: the customer policy is genuinely account-scoped — invisible from another account.
         Instance<RequestContext> otherCtx = requestContextFor("222222222222");
@@ -289,7 +290,8 @@ class IamManagedPolicyAccountScopeTest {
         // the attached managed policy and the managed permissions boundary for a non-default account.
         CallerContext caller = service.resolvePrincipalContext(
                 "arn:aws:iam::" + REQUEST_ACCT + ":role/task-role");
-        assertTrue(caller.identityPolicies().contains(AwsManagedPolicies.PERMISSIVE_DOCUMENT));
+        assertTrue(caller.identityPolicies().contains(
+                AwsManagedPolicies.documentFor("AWSLambdaBasicExecutionRole")));
         assertEquals(AwsManagedPolicies.PERMISSIVE_DOCUMENT, caller.boundaryPolicyDocument());
     }
 }

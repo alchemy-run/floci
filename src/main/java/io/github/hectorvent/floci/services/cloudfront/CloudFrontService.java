@@ -15,6 +15,7 @@ import io.github.hectorvent.floci.services.cloudfront.model.FieldLevelEncryption
 import io.github.hectorvent.floci.services.cloudfront.model.FieldLevelEncryptionProfile;
 import io.github.hectorvent.floci.services.cloudfront.model.Invalidation;
 import io.github.hectorvent.floci.services.cloudfront.model.KeyGroup;
+import io.github.hectorvent.floci.services.cloudfront.model.KeyValueStore;
 import io.github.hectorvent.floci.services.cloudfront.model.MonitoringSubscription;
 import io.github.hectorvent.floci.services.cloudfront.model.OriginAccessControl;
 import io.github.hectorvent.floci.services.cloudfront.model.OriginRequestPolicy;
@@ -22,15 +23,20 @@ import io.github.hectorvent.floci.services.cloudfront.model.PublicKey;
 import io.github.hectorvent.floci.services.cloudfront.model.RealtimeLogConfig;
 import io.github.hectorvent.floci.services.cloudfront.model.ResponseHeadersPolicy;
 import io.github.hectorvent.floci.services.cloudfront.model.StreamingDistribution;
+import io.github.hectorvent.floci.services.cloudfront.model.VpcOrigin;
+import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
+import io.github.hectorvent.floci.services.elbv2.model.LoadBalancer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -57,11 +63,20 @@ public class CloudFrontService {
     private final StorageBackend<String, FieldLevelEncryptionConfig> fleConfigStore;
     private final StorageBackend<String, FieldLevelEncryptionProfile> fleProfileStore;
     private final StorageBackend<String, MonitoringSubscription> monitoringStore;
+    private final StorageBackend<String, VpcOrigin> vpcOriginStore;
+    private final StorageBackend<String, KeyValueStore> kvsStore;
+    /** KVS data-plane keys, keyed by store id → (key → value). */
+    private final StorageBackend<String, Map<String, String>> kvsKeysStore;
     private final String accountId;
     private final String domainSuffix;
+    private final ElbV2Service elbV2;
+
+    public CloudFrontService(StorageFactory factory, EmulatorConfig config) {
+        this(factory, config, null);
+    }
 
     @Inject
-    public CloudFrontService(StorageFactory factory, EmulatorConfig config) {
+    public CloudFrontService(StorageFactory factory, EmulatorConfig config, ElbV2Service elbV2) {
         this.distStore = factory.create("cloudfront", "cloudfront-distributions.json",
                 new TypeReference<Map<String, Distribution>>() {});
         this.invalidationStore = factory.create("cloudfront", "cloudfront-invalidations.json",
@@ -96,8 +111,15 @@ public class CloudFrontService {
                 new TypeReference<Map<String, FieldLevelEncryptionProfile>>() {});
         this.monitoringStore = factory.create("cloudfront", "cloudfront-monitoring-subscriptions.json",
                 new TypeReference<Map<String, MonitoringSubscription>>() {});
+        this.vpcOriginStore = factory.create("cloudfront", "cloudfront-vpc-origins.json",
+                new TypeReference<Map<String, VpcOrigin>>() {});
+        this.kvsStore = factory.create("cloudfront", "cloudfront-key-value-stores.json",
+                new TypeReference<Map<String, KeyValueStore>>() {});
+        this.kvsKeysStore = factory.create("cloudfront", "cloudfront-kvs-keys.json",
+                new TypeReference<Map<String, Map<String, String>>>() {});
         this.accountId = config.defaultAccountId();
         this.domainSuffix = config.services().cloudfront().domainSuffix();
+        this.elbV2 = elbV2;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -538,64 +560,105 @@ public class CloudFrontService {
 
     // ── CloudFront Functions ──────────────────────────────────────────────────
 
+    private static final String FUNCTION_STAGE_DEVELOPMENT = "DEVELOPMENT";
+    private static final String FUNCTION_STAGE_LIVE = "LIVE";
+
+    private static String functionKey(String name, String stage) {
+        return name + ":" + stage;
+    }
+
     public synchronized CloudFrontFunction createFunction(CloudFrontFunction fn) {
-        fn.setStage("DEVELOPMENT");
+        if (fn.getName() != null && findFunction(fn.getName(), null).isPresent()) {
+            throw new AwsException("FunctionAlreadyExists",
+                    "A function with the specified name already exists.", 409);
+        }
+        fn.setStage(FUNCTION_STAGE_DEVELOPMENT);
         fn.setStatus("UNPUBLISHED");
         fn.setEtag(UUID.randomUUID().toString());
         fn.setCreatedTime(Instant.now());
         fn.setLastModifiedTime(Instant.now());
-        functionStore.put(fn.getName(), fn);
+        functionStore.put(functionKey(fn.getName(), FUNCTION_STAGE_DEVELOPMENT), fn);
         return fn;
     }
 
     public CloudFrontFunction describeFunction(String name, String stage) {
-        CloudFrontFunction fn = functionStore.get(name).orElseThrow(() ->
+        return findFunction(name, stage).orElseThrow(() ->
                 new AwsException("NoSuchFunctionExists",
                         "The specified function does not exist.", 404));
-        if (stage != null && !stage.isEmpty() && !fn.getStage().equals(stage)) {
-            throw new AwsException("NoSuchFunctionExists",
-                    "The specified function does not exist.", 404);
+    }
+
+    private Optional<CloudFrontFunction> findFunction(String name, String stage) {
+        if (stage != null && !stage.isEmpty()) {
+            Optional<CloudFrontFunction> staged = functionStore.get(functionKey(name, stage));
+            if (staged.isPresent()) {
+                return staged;
+            }
+            return functionStore.get(name).filter(fn -> stage.equals(fn.getStage()));
         }
-        return fn;
+        Optional<CloudFrontFunction> live = functionStore.get(functionKey(name, FUNCTION_STAGE_LIVE));
+        if (live.isPresent()) {
+            return live;
+        }
+        Optional<CloudFrontFunction> development = functionStore.get(functionKey(name, FUNCTION_STAGE_DEVELOPMENT));
+        if (development.isPresent()) {
+            return development;
+        }
+        return functionStore.get(name);
     }
 
     public synchronized CloudFrontFunction updateFunction(String name, String ifMatch,
                                                           CloudFrontFunction updated) {
-        CloudFrontFunction existing = describeFunction(name, null);
+        CloudFrontFunction existing = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
         if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
         updated.setName(name);
-        updated.setStage(existing.getStage());
+        updated.setStage(FUNCTION_STAGE_DEVELOPMENT);
         updated.setStatus(existing.getStatus());
         updated.setEtag(UUID.randomUUID().toString());
         updated.setCreatedTime(existing.getCreatedTime());
         updated.setLastModifiedTime(Instant.now());
-        functionStore.put(name, updated);
+        if (updated.getKeyValueStoreArns() == null || updated.getKeyValueStoreArns().isEmpty()) {
+            updated.setKeyValueStoreArns(existing.getKeyValueStoreArns());
+        }
+        functionStore.put(functionKey(name, FUNCTION_STAGE_DEVELOPMENT), updated);
+        functionStore.delete(name);
         return updated;
     }
 
     public synchronized CloudFrontFunction publishFunction(String name, String ifMatch) {
-        CloudFrontFunction fn = describeFunction(name, null);
-        if (!fn.getEtag().equals(ifMatch)) {
+        CloudFrontFunction development = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
+        if (!development.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
-        fn.setStage("LIVE");
-        fn.setStatus("DEPLOYED");
-        fn.setEtag(UUID.randomUUID().toString());
-        fn.setLastModifiedTime(Instant.now());
-        functionStore.put(name, fn);
-        return fn;
+        CloudFrontFunction live = development.copy();
+        live.setStage(FUNCTION_STAGE_LIVE);
+        live.setStatus("DEPLOYED");
+        live.setEtag(UUID.randomUUID().toString());
+        live.setLastModifiedTime(Instant.now());
+        functionStore.put(functionKey(name, FUNCTION_STAGE_LIVE), live);
+        return live;
     }
 
     public synchronized void deleteFunction(String name, String ifMatch) {
-        CloudFrontFunction existing = describeFunction(name, null);
-        if (!existing.getEtag().equals(ifMatch)) {
+        Optional<CloudFrontFunction> development = findFunction(name, FUNCTION_STAGE_DEVELOPMENT);
+        Optional<CloudFrontFunction> live = findFunction(name, FUNCTION_STAGE_LIVE);
+        Optional<CloudFrontFunction> legacy = functionStore.get(name);
+        if (development.isEmpty() && live.isEmpty() && legacy.isEmpty()) {
+            throw new AwsException("NoSuchFunctionExists",
+                    "The specified function does not exist.", 404);
+        }
+        boolean match = development.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
+                || live.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent()
+                || legacy.map(CloudFrontFunction::getEtag).filter(ifMatch::equals).isPresent();
+        if (!match) {
             throw new AwsException("InvalidIfMatchVersion",
                     "The If-Match version is missing or not valid for the resource.", 400);
         }
+        functionStore.delete(functionKey(name, FUNCTION_STAGE_DEVELOPMENT));
+        functionStore.delete(functionKey(name, FUNCTION_STAGE_LIVE));
         functionStore.delete(name);
     }
 
@@ -605,7 +668,15 @@ public class CloudFrontService {
             all = all.stream().filter(f -> stage.equals(f.getStage())).toList();
             all = new ArrayList<>(all);
         }
-        all.sort((a, b) -> a.getName().compareTo(b.getName()));
+        all.sort((a, b) -> {
+            int names = a.getName().compareTo(b.getName());
+            if (names != 0) {
+                return names;
+            }
+            String left = a.getStage() != null ? a.getStage() : "";
+            String right = b.getStage() != null ? b.getStage() : "";
+            return left.compareTo(right);
+        });
         return all;
     }
 
@@ -977,6 +1048,234 @@ public class CloudFrontService {
         monitoringStore.delete(distributionId);
     }
 
+    // ── VPC Origins ───────────────────────────────────────────────────────────
+
+    public synchronized VpcOrigin createVpcOrigin(VpcOrigin origin, Map<String, String> tags) {
+        validateVpcOriginArn(origin.getOriginEndpointArn());
+        for (VpcOrigin existing : vpcOriginStore.scan(k -> true)) {
+            if (origin.getName() != null && origin.getName().equals(existing.getName())) {
+                throw new AwsException("EntityAlreadyExists",
+                        "A VPC origin with the specified name already exists.", 409);
+            }
+        }
+        Instant now = Instant.now();
+        String id = generateVpcOriginId();
+        origin.setId(id);
+        origin.setAccountId(accountId);
+        origin.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "vpcorigin/" + id).toString());
+        origin.setStatus("Deployed");
+        origin.setCreatedTime(now);
+        origin.setLastModifiedTime(now);
+        origin.setEtag(UUID.randomUUID().toString());
+        if (tags != null && !tags.isEmpty()) {
+            tagStore.put(origin.getArn(), tags);
+        }
+        vpcOriginStore.put(id, origin);
+        return origin;
+    }
+
+    public VpcOrigin getVpcOrigin(String id) {
+        return vpcOriginStore.get(id).orElseThrow(() ->
+                new AwsException("EntityNotFound", "The specified VPC origin does not exist.", 404));
+    }
+
+    public synchronized VpcOrigin updateVpcOrigin(String id, String ifMatch, VpcOrigin updated) {
+        VpcOrigin existing = getVpcOrigin(id);
+        if (!existing.getEtag().equals(ifMatch)) {
+            throw new AwsException("InvalidIfMatchVersion",
+                    "The If-Match version is missing or not valid for the resource.", 400);
+        }
+        validateVpcOriginArn(updated.getOriginEndpointArn());
+        updated.setId(id);
+        updated.setArn(existing.getArn());
+        updated.setAccountId(existing.getAccountId());
+        updated.setCreatedTime(existing.getCreatedTime());
+        updated.setStatus("Deployed");
+        updated.setLastModifiedTime(Instant.now());
+        updated.setEtag(UUID.randomUUID().toString());
+        if (updated.getName() == null || updated.getName().isEmpty()) {
+            updated.setName(existing.getName());
+        }
+        vpcOriginStore.put(id, updated);
+        return updated;
+    }
+
+    public synchronized void deleteVpcOrigin(String id, String ifMatch) {
+        VpcOrigin existing = getVpcOrigin(id);
+        if (!existing.getEtag().equals(ifMatch)) {
+            throw new AwsException("InvalidIfMatchVersion",
+                    "The If-Match version is missing or not valid for the resource.", 400);
+        }
+        vpcOriginStore.delete(id);
+        if (existing.getArn() != null) {
+            tagStore.delete(existing.getArn());
+        }
+    }
+
+    public List<VpcOrigin> listVpcOrigins(String marker, int maxItems) {
+        List<VpcOrigin> all = new ArrayList<>(vpcOriginStore.scan(k -> true));
+        all.sort((a, b) -> a.getId().compareTo(b.getId()));
+        return paginate(all, marker, maxItems, VpcOrigin::getId);
+    }
+
+    // ── Key Value Stores ──────────────────────────────────────────────────────
+
+    public synchronized KeyValueStore createKeyValueStore(KeyValueStore store, Map<String, String> tags) {
+        if (store.getName() == null || store.getName().isBlank()) {
+            throw new AwsException("InvalidArgument", "KeyValueStore Name is required.", 400);
+        }
+        if (findKeyValueStoreByName(store.getName()) != null) {
+            throw new AwsException("EntityAlreadyExists",
+                    "A key value store with the specified name already exists.", 409);
+        }
+        Instant now = Instant.now();
+        String id = UUID.randomUUID().toString();
+        store.setId(id);
+        store.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "key-value-store/" + id).toString());
+        store.setStatus("READY");
+        store.setCreatedTime(now);
+        store.setLastModifiedTime(now);
+        store.setEtag(UUID.randomUUID().toString());
+        if (tags != null && !tags.isEmpty()) {
+            tagStore.put(store.getArn(), tags);
+        }
+        kvsStore.put(id, store);
+        return store;
+    }
+
+    public KeyValueStore describeKeyValueStore(String name) {
+        KeyValueStore store = findKeyValueStoreByName(name);
+        if (store == null) {
+            throw new AwsException("EntityNotFound",
+                    "The specified key value store does not exist.", 404);
+        }
+        return store;
+    }
+
+    public synchronized KeyValueStore updateKeyValueStore(String name, String ifMatch, String comment) {
+        KeyValueStore existing = describeKeyValueStore(name);
+        if (!existing.getEtag().equals(ifMatch)) {
+            throw new AwsException("InvalidIfMatchVersion",
+                    "The If-Match version is missing or not valid for the resource.", 400);
+        }
+        existing.setComment(comment != null ? comment : "");
+        existing.setLastModifiedTime(Instant.now());
+        existing.setEtag(UUID.randomUUID().toString());
+        kvsStore.put(existing.getId(), existing);
+        return existing;
+    }
+
+    public synchronized void deleteKeyValueStore(String name, String ifMatch) {
+        KeyValueStore existing = describeKeyValueStore(name);
+        if (!existing.getEtag().equals(ifMatch)) {
+            throw new AwsException("InvalidIfMatchVersion",
+                    "The If-Match version is missing or not valid for the resource.", 400);
+        }
+        kvsStore.delete(existing.getId());
+        kvsKeysStore.delete(existing.getId());
+        if (existing.getArn() != null) {
+            tagStore.delete(existing.getArn());
+        }
+    }
+
+    public List<KeyValueStore> listKeyValueStores(String marker, int maxItems, String status) {
+        List<KeyValueStore> all = new ArrayList<>(kvsStore.scan(k -> true));
+        if (status != null && !status.isEmpty()) {
+            all = new ArrayList<>(all.stream().filter(s -> status.equals(s.getStatus())).toList());
+        }
+        all.sort((a, b) -> a.getName().compareTo(b.getName()));
+        return paginate(all, marker, maxItems, KeyValueStore::getName);
+    }
+
+    // ── Key Value Store data plane (cloudfront-keyvaluestore) ────────────────
+
+    /**
+     * Resolves a store by its data-plane ARN
+     * ({@code arn:aws:cloudfront::{account}:key-value-store/{id}}).
+     * The data plane reports a missing store as {@code ResourceNotFoundException}
+     * (404), not the control plane's {@code EntityNotFound}.
+     */
+    public KeyValueStore describeKeyValueStoreByArn(String kvsArn) {
+        String id = kvsArn;
+        int slash = kvsArn.lastIndexOf('/');
+        if (slash >= 0) {
+            id = kvsArn.substring(slash + 1);
+        }
+        return kvsStore.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                "Resource was not found.", 404));
+    }
+
+    public Map<String, String> kvsKeys(String kvsArn) {
+        KeyValueStore store = describeKeyValueStoreByArn(kvsArn);
+        return kvsKeysStore.get(store.getId()).map(HashMap::new).orElseGet(HashMap::new);
+    }
+
+    public String kvsGetKey(String kvsArn, String key) {
+        String value = kvsKeys(kvsArn).get(key);
+        if (value == null) {
+            throw new AwsException("ResourceNotFoundException", "Resource was not found.", 404);
+        }
+        return value;
+    }
+
+    public synchronized KeyValueStore kvsPutKey(String kvsArn, String key, String value, String ifMatch) {
+        return kvsMutate(kvsArn, ifMatch, keys -> keys.put(key, value));
+    }
+
+    public synchronized KeyValueStore kvsDeleteKey(String kvsArn, String key, String ifMatch) {
+        return kvsMutate(kvsArn, ifMatch, keys -> {
+            if (keys.remove(key) == null) {
+                throw new AwsException("ResourceNotFoundException", "Resource was not found.", 404);
+            }
+        });
+    }
+
+    /**
+     * Bulk puts + deletes in one atomic step. Deletes of absent keys are
+     * tolerated — UpdateKeys is the bulk-convergence operation, so a caller
+     * re-driving a partially applied batch must not fail on already-gone keys.
+     */
+    public synchronized KeyValueStore kvsUpdateKeys(String kvsArn, String ifMatch,
+                                                     Map<String, String> puts, List<String> deletes) {
+        return kvsMutate(kvsArn, ifMatch, keys -> {
+            if (puts != null) {
+                keys.putAll(puts);
+            }
+            if (deletes != null) {
+                deletes.forEach(keys::remove);
+            }
+        });
+    }
+
+    public long kvsTotalSizeInBytes(String kvsArn) {
+        return kvsKeys(kvsArn).entrySet().stream()
+                .mapToLong(e -> utf8Length(e.getKey()) + utf8Length(e.getValue()))
+                .sum();
+    }
+
+    private KeyValueStore kvsMutate(String kvsArn, String ifMatch,
+                                    java.util.function.Consumer<Map<String, String>> mutation) {
+        KeyValueStore store = describeKeyValueStoreByArn(kvsArn);
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new AwsException("ValidationException", "The If-Match version is required.", 400);
+        }
+        if (!ifMatch.equals(store.getEtag())) {
+            throw new AwsException("ConflictException",
+                    "Pre-Condition failed: the provided ETag does not match the current version.", 409);
+        }
+        Map<String, String> keys = kvsKeysStore.get(store.getId()).map(HashMap::new).orElseGet(HashMap::new);
+        mutation.accept(keys);
+        kvsKeysStore.put(store.getId(), keys);
+        store.setLastModifiedTime(Instant.now());
+        store.setEtag(UUID.randomUUID().toString());
+        kvsStore.put(store.getId(), store);
+        return store;
+    }
+
+    private static long utf8Length(String value) {
+        return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     public String getAccountId() {
@@ -997,6 +1296,56 @@ public class CloudFrontService {
             sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
         }
         return sb.toString();
+    }
+
+    private static String generateVpcOriginId() {
+        StringBuilder sb = new StringBuilder("vo_");
+        for (int i = 0; i < 14; i++) {
+            sb.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    private KeyValueStore findKeyValueStoreByName(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (KeyValueStore store : kvsStore.scan(k -> true)) {
+            if (name.equals(store.getName())) {
+                return store;
+            }
+        }
+        return null;
+    }
+
+    private void validateVpcOriginArn(String arn) {
+        if (arn == null || arn.isBlank()) {
+            throw new AwsException("InvalidArgument", "The specified origin ARN is not valid.", 400);
+        }
+        if (arn.startsWith("arn:aws:elasticloadbalancing:")) {
+            String[] parts = arn.split(":", 6);
+            if (parts.length < 6 || parts[3].isEmpty() || !parts[5].startsWith("loadbalancer/")) {
+                throw new AwsException("InvalidArgument", "The specified origin ARN is not valid.", 400);
+            }
+            if (elbV2 != null) {
+                try {
+                    List<LoadBalancer> found = elbV2.describeLoadBalancers(
+                            parts[3], List.of(arn), null, null, null);
+                    if (found.isEmpty()) {
+                        throw new AwsException("InvalidArgument",
+                                "The specified origin ARN is not valid.", 400);
+                    }
+                } catch (AwsException e) {
+                    throw new AwsException("InvalidArgument",
+                            "The specified origin ARN is not valid.", 400);
+                }
+            }
+            return;
+        }
+        if (arn.startsWith("arn:aws:ec2:") && arn.contains(":instance/")) {
+            return;
+        }
+        throw new AwsException("InvalidArgument", "The specified origin ARN is not valid.", 400);
     }
 
     private <T> List<T> paginate(List<T> all, String marker, int maxItems,

@@ -10,9 +10,11 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import software.amazon.awssdk.services.ses.SesClient;
 import software.amazon.awssdk.services.ses.model.ConfigurationSetAttribute;
+import software.amazon.awssdk.services.ses.model.DeleteIdentityRequest;
 import software.amazon.awssdk.services.ses.model.DescribeConfigurationSetRequest;
 import software.amazon.awssdk.services.ses.model.DescribeConfigurationSetResponse;
 import software.amazon.awssdk.services.ses.model.UpdateConfigurationSetSendingEnabledRequest;
+import software.amazon.awssdk.services.ses.model.VerifyEmailIdentityRequest;
 
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.Body;
@@ -69,6 +71,13 @@ class SesConfigurationSetSendingTest {
         } catch (Exception ignored) {}
         sesV2.createConfigurationSet(CreateConfigurationSetRequest.builder()
                 .configurationSetName(CS_NAME).build());
+        // AWS rejects SendEmail from an unverified identity (MessageRejected).
+        // v1 VerifyEmailIdentity is the local confirm path (CreateEmailIdentity
+        // leaves the address PENDING).
+        sesV1.verifyEmailIdentity(VerifyEmailIdentityRequest.builder()
+                .emailAddress(FROM).build());
+        sesV1.verifyEmailIdentity(VerifyEmailIdentityRequest.builder()
+                .emailAddress(TO).build());
     }
 
     @AfterAll
@@ -81,6 +90,12 @@ class SesConfigurationSetSendingTest {
             sesV2.close();
         }
         if (sesV1 != null) {
+            try {
+                sesV1.deleteIdentity(DeleteIdentityRequest.builder().identity(FROM).build());
+            } catch (Exception ignored) {}
+            try {
+                sesV1.deleteIdentity(DeleteIdentityRequest.builder().identity(TO).build());
+            } catch (Exception ignored) {}
             sesV1.close();
         }
     }

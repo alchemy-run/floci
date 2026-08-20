@@ -292,9 +292,133 @@ class ApplicationAutoScalingIntegrationTest {
 
     @Test
     @Order(13)
-    void unsupportedActionIsRejected() {
+    void scheduledActionRoundTripAndForecastRejection() {
+        scalableTargetArn = call("RegisterScalableTarget")
+            .body("""
+                {
+                  "ServiceNamespace": "ecs",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "%s",
+                  "MinCapacity": 1,
+                  "MaxCapacity": 10
+                }
+                """.formatted(RESOURCE_ID, DIMENSION))
+        .when().post("/").then().statusCode(200)
+            .extract().path("ScalableTargetARN");
+
         call("PutScheduledAction")
-            .body("{ \"ServiceNamespace\": \"ecs\" }")
-        .when().post("/").then().statusCode(400);
+            .body("""
+                {
+                  "ScheduledActionName": "aas-it-morning",
+                  "ServiceNamespace": "ecs",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "%s",
+                  "Schedule": "at(2030-01-01T00:00:00)",
+                  "Timezone": "UTC",
+                  "ScalableTargetAction": { "MinCapacity": 2 }
+                }
+                """.formatted(RESOURCE_ID, DIMENSION))
+        .when().post("/").then().statusCode(200)
+            .body("ScheduledActionARN", containsString("scheduledAction"));
+
+        call("DescribeScheduledActions")
+            .body("""
+                { "ServiceNamespace": "ecs", "ScheduledActionNames": ["aas-it-morning"] }
+                """)
+        .when().post("/").then().statusCode(200)
+            .body("ScheduledActions", hasSize(1))
+            .body("ScheduledActions[0].Schedule", equalTo("at(2030-01-01T00:00:00)"))
+            .body("ScheduledActions[0].ScalableTargetAction.MinCapacity", equalTo(2));
+
+        call("DescribeScalingActivities")
+            .body("""
+                { "ServiceNamespace": "ecs", "ResourceId": "%s", "ScalableDimension": "%s" }
+                """.formatted(RESOURCE_ID, DIMENSION))
+        .when().post("/").then().statusCode(200)
+            .body("ScalingActivities", hasSize(0));
+
+        call("GetPredictiveScalingForecast")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceId": "table/missing",
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits",
+                  "PolicyName": "missing",
+                  "StartTime": 1893456000,
+                  "EndTime": 1893499200
+                }
+                """)
+        .when().post("/").then().statusCode(400)
+            .body("__type", equalTo("AccessDeniedException"))
+            .body("message", containsString("GetPredictiveScalingForecast is not supported"));
+
+        call("DeleteScheduledAction")
+            .body("""
+                {
+                  "ScheduledActionName": "aas-it-morning",
+                  "ServiceNamespace": "ecs",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "%s"
+                }
+                """.formatted(RESOURCE_ID, DIMENSION))
+        .when().post("/").then().statusCode(200);
+
+        call("DeregisterScalableTarget")
+            .body("""
+                { "ServiceNamespace": "ecs", "ResourceId": "%s", "ScalableDimension": "%s" }
+                """.formatted(RESOURCE_ID, DIMENSION))
+        .when().post("/").then().statusCode(200);
+    }
+
+    @Test
+    @Order(14)
+    void dynamodbTableResourceIdRegistersWithoutALiveCloudTable() {
+        String tableResourceId = "table/alchemy-local-aas-table";
+        call("RegisterScalableTarget")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits",
+                  "MinCapacity": 1,
+                  "MaxCapacity": 5
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200)
+            .body("ScalableTargetARN", containsString("scalable-target/"));
+
+        call("DescribeScalableTargets")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceIds": ["%s"],
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits"
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200)
+            .body("ScalableTargets", hasSize(1))
+            .body("ScalableTargets[0].ResourceId", equalTo(tableResourceId))
+            .body("ScalableTargets[0].MinCapacity", equalTo(1));
+
+        call("DescribeScalingActivities")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits"
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200)
+            .body("ScalingActivities", hasSize(0));
+
+        call("DeregisterScalableTarget")
+            .body("""
+                {
+                  "ServiceNamespace": "dynamodb",
+                  "ResourceId": "%s",
+                  "ScalableDimension": "dynamodb:table:ReadCapacityUnits"
+                }
+                """.formatted(tableResourceId))
+        .when().post("/").then().statusCode(200);
     }
 }

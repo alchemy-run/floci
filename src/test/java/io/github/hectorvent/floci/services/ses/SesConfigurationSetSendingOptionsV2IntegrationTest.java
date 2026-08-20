@@ -39,6 +39,16 @@ class SesConfigurationSetSendingOptionsV2IntegrationTest {
                 .post("/v2/email/configuration-sets")
         .then()
                 .statusCode(200);
+
+        given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", SES_AUTH)
+                .formParam("Action", "VerifyEmailIdentity")
+                .formParam("EmailAddress", SENDER)
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
     }
 
     @Test

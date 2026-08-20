@@ -314,4 +314,166 @@ class S3VectorsIntegrationTest {
         .then()
             .statusCode(404);
     }
+
+    @Test
+    @Order(13)
+    void vectorBucketPolicyAndTags() {
+        String bucket = "parity-vector-bucket";
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {
+                    "vectorBucketName": "%s",
+                    "tags": {"alchemy::id": "Parity"}
+                }
+                """.formatted(bucket))
+        .when()
+            .post("/CreateVectorBucket")
+        .then()
+            .statusCode(200);
+
+        String arn = given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {"vectorBucketName": "%s"}
+                """.formatted(bucket))
+        .when()
+            .post("/GetVectorBucket")
+        .then()
+            .statusCode(200)
+            .extract().path("vectorBucket.vectorBucketArn");
+
+        given()
+            .when()
+            .get("/tags/" + arn)
+        .then()
+            .statusCode(200)
+            .body("tags.'alchemy::id'", equalTo("Parity"));
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("{\"tags\": {\"team\": \"platform\"}}")
+        .when()
+            .post("/tags/" + arn)
+        .then()
+            .statusCode(204);
+
+        given()
+            .when()
+            .get("/tags/" + arn)
+        .then()
+            .statusCode(200)
+            .body("tags.team", equalTo("platform"));
+
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3vectors:GetVectors\",\"Resource\":\"*\"}]}";
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {
+                    "vectorBucketName": "%s",
+                    "policy": %s
+                }
+                """.formatted(bucket, objectJson(policy)))
+        .when()
+            .post("/PutVectorBucketPolicy")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {"vectorBucketName": "%s"}
+                """.formatted(bucket))
+        .when()
+            .post("/GetVectorBucketPolicy")
+        .then()
+            .statusCode(200)
+            .body("policy", containsString("s3vectors:GetVectors"));
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {"vectorBucketName": "%s"}
+                """.formatted(bucket))
+        .when()
+            .post("/DeleteVectorBucketPolicy")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {"vectorBucketName": "%s"}
+                """.formatted(bucket))
+        .when()
+            .post("/GetVectorBucketPolicy")
+        .then()
+            .statusCode(404);
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {"vectorBucketName": "%s"}
+                """.formatted(bucket))
+        .when()
+            .post("/DeleteVectorBucket")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    @Order(14)
+    void listVectorsReturnsKeys() {
+        String bucket = "list-vector-bucket";
+        String index = "list-index";
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("{\"vectorBucketName\": \"%s\"}".formatted(bucket))
+        .when().post("/CreateVectorBucket")
+        .then().statusCode(200);
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {
+                    "vectorBucketName": "%s",
+                    "indexName": "%s",
+                    "dimension": 2,
+                    "distanceMetric": "cosine",
+                    "dataType": "float32"
+                }
+                """.formatted(bucket, index))
+        .when().post("/CreateIndex")
+        .then().statusCode(200);
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {
+                    "vectorBucketName": "%s",
+                    "indexName": "%s",
+                    "vectors": [{"key": "k1", "data": {"float32": [1.0, 0.0]}}]
+                }
+                """.formatted(bucket, index))
+        .when().post("/PutVectors")
+        .then().statusCode(200);
+
+        given()
+            .contentType(JSON_CONTENT_TYPE)
+            .body("""
+                {
+                    "vectorBucketName": "%s",
+                    "indexName": "%s"
+                }
+                """.formatted(bucket, index))
+        .when().post("/ListVectors")
+        .then()
+            .statusCode(200)
+            .body("vectors", hasSize(1))
+            .body("vectors[0].key", equalTo("k1"));
+    }
+
+    private static String objectJson(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
 }

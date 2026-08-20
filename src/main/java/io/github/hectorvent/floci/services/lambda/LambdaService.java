@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.lambda.durable.LambdaDurableService;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
 import io.github.hectorvent.floci.services.lambda.model.FunctionEventInvokeConfig;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
@@ -17,6 +18,8 @@ import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
 import io.github.hectorvent.floci.services.lambda.model.ScalingConfig;
 import io.github.hectorvent.floci.services.lambda.zip.CodeStore;
 import io.github.hectorvent.floci.services.lambda.zip.ZipExtractor;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.s3.model.S3ObjectUpdatedEvent;
@@ -24,6 +27,7 @@ import io.github.hectorvent.floci.services.sqs.SqsService;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -65,6 +69,7 @@ public class LambdaService {
     private final KinesisEventSourcePoller kinesisPoller;
     private final DynamoDbStreamsEventSourcePoller dynamodbStreamsPoller;
     private final StorageFactory storageFactory;
+    private final Ec2Service ec2Service;
     private Map<String, Integer> versionCounters = new ConcurrentHashMap<>();
     private Map<String, FunctionEventInvokeConfig> eventInvokeConfigs = new ConcurrentHashMap<>();
     /**
@@ -82,6 +87,15 @@ public class LambdaService {
      */
     private final ConcurrentHashMap<String, Object> concurrencyOpLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Object> versionCounterLocks = new ConcurrentHashMap<>();
+
+    /**
+     * Optional: durable-execution purge on function delete. Injected lazily so
+     * LambdaDurableService can depend on LambdaService without a CDI cycle.
+     * Unit tests assign it via {@link #setDurableService}.
+     */
+    @Inject
+    Instance<LambdaDurableService> durableServiceInstance;
+    private LambdaDurableService durableService;
 
     /**
      * Package-private constructor for testing without CDI. Config defaults
@@ -132,6 +146,7 @@ public class LambdaService {
         this.kinesisPoller = null;
         this.dynamodbStreamsPoller = null;
         this.storageFactory = storageFactory;
+        this.ec2Service = null;
     }
 
     @Inject
@@ -150,7 +165,8 @@ public class LambdaService {
                           SqsEventSourcePoller poller,
                           KinesisEventSourcePoller kinesisPoller,
                           DynamoDbStreamsEventSourcePoller dynamodbStreamsPoller,
-                          StorageFactory storageFactory) {
+                          StorageFactory storageFactory,
+                          Ec2Service ec2Service) {
         this.functionStore = functionStore;
         this.executorService = executorService;
         this.concurrencyLimiter = concurrencyLimiter;
@@ -167,6 +183,7 @@ public class LambdaService {
         this.kinesisPoller = kinesisPoller;
         this.dynamodbStreamsPoller = dynamodbStreamsPoller;
         this.storageFactory = storageFactory;
+        this.ec2Service = ec2Service;
     }
 
     /** Package-private accessor for tests that want to assert limiter state directly. */
@@ -325,6 +342,7 @@ public class LambdaService {
             @SuppressWarnings("unchecked")
             Map<String, Object> vpc = (Map<String, Object>) request.get("VpcConfig");
             fn.setVpcConfig(vpc);
+            syncVpcEnis(region, fn);
         }
 
         // ImageConfig (PackageType=Image overrides)
@@ -437,6 +455,15 @@ public class LambdaService {
             }
         }
 
+        if (request.containsKey("Architectures")) {
+            @SuppressWarnings("unchecked")
+            List<String> archs = request.get("Architectures") instanceof List
+                    ? (List<String>) request.get("Architectures") : null;
+            if (archs != null && !archs.isEmpty()) {
+                fn.setArchitectures(new ArrayList<>(archs));
+            }
+        }
+
         fn.setLastModified(System.currentTimeMillis());
         fn.setRevisionId(UUID.randomUUID().toString());
 
@@ -534,6 +561,7 @@ public class LambdaService {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> vpc = (Map<String, Object>) request.get("VpcConfig");
                 fn.setVpcConfig(vpc);
+                syncVpcEnis(region, fn);
             }
         }
 
@@ -569,10 +597,34 @@ public class LambdaService {
         return fn;
     }
 
+    /**
+     * DeleteFunction with a numeric Qualifier removes ONLY that published
+     * version (AWS semantics); the unqualified form deletes the function and
+     * every version. Deleting {@code $LATEST} by qualifier is invalid on AWS.
+     */
+    public void deleteFunction(String region, String functionName, String qualifier) {
+        if (qualifier == null || qualifier.isBlank()) {
+            deleteFunction(region, functionName);
+            return;
+        }
+        if ("$LATEST".equals(qualifier)) {
+            throw new AwsException("InvalidParameterValueException",
+                    "$LATEST version cannot be deleted without deleting the function.", 400);
+        }
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(functionName);
+        enforceRegion(region, ref);
+        LambdaFunction version = functionStore.get(region, ref.name(), qualifier)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Function version not found: " + ref.name() + ":" + qualifier, 404));
+        functionStore.deleteVersion(region, ref.name(), version.getVersion());
+        LOG.infov("Deleted Lambda function version: {0}:{1}", ref.name(), qualifier);
+    }
+
     public void deleteFunction(String region, String functionName) {
         LambdaFunction fn = getFunction(region, functionName); // throws 404 if not found
         functionName = fn.getFunctionName();
         String arn = fn.getFunctionArn();
+        releaseVpcEnis(region, fn);
         warmPool.drainFunction(functionName);
         // Take the same per-function lock used by Put/DeleteFunctionConcurrency
         // so a concurrent concurrency mutation cannot interleave with the
@@ -604,6 +656,22 @@ public class LambdaService {
             }
         }
         LOG.infov("Deleted Lambda function: {0}", functionName);
+        purgeDurableExecutions(region, functionName);
+    }
+
+    /** Test hook: wire the durable service without CDI. */
+    void setDurableService(LambdaDurableService durableService) {
+        this.durableService = durableService;
+    }
+
+    private void purgeDurableExecutions(String region, String functionName) {
+        LambdaDurableService durable = durableService;
+        if (durable == null && durableServiceInstance != null && durableServiceInstance.isResolvable()) {
+            durable = durableServiceInstance.get();
+        }
+        if (durable != null) {
+            durable.purgeExecutionsForFunction(region, functionName);
+        }
     }
 
     public InvokeResult invoke(String region, String functionName, byte[] payload, InvocationType type) {
@@ -615,6 +683,24 @@ public class LambdaService {
         InvokeResult result = executorService.invoke(fn, payload, type);
         result.setExecutedVersion(fn.getVersion());
         return result;
+    }
+
+    /**
+     * Qualifier-aware read used by GetFunction / GetFunctionConfiguration:
+     * a numeric qualifier resolves the published version snapshot (whose
+     * FunctionArn carries the {@code :N} suffix), an alias name resolves
+     * through the alias, and null/$LATEST reads the unqualified function.
+     */
+    public LambdaFunction getFunction(String region, String functionName, String qualifier) {
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolve(functionName);
+        String effectiveQualifier = qualifier != null && !qualifier.isBlank()
+                ? qualifier
+                : ref.qualifier();
+        if (effectiveQualifier == null || effectiveQualifier.equals("$LATEST")) {
+            return getFunction(region, functionName);
+        }
+        enforceRegion(region, ref);
+        return resolveInvokeTarget(region, ref.name(), effectiveQualifier);
     }
 
     private LambdaFunction resolveInvokeTarget(String region, String name, String qualifier) {
@@ -950,6 +1036,14 @@ public class LambdaService {
         snapshot.setState(fn.getState());
         snapshot.setCodeSizeBytes(fn.getCodeSizeBytes());
         snapshot.setEnvironment(fn.getEnvironment());
+        // Versions are immutable code snapshots on AWS: carry the code
+        // identity and location so the version's configuration is complete
+        // and version-qualified invokes can run the same code.
+        snapshot.setCodeSha256(fn.getCodeSha256());
+        snapshot.setCodeLocalPath(fn.getCodeLocalPath());
+        snapshot.setHotReloadHostPath(fn.getHotReloadHostPath());
+        snapshot.setS3Bucket(fn.getS3Bucket());
+        snapshot.setS3Key(fn.getS3Key());
         snapshot.setLastModified(System.currentTimeMillis());
         snapshot.setRevisionId(UUID.randomUUID().toString());
 
@@ -1127,7 +1221,8 @@ public class LambdaService {
                 cors.setAllowMethods(toStringArray(corsMap.get("AllowMethods")));
                 cors.setAllowOrigins(toStringArray(corsMap.get("AllowOrigins")));
                 cors.setExposeHeaders(toStringArray(corsMap.get("ExposeHeaders")));
-                cors.setMaxAge(toInt(corsMap.get("MaxAge"), cors.getMaxAge()));
+                cors.setMaxAge(toInt(corsMap.get("MaxAge"),
+                        cors.getMaxAge() != null ? cors.getMaxAge() : 0));
                 urlConfig.setCors(cors);
             } else {
                 urlConfig.setCors(null);
@@ -1394,13 +1489,30 @@ public class LambdaService {
         fn.setS3Bucket(null);
         fn.setS3Key(null);
         fn.setCodeSizeBytes(0);
-        fn.setCodeSha256("");
+        // AWS always returns a non-empty CodeSha256 and version publishers
+        // (Alchemy's Lambda.Version) require one. Hot-reload code lives on a
+        // bind mount with no fixed artifact, so hash the mount path — stable,
+        // deterministic, and non-empty.
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(hostPath.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            fn.setCodeSha256(Base64.getEncoder().encodeToString(digest));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            fn.setCodeSha256(Base64.getEncoder().encodeToString(hostPath.getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8)));
+        }
         LOG.infov("Hot-reload configured for function {0}: bind-mounting {1}", fn.getFunctionName(), hostPath);
     }
 
     // ──────────────────────────── Permissions (Policy) ────────────────────────────
 
     public Map<String, Object> addPermission(String region, String functionName, Map<String, Object> request) {
+        synchronized (this) {
+            return addPermissionLocked(region, functionName, request);
+        }
+    }
+
+    private Map<String, Object> addPermissionLocked(String region, String functionName, Map<String, Object> request) {
         LambdaFunction fn = getFunction(region, functionName);
         String statementId = (String) request.get("StatementId");
         if (statementId == null || statementId.isBlank()) {
@@ -1416,8 +1528,6 @@ public class LambdaService {
 
         String principal = (String) request.get("Principal");
         String action = (String) request.get("Action");
-        String sourceArn = (String) request.get("SourceArn");
-        String sourceAccount = (String) request.get("SourceAccount");
 
         Map<String, Object> statement = new java.util.LinkedHashMap<>();
         statement.put("Sid", statementId);
@@ -1431,10 +1541,9 @@ public class LambdaService {
         }
         statement.put("Action", action);
         statement.put("Resource", fn.getFunctionArn());
-        if (sourceArn != null) {
-            statement.put("Condition", Map.of("ArnLike", Map.of("AWS:SourceArn", sourceArn)));
-        } else if (sourceAccount != null) {
-            statement.put("Condition", Map.of("StringEquals", Map.of("AWS:SourceAccount", sourceAccount)));
+        Map<String, Object> condition = buildPermissionCondition(request);
+        if (!condition.isEmpty()) {
+            statement.put("Condition", condition);
         }
 
         fn.getPolicies().add(statement);
@@ -1457,14 +1566,16 @@ public class LambdaService {
     }
 
     public void removePermission(String region, String functionName, String statementId) {
-        LambdaFunction fn = getFunction(region, functionName);
-        boolean removed = fn.getPolicies().removeIf(s -> statementId.equals(s.get("Sid")));
-        if (!removed) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Statement " + statementId + " not found in function " + functionName, 404);
+        synchronized (this) {
+            LambdaFunction fn = getFunction(region, functionName);
+            boolean removed = fn.getPolicies().removeIf(s -> statementId.equals(s.get("Sid")));
+            if (!removed) {
+                throw new AwsException("ResourceNotFoundException",
+                        "Statement " + statementId + " not found in function " + functionName, 404);
+            }
+            functionStore.save(region, fn);
+            LOG.infov("Removed permission {0} from function {1}", statementId, functionName);
         }
-        functionStore.save(region, fn);
-        LOG.infov("Removed permission {0} from function {1}", statementId, functionName);
     }
 
     // ──────────────────────────── Tags ────────────────────────────
@@ -1674,6 +1785,124 @@ public class LambdaService {
                 cfg.setDestinationConfig(null);
             }
         }
+    }
+
+    /**
+     * AWS {@code GetAccountSettings} — region-scoped limits plus current usage.
+     */
+    public Map<String, Object> getAccountSettings(String region) {
+        int concurrent = 1000;
+        if (config != null) {
+            concurrent = config.services().lambda().regionConcurrencyLimit();
+        }
+        int reserved = concurrencyLimiter != null ? concurrencyLimiter.totalReserved(region) : 0;
+        List<LambdaFunction> functions = listFunctions(region);
+        long totalCodeSize = functions.stream().mapToLong(LambdaFunction::getCodeSizeBytes).sum();
+
+        Map<String, Object> limit = new java.util.LinkedHashMap<>();
+        limit.put("TotalCodeSize", 80_530_636_800L);
+        limit.put("CodeSizeUnzipped", 262_144_000L);
+        limit.put("CodeSizeZipped", 52_428_800L);
+        limit.put("ConcurrentExecutions", concurrent);
+        limit.put("UnreservedConcurrentExecutions", Math.max(0, concurrent - reserved));
+
+        Map<String, Object> usage = new java.util.LinkedHashMap<>();
+        usage.put("TotalCodeSize", totalCodeSize);
+        usage.put("FunctionCount", functions.size());
+
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("AccountLimit", limit);
+        response.put("AccountUsage", usage);
+        return response;
+    }
+
+    /**
+     * Builds the IAM Condition block for AddPermission. AWS stores
+     * {@code InvokedViaFunctionUrl} as {@code Bool.lambda:InvokedViaFunctionUrl}
+     * and {@code FunctionUrlAuthType} as {@code StringEquals.lambda:FunctionUrlAuthType}.
+     */
+    static Map<String, Object> buildPermissionCondition(Map<String, Object> request) {
+        Map<String, Object> condition = new java.util.LinkedHashMap<>();
+        String sourceArn = (String) request.get("SourceArn");
+        String sourceAccount = (String) request.get("SourceAccount");
+        String functionUrlAuthType = (String) request.get("FunctionUrlAuthType");
+        Object invokedVia = request.get("InvokedViaFunctionUrl");
+
+        if (sourceArn != null && !sourceArn.isBlank()) {
+            condition.put("ArnLike", new java.util.LinkedHashMap<>(Map.of("AWS:SourceArn", sourceArn)));
+        }
+
+        Map<String, Object> stringEquals = new java.util.LinkedHashMap<>();
+        if (sourceAccount != null && !sourceAccount.isBlank()) {
+            stringEquals.put("AWS:SourceAccount", sourceAccount);
+        }
+        if (functionUrlAuthType != null && !functionUrlAuthType.isBlank()) {
+            stringEquals.put("lambda:FunctionUrlAuthType", functionUrlAuthType);
+        }
+        if (!stringEquals.isEmpty()) {
+            condition.put("StringEquals", stringEquals);
+        }
+
+        if (invokedVia != null) {
+            boolean invoked = invokedVia instanceof Boolean b ? b : Boolean.parseBoolean(invokedVia.toString());
+            if (invoked) {
+                condition.put("Bool", Map.of("lambda:InvokedViaFunctionUrl", "true"));
+            }
+        }
+        return condition;
+    }
+
+    private void syncVpcEnis(String region, LambdaFunction fn) {
+        releaseVpcEnis(region, fn);
+        Map<String, Object> vpc = fn.getVpcConfig();
+        if (ec2Service == null || vpc == null) {
+            return;
+        }
+        List<String> subnetIds = asStringList(vpc.get("SubnetIds"));
+        List<String> groupIds = asStringList(vpc.get("SecurityGroupIds"));
+        if (subnetIds.isEmpty()) {
+            return;
+        }
+        List<String> eniIds = new ArrayList<>();
+        for (String subnetId : subnetIds) {
+            try {
+                String description = "AWS Lambda VPC ENI-" + fn.getFunctionName()
+                        + "-" + UUID.randomUUID().toString().substring(0, 8);
+                NetworkInterface ni = ec2Service.createNetworkInterface(
+                        region, subnetId, description, null, groupIds, "lambda", null);
+                eniIds.add(ni.getNetworkInterfaceId());
+            } catch (Exception e) {
+                LOG.warnv("Could not create Lambda VPC ENI in subnet {0}: {1}", subnetId, e.getMessage());
+            }
+        }
+        fn.setVpcEniIds(eniIds);
+    }
+
+    private void releaseVpcEnis(String region, LambdaFunction fn) {
+        if (ec2Service == null || fn.getVpcEniIds() == null || fn.getVpcEniIds().isEmpty()) {
+            return;
+        }
+        for (String eniId : new ArrayList<>(fn.getVpcEniIds())) {
+            try {
+                ec2Service.deleteNetworkInterface(region, eniId);
+            } catch (Exception e) {
+                LOG.warnv("Could not delete Lambda VPC ENI {0}: {1}", eniId, e.getMessage());
+            }
+        }
+        fn.setVpcEniIds(new ArrayList<>());
+    }
+
+    private static List<String> asStringList(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null) {
+                out.add(item.toString());
+            }
+        }
+        return out;
     }
 
     /**

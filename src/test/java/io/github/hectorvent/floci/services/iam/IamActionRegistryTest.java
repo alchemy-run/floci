@@ -14,7 +14,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
@@ -109,6 +111,27 @@ class IamActionRegistryTest {
                 mockCtx("POST", "/CommitTransaction", new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
         assertEquals("rds-data:RollbackTransaction", registry.resolve("rds-data",
                 mockCtx("POST", "/RollbackTransaction", new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
+    @Test
+    void resolvesSesV2SendRoutes() {
+        assertEquals("ses:SendEmail", registry.resolve("ses",
+                mockCtx("POST", "/v2/email/outbound-emails", new MultivaluedHashMap<>(),
+                        MediaType.APPLICATION_JSON_TYPE, "{\"FromEmailAddress\":\"a@b.test\"}")));
+        assertEquals("ses:SendEmail", registry.resolve("ses",
+                mockCtx("POST", "/v2/email/outbound-bulk-emails", new MultivaluedHashMap<>(),
+                        MediaType.APPLICATION_JSON_TYPE, "{\"FromEmailAddress\":\"a@b.test\"}")));
+    }
+
+    @Test
+    void roleEnforcedActionsCoverSesSendAndKmsGetKeyRotationStatus() {
+        assertTrue(registry.isRoleEnforcedAction("ses:SendEmail"));
+        assertTrue(registry.isRoleEnforcedAction("ses:SendRawEmail"));
+        assertTrue(registry.isRoleEnforcedAction("ses:SendBulkEmail"));
+        assertTrue(registry.isRoleEnforcedAction("kms:GetKeyRotationStatus"));
+        assertFalse(registry.isRoleEnforcedAction("kms:Encrypt"));
+        assertFalse(registry.isRoleEnforcedAction("dynamodb:PutItem"));
+        assertFalse(registry.isRoleEnforcedAction(null));
     }
 
     @Test

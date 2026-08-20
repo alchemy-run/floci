@@ -34,6 +34,12 @@ public class DeliveryStreamDescription {
     private Instant lastUpdateTimestamp;
     @JsonProperty("Destinations")
     private List<Destination> destinations;
+    @JsonProperty("Source")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Source source;
+    @JsonProperty("DeliveryStreamEncryptionConfiguration")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private DeliveryStreamEncryptionConfiguration deliveryStreamEncryptionConfiguration;
     @JsonProperty("Tags")
     private List<Tag> tags = new ArrayList<>();
 
@@ -70,6 +76,17 @@ public class DeliveryStreamDescription {
     public void setLastUpdateTimestamp(Instant lastUpdateTimestamp) { this.lastUpdateTimestamp = lastUpdateTimestamp; }
     public List<Destination> getDestinations() { return destinations; }
     public void setDestinations(List<Destination> destinations) { this.destinations = destinations; }
+
+    public Source getSource() { return source; }
+    public void setSource(Source source) { this.source = source; }
+
+    public DeliveryStreamEncryptionConfiguration getDeliveryStreamEncryptionConfiguration() {
+        return deliveryStreamEncryptionConfiguration;
+    }
+    public void setDeliveryStreamEncryptionConfiguration(
+            DeliveryStreamEncryptionConfiguration deliveryStreamEncryptionConfiguration) {
+        this.deliveryStreamEncryptionConfiguration = deliveryStreamEncryptionConfiguration;
+    }
 
     /** Convenience: returns the first S3 destination, or null if none. */
     public S3Destination s3Destination() {
@@ -242,6 +259,96 @@ public class DeliveryStreamDescription {
         public void setSizeInMBs(Integer sizeInMBs) { this.sizeInMBs = sizeInMBs; }
         public Integer getIntervalInSeconds() { return intervalInSeconds; }
         public void setIntervalInSeconds(Integer intervalInSeconds) { this.intervalInSeconds = intervalInSeconds; }
+    }
+
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class Source {
+        @JsonProperty("KinesisStreamSourceDescription")
+        private KinesisStreamSourceDescription kinesisStreamSourceDescription;
+
+        public Source() {}
+        public Source(KinesisStreamSourceDescription kinesisStreamSourceDescription) {
+            this.kinesisStreamSourceDescription = kinesisStreamSourceDescription;
+        }
+
+        public KinesisStreamSourceDescription getKinesisStreamSourceDescription() {
+            return kinesisStreamSourceDescription;
+        }
+        public void setKinesisStreamSourceDescription(
+                KinesisStreamSourceDescription kinesisStreamSourceDescription) {
+            this.kinesisStreamSourceDescription = kinesisStreamSourceDescription;
+        }
+    }
+
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class KinesisStreamSourceDescription {
+        @JsonProperty("KinesisStreamARN")
+        private String kinesisStreamArn;
+        @JsonProperty("RoleARN")
+        private String roleArn;
+        @JsonProperty("DeliveryStartTimestamp")
+        @JsonFormat(shape = JsonFormat.Shape.NUMBER)
+        private Instant deliveryStartTimestamp;
+
+        public KinesisStreamSourceDescription() {}
+
+        public String getKinesisStreamArn() { return kinesisStreamArn; }
+        public void setKinesisStreamArn(String kinesisStreamArn) { this.kinesisStreamArn = kinesisStreamArn; }
+        public String getRoleArn() { return roleArn; }
+        public void setRoleArn(String roleArn) { this.roleArn = roleArn; }
+        public Instant getDeliveryStartTimestamp() { return deliveryStartTimestamp; }
+        public void setDeliveryStartTimestamp(Instant deliveryStartTimestamp) {
+            this.deliveryStartTimestamp = deliveryStartTimestamp;
+        }
+    }
+
+    /**
+     * Stream-level SSE (Start/StopDeliveryStreamEncryption), distinct from the
+     * destination {@link EncryptionConfiguration} that covers S3 object encryption.
+     */
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class DeliveryStreamEncryptionConfiguration {
+        @JsonProperty("KeyARN")
+        private String keyArn;
+        @JsonProperty("KeyType")
+        private String keyType;
+        @JsonProperty("Status")
+        private String status;
+
+        public DeliveryStreamEncryptionConfiguration() {}
+
+        public static DeliveryStreamEncryptionConfiguration disabled() {
+            DeliveryStreamEncryptionConfiguration config = new DeliveryStreamEncryptionConfiguration();
+            config.status = "DISABLED";
+            return config;
+        }
+
+        public static DeliveryStreamEncryptionConfiguration enabled(String keyType, String keyArn) {
+            DeliveryStreamEncryptionConfiguration config = new DeliveryStreamEncryptionConfiguration();
+            config.status = "ENABLED";
+            config.keyType = keyType;
+            if ("CUSTOMER_MANAGED_CMK".equals(keyType)) {
+                config.keyArn = keyArn;
+            }
+            return config;
+        }
+
+        public String getKeyArn() { return keyArn; }
+        public void setKeyArn(String keyArn) { this.keyArn = keyArn; }
+        public String getKeyType() { return keyType; }
+        public void setKeyType(String keyType) { this.keyType = keyType; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+
+        public boolean isEnabled() {
+            return "ENABLED".equals(status);
+        }
     }
 
     public List<Tag> getTags() {

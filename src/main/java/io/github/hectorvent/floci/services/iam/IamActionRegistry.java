@@ -7,6 +7,7 @@ import java.net.URLDecoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.jboss.logging.Logger;
@@ -89,7 +90,25 @@ public class IamActionRegistry {
         rule("apigateway", "POST",   ".*/restapis/.+",                      "apigateway:POST"),
 
         // ── Kinesis ────────────────────────────────────────────────────────────
-        rule("kinesis", "POST", ".*", "kinesis:*")
+        rule("kinesis", "POST", ".*", "kinesis:*"),
+
+        // ── SES v2 (REST-JSON). Bulk is authorized as ses:SendEmail (Alchemy and
+        // AWS both grant that action on the From identity, not ses:SendBulkEmail).
+        rule("ses", "POST", ".*/outbound-emails$",      "ses:SendEmail"),
+        rule("ses", "POST", ".*/outbound-bulk-emails$", "ses:SendEmail")
+    );
+
+    /**
+     * Actions evaluated for assumed-role callers even when global IAM
+     * enforcement is off. Keep this set small: JSON 1.1 / Query auto-resolve
+     * every operation, and evaluating those would deny DynamoDB/AutoScaling/…
+     * Lambdas whose resource ARNs or condition keys we do not yet model.
+     */
+    private static final Set<String> ROLE_ENFORCED_ACTIONS = Set.of(
+            "ses:SendEmail",
+            "ses:SendRawEmail",
+            "ses:SendBulkEmail",
+            "kms:GetKeyRotationStatus"
     );
 
     private static ActionRule rule(String service, String method, String path, String action) {
@@ -156,6 +175,14 @@ public class IamActionRegistry {
 
         LOG.debugv("No action mapping for {0} {1} {2} — defaulting to ALLOW", credentialScope, method, path);
         return null;
+    }
+
+    /**
+     * {@code true} when {@code action} is one of the few operations evaluated
+     * for assumed-role callers while global enforcement is off.
+     */
+    public boolean isRoleEnforcedAction(String action) {
+        return action != null && ROLE_ENFORCED_ACTIONS.contains(action);
     }
 
     /**

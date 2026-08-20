@@ -8,9 +8,11 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
 import io.github.hectorvent.floci.services.eventbridge.model.Archive;
 import io.github.hectorvent.floci.services.eventbridge.model.ArchiveState;
 import io.github.hectorvent.floci.services.eventbridge.model.ArchivedEvent;
+import io.github.hectorvent.floci.services.eventbridge.model.Connection;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
 import io.github.hectorvent.floci.services.eventbridge.model.Replay;
 import io.github.hectorvent.floci.services.eventbridge.model.ReplayState;
@@ -47,6 +49,8 @@ public class EventBridgeService {
     private final StorageBackend<String, Archive> archiveStore;
     private final StorageBackend<String, List<ArchivedEvent>> archivedEventStore;
     private final StorageBackend<String, Replay> replayStore;
+    private final StorageBackend<String, Connection> connectionStore;
+    private final StorageBackend<String, ApiDestination> destinationStore;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
     private final RuleScheduler ruleScheduler;
@@ -76,6 +80,10 @@ public class EventBridgeService {
                         new TypeReference<Map<String, List<ArchivedEvent>>>() {}),
                 storageFactory.create("eventbridge", "eventbridge-replays.json",
                         new TypeReference<Map<String, Replay>>() {}),
+                storageFactory.create("eventbridge", "eventbridge-connections.json",
+                        new TypeReference<Map<String, Connection>>() {}),
+                storageFactory.create("eventbridge", "eventbridge-api-destinations.json",
+                        new TypeReference<Map<String, ApiDestination>>() {}),
                 regionResolver, objectMapper, ruleScheduler, invoker, replayDispatcher,
                 resourceGroupsTaggingService
         );
@@ -87,6 +95,8 @@ public class EventBridgeService {
                        StorageBackend<String, Archive> archiveStore,
                        StorageBackend<String, List<ArchivedEvent>> archivedEventStore,
                        StorageBackend<String, Replay> replayStore,
+                       StorageBackend<String, Connection> connectionStore,
+                       StorageBackend<String, ApiDestination> destinationStore,
                        RegionResolver regionResolver,
                        ObjectMapper objectMapper,
                        RuleScheduler ruleScheduler,
@@ -99,6 +109,8 @@ public class EventBridgeService {
         this.archiveStore = archiveStore;
         this.archivedEventStore = archivedEventStore;
         this.replayStore = replayStore;
+        this.connectionStore = connectionStore;
+        this.destinationStore = destinationStore;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
         this.ruleScheduler = ruleScheduler;
@@ -398,6 +410,32 @@ public class EventBridgeService {
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Rule not found: " + ruleName, 404));
         return targetStore.get(key).orElse(List.of());
+    }
+
+    public List<String> listRuleNamesByTarget(String targetArn, String busName, String region) {
+        if (targetArn == null || targetArn.isBlank()) {
+            throw new AwsException("ValidationException", "TargetArn is required.", 400);
+        }
+        String prefix = (busName == null || busName.isBlank())
+                ? "rule:" + region + ":"
+                : ruleKeyPrefix(region, resolvedBusName(busName));
+        List<String> names = new ArrayList<>();
+        for (String key : targetStore.keys()) {
+            if (!key.startsWith(prefix)) {
+                continue;
+            }
+            List<Target> targets = targetStore.get(key).orElse(List.of());
+            boolean matches = targets.stream().anyMatch(t -> targetArn.equals(t.getArn()));
+            if (!matches) {
+                continue;
+            }
+            Rule rule = ruleStore.get(key).orElse(null);
+            if (rule != null) {
+                names.add(rule.getName());
+            }
+        }
+        names.sort(String::compareTo);
+        return names;
     }
 
     // ──────────────────────────── Tags ────────────────────────────
@@ -1069,6 +1107,7 @@ public class EventBridgeService {
         if (eventSourceArn == null || eventSourceArn.isBlank()) {
             throw new AwsException("ValidationException", "EventSourceArn is required.", 400);
         }
+        ensureArchiveSourceBusExists(eventSourceArn, region);
         String key = archiveKey(region, archiveName);
         if (archiveStore.get(key).isPresent()) {
             throw new AwsException("ResourceAlreadyExistsException",
@@ -1320,6 +1359,259 @@ public class EventBridgeService {
 
     private static String replayKey(String region, String replayName) {
         return "replay:" + region + ":" + replayName;
+    }
+
+    private static String connectionKey(String region, String name) {
+        return "connection:" + region + ":" + name;
+    }
+
+    private static String destinationKey(String region, String name) {
+        return "destination:" + region + ":" + name;
+    }
+
+    private void ensureArchiveSourceBusExists(String eventSourceArn, String region) {
+        String busName;
+        try {
+            busName = extractBusNameFromArn(eventSourceArn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("ValidationException",
+                    "Invalid EventSourceArn: " + eventSourceArn, 400);
+        }
+        if ("default".equals(busName)) {
+            getOrCreateDefaultBus(region);
+            return;
+        }
+        busStore.get(busKey(region, busName))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Event bus " + busName + " does not exist.", 404));
+    }
+
+    // ──────────────────────────── Connections ────────────────────────────
+
+    public Connection createConnection(String name, String description, String authorizationType,
+                                       String authParametersJson, String kmsKeyIdentifier,
+                                       String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ValidationException", "Connection name is required.", 400);
+        }
+        if (authorizationType == null || authorizationType.isBlank()) {
+            throw new AwsException("ValidationException", "AuthorizationType is required.", 400);
+        }
+        String key = connectionKey(region, name);
+        if (connectionStore.get(key).isPresent()) {
+            throw new AwsException("ResourceAlreadyExistsException",
+                    "Connection already exists: " + name, 400);
+        }
+        Instant now = Instant.now();
+        String id = UUID.randomUUID().toString();
+        Connection connection = new Connection();
+        connection.setName(name);
+        connection.setConnectionId(id);
+        connection.setConnectionArn(regionResolver.buildArn("events", region, "connection/" + name + "/" + id));
+        connection.setDescription(description);
+        connection.setAuthorizationType(authorizationType);
+        connection.setConnectionState("AUTHORIZED");
+        connection.setAuthParametersJson(authParametersJson);
+        connection.setKmsKeyIdentifier(kmsKeyIdentifier);
+        connection.setSecretArn(regionResolver.buildArn(
+                "secretsmanager", region, "secret:events!connection/" + name + "/" + id.substring(0, 8)));
+        connection.setCreationTime(now);
+        connection.setLastModifiedTime(now);
+        connection.setLastAuthorizedTime(now);
+        connectionStore.put(key, connection);
+        LOG.infov("Created connection: {0}", name);
+        return connection;
+    }
+
+    public Connection describeConnection(String name, String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ValidationException", "Connection name is required.", 400);
+        }
+        return connectionStore.get(connectionKey(region, name))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Connection not found: " + name, 404));
+    }
+
+    public Connection updateConnection(String name, String description, String authorizationType,
+                                       String authParametersJson, String kmsKeyIdentifier,
+                                       String region) {
+        String key = connectionKey(region, name);
+        Connection connection = connectionStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Connection not found: " + name, 404));
+        Instant now = Instant.now();
+        if (description != null) {
+            connection.setDescription(description);
+        }
+        if (authorizationType != null && !authorizationType.isBlank()) {
+            connection.setAuthorizationType(authorizationType);
+        }
+        if (authParametersJson != null && !authParametersJson.isBlank()) {
+            connection.setAuthParametersJson(authParametersJson);
+        }
+        if (kmsKeyIdentifier != null) {
+            connection.setKmsKeyIdentifier(kmsKeyIdentifier);
+        }
+        connection.setLastModifiedTime(now);
+        connection.setLastAuthorizedTime(now);
+        connection.setConnectionState("AUTHORIZED");
+        connectionStore.put(key, connection);
+        return connection;
+    }
+
+    public Connection deleteConnection(String name, String region) {
+        String key = connectionKey(region, name);
+        Connection connection = connectionStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Connection not found: " + name, 404));
+        String arn = connection.getConnectionArn();
+        boolean inUse = destinationStore.scan(k -> k.startsWith("destination:" + region + ":"))
+                .stream()
+                .anyMatch(d -> arn.equals(d.getConnectionArn()));
+        if (inUse) {
+            throw new AwsException("ConcurrentModificationException",
+                    "Connection is in use by one or more API destinations: " + name, 400);
+        }
+        connectionStore.delete(key);
+        LOG.infov("Deleted connection: {0}", name);
+        return connection;
+    }
+
+    public List<Connection> listConnections(String namePrefix, String connectionState, String region) {
+        String prefix = "connection:" + region + ":";
+        return connectionStore.scan(k -> {
+            if (!k.startsWith(prefix)) return false;
+            Connection c = connectionStore.get(k).orElse(null);
+            if (c == null) return false;
+            if (namePrefix != null && !namePrefix.isBlank()
+                    && !c.getName().startsWith(namePrefix)) {
+                return false;
+            }
+            if (connectionState != null && !connectionState.isBlank()
+                    && !connectionState.equals(c.getConnectionState())) {
+                return false;
+            }
+            return true;
+        });
+    }
+
+    // ──────────────────────────── API Destinations ────────────────────────────
+
+    public ApiDestination createApiDestination(String name, String description, String connectionArn,
+                                               String invocationEndpoint, String httpMethod,
+                                               Integer invocationRateLimitPerSecond, String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ValidationException", "API destination name is required.", 400);
+        }
+        if (connectionArn == null || connectionArn.isBlank()) {
+            throw new AwsException("ValidationException", "ConnectionArn is required.", 400);
+        }
+        if (invocationEndpoint == null || invocationEndpoint.isBlank()) {
+            throw new AwsException("ValidationException", "InvocationEndpoint is required.", 400);
+        }
+        if (httpMethod == null || httpMethod.isBlank()) {
+            throw new AwsException("ValidationException", "HttpMethod is required.", 400);
+        }
+        requireConnectionArn(connectionArn, region);
+        String key = destinationKey(region, name);
+        if (destinationStore.get(key).isPresent()) {
+            throw new AwsException("ResourceAlreadyExistsException",
+                    "ApiDestination already exists: " + name, 400);
+        }
+        Instant now = Instant.now();
+        String id = UUID.randomUUID().toString();
+        ApiDestination destination = new ApiDestination();
+        destination.setName(name);
+        destination.setDestinationId(id);
+        destination.setApiDestinationArn(
+                regionResolver.buildArn("events", region, "api-destination/" + name + "/" + id));
+        destination.setDescription(description);
+        destination.setConnectionArn(connectionArn);
+        destination.setInvocationEndpoint(invocationEndpoint);
+        destination.setHttpMethod(httpMethod);
+        destination.setInvocationRateLimitPerSecond(
+                invocationRateLimitPerSecond != null ? invocationRateLimitPerSecond : 300);
+        destination.setApiDestinationState("ACTIVE");
+        destination.setCreationTime(now);
+        destination.setLastModifiedTime(now);
+        destinationStore.put(key, destination);
+        LOG.infov("Created API destination: {0}", name);
+        return destination;
+    }
+
+    public ApiDestination describeApiDestination(String name, String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ValidationException", "API destination name is required.", 400);
+        }
+        return destinationStore.get(destinationKey(region, name))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "ApiDestination not found: " + name, 404));
+    }
+
+    public ApiDestination updateApiDestination(String name, String description, String connectionArn,
+                                               String invocationEndpoint, String httpMethod,
+                                               Integer invocationRateLimitPerSecond, String region) {
+        String key = destinationKey(region, name);
+        ApiDestination destination = destinationStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "ApiDestination not found: " + name, 404));
+        if (connectionArn != null && !connectionArn.isBlank()) {
+            requireConnectionArn(connectionArn, region);
+            destination.setConnectionArn(connectionArn);
+        }
+        if (description != null) {
+            destination.setDescription(description);
+        }
+        if (invocationEndpoint != null && !invocationEndpoint.isBlank()) {
+            destination.setInvocationEndpoint(invocationEndpoint);
+        }
+        if (httpMethod != null && !httpMethod.isBlank()) {
+            destination.setHttpMethod(httpMethod);
+        }
+        if (invocationRateLimitPerSecond != null) {
+            destination.setInvocationRateLimitPerSecond(invocationRateLimitPerSecond);
+        }
+        destination.setLastModifiedTime(Instant.now());
+        destinationStore.put(key, destination);
+        return destination;
+    }
+
+    public void deleteApiDestination(String name, String region) {
+        String key = destinationKey(region, name);
+        destinationStore.get(key)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "ApiDestination not found: " + name, 404));
+        destinationStore.delete(key);
+        LOG.infov("Deleted API destination: {0}", name);
+    }
+
+    public List<ApiDestination> listApiDestinations(String namePrefix, String connectionArn, String region) {
+        String prefix = "destination:" + region + ":";
+        return destinationStore.scan(k -> {
+            if (!k.startsWith(prefix)) return false;
+            ApiDestination d = destinationStore.get(k).orElse(null);
+            if (d == null) return false;
+            if (namePrefix != null && !namePrefix.isBlank()
+                    && !d.getName().startsWith(namePrefix)) {
+                return false;
+            }
+            if (connectionArn != null && !connectionArn.isBlank()
+                    && !connectionArn.equals(d.getConnectionArn())) {
+                return false;
+            }
+            return true;
+        });
+    }
+
+    private void requireConnectionArn(String connectionArn, String region) {
+        String prefix = "connection:" + region + ":";
+        boolean found = connectionStore.scan(k -> k.startsWith(prefix))
+                .stream()
+                .anyMatch(c -> connectionArn.equals(c.getConnectionArn()));
+        if (!found) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Connection not found: " + connectionArn, 404);
+        }
     }
 
     private static String archiveNameFromArn(String arn) {

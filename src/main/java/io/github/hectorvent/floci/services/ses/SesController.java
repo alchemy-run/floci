@@ -3,9 +3,13 @@ package io.github.hectorvent.floci.services.ses;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ses.model.AccountSuppressionAttributes;
+import io.github.hectorvent.floci.services.ses.model.AccountVdmAttributes;
 import io.github.hectorvent.floci.services.ses.model.ArchivingOptions;
 import io.github.hectorvent.floci.services.ses.model.DashboardOptions;
 import io.github.hectorvent.floci.services.ses.model.GuardianOptions;
+import io.github.hectorvent.floci.services.ses.model.MultiRegionEndpoint;
+import io.github.hectorvent.floci.services.ses.model.Tenant;
+import io.github.hectorvent.floci.services.ses.model.TenantResource;
 import io.github.hectorvent.floci.services.ses.model.BulkEmailEntry;
 import io.github.hectorvent.floci.services.ses.model.BulkEmailEntryResult;
 import io.github.hectorvent.floci.services.ses.model.ConfigurationSet;
@@ -47,6 +51,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -100,12 +107,21 @@ public class SesController {
             }
 
             Identity identity = emailIdentity.contains("@")
-                    ? sesService.verifyEmailIdentity(emailIdentity, region)
+                    ? sesService.createEmailAddressIdentity(emailIdentity, region)
                     : sesService.verifyDomainIdentity(emailIdentity, region);
 
             List<Tag> parsedTags = parseTagsArray(request.path("Tags"));
             if (parsedTags != null) {
                 sesService.setIdentityTags(emailIdentity, region, parsedTags);
+            }
+            JsonNode dkimSigning = request.path("DkimSigningAttributes");
+            if (!dkimSigning.isMissingNode() && !dkimSigning.isNull()) {
+                String nextLength = dkimSigning.path("NextSigningKeyLength").asText(null);
+                if (nextLength != null && !nextLength.isBlank()) {
+                    sesService.putEmailIdentityDkimSigningAttributes(
+                            emailIdentity, "AWS_SES", nextLength, region);
+                    identity = sesService.getIdentityVerificationAttributes(emailIdentity, region);
+                }
             }
 
             ObjectNode result = objectMapper.createObjectNode();
@@ -274,6 +290,30 @@ public class SesController {
             }
             boolean signingEnabled = signingEnabledNode.booleanValue();
             sesService.setDkimAttributes(emailIdentity, signingEnabled, region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @PUT
+    @Path("/identities/{emailIdentity}/dkim/signing")
+    public Response putEmailIdentityDkimSigningAttributes(@Context HttpHeaders headers,
+                                                          @PathParam("emailIdentity") String emailIdentity,
+                                                          String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            requireJsonObject(request);
+            String origin = request.path("SigningAttributesOrigin").asText(null);
+            JsonNode signing = request.path("SigningAttributes");
+            String nextLength = null;
+            if (!signing.isMissingNode() && !signing.isNull()) {
+                nextLength = signing.path("NextSigningKeyLength").asText(null);
+            }
+            sesService.putEmailIdentityDkimSigningAttributes(emailIdentity, origin, nextLength, region);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
@@ -1351,7 +1391,8 @@ public class SesController {
             } else {
                 scalingMode = scalingNode.asText();
             }
-            sesService.createDedicatedIpPool(poolName, scalingMode, region);
+            List<Tag> parsedTags = parseTagsArray(request.path("Tags"));
+            sesService.createDedicatedIpPool(poolName, scalingMode, parsedTags, region);
             LOG.infov("SES V2 CreateDedicatedIpPool: {0}", poolName);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
@@ -1390,6 +1431,25 @@ public class SesController {
         sesService.deleteDedicatedIpPool(poolName, region);
         LOG.infov("SES V2 DeleteDedicatedIpPool: {0}", poolName);
         return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @PUT
+    @Path("/dedicated-ip-pools/{poolName}/scaling")
+    public Response putDedicatedIpPoolScalingAttributes(@Context HttpHeaders headers,
+                                                        @PathParam("poolName") String poolName,
+                                                        String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            requireJsonObject(request);
+            String scalingMode = readRequiredStringField(request, "ScalingMode");
+            sesService.putDedicatedIpPoolScalingAttributes(poolName, scalingMode, region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
     }
 
     // ─────────────────────────── Contact lists ───────────────────────────
@@ -1742,7 +1802,49 @@ public class SesController {
             reasons.add(r);
         }
 
+        AccountVdmAttributes vdm = sesService.getAccountVdmAttributes(region);
+        ObjectNode vdmNode = result.putObject("VdmAttributes");
+        vdmNode.put("VdmEnabled", vdm.getVdmEnabled() == null ? "DISABLED" : vdm.getVdmEnabled());
+        if (vdm.getEngagementMetrics() != null) {
+            ObjectNode dashboard = vdmNode.putObject("DashboardAttributes");
+            dashboard.put("EngagementMetrics", vdm.getEngagementMetrics());
+        }
+        if (vdm.getOptimizedSharedDelivery() != null) {
+            ObjectNode guardian = vdmNode.putObject("GuardianAttributes");
+            guardian.put("OptimizedSharedDelivery", vdm.getOptimizedSharedDelivery());
+        }
+
         return Response.ok(result).build();
+    }
+
+    @PUT
+    @Path("/account/vdm")
+    public Response putAccountVdmAttributes(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            requireJsonObject(request);
+            JsonNode vdmNode = request.path("VdmAttributes");
+            if (vdmNode.isMissingNode() || vdmNode.isNull() || !vdmNode.isObject()) {
+                throw new AwsException("BadRequestException", "VdmAttributes is required.", 400);
+            }
+            AccountVdmAttributes attrs = new AccountVdmAttributes();
+            attrs.setVdmEnabled(vdmNode.path("VdmEnabled").asText(null));
+            JsonNode dashboard = vdmNode.path("DashboardAttributes");
+            if (!dashboard.isMissingNode() && dashboard.isObject()) {
+                attrs.setEngagementMetrics(dashboard.path("EngagementMetrics").asText(null));
+            }
+            JsonNode guardian = vdmNode.path("GuardianAttributes");
+            if (!guardian.isMissingNode() && guardian.isObject()) {
+                attrs.setOptimizedSharedDelivery(guardian.path("OptimizedSharedDelivery").asText(null));
+            }
+            sesService.putAccountVdmAttributes(region, attrs);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
     }
 
     @PUT
@@ -1954,6 +2056,424 @@ public class SesController {
         }
     }
 
+    // ──────────────────────────── Tenants ────────────────────────────
+
+    @POST
+    @Path("/tenants")
+    public Response createTenant(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            requireJsonObject(request);
+            String name = readRequiredStringField(request, "TenantName");
+            List<Tag> tags = parseTagsArray(request.path("Tags"));
+            List<String> reasons = null;
+            String scope = null;
+            JsonNode suppression = request.path("SuppressionAttributes");
+            if (!suppression.isMissingNode() && suppression.isObject()) {
+                JsonNode reasonsNode = suppression.path("SuppressedReasons");
+                if (!reasonsNode.isMissingNode() && !reasonsNode.isNull()) {
+                    reasons = jsonArrayToList(reasonsNode);
+                }
+                if (suppression.has("SuppressionScope") && !suppression.get("SuppressionScope").isNull()) {
+                    scope = suppression.path("SuppressionScope").asText(null);
+                }
+            }
+            Tenant tenant = sesService.createTenant(name, tags, reasons, scope, region);
+            return Response.ok(buildTenantNode(tenant)).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/get")
+    public Response getTenant(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            Tenant tenant = sesService.getTenant(readRequiredStringField(request, "TenantName"), region);
+            ObjectNode result = objectMapper.createObjectNode();
+            result.set("Tenant", buildTenantNode(tenant));
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/list")
+    public Response listTenants(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode tenants = result.putArray("Tenants");
+        for (Tenant tenant : sesService.listTenants(region)) {
+            ObjectNode item = objectMapper.createObjectNode();
+            item.put("TenantName", tenant.getTenantName());
+            item.put("TenantId", tenant.getTenantId());
+            item.put("TenantArn", tenant.getTenantArn());
+            if (tenant.getCreatedTimestamp() != null) {
+                item.put("CreatedTimestamp", tenant.getCreatedTimestamp().getEpochSecond());
+            }
+            tenants.add(item);
+        }
+        return Response.ok(result).build();
+    }
+
+    @POST
+    @Path("/tenants/delete")
+    public Response deleteTenant(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            sesService.deleteTenant(readRequiredStringField(request, "TenantName"), region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    // AWS PutTenantSuppressionAttributes is POST (not PUT) on this path.
+    @POST
+    @Path("/tenant/suppression")
+    public Response putTenantSuppressionAttributes(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            requireJsonObject(request);
+            String name = readRequiredStringField(request, "TenantName");
+            List<String> reasons = request.has("SuppressedReasons")
+                    ? jsonArrayToList(request.path("SuppressedReasons")) : null;
+            String scope = request.has("SuppressionScope")
+                    ? request.path("SuppressionScope").asText(null) : null;
+            sesService.putTenantSuppressionAttributes(name, reasons, scope, region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/resources")
+    public Response createTenantResourceAssociation(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            sesService.createTenantResourceAssociation(
+                    readRequiredStringField(request, "TenantName"),
+                    readRequiredStringField(request, "ResourceArn"),
+                    region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/resources/delete")
+    public Response deleteTenantResourceAssociation(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            sesService.deleteTenantResourceAssociation(
+                    readRequiredStringField(request, "TenantName"),
+                    readRequiredStringField(request, "ResourceArn"),
+                    region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/resources/list")
+    public Response listTenantResources(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            String tenantName = readRequiredStringField(request, "TenantName");
+            String resourceType = null;
+            JsonNode filter = request.path("Filter");
+            if (filter.isObject()) {
+                resourceType = filter.path("RESOURCE_TYPE").asText(null);
+            }
+            ObjectNode result = objectMapper.createObjectNode();
+            ArrayNode resources = result.putArray("TenantResources");
+            for (TenantResource resource : sesService.listTenantResources(tenantName, resourceType, region)) {
+                ObjectNode item = objectMapper.createObjectNode();
+                item.put("ResourceType", resource.getResourceType());
+                item.put("ResourceArn", resource.getResourceArn());
+                resources.add(item);
+            }
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    private ObjectNode buildTenantNode(Tenant tenant) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("TenantName", tenant.getTenantName());
+        node.put("TenantId", tenant.getTenantId());
+        node.put("TenantArn", tenant.getTenantArn());
+        if (tenant.getCreatedTimestamp() != null) {
+            node.put("CreatedTimestamp", tenant.getCreatedTimestamp().getEpochSecond());
+        }
+        node.put("SendingStatus", tenant.getSendingStatus());
+        ArrayNode tags = node.putArray("Tags");
+        if (tenant.getTags() != null) {
+            for (Tag t : tenant.getTags()) {
+                ObjectNode tagNode = objectMapper.createObjectNode();
+                tagNode.put("Key", t.key());
+                tagNode.put("Value", t.value());
+                tags.add(tagNode);
+            }
+        }
+        if (tenant.getSuppressedReasons() != null || tenant.getSuppressionScope() != null) {
+            ObjectNode suppression = node.putObject("SuppressionAttributes");
+            if (tenant.getSuppressedReasons() != null) {
+                ArrayNode reasons = suppression.putArray("SuppressedReasons");
+                tenant.getSuppressedReasons().forEach(reasons::add);
+            }
+            if (tenant.getSuppressionScope() != null) {
+                suppression.put("SuppressionScope", tenant.getSuppressionScope());
+            }
+        }
+        return node;
+    }
+
+    // ──────────────────── Multi-region endpoints ─────────────────────
+
+    @POST
+    @Path("/multi-region-endpoints")
+    public Response createMultiRegionEndpoint(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            requireJsonObject(request);
+            String name = readRequiredStringField(request, "EndpointName");
+            List<String> regions = new ArrayList<>();
+            JsonNode details = request.path("Details");
+            JsonNode routes = details.path("RoutesDetails");
+            if (routes.isArray()) {
+                for (JsonNode route : routes) {
+                    String routeRegion = route.path("Region").asText(null);
+                    if (routeRegion != null && !routeRegion.isBlank()) {
+                        regions.add(routeRegion);
+                    }
+                }
+            }
+            List<Tag> tags = parseTagsArray(request.path("Tags"));
+            MultiRegionEndpoint endpoint = sesService.createMultiRegionEndpoint(name, regions, tags, region);
+            ObjectNode result = objectMapper.createObjectNode();
+            result.put("Status", endpoint.getStatus());
+            result.put("EndpointId", endpoint.getEndpointId());
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @GET
+    @Path("/multi-region-endpoints")
+    public Response listMultiRegionEndpoints(@Context HttpHeaders headers) {
+        String region = regionResolver.resolveRegion(headers);
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode items = result.putArray("MultiRegionEndpoints");
+        for (MultiRegionEndpoint endpoint : sesService.listMultiRegionEndpoints(region)) {
+            ObjectNode item = objectMapper.createObjectNode();
+            item.put("EndpointName", endpoint.getEndpointName());
+            item.put("EndpointId", endpoint.getEndpointId());
+            item.put("Status", endpoint.getStatus());
+            items.add(item);
+        }
+        return Response.ok(result).build();
+    }
+
+    @GET
+    @Path("/multi-region-endpoints/{endpointName}")
+    public Response getMultiRegionEndpoint(@Context HttpHeaders headers,
+                                           @PathParam("endpointName") String endpointName) {
+        String region = regionResolver.resolveRegion(headers);
+        MultiRegionEndpoint endpoint = sesService.getMultiRegionEndpoint(endpointName, region);
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("EndpointName", endpoint.getEndpointName());
+        result.put("EndpointId", endpoint.getEndpointId());
+        result.put("Status", endpoint.getStatus());
+        ArrayNode routes = result.putArray("Routes");
+        for (String routeRegion : endpoint.getRegions()) {
+            ObjectNode route = objectMapper.createObjectNode();
+            route.put("Region", routeRegion);
+            routes.add(route);
+        }
+        if (endpoint.getCreatedTimestamp() != null) {
+            result.put("CreatedTimestamp", endpoint.getCreatedTimestamp().getEpochSecond());
+        }
+        if (endpoint.getLastUpdatedTimestamp() != null) {
+            result.put("LastUpdatedTimestamp", endpoint.getLastUpdatedTimestamp().getEpochSecond());
+        }
+        return Response.ok(result).build();
+    }
+
+    @DELETE
+    @Path("/multi-region-endpoints/{endpointName}")
+    public Response deleteMultiRegionEndpoint(@Context HttpHeaders headers,
+                                              @PathParam("endpointName") String endpointName) {
+        String region = regionResolver.resolveRegion(headers);
+        sesService.deleteMultiRegionEndpoint(endpointName, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/outbound-custom-verification-emails")
+    public Response sendCustomVerificationEmail(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            requireJsonObject(request);
+            String messageId = sesService.sendCustomVerificationEmail(
+                    readRequiredStringField(request, "EmailAddress"),
+                    readRequiredStringField(request, "TemplateName"),
+                    request.path("ConfigurationSetName").asText(null),
+                    region);
+            ObjectNode result = objectMapper.createObjectNode();
+            result.put("MessageId", messageId);
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @GET
+    @Path("/deliverability-dashboard/blacklist-report")
+    public Response getBlacklistReports(@QueryParam("BlacklistItemNames") List<String> blacklistItemNames) {
+        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode report = result.putObject("BlacklistReport");
+        if (blacklistItemNames != null) {
+            for (String item : blacklistItemNames) {
+                if (item != null && !item.isBlank()) {
+                    report.putArray(item);
+                }
+            }
+        }
+        return Response.ok(result).build();
+    }
+
+    @GET
+    @Path("/insights/{messageId}")
+    public Response getMessageInsights(@Context HttpHeaders headers,
+                                       @PathParam("messageId") String messageId) {
+        String region = regionResolver.resolveRegion(headers);
+        if (!sesService.isVdmEnabled(region)) {
+            throw new AwsException("NotFoundException",
+                    "To use this feature you must enable Virtual Deliverability Manager.", 404);
+        }
+        if (messageId == null || messageId.isBlank() || !messageId.contains("-")) {
+            throw new AwsException("BadRequestException",
+                    "MessageId is not a valid SES message id.", 400);
+        }
+        throw new AwsException("NotFoundException",
+                "Message " + messageId + " was not found.", 404);
+    }
+
+    @POST
+    @Path("/metrics/batch")
+    public Response batchGetMetricData(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            if (!sesService.isVdmEnabled(region)) {
+                throw new AwsException("BadRequestException",
+                        "To use this feature you must enable Virtual Deliverability Manager.", 400);
+            }
+            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            requireJsonObject(request);
+            JsonNode queries = request.path("Queries");
+            if (!queries.isArray() || queries.isEmpty()) {
+                throw new AwsException("BadRequestException", "Queries is required.", 400);
+            }
+            ArrayNode results = objectMapper.createArrayNode();
+            for (JsonNode query : queries) {
+                Instant start = parseMetricTimestamp(query.path("StartDate"));
+                Instant end = parseMetricTimestamp(query.path("EndDate"));
+                if (start != null && end != null && (!isMidnightUtc(start) || !isMidnightUtc(end))) {
+                    throw new AwsException("BadRequestException",
+                            "To get daily aggregated data you must not specify partial-day timestamps. "
+                                    + "Please make your interval go from midnight to midnight UTC.", 400);
+                }
+                ObjectNode item = objectMapper.createObjectNode();
+                item.put("Id", query.path("Id").asText(""));
+                item.putArray("Timestamps");
+                item.putArray("Values");
+                results.add(item);
+            }
+            ObjectNode result = objectMapper.createObjectNode();
+            result.set("Results", results);
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (Exception e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @GET
+    @Path("/deliverability-dashboard/statistics-report/{domain}")
+    public Response getDomainStatisticsReport(@Context HttpHeaders headers,
+                                              @PathParam("domain") String domain) {
+        String region = regionResolver.resolveRegion(headers);
+        Identity identity = sesService.getIdentityVerificationAttributes(domain, region);
+        if (identity == null) {
+            throw new AwsException("NotFoundException",
+                    "Domain " + domain + " is not a verified identity.", 404);
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        ObjectNode overall = result.putObject("OverallVolume");
+        ObjectNode stats = overall.putObject("VolumeStatistics");
+        stats.put("InboxRawCount", 0);
+        stats.put("SpamRawCount", 0);
+        result.putArray("DailyVolumes");
+        return Response.ok(result).build();
+    }
+
+    private static Instant parseMetricTimestamp(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isNumber()) {
+            return Instant.ofEpochSecond(node.asLong());
+        }
+        if (node.isTextual()) {
+            try {
+                return Instant.parse(node.asText());
+            } catch (Exception ignored) {
+                return Instant.ofEpochSecond(Long.parseLong(node.asText()));
+            }
+        }
+        return null;
+    }
+
+    private static boolean isMidnightUtc(Instant instant) {
+        return instant.atZone(ZoneOffset.UTC).toLocalTime().equals(LocalTime.MIDNIGHT);
+    }
+
     // ──────────────────────────── Helpers ────────────────────────────
 
     private ObjectNode buildFullIdentityResponse(Identity identity) {
@@ -2021,6 +2541,15 @@ public class SesController {
             for (String token : identity.getDkimTokens()) {
                 tokens.add(token);
             }
+        }
+        if (identity.getNextSigningKeyLength() != null) {
+            dkim.put("NextSigningKeyLength", identity.getNextSigningKeyLength());
+        }
+        if (identity.getCurrentSigningKeyLength() != null) {
+            dkim.put("CurrentSigningKeyLength", identity.getCurrentSigningKeyLength());
+        }
+        if (identity.getSigningAttributesOrigin() != null) {
+            dkim.put("SigningAttributesOrigin", identity.getSigningAttributesOrigin());
         }
         return dkim;
     }

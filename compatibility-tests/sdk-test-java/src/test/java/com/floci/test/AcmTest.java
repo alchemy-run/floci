@@ -118,15 +118,17 @@ class AcmTest {
 
     @Test
     @Order(3)
-    @DisplayName("Get a certificate")
+    @DisplayName("Get a certificate rejects a pending request")
     void testGetCertificate() {
         Assumptions.assumeTrue(requestedCertArn != null, "RequestCertificate must succeed first");
 
-        GetCertificateResponse response = acm.getCertificate(b -> b
-                .certificateArn(requestedCertArn));
-
-        assertThat(response.certificate()).isNotNull();
-        assertThat(response.certificate()).contains("BEGIN CERTIFICATE");
+        // Real ACM: GetCertificate on a certificate still pending validation
+        // fails with RequestInProgressException. The Java SDK's exception
+        // message carries the error MESSAGE ("The certificate request is in
+        // progress. ..."), not the error code.
+        assertThatThrownBy(() -> acm.getCertificate(b -> b
+                .certificateArn(requestedCertArn)))
+                .hasMessageContaining("in progress");
     }
 
     @Test

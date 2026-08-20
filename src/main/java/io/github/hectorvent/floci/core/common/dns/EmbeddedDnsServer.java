@@ -167,7 +167,61 @@ public class EmbeddedDnsServer {
         if (matchesSuffix(name)) {
             return Optional.of(myIp);
         }
+        if (isAwsDataPlaneHost(name)) {
+            return Optional.of(myIp);
+        }
         return resolveEc2PrivateDnsName(name);
+    }
+
+    /**
+     * AWS hostnames that Lambda containers must resolve to Floci rather than
+     * the public internet (SigV4 data-plane URLs the SDK does not rewrite
+     * through {@code AWS_ENDPOINT_URL}).
+     */
+    static boolean isAwsDataPlaneHost(String name) {
+        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name);
+    }
+
+    /**
+     * {@code StartSyncExecution} targets {@code sync-states.{region}.amazonaws.com}
+     * (Smithy {@code hostPrefix: "sync-"}). Lambda containers that call that
+     * host (Alchemy's StartSyncExecutionHttp) must resolve it to Floci.
+     */
+    static boolean isSyncStatesHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches("sync-states(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * AppSync GraphQL data-plane ({@code {apiId}.appsync-api.{region}.amazonaws.com})
+     * and management-plane ({@code appsync[-fips].{region}.amazonaws.com}) hosts.
+     * Alchemy's GraphQL binding {@code fetch()}es the advertised GRAPHQL URI
+     * from inside Lambda; EvaluateCode / FlushApiCache fall back here when
+     * {@code AWS_ENDPOINT_URL} is not applied.
+     */
+    static boolean isAppSyncHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        String lower = name.toLowerCase();
+        return lower.matches("[a-z0-9-]+\\.appsync-api\\.[a-z0-9-]+\\.amazonaws\\.com")
+                || lower.matches("appsync(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * API Gateway invoke / {@code @connections} data-plane
+     * ({@code {apiId}.execute-api.{region}.amazonaws.com}). Alchemy's
+     * ManageConnections binding {@code fetch()}es the advertised callback
+     * URL from inside Lambda; {@code AWS_ENDPOINT_URL} is not applied
+     * because the client overrides the endpoint with that URL.
+     */
+    static boolean isExecuteApiHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches("[a-z0-9-]+\\.execute-api\\.[a-z0-9-]+\\.amazonaws\\.com");
     }
 
     Optional<String> resolveEc2PrivateDnsName(String name) {

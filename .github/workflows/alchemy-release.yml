@@ -16,8 +16,15 @@
 # `@alchemy.run/floci` pins the `<tag>` ref; bumping that pin in an alchemy
 # release is how a patch reaches users.
 #
-# NOTE (first publish only): the GHCR package is created private — flip it
-# to public in the package settings so anonymous pulls work.
+# `uses` is the owner/repo@ref form (not `./.github/workflows/...`) so the
+# caller resolves whether this file is opened from the floci repo or from
+# alchemy's vendor checkout.
+#
+# GHCR creates org packages as private. There is no supported API to flip
+# that; an org admin must make it public once in
+# https://github.com/orgs/alchemy-run/packages/container/package/floci
+# (Package settings → Danger Zone → Change visibility → Public). Without
+# that, `docker pull ghcr.io/alchemy-run/floci` requires a token.
 
 name: Alchemy Release
 
@@ -82,4 +89,8 @@ jobs:
             echo "$IMAGE:$TAG-jvm"
             echo "$IMAGE:$TAG-compat"
             echo '```'
+            echo
+            echo "If anonymous pulls fail, the package is still private. An org"
+            echo "admin must change visibility at"
+            echo "https://github.com/orgs/${{ github.repository_owner }}/packages/container/package/floci"
           } >> "$GITHUB_STEP_SUMMARY"

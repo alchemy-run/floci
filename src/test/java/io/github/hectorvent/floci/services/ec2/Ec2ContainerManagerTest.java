@@ -26,6 +26,7 @@ import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InstanceNetworkInterface;
+import io.github.hectorvent.floci.services.ec2.model.InstanceState;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -328,7 +329,7 @@ class Ec2ContainerManagerTest {
     }
 
     @Test
-    void launchTerminatesWhenContainerBridgeIpNeverAppears() throws Exception {
+    void launchKeepsControlPlaneWhenContainerBridgeIpNeverAppears() throws Exception {
         Ec2ContainerManager.containerBridgeIpAttempts = 2;
         Ec2ContainerManager.containerBridgeIpPollMillis = 1;
         LaunchHarness harness = launchHarness();
@@ -338,11 +339,12 @@ class Ec2ContainerManagerTest {
         when(inspect.exec()).thenReturn(noIp);
 
         Instance instance = instance("i-noip");
+        instance.setState(InstanceState.running());
 
         harness.manager.launch(instance, "ubuntu:24.04", null, "us-west-2");
 
-        awaitUntil(() -> "terminated".equals(instance.getState().getName()), Duration.ofSeconds(2));
-        assertEquals(TEST_CONTAINER_ID, instance.getDockerContainerId());
+        awaitUntil(() -> TEST_CONTAINER_ID.equals(instance.getDockerContainerId()), Duration.ofSeconds(2));
+        assertEquals("running", instance.getState().getName());
         verify(harness.metadataServer, never()).registerContainer(anyString(), anyString(), any());
     }
 

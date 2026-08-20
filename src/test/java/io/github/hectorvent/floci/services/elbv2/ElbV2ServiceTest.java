@@ -15,6 +15,9 @@ import io.github.hectorvent.floci.services.elbv2.model.Rule;
 import io.github.hectorvent.floci.services.elbv2.model.RuleCondition;
 import io.github.hectorvent.floci.services.elbv2.model.TargetDescription;
 import io.github.hectorvent.floci.services.elbv2.model.TargetGroup;
+import io.github.hectorvent.floci.services.elbv2.model.TrustStore;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +32,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -36,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -60,7 +65,16 @@ class ElbV2ServiceTest {
     @Mock
     Ec2Service ec2Service;
 
+    @Mock
+    S3Service s3Service;
+
     private ElbV2Service service;
+
+    private static final String CA_PEM = """
+            -----BEGIN CERTIFICATE-----
+            MIIB
+            -----END CERTIFICATE-----
+            """;
 
     @BeforeEach
     void setUp() {
@@ -69,7 +83,9 @@ class ElbV2ServiceTest {
         service.healthChecker = healthChecker;
         service.regionResolver = new RegionResolver(REGION, "000000000000");
         service.ec2Service = ec2Service;
+        service.s3Service = s3Service;
         stubAlbSubnets(ec2Service);
+        stubCaBundle(s3Service, "ca-bundles", "ca-bundle.pem", CA_PEM);
     }
 
     @Test
@@ -122,6 +138,63 @@ class ElbV2ServiceTest {
         verify(dataPlane).restartListener(any(Listener.class), eq(REGION), anyList());
         verify(dataPlane, never()).stopListener(anyString());
         verify(dataPlane, never()).startListener(any(Listener.class), anyString(), anyList());
+    }
+
+    @Test
+    void describeRulesRequiresListenerAndThrowsAfterDelete() {
+        String lbArn = service.createLoadBalancer(
+                REGION, "rules-listener-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        String tgArn = createTargetGroup("rules-listener-tg");
+        String listenerArn = service.createListener(
+                REGION, lbArn, "HTTP", 80, null, List.of(),
+                List.of(forwardAction(tgArn)), List.of(), Map.of()).getListenerArn();
+
+        assertFalse(service.describeRules(REGION, listenerArn, null).isEmpty());
+
+        service.deleteListener(REGION, listenerArn);
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.describeRules(REGION, listenerArn, null));
+        assertEquals("ListenerNotFound", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void createLoadBalancerAcceptsSubnetsEc2StoreCannotSee() {
+        when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
+
+        var lb = service.createLoadBalancer(
+                REGION, "foreign-subnets", "internal", "application", "ipv4",
+                List.of("subnet-05d391f2554e440c8", "subnet-0abcdef1234567890"),
+                List.of("sg-a"), Map.of());
+
+        assertEquals("vpc-default", lb.getVpcId());
+        assertEquals(2, lb.getAvailabilityZones().size());
+        assertEquals("subnet-05d391f2554e440c8", lb.getAvailabilityZones().get(0).getSubnetId());
+        assertEquals("subnet-0abcdef1234567890", lb.getAvailabilityZones().get(1).getSubnetId());
+        assertEquals(REGION + "a", lb.getAvailabilityZones().get(0).getZoneName());
+        assertEquals(REGION + "b", lb.getAvailabilityZones().get(1).getZoneName());
+    }
+
+    @Test
+    void createLoadBalancerMissingSubnetUsesTypedSubnetNotFound() {
+        AwsException error = assertThrows(AwsException.class, () -> service.createLoadBalancer(
+                REGION, "blank-subnet", "internal", "application", "ipv4",
+                List.of("subnet-a", "   "), List.of("sg-a"), Map.of()));
+        assertEquals("SubnetNotFound", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void createLoadBalancerMalformedSubnetIdIsSubnetNotFound() {
+        when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
+
+        AwsException error = assertThrows(AwsException.class, () -> service.createLoadBalancer(
+                REGION, "malformed-subnet", "internal", "application", "ipv4",
+                List.of("subnet-does-not-exist"), List.of("sg-a"), Map.of()));
+        assertEquals("SubnetNotFound", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
     }
 
     @Test
@@ -251,6 +324,230 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void createTrustStoreReadsCaBundleAndReturnsActive() {
+        TrustStore ts = service.createTrustStore(
+                REGION, "mtls-store", "ca-bundles", "ca-bundle.pem", null, Map.of("env", "test"));
+
+        assertEquals("ACTIVE", ts.getStatus());
+        assertEquals(1, ts.getNumberOfCaCertificates());
+        assertTrue(ts.getTrustStoreArn().contains(":truststore/mtls-store/"));
+        assertEquals("test", service.describeTags(List.of(ts.getTrustStoreArn()))
+                .get(ts.getTrustStoreArn()).get("env"));
+    }
+
+    @Test
+    void createTrustStoreMissingBundleIsCaCertificatesBundleNotFound() {
+        when(s3Service.getObject("missing-bucket", "missing.pem"))
+                .thenThrow(new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+
+        AwsException error = assertThrows(AwsException.class, () -> service.createTrustStore(
+                REGION, "probe-store", "missing-bucket", "missing.pem", null, Map.of()));
+
+        assertEquals("CaCertificatesBundleNotFound", error.getErrorCode());
+    }
+
+    @Test
+    void createTrustStoreInvalidPemIsInvalidCaCertificatesBundle() {
+        stubCaBundle(s3Service, "ca-bundles", "not-a-cert.txt", "not a certificate");
+
+        AwsException error = assertThrows(AwsException.class, () -> service.createTrustStore(
+                REGION, "bad-store", "ca-bundles", "not-a-cert.txt", null, Map.of()));
+
+        assertEquals("InvalidCaCertificatesBundle", error.getErrorCode());
+    }
+
+    @Test
+    void describeTrustStoresByNameAndArn() {
+        TrustStore created = service.createTrustStore(
+                REGION, "lookup-store", "ca-bundles", "ca-bundle.pem", null, Map.of());
+
+        assertEquals(created.getTrustStoreArn(),
+                service.describeTrustStores(REGION, null, List.of("lookup-store")).getFirst().getTrustStoreArn());
+        assertEquals("lookup-store",
+                service.describeTrustStores(REGION, List.of(created.getTrustStoreArn()), null)
+                        .getFirst().getName());
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.describeTrustStores(REGION, null, List.of("no-such-store")));
+        assertEquals("TrustStoreNotFound", missing.getErrorCode());
+    }
+
+    @Test
+    void modifyAndDeleteTrustStore() {
+        TrustStore created = service.createTrustStore(
+                REGION, "lifecycle-store", "ca-bundles", "ca-bundle.pem", null, Map.of());
+        stubCaBundle(s3Service, "ca-bundles", "ca-bundle-2.pem", CA_PEM + CA_PEM);
+
+        TrustStore modified = service.modifyTrustStore(
+                REGION, created.getTrustStoreArn(), "ca-bundles", "ca-bundle-2.pem", null);
+        assertEquals(2, modified.getNumberOfCaCertificates());
+
+        assertEquals("https://s3.us-west-2.amazonaws.com/ca-bundles/ca-bundle-2.pem",
+                service.getTrustStoreCaCertificatesBundleLocation(REGION, created.getTrustStoreArn()));
+
+        AwsException revocation = assertThrows(AwsException.class,
+                () -> service.getTrustStoreRevocationContentLocation(
+                        REGION, created.getTrustStoreArn(), 424242L));
+        assertEquals("RevocationIdNotFound", revocation.getErrorCode());
+
+        service.deleteTrustStore(REGION, created.getTrustStoreArn());
+        AwsException gone = assertThrows(AwsException.class,
+                () -> service.describeTrustStores(REGION, List.of(created.getTrustStoreArn()), null));
+        assertEquals("TrustStoreNotFound", gone.getErrorCode());
+    }
+
+    @Test
+    void createListenerStoresAuthenticateOidcAction() {
+        String lbArn = service.createLoadBalancer(
+                REGION, "oidc-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        Action oidc = new Action();
+        oidc.setType("authenticate-oidc");
+        oidc.setOidcIssuer("https://idp.example.test");
+        oidc.setOidcAuthorizationEndpoint("https://idp.example.test/authorize");
+        oidc.setOidcTokenEndpoint("https://idp.example.test/token");
+        oidc.setOidcUserInfoEndpoint("https://idp.example.test/userinfo");
+        oidc.setOidcClientId("alchemy-test-client");
+        oidc.setOidcClientSecret("secret");
+        oidc.setOidcSessionTimeout(604800L);
+        oidc.setOidcOnUnauthenticatedRequest("deny");
+        Action fixed = new Action();
+        fixed.setType("fixed-response");
+        fixed.setFixedResponseStatusCode("200");
+
+        String listenerArn = service.createListener(
+                REGION, lbArn, "HTTPS", 443, null, List.of(),
+                List.of(oidc, fixed), List.of(), Map.of()).getListenerArn();
+
+        Action stored = service.describeListeners(REGION, lbArn, List.of(listenerArn))
+                .getFirst().getDefaultActions().getFirst();
+        assertEquals("authenticate-oidc", stored.getType());
+        assertEquals("alchemy-test-client", stored.getOidcClientId());
+        assertEquals(604800L, stored.getOidcSessionTimeout());
+        assertEquals("deny", stored.getOidcOnUnauthenticatedRequest());
+    }
+
+    @Test
+    void createListenerWhenPersistedRegionMapIsImmutable() throws Exception {
+        String lbArn = service.createLoadBalancer(
+                REGION, "immutable-region-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        var field = ElbV2Service.class.getDeclaredField("listeners");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Map<String, Listener>> persisted = (Map<String, Map<String, Listener>>) field.get(service);
+        persisted.put(REGION, Map.of());
+
+        Action fixed = new Action();
+        fixed.setType("fixed-response");
+        fixed.setFixedResponseStatusCode("200");
+        Listener listener = service.createListener(
+                REGION, lbArn, "HTTP", 80, null, List.of(),
+                List.of(fixed), List.of(), Map.of());
+
+        assertNotNull(listener.getListenerArn());
+        assertEquals(1, service.describeListeners(REGION, lbArn, null).size());
+    }
+
+    @Test
+    void createListenerOnNlbTcpSurvivesDataPlaneNpe() {
+        doThrow(new NullPointerException()).when(dataPlane)
+                .startListener(any(Listener.class), anyString(), anyList());
+        String lbArn = service.createLoadBalancer(
+                REGION, "nlb-tcp", "internal", "network", "ipv4",
+                ALB_SUBNETS, List.of(), Map.of()).getLoadBalancerArn();
+        String tgArn = createTcpTargetGroup("nlb-tcp-tg");
+        Action forward = forwardConfigOnly(tgArn);
+
+        Listener listener = service.createListener(
+                REGION, lbArn, "TCP", 80, null, List.of(),
+                List.of(forward), List.of(), Map.of());
+
+        assertNotNull(listener.getListenerArn());
+        assertTrue(listener.getListenerArn().contains(":listener/net/"));
+        assertEquals("TCP", listener.getProtocol());
+        assertEquals(80, listener.getPort());
+        assertEquals(1, service.describeListeners(REGION, lbArn, null).size());
+    }
+
+    @Test
+    void createListenerHttpsWithCertificateAndNullPortStillPersists() {
+        doThrow(new NullPointerException()).when(dataPlane)
+                .startListener(any(Listener.class), anyString(), anyList());
+        String lbArn = service.createLoadBalancer(
+                REGION, "https-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        Action fixed = new Action();
+        fixed.setType("fixed-response");
+        fixed.setFixedResponseStatusCode("200");
+
+        Listener withCert = service.createListener(
+                REGION, lbArn, "HTTPS", 443, "ELBSecurityPolicy-2016-08",
+                List.of("arn:aws:acm:us-west-2:000000000000:certificate/default"),
+                List.of(fixed), List.of(), Map.of());
+        assertEquals("HTTPS", withCert.getProtocol());
+        assertEquals("arn:aws:acm:us-west-2:000000000000:certificate/default",
+                withCert.getCertificates().getFirst());
+
+        Listener tls = service.createListener(
+                REGION, lbArn, "TLS", 8443, null,
+                List.of("arn:aws:acm:us-west-2:000000000000:certificate/tls"),
+                List.of(fixed), List.of(), Map.of());
+        assertEquals("TLS", tls.getProtocol());
+
+        Listener noPort = service.createListener(
+                REGION, lbArn, "TCP", null, null, List.of(),
+                List.of(fixed), List.of(), Map.of());
+        assertNotNull(noPort.getListenerArn());
+        assertEquals("TCP", noPort.getProtocol());
+    }
+
+    @Test
+    void listenerCertificatesSniAttachDetachPreservesDefault() {
+        String lbArn = service.createLoadBalancer(
+                REGION, "sni-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        Action fixed = new Action();
+        fixed.setType("fixed-response");
+        fixed.setFixedResponseStatusCode("200");
+        String defaultCert = "arn:aws:acm:us-west-2:000000000000:certificate/default";
+        String sniCert = "arn:aws:acm:us-west-2:000000000000:certificate/sni";
+        String listenerArn = service.createListener(
+                REGION, lbArn, "HTTPS", 443, null, List.of(defaultCert),
+                List.of(fixed), List.of(), Map.of()).getListenerArn();
+
+        service.addListenerCertificates(REGION, listenerArn, List.of(sniCert));
+        List<String> attached = service.describeListenerCertificates(REGION, listenerArn);
+        assertEquals(List.of(defaultCert, sniCert), attached);
+
+        service.modifyListener(REGION, listenerArn, "HTTPS", 443, null,
+                List.of(defaultCert), null, null);
+        attached = service.describeListenerCertificates(REGION, listenerArn);
+        assertEquals(List.of(defaultCert, sniCert), attached);
+
+        service.removeListenerCertificates(REGION, listenerArn, List.of(sniCert));
+        attached = service.describeListenerCertificates(REGION, listenerArn);
+        assertEquals(List.of(defaultCert), attached);
+
+        AwsException defaultRemove = assertThrows(AwsException.class,
+                () -> service.removeListenerCertificates(REGION, listenerArn, List.of(defaultCert)));
+        assertEquals("OperationNotPermitted", defaultRemove.getErrorCode());
+    }
+
+    @Test
+    void modifyCapacityReservationResetIsNoOpSuccess() {
+        String lbArn = service.createLoadBalancer(
+                REGION, "capacity-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+
+        ElbV2Service.CapacityReservation reset = service.modifyCapacityReservation(REGION, lbArn, null, true);
+        assertEquals(null, reset.minimumCapacityUnits());
+
+        ElbV2Service.CapacityReservation reserved = service.modifyCapacityReservation(REGION, lbArn, 10, false);
+        assertEquals(10, reserved.minimumCapacityUnits());
+        assertEquals(10, service.describeCapacityReservation(REGION, lbArn).minimumCapacityUnits());
+    }
+
+    @Test
     void describeTargetHealthReturnsUnusedForExplicitUnregisteredTarget() {
         String tgArn = createTargetGroup("sample-tg");
         TargetDescription target = new TargetDescription();
@@ -271,10 +568,26 @@ class ElbV2ServiceTest {
                 "ipv4", Map.of()).getTargetGroupArn();
     }
 
+    private String createTcpTargetGroup(String name) {
+        return service.createTargetGroup(
+                REGION, name, "TCP", null, 80, "vpc-a", "ip",
+                "TCP", "traffic-port", true, "/", 30, 10, 3, 3, "200",
+                "ipv4", Map.of()).getTargetGroupArn();
+    }
+
     private static Action forwardAction(String targetGroupArn) {
         Action action = new Action();
         action.setType("forward");
         action.setTargetGroupArn(targetGroupArn);
+        return action;
+    }
+
+    private static Action forwardConfigOnly(String targetGroupArn) {
+        Action action = new Action();
+        action.setType("forward");
+        Action.TargetGroupTuple tuple = new Action.TargetGroupTuple();
+        tuple.setTargetGroupArn(targetGroupArn);
+        action.setTargetGroups(List.of(tuple));
         return action;
     }
 
@@ -304,8 +617,20 @@ class ElbV2ServiceTest {
         service.regionResolver = new RegionResolver(REGION, "000000000000");
         service.ec2Service = ec2Service;
         service.storageFactory = storageFactory;
+        service.s3Service = mock(S3Service.class);
+        stubCaBundle(service.s3Service, "ca-bundles", "ca-bundle.pem", """
+                -----BEGIN CERTIFICATE-----
+                MIIB
+                -----END CERTIFICATE-----
+                """);
         service.initializeStorage();
         return service;
+    }
+
+    private static void stubCaBundle(S3Service s3Service, String bucket, String key, String pem) {
+        S3Object object = new S3Object(bucket, key, pem.getBytes(), "application/x-pem-file");
+        lenient().when(s3Service.getObject(eq(bucket), eq(key))).thenReturn(object);
+        lenient().when(s3Service.getObject(eq(bucket), eq(key), any())).thenReturn(object);
     }
 
     private static void stubAlbSubnets(Ec2Service ec2Service) {
@@ -313,6 +638,8 @@ class ElbV2ServiceTest {
         Subnet subnetB = subnet("subnet-b", REGION + "b");
         lenient().when(ec2Service.requireSubnet(REGION, "subnet-a")).thenReturn(subnetA);
         lenient().when(ec2Service.requireSubnet(REGION, "subnet-b")).thenReturn(subnetB);
+        lenient().when(ec2Service.findSubnetById(REGION, "subnet-a")).thenReturn(Optional.of(subnetA));
+        lenient().when(ec2Service.findSubnetById(REGION, "subnet-b")).thenReturn(Optional.of(subnetB));
         lenient().when(ec2Service.describeSubnets(eq(REGION), eq(ALB_SUBNETS), eq(Map.of())))
                 .thenReturn(List.of(subnetA, subnetB));
     }

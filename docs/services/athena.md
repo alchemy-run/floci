@@ -24,14 +24,38 @@ Floci emulates Amazon Athena with **real SQL execution** powered by a [floci-duc
 | `ListTableMetadata` | - |
 | `GetTableMetadata` | - |
 | `DeleteWorkGroup` | Deletes a workgroup |
+| `UpdateWorkGroup` | Updates workgroup state, description, and configuration |
+| `CreateDataCatalog` | Creates a named data catalog |
+| `UpdateDataCatalog` | Updates a stored data catalog |
+| `DeleteDataCatalog` | Deletes a stored data catalog |
+| `GetDatabase` | Returns Glue database metadata |
+| `CreateNamedQuery` | Creates a named query (honors `ClientRequestToken`) |
+| `GetNamedQuery` | Returns a stored named query. Missing ids throw `InvalidRequestException` with `NamedQuery {id} does not exist` (distilled `NamedQueryNotFound`) |
+| `ListNamedQueries` | Lists named query IDs for a workgroup |
+| `UpdateNamedQuery` | Updates name, description, or SQL |
+| `DeleteNamedQuery` | Deletes a named query |
+| `BatchGetNamedQuery` | Returns named queries by id |
+| `CreatePreparedStatement` | Creates a prepared statement in a workgroup |
+| `GetPreparedStatement` | Returns a stored prepared statement |
+| `ListPreparedStatements` | Lists prepared statements for a workgroup |
+| `UpdatePreparedStatement` | Updates statement text or description |
+| `DeletePreparedStatement` | Deletes a prepared statement |
+| `BatchGetPreparedStatement` | Returns prepared statements by name |
+| `BatchGetQueryExecution` | Returns query executions by id |
+| `GetQueryRuntimeStatistics` | Returns a stub timeline for a query |
+| `TagResource` | Tags a workgroup or data catalog |
+| `UntagResource` | Removes tags from a workgroup or data catalog |
+| `ListTagsForResource` | Lists tags on a workgroup or data catalog |
 <!-- floci:actions:end -->
 
 ## How it works
 
-1. **Lazy sidecar start**: On the first `StartQueryExecution` call, Floci checks for a local `floci/floci-duck:latest` image and starts the container. Subsequent queries reuse the running container.
-2. **Glue DDL injection**: Floci reads all Glue tables for the target database and generates `CREATE OR REPLACE VIEW` statements mapping each table name to its S3 location via DuckDB's `read_parquet`, `read_json_auto`, or `read_csv_auto` functions — chosen based on the table's `InputFormat` or SerDe serialization library.
-3. **Query execution**: The user's SQL is wrapped in `COPY (...) TO 's3://...' (FORMAT CSV, HEADER)` and executed. Results are written directly to the output S3 path.
-4. **Results retrieval**: `GetQueryResults` reads the CSV back from S3 and returns it in the standard Athena `ResultSet` shape.
+1. **Literal SELECT fast path**: `SELECT <integer>` (optional `AS alias`) completes in-process: writes a header+value CSV, caches the `ResultSet`, and marks `SUCCEEDED` without starting DuckDB. Alchemy's first `/select-one` after deploy used to 5xx while the sidecar cold-started.
+2. **Lazy sidecar start**: On the first non-literal `StartQueryExecution` call, Floci checks for a local `floci/floci-duck:latest` image and starts the container. Subsequent queries reuse the running container.
+3. **Glue DDL injection**: Floci reads every Glue database/table and generates `CREATE SCHEMA` plus `CREATE OR REPLACE VIEW` statements. Views are created as `database.table` (so `SELECT COUNT(*) FROM alchemy_athena_e2e.people` works) and also unqualified for the `QueryExecutionContext` database. CSV tables use Glue column names with `header = false` unless `skip.header.line.count` / `has_header` is set — matching Hive/Athena. Listed S3 objects under the table prefix are unioned; if none exist yet the prefix glob is used. Parquet/JSON still use `read_parquet` / `read_json_auto`.
+4. **Query execution**: The user's SQL is wrapped in `COPY (...) TO 's3://...' (FORMAT CSV, HEADER)` and executed. Results are written directly to the output S3 path.
+5. **Results retrieval**: `GetQueryResults` reads the CSV back from S3 and returns it in the standard Athena `ResultSet` shape.
+6. **EventBridge**: every state transition (`QUEUED` → `RUNNING` → `SUCCEEDED`/`FAILED`/`CANCELLED`) is published to the default bus as `source=aws.athena`, `detail-type=Athena Query State Change`, with camelCase detail (`currentState`, `previousState`, `queryExecutionId`, `workgroupName`, `statementType`, `sequenceNumber`, `versionId`).
 
 ## Format inference
 
@@ -41,8 +65,7 @@ The DuckDB read function is chosen from the Glue table's `StorageDescriptor`:
 |---|---|
 | `InputFormat` or `SerializationLibrary` contains `parquet` | `read_parquet` |
 | `InputFormat` or `SerializationLibrary` contains `json` | `read_json_auto` |
-| `InputFormat` contains `hive` | `read_json_auto` |
-| Anything else | `read_csv_auto` |
+| Anything else (including Hive `LazySimpleSerDe` CSV) | `read_csv` with Glue columns and `header = false` |
 
 ## Configuration
 

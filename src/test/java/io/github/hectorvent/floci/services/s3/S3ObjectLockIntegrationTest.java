@@ -207,4 +207,77 @@ class S3ObjectLockIntegrationTest {
             .statusCode(404)
             .body(containsString("NoSuchBucket"));
     }
+
+    // --- object-level lock APIs on a bucket without Object Lock ---
+
+    @Test
+    @Order(15)
+    void putObjectOnPlainBucketForLockApiTests() {
+        given()
+            .body("no lock")
+        .when()
+            .put("/" + PLAIN_BUCKET + "/lock-api.txt")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    @Order(16)
+    void getObjectRetentionOnPlainBucketReturnsInvalidRequest() {
+        given()
+        .when()
+            .get("/" + PLAIN_BUCKET + "/lock-api.txt?retention")
+        .then()
+            .statusCode(400)
+            .body(containsString("InvalidRequest"))
+            .body(containsString("Object Lock Configuration"));
+    }
+
+    @Test
+    @Order(17)
+    void putObjectRetentionOnPlainBucketReturnsInvalidRequest() {
+        String body = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                  <Mode>GOVERNANCE</Mode>
+                  <RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate>
+                </Retention>
+                """;
+        given()
+            .body(body)
+        .when()
+            .put("/" + PLAIN_BUCKET + "/lock-api.txt?retention")
+        .then()
+            .statusCode(400)
+            .body(containsString("InvalidRequest"));
+    }
+
+    @Test
+    @Order(18)
+    void getObjectLegalHoldOnPlainBucketReturnsInvalidRequest() {
+        given()
+        .when()
+            .get("/" + PLAIN_BUCKET + "/lock-api.txt?legal-hold")
+        .then()
+            .statusCode(400)
+            .body(containsString("InvalidRequest"));
+    }
+
+    @Test
+    @Order(19)
+    void putObjectLegalHoldOnPlainBucketReturnsInvalidRequest() {
+        String body = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                  <Status>ON</Status>
+                </LegalHold>
+                """;
+        given()
+            .body(body)
+        .when()
+            .put("/" + PLAIN_BUCKET + "/lock-api.txt?legal-hold")
+        .then()
+            .statusCode(400)
+            .body(containsString("InvalidRequest"));
+    }
 }

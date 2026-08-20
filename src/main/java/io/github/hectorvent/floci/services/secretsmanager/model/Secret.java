@@ -29,6 +29,7 @@ public class Secret {
     private Instant lastRotatedDate;
     private Instant nextRotationDate;
     private String targetAttachmentOwner;
+    private String resourcePolicy;
 
     @RegisterForReflection
     public record RotationRules(
@@ -180,5 +181,13 @@ public class Secret {
 
     public void setTargetAttachmentOwner(String targetAttachmentOwner) {
         this.targetAttachmentOwner = targetAttachmentOwner;
+    }
+
+    public String getResourcePolicy() {
+        return resourcePolicy;
+    }
+
+    public void setResourcePolicy(String resourcePolicy) {
+        this.resourcePolicy = resourcePolicy;
     }
 }

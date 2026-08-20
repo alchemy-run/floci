@@ -60,18 +60,22 @@ func TestACM(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "go-test.example.com", aws.ToString(r.Certificate.DomainName))
-		assert.Equal(t, acmtypes.CertificateStatusIssued, r.Certificate.Status)
+		// Real ACM: a freshly requested public certificate stays
+		// PENDING_VALIDATION until its DNS/email validation completes.
+		assert.Equal(t, acmtypes.CertificateStatusPendingValidation, r.Certificate.Status)
 	})
 
 	t.Run("GetCertificate", func(t *testing.T) {
 		if certARN == "" {
 			t.Skip("No certificate ARN from RequestCertificate")
 		}
-		r, err := svc.GetCertificate(ctx, &acm.GetCertificateInput{
+		// Real ACM: GetCertificate on a pending certificate fails with
+		// RequestInProgressException (the body does not exist yet).
+		_, err := svc.GetCertificate(ctx, &acm.GetCertificateInput{
 			CertificateArn: aws.String(certARN),
 		})
-		require.NoError(t, err)
-		assert.NotEmpty(t, aws.ToString(r.Certificate))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "RequestInProgress")
 	})
 
 	t.Run("ListCertificates", func(t *testing.T) {

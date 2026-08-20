@@ -809,7 +809,13 @@ public class SqsService implements Resettable {
         String prefix = region + "::";
         for (Queue q : queueStore.scan(k -> k.startsWith(prefix))) {
             if (targetArn.equals(redriveDlqArn(q))) {
-                sourceQueues.add(q.getQueueUrl());
+                // Echo the caller's scheme/host/port. Storage always records
+                // CreateQueue's baseUrl (https://localhost:4566/...), but a
+                // Lambda container holds the same queue as
+                // https://host.docker.internal:4566/... — sibling URLs must
+                // match that form or ListDeadLetterSourceQueues disagrees
+                // with the CreateQueue/GetQueueUrl value the caller already has.
+                sourceQueues.add(presentQueueUrl(q.getQueueUrl(), queueUrl));
             }
         }
         return sourceQueues;
@@ -1262,6 +1268,34 @@ public class SqsService implements Resettable {
 
     private String regionKey(String region, String queueUrl) {
         return region + "::" + extractQueuePath(normalizeQueueUrl(queueUrl));
+    }
+
+    /**
+     * Re-present a stored queue URL using the scheme/host/port of
+     * {@code incomingQueueUrl}. Lookups already ignore hostname
+     * ({@link #extractQueuePath}); responses must too, otherwise
+     * ListDeadLetterSourceQueues returns {@code https://localhost:4566/...}
+     * while the caller holds the CreateQueue URL rewritten onto another host.
+     */
+    static String presentQueueUrl(String storedUrl, String incomingQueueUrl) {
+        if (storedUrl == null || incomingQueueUrl == null) {
+            return storedUrl;
+        }
+        String incomingOrigin = originOf(incomingQueueUrl);
+        String storedPath = extractQueuePath(storedUrl);
+        if (incomingOrigin == null || storedPath.isEmpty() || !storedPath.startsWith("/")) {
+            return storedUrl;
+        }
+        return incomingOrigin + storedPath;
+    }
+
+    private static String originOf(String url) {
+        int schemeEnd = url.indexOf("://");
+        if (schemeEnd < 0) {
+            return null;
+        }
+        int pathStart = url.indexOf('/', schemeEnd + 3);
+        return pathStart < 0 ? url : url.substring(0, pathStart);
     }
 
     /**

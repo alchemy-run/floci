@@ -3,9 +3,11 @@ package io.github.hectorvent.floci.services.eventbridge;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsJson11Controller;
+import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
 import io.github.hectorvent.floci.services.eventbridge.model.Archive;
 import io.github.hectorvent.floci.services.eventbridge.model.ArchiveState;
 import io.github.hectorvent.floci.services.eventbridge.model.BatchParameters;
+import io.github.hectorvent.floci.services.eventbridge.model.Connection;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
 import io.github.hectorvent.floci.services.eventbridge.model.InputTransformer;
 import io.github.hectorvent.floci.services.eventbridge.model.Replay;
@@ -65,6 +67,7 @@ public class EventBridgeHandler {
                 case "PutTargets" -> handlePutTargets(request, region);
                 case "RemoveTargets" -> handleRemoveTargets(request, region);
                 case "ListTargetsByRule" -> handleListTargetsByRule(request, region);
+                case "ListRuleNamesByTarget" -> handleListRuleNamesByTarget(request, region);
                 case "PutEvents" -> handlePutEvents(request, region);
                 case "TestEventPattern" -> handleTestEventPattern(request);
                 case "ListTagsForResource" -> handleListTagsForResource(request, region);
@@ -81,6 +84,16 @@ public class EventBridgeHandler {
                 case "DescribeReplay" -> handleDescribeReplay(request, region);
                 case "CancelReplay" -> handleCancelReplay(request, region);
                 case "ListReplays" -> handleListReplays(request, region);
+                case "CreateConnection" -> handleCreateConnection(request, region);
+                case "DescribeConnection" -> handleDescribeConnection(request, region);
+                case "UpdateConnection" -> handleUpdateConnection(request, region);
+                case "DeleteConnection" -> handleDeleteConnection(request, region);
+                case "ListConnections" -> handleListConnections(request, region);
+                case "CreateApiDestination" -> handleCreateApiDestination(request, region);
+                case "DescribeApiDestination" -> handleDescribeApiDestination(request, region);
+                case "UpdateApiDestination" -> handleUpdateApiDestination(request, region);
+                case "DeleteApiDestination" -> handleDeleteApiDestination(request, region);
+                case "ListApiDestinations" -> handleListApiDestinations(request, region);
                 default -> Response.status(400)
                         .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                         .build();
@@ -304,6 +317,16 @@ public class EventBridgeHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleListRuleNamesByTarget(JsonNode request, String region) {
+        String targetArn = request.path("TargetArn").asText(null);
+        String busName = request.path("EventBusName").asText(null);
+        List<String> names = eventBridgeService.listRuleNamesByTarget(targetArn, busName, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode namesArray = response.putArray("RuleNames");
+        names.forEach(namesArray::add);
+        return Response.ok(response).build();
+    }
+
     private Response handlePutEvents(JsonNode request, String region) {
         List<Map<String, Object>> entries = new ArrayList<>();
         JsonNode entriesNode = request.path("Entries");
@@ -415,7 +438,7 @@ public class EventBridgeHandler {
         String archiveName = request.path("ArchiveName").asText(null);
         String eventSourceArn = request.path("EventSourceArn").asText(null);
         String description = request.path("Description").asText(null);
-        String eventPattern = request.path("EventPattern").asText(null);
+        String eventPattern = textOrJson(request.path("EventPattern"));
         int retentionDays = request.path("RetentionDays").asInt(0);
         Archive archive = eventBridgeService.createArchive(
                 archiveName, eventSourceArn, description, eventPattern, retentionDays, region);
@@ -435,7 +458,7 @@ public class EventBridgeHandler {
     private Response handleUpdateArchive(JsonNode request, String region) {
         String archiveName = request.path("ArchiveName").asText(null);
         String description = request.path("Description").asText(null);
-        String eventPattern = request.path("EventPattern").asText(null);
+        String eventPattern = textOrJson(request.path("EventPattern"));
         int retentionDays = request.path("RetentionDays").asInt(0);
         Archive archive = eventBridgeService.updateArchive(
                 archiveName, description, eventPattern, retentionDays, region);
@@ -511,6 +534,130 @@ public class EventBridgeHandler {
         ArrayNode replaysArray = response.putArray("Replays");
         for (Replay replay : replays) {
             replaysArray.add(buildReplayNode(replay, false));
+        }
+        return Response.ok(response).build();
+    }
+
+    // ──────────────────────────── Connections ────────────────────────────
+
+    private Response handleCreateConnection(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        String description = request.path("Description").asText(null);
+        String authorizationType = request.path("AuthorizationType").asText(null);
+        String kmsKey = request.path("KmsKeyIdentifier").asText(null);
+        String authJson = objectOrNull(request.path("AuthParameters"));
+        Connection connection = eventBridgeService.createConnection(
+                name, description, authorizationType, authJson, kmsKey, region);
+        return Response.ok(buildConnectionMutationNode(connection)).build();
+    }
+
+    private Response handleDescribeConnection(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        Connection connection = eventBridgeService.describeConnection(name, region);
+        return Response.ok(buildConnectionDescribeNode(connection)).build();
+    }
+
+    private Response handleUpdateConnection(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        String description = request.has("Description") ? request.path("Description").asText(null) : null;
+        String authorizationType = request.path("AuthorizationType").asText(null);
+        String kmsKey = request.has("KmsKeyIdentifier") ? request.path("KmsKeyIdentifier").asText(null) : null;
+        String authJson = objectOrNull(request.path("AuthParameters"));
+        Connection connection = eventBridgeService.updateConnection(
+                name, description, authorizationType, authJson, kmsKey, region);
+        return Response.ok(buildConnectionMutationNode(connection)).build();
+    }
+
+    private Response handleDeleteConnection(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        Connection connection = eventBridgeService.deleteConnection(name, region);
+        ObjectNode response = buildConnectionMutationNode(connection);
+        putEpoch(response, "LastAuthorizedTime", connection.getLastAuthorizedTime());
+        return Response.ok(response).build();
+    }
+
+    private Response handleListConnections(JsonNode request, String region) {
+        String namePrefix = request.path("NamePrefix").asText(null);
+        String state = request.path("ConnectionState").asText(null);
+        List<Connection> connections = eventBridgeService.listConnections(namePrefix, state, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("Connections");
+        for (Connection connection : connections) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("ConnectionArn", connection.getConnectionArn());
+            node.put("Name", connection.getName());
+            node.put("ConnectionState", connection.getConnectionState());
+            if (connection.getAuthorizationType() != null) {
+                node.put("AuthorizationType", connection.getAuthorizationType());
+            }
+            putEpoch(node, "CreationTime", connection.getCreationTime());
+            putEpoch(node, "LastModifiedTime", connection.getLastModifiedTime());
+            putEpoch(node, "LastAuthorizedTime", connection.getLastAuthorizedTime());
+            array.add(node);
+        }
+        return Response.ok(response).build();
+    }
+
+    // ──────────────────────────── API Destinations ────────────────────────────
+
+    private Response handleCreateApiDestination(JsonNode request, String region) {
+        ApiDestination destination = eventBridgeService.createApiDestination(
+                request.path("Name").asText(null),
+                request.path("Description").asText(null),
+                request.path("ConnectionArn").asText(null),
+                request.path("InvocationEndpoint").asText(null),
+                request.path("HttpMethod").asText(null),
+                request.has("InvocationRateLimitPerSecond")
+                        ? request.path("InvocationRateLimitPerSecond").asInt() : null,
+                region);
+        return Response.ok(buildDestinationMutationNode(destination)).build();
+    }
+
+    private Response handleDescribeApiDestination(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        ApiDestination destination = eventBridgeService.describeApiDestination(name, region);
+        return Response.ok(buildDestinationDescribeNode(destination)).build();
+    }
+
+    private Response handleUpdateApiDestination(JsonNode request, String region) {
+        Integer rate = request.has("InvocationRateLimitPerSecond")
+                ? request.path("InvocationRateLimitPerSecond").asInt() : null;
+        ApiDestination destination = eventBridgeService.updateApiDestination(
+                request.path("Name").asText(null),
+                request.has("Description") ? request.path("Description").asText(null) : null,
+                request.path("ConnectionArn").asText(null),
+                request.path("InvocationEndpoint").asText(null),
+                request.path("HttpMethod").asText(null),
+                rate,
+                region);
+        return Response.ok(buildDestinationMutationNode(destination)).build();
+    }
+
+    private Response handleDeleteApiDestination(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        eventBridgeService.deleteApiDestination(name, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleListApiDestinations(JsonNode request, String region) {
+        String namePrefix = request.path("NamePrefix").asText(null);
+        String connectionArn = request.path("ConnectionArn").asText(null);
+        List<ApiDestination> destinations =
+                eventBridgeService.listApiDestinations(namePrefix, connectionArn, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("ApiDestinations");
+        for (ApiDestination destination : destinations) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("ApiDestinationArn", destination.getApiDestinationArn());
+            node.put("Name", destination.getName());
+            node.put("ApiDestinationState", destination.getApiDestinationState());
+            node.put("ConnectionArn", destination.getConnectionArn());
+            node.put("InvocationEndpoint", destination.getInvocationEndpoint());
+            node.put("HttpMethod", destination.getHttpMethod());
+            node.put("InvocationRateLimitPerSecond", destination.getInvocationRateLimitPerSecond());
+            putEpoch(node, "CreationTime", destination.getCreationTime());
+            putEpoch(node, "LastModifiedTime", destination.getLastModifiedTime());
+            array.add(node);
         }
         return Response.ok(response).build();
     }
@@ -691,5 +838,148 @@ public class EventBridgeHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private String textOrJson(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            String text = node.asText();
+            return text.isEmpty() ? null : text;
+        }
+        if (node.isObject() || node.isArray()) {
+            return node.toString();
+        }
+        return null;
+    }
+
+    private String objectOrNull(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull() || !node.isObject()) {
+            return null;
+        }
+        return node.toString();
+    }
+
+    private void putEpoch(ObjectNode node, String field, Instant instant) {
+        if (instant != null) {
+            node.put(field, instant.getEpochSecond());
+        }
+    }
+
+    private ObjectNode buildConnectionMutationNode(Connection connection) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ConnectionArn", connection.getConnectionArn());
+        node.put("ConnectionState", connection.getConnectionState());
+        putEpoch(node, "CreationTime", connection.getCreationTime());
+        putEpoch(node, "LastModifiedTime", connection.getLastModifiedTime());
+        return node;
+    }
+
+    private ObjectNode buildConnectionDescribeNode(Connection connection) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ConnectionArn", connection.getConnectionArn());
+        node.put("Name", connection.getName());
+        node.put("ConnectionState", connection.getConnectionState());
+        if (connection.getDescription() != null) {
+            node.put("Description", connection.getDescription());
+        }
+        if (connection.getAuthorizationType() != null) {
+            node.put("AuthorizationType", connection.getAuthorizationType());
+        }
+        if (connection.getSecretArn() != null) {
+            node.put("SecretArn", connection.getSecretArn());
+        }
+        if (connection.getKmsKeyIdentifier() != null) {
+            node.put("KmsKeyIdentifier", connection.getKmsKeyIdentifier());
+        }
+        JsonNode sanitized = sanitizeAuthParameters(connection.getAuthParametersJson());
+        if (sanitized != null) {
+            node.set("AuthParameters", sanitized);
+        }
+        putEpoch(node, "CreationTime", connection.getCreationTime());
+        putEpoch(node, "LastModifiedTime", connection.getLastModifiedTime());
+        putEpoch(node, "LastAuthorizedTime", connection.getLastAuthorizedTime());
+        return node;
+    }
+
+    /**
+     * EventBridge never returns secret values from DescribeConnection — only
+     * the non-secret halves (header name, username, client id, endpoints).
+     */
+    private JsonNode sanitizeAuthParameters(String authJson) {
+        if (authJson == null || authJson.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode raw = objectMapper.readTree(authJson);
+            if (!raw.isObject()) {
+                return null;
+            }
+            ObjectNode out = objectMapper.createObjectNode();
+            JsonNode apiKey = raw.path("ApiKeyAuthParameters");
+            if (apiKey.isObject() && apiKey.hasNonNull("ApiKeyName")) {
+                out.putObject("ApiKeyAuthParameters")
+                        .put("ApiKeyName", apiKey.path("ApiKeyName").asText());
+            }
+            JsonNode basic = raw.path("BasicAuthParameters");
+            if (basic.isObject() && basic.hasNonNull("Username")) {
+                out.putObject("BasicAuthParameters")
+                        .put("Username", basic.path("Username").asText());
+            }
+            JsonNode oauth = raw.path("OAuthParameters");
+            if (oauth.isObject()) {
+                ObjectNode oauthOut = out.putObject("OAuthParameters");
+                JsonNode client = oauth.path("ClientParameters");
+                if (client.isObject() && client.hasNonNull("ClientID")) {
+                    oauthOut.putObject("ClientParameters")
+                            .put("ClientID", client.path("ClientID").asText());
+                }
+                if (oauth.hasNonNull("AuthorizationEndpoint")) {
+                    oauthOut.put("AuthorizationEndpoint", oauth.path("AuthorizationEndpoint").asText());
+                }
+                if (oauth.hasNonNull("HttpMethod")) {
+                    oauthOut.put("HttpMethod", oauth.path("HttpMethod").asText());
+                }
+                JsonNode oauthHttp = oauth.path("OAuthHttpParameters");
+                if (oauthHttp.isObject()) {
+                    oauthOut.set("OAuthHttpParameters", oauthHttp);
+                }
+            }
+            JsonNode invocation = raw.path("InvocationHttpParameters");
+            if (invocation.isObject()) {
+                out.set("InvocationHttpParameters", invocation);
+            }
+            return out.isEmpty() ? null : out;
+        } catch (Exception e) {
+            LOG.warnv("Failed to sanitize connection AuthParameters: {0}", e.getMessage());
+            return null;
+        }
+    }
+
+    private ObjectNode buildDestinationMutationNode(ApiDestination destination) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ApiDestinationArn", destination.getApiDestinationArn());
+        node.put("ApiDestinationState", destination.getApiDestinationState());
+        putEpoch(node, "CreationTime", destination.getCreationTime());
+        putEpoch(node, "LastModifiedTime", destination.getLastModifiedTime());
+        return node;
+    }
+
+    private ObjectNode buildDestinationDescribeNode(ApiDestination destination) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ApiDestinationArn", destination.getApiDestinationArn());
+        node.put("Name", destination.getName());
+        if (destination.getDescription() != null) {
+            node.put("Description", destination.getDescription());
+        }
+        node.put("ApiDestinationState", destination.getApiDestinationState());
+        node.put("ConnectionArn", destination.getConnectionArn());
+        node.put("InvocationEndpoint", destination.getInvocationEndpoint());
+        node.put("HttpMethod", destination.getHttpMethod());
+        node.put("InvocationRateLimitPerSecond", destination.getInvocationRateLimitPerSecond());
+        putEpoch(node, "CreationTime", destination.getCreationTime());
+        putEpoch(node, "LastModifiedTime", destination.getLastModifiedTime());
+        return node;
     }
 }

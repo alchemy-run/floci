@@ -11,7 +11,7 @@
 | `DeleteTable` | Delete a table |
 | `DescribeTable` | Get table metadata |
 | `ListTables` | List all tables |
-| `UpdateTable` | Update throughput, indexes, streams |
+| `UpdateTable` | Update throughput, indexes, streams. Unchanged `ProvisionedThroughput` is rejected only when it is the sole field (AWS parity). |
 | `PutItem` | Write an item |
 | `GetItem` | Read an item by primary key |
 | `DeleteItem` | Delete an item |
@@ -32,9 +32,22 @@
 | `DescribeKinesisStreamingDestination` | List Kinesis streaming destinations |
 | `EnableKinesisStreamingDestination` | Enable Kinesis streaming for a table |
 | `DisableKinesisStreamingDestination` | Disable Kinesis streaming for a table |
-| `ExportTableToPointInTime` | Export table data to S3 as gzip NDJSON |
+| `UpdateKinesisStreamingDestination` | Update destination timestamp precision |
+| `ExportTableToPointInTime` | Export table data to S3 as gzip NDJSON (requires PITR) |
 | `DescribeExport` | Get export status and metadata |
 | `ListExports` | List exports, optionally filtered by table ARN |
+| `PutResourcePolicy` | Attach a resource-based policy to a table |
+| `GetResourcePolicy` | Get a table resource policy |
+| `DeleteResourcePolicy` | Remove a table resource policy |
+| `UpdateContributorInsights` | Enable or disable Contributor Insights |
+| `DescribeContributorInsights` | Get Contributor Insights status |
+| `ListContributorInsights` | List Contributor Insights summaries |
+| `CreateBackup` | Create an on-demand table backup |
+| `DescribeBackup` | Get backup status and source-table details |
+| `ListBackups` | List on-demand backups, optionally filtered by table |
+| `DeleteBackup` | Delete an on-demand backup |
+| `RestoreTableFromBackup` | Restore a new table from an on-demand backup |
+| `RestoreTableToPointInTime` | Restore a new table from PITR (requires PITR enabled) |
 
 ## Streams {#streams}
 

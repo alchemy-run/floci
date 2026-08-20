@@ -90,6 +90,13 @@ class AppSyncVtlEngineTest {
         }
 
         @Test
+        void b3b_ctxArgsAlias() {
+            var ctx = ctxWith(b -> b.arguments(Map.of("id", "123")));
+            var result = engine.evaluate("$ctx.args.id", ctx);
+            assertEquals("123", result.output());
+        }
+
+        @Test
         void b4_contextSource() {
             var ctx = ctxWith(b -> b.source(Map.of("name", "Alice")));
             var result = engine.evaluate("$context.source.name", ctx);

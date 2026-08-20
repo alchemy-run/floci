@@ -289,4 +289,30 @@ class ScheduleInvokerTest {
         verify(sqsService, never()).sendMessage(anyString(), anyString(), anyInt(), anyString(), any(), anyString());
         verify(snsService, never()).publish(anyString(), any(), anyString(), anyString(), anyString());
     }
+
+    @Test
+    void scheduleContextAttributesAreSubstitutedIntoLambdaInput() {
+        io.github.hectorvent.floci.services.scheduler.model.Schedule schedule =
+                new io.github.hectorvent.floci.services.scheduler.model.Schedule();
+        schedule.setArn("arn:aws:scheduler:us-east-1:000000000000:schedule/default/cron-job");
+        Target target = new Target();
+        target.setArn("arn:aws:lambda:us-east-1:000000000000:function:handler");
+        target.setInput("{\"source\":\"alchemy.scheduler\","
+                + "\"scheduleArn\":\"<aws.scheduler.schedule-arn>\","
+                + "\"scheduledTime\":\"<aws.scheduler.scheduled-time>\","
+                + "\"executionId\":\"<aws.scheduler.execution-id>\","
+                + "\"attemptNumber\":\"<aws.scheduler.attempt-number>\"}");
+        schedule.setTarget(target);
+
+        java.time.Instant scheduled = java.time.Instant.parse("2026-08-18T19:00:00Z");
+        invoker.invoke(schedule, scheduled);
+
+        org.mockito.ArgumentCaptor<byte[]> payload = org.mockito.ArgumentCaptor.forClass(byte[].class);
+        verify(lambdaService).invoke(eq("us-east-1"), eq("handler"), payload.capture(), any());
+        String json = new String(payload.getValue());
+        assertEquals(false, json.contains("<aws.scheduler."));
+        assertEquals(true, json.contains("arn:aws:scheduler:us-east-1:000000000000:schedule/default/cron-job"));
+        assertEquals(true, json.contains("2026-08-18T19:00:00Z"));
+        assertEquals(true, json.contains("\"attemptNumber\":\"1\""));
+    }
 }

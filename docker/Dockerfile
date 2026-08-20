@@ -4,11 +4,25 @@ WORKDIR /build
 
 RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
 
+# Mirror Maven Central through Google's GCS replica: repo.maven.apache.org
+# rate-limits (HTTP 429) under repeated local image builds and fails them.
+RUN mkdir -p /root/.m2 && printf '%s' \
+    '<settings><mirrors><mirror>' \
+    '<id>gcs-central</id><mirrorOf>central</mirrorOf>' \
+    '<url>https://maven-central.storage-download.googleapis.com/maven2/</url>' \
+    '</mirror></mirrors></settings>' > /root/.m2/settings.xml
+
 COPY pom.xml .
-RUN mvn dependency:go-offline -q
+# resolve-plugins caches build plugins (surefire, jar, resources, ...) in
+# this pom.xml-keyed layer; without it every image build re-fetches them
+# on every build.
+RUN mvn dependency:go-offline dependency:resolve-plugins -q
 
 COPY src/ src/
-RUN mvn clean package -DskipTests -q
+# No `clean`: the build stage is fresh (no target/ to clean), and resolving
+# the clean-plugin pulls from Maven Central on every image build — which
+# rate-limits (HTTP 429) under repeated local builds.
+RUN mvn package -DskipTests -q
 
 # Stage 2: Runtime
 FROM eclipse-temurin:25-jre-noble
@@ -16,6 +30,10 @@ FROM eclipse-temurin:25-jre-noble
 ARG VERSION=latest
 ENV FLOCI_VERSION=${VERSION}
 ENV FLOCI_STORAGE_PERSISTENT_PATH=/app/data
+# Alchemy Lambda StartSyncExecution targets https://sync-states.{region}.amazonaws.com:443
+# (Smithy hostPrefix "sync-"). TLS + the TlsProxyServer 443 bind + CA mount in
+# ContainerLauncher are required for that hop; HTTP on 4566 stays dual-protocol.
+ENV FLOCI_TLS_ENABLED=true
 
 ENV AWS_DEFAULT_REGION=us-east-1
 ENV AWS_ACCESS_KEY_ID=test
@@ -62,6 +80,7 @@ COPY --chmod=755 docker/localstack-parity.sh /usr/local/bin/localstack-parity.sh
 VOLUME /app/data
 
 EXPOSE 4566
+EXPOSE 443
 
 # Need to expose separately due to https://github.com/floci-io/floci/issues/2095.
 # This preseres compatibility with https://github.com/docker-java/docker-java/blob/002b6eb7aa2b892be729c7c2a5e95f782924db38/docker-java-api/src/main/java/com/github/dockerjava/api/model/ExposedPort.java#L119

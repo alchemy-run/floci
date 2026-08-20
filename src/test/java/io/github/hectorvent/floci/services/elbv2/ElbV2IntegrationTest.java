@@ -1149,4 +1149,70 @@ class ElbV2IntegrationTest {
                 .statusCode(400)
                 .body("ErrorResponse.Error.Code", equalTo("SubnetNotFound"));
     }
+
+    @Test
+    @Order(76)
+    void describeRulesAfterDeleteListenerReturnsListenerNotFound() {
+        String isolatedLbArn = given()
+                .formParam("Action", "CreateLoadBalancer")
+                .formParam("Name", "lb-describe-rules-gone")
+                .formParam("Type", "application")
+                .formParam("Subnets.member.1", "subnet-default-a")
+                .formParam("Subnets.member.2", "subnet-default-b")
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .extract()
+                .path("CreateLoadBalancerResponse.CreateLoadBalancerResult.LoadBalancers.member.LoadBalancerArn");
+
+        String isolatedTgArn = given()
+                .formParam("Action", "CreateTargetGroup")
+                .formParam("Name", "tg-describe-rules-gone")
+                .formParam("Protocol", "HTTP")
+                .formParam("Port", "80")
+                .formParam("VpcId", "vpc-default")
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .extract()
+                .path("CreateTargetGroupResponse.CreateTargetGroupResult.TargetGroups.member.TargetGroupArn");
+
+        String isolatedListenerArn = given()
+                .formParam("Action", "CreateListener")
+                .formParam("LoadBalancerArn", isolatedLbArn)
+                .formParam("Protocol", "HTTP")
+                .formParam("Port", "80")
+                .formParam("DefaultActions.member.1.Type", "forward")
+                .formParam("DefaultActions.member.1.TargetGroupArn", isolatedTgArn)
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .extract()
+                .path("CreateListenerResponse.CreateListenerResult.Listeners.member.ListenerArn");
+
+        given()
+                .formParam("Action", "DeleteListener")
+                .formParam("ListenerArn", isolatedListenerArn)
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200);
+
+        given()
+                .formParam("Action", "DescribeRules")
+                .formParam("ListenerArn", isolatedListenerArn)
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(400)
+                .body("ErrorResponse.Error.Code", equalTo("ListenerNotFound"));
+    }
 }

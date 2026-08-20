@@ -20,15 +20,23 @@
 | `RemoveTagsFromCertificate` | Remove tags from a certificate |
 | `GetAccountConfiguration` | Get account-level ACM settings |
 | `PutAccountConfiguration` | Update account-level ACM settings |
+| `UpdateCertificateOptions` | Update CT logging preference (Export is immutable) |
+| `SearchCertificates` | Filter certificates by ARN, X.509 attributes, or ACM metadata |
+| `RenewCertificate` | Renew an eligible certificate (emulator rejects ineligible/pending) |
+| `ResendValidationEmail` | Resend EMAIL validation (rejected for DNS-validated certs) |
+| `RevokeCertificate` | Revoke a previously exported certificate |
 <!-- floci:actions:end -->
 
 ## Emulation Behavior
 
-- **Auto-Issuance:** All requested certificates are immediately issued with status `ISSUED` (no DNS/email validation required)
+- **Public certificates stay `PENDING_VALIDATION`:** Amazon-issued certs are not auto-issued. `GetCertificate` returns `RequestInProgressException` until the certificate is private or imported. This matches live ACM when DNS/email validation never completes.
+- **Private / imported certificates are `ISSUED` immediately:** providing `CertificateAuthorityArn` or calling `ImportCertificate` produces an issued cert that `GetCertificate` / `ExportCertificate` can read.
 - **Real Cryptography:** Certificates are generated with real RSA/EC keys and valid X.509 structure
 - **Key Algorithms:** Supports `RSA_2048`, `RSA_3072`, `RSA_4096`, `EC_prime256v1`, `EC_secp384r1`, `EC_secp521r1`
 - **Certificate Types:** `AMAZON_ISSUED` (default) and `PRIVATE` (when `CertificateAuthorityArn` is provided)
-- **Export:** Only `PRIVATE` type certificates can be exported with their private key
+- **Export:** `PRIVATE`, `IMPORTED`, or `Options.Export=ENABLED` certificates can be exported. `UpdateCertificateOptions` cannot change Export (`InvalidStateException`).
+- **Revoke:** only certificates that have been exported at least once can be revoked (`ConflictException` otherwise).
+- **ACMPCA:** there is no Floci ACM PCA service. `CertificateAuthorityArn` is stored as an opaque string so ACM private-cert emulation works; PCA APIs stay remote-only.
 
 ## Configuration
 
@@ -55,10 +63,8 @@ aws acm describe-certificate \
   --certificate-arn $CERT_ARN \
   --endpoint-url $AWS_ENDPOINT_URL
 
-# Get certificate in PEM format
-aws acm get-certificate \
-  --certificate-arn $CERT_ARN \
-  --endpoint-url $AWS_ENDPOINT_URL
+# Public certs stay PENDING — GetCertificate returns RequestInProgressException.
+# Request a private cert (CertificateAuthorityArn) or import one to retrieve PEM.
 
 # List all certificates
 aws acm list-certificates \

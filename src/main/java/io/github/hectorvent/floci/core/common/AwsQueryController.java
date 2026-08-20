@@ -75,7 +75,8 @@ public class AwsQueryController {
             "GetSubscriptionAttributes", "SetSubscriptionAttributes", "ConfirmSubscription",
             "CreateSMSSandboxPhoneNumber", "DeleteSMSSandboxPhoneNumber",
             "GetSMSSandboxAccountStatus", "ListSMSSandboxPhoneNumbers",
-            "VerifySMSSandboxPhoneNumber", "AddPermission", "RemovePermission"
+            "VerifySMSSandboxPhoneNumber", "ListOriginationNumbers",
+            "AddPermission", "RemovePermission"
     );
 
     private static final Set<String> IAM_ACTIONS = Set.of(
@@ -111,14 +112,19 @@ public class AwsQueryController {
             "CreateAutoScalingGroup", "UpdateAutoScalingGroup", "DeleteAutoScalingGroup",
             "DescribeAutoScalingGroups", "SetDesiredCapacity",
             "StartInstanceRefresh", "DescribeInstanceRefreshes",
+            "CancelInstanceRefresh", "RollbackInstanceRefresh",
             "CreateOrUpdateTags", "DeleteTags",
             "DescribeAutoScalingInstances", "AttachInstances", "DetachInstances",
             "TerminateInstanceInAutoScalingGroup",
+            "SetInstanceProtection", "SetInstanceHealth",
+            "EnterStandby", "ExitStandby",
             "AttachLoadBalancerTargetGroups", "DetachLoadBalancerTargetGroups",
             "DescribeLoadBalancerTargetGroups", "AttachLoadBalancers", "DetachLoadBalancers",
+            "DescribeLoadBalancers",
             "PutLifecycleHook", "DeleteLifecycleHook", "DescribeLifecycleHooks",
             "CompleteLifecycleAction", "RecordLifecycleActionHeartbeat",
-            "PutScalingPolicy", "DeletePolicy", "DescribePolicies",
+            "PutScalingPolicy", "DeletePolicy", "DescribePolicies", "ExecutePolicy",
+            "PutScheduledUpdateGroupAction", "DescribeScheduledActions", "DeleteScheduledAction",
             "DescribeScalingActivities",
             "DescribeAutoScalingNotificationTypes", "DescribeTerminationPolicyTypes",
             "DescribeAdjustmentTypes", "DescribeAccountLimits",
@@ -412,7 +418,11 @@ public class AwsQueryController {
             "UpdateConfigurationSetReputationMetricsEnabled",
             "PutConfigurationSetDeliveryOptions",
             "CreateReceiptRuleSet", "DescribeReceiptRuleSet", "ListReceiptRuleSets",
-            "DeleteReceiptRuleSet", "SetActiveReceiptRuleSet", "DescribeActiveReceiptRuleSet"
+            "DeleteReceiptRuleSet", "SetActiveReceiptRuleSet", "DescribeActiveReceiptRuleSet",
+            "CreateReceiptRule", "DescribeReceiptRule", "UpdateReceiptRule",
+            "DeleteReceiptRule", "SetReceiptRulePosition",
+            "CreateReceiptFilter", "ListReceiptFilters", "DeleteReceiptFilter",
+            "SendBounce"
     );
 
     private static final Set<String> COGNITO_ACTIONS = Set.of(

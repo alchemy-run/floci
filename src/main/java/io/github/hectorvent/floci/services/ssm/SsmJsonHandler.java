@@ -50,6 +50,7 @@ public class SsmJsonHandler {
             case "GetParameterHistory" -> handleGetParameterHistory(request, region);
             case "DescribeParameters" -> handleDescribeParameters(request, region);
             case "LabelParameterVersion" -> handleLabelParameterVersion(request, region);
+            case "UnlabelParameterVersion" -> handleUnlabelParameterVersion(request, region);
             case "AddTagsToResource" -> handleAddTagsToResource(request, region);
             case "ListTagsForResource" -> handleListTagsForResource(request, region);
             case "RemoveTagsFromResource" -> handleRemoveTagsFromResource(request, region);
@@ -76,19 +77,30 @@ public class SsmJsonHandler {
     }
 
     @RegisterForReflection
-    record PutParameterResponse(@JsonProperty("Version") long version) {
+    record PutParameterResponse(@JsonProperty("Version") long version, @JsonProperty("Tier") String tier) {
     }
 
     private Response handlePutParameter(JsonNode request, String region) {
         String name = request.path("Name").asText();
         String value = request.path("Value").asText();
-        String type = request.path("Type").asText("String");
+        String type = request.has("Type") ? request.path("Type").asText() : null;
         String description = request.has("Description") ? request.path("Description").asText() : null;
         boolean overwrite = request.path("Overwrite").asBoolean(false);
+        String tier = request.has("Tier") ? request.path("Tier").asText() : null;
+        String keyId = request.has("KeyId") ? request.path("KeyId").asText() : null;
+        String allowedPattern = request.has("AllowedPattern") ? request.path("AllowedPattern").asText() : null;
+        String dataType = request.has("DataType") ? request.path("DataType").asText() : null;
+        Map<String, String> tags = new HashMap<>();
+        if (request.has("Tags") && request.get("Tags").isArray()) {
+            request.get("Tags").forEach(t ->
+                    tags.put(t.path("Key").asText(), t.path("Value").asText()));
+        }
 
-        long version = ssmService.putParameter(name, value, type, description, overwrite, region);
+        long version = ssmService.putParameter(name, value, type, description, overwrite, region,
+                tags, tier, keyId, allowedPattern, dataType);
 
-        return Response.ok(new PutParameterResponse(version)).build();
+        Parameter stored = ssmService.getParameter(name, region);
+        return Response.ok(new PutParameterResponse(version, stored.getTier())).build();
     }
 
     private Response handleGetParameter(JsonNode request, String region) {
@@ -214,6 +226,18 @@ public class SsmJsonHandler {
                 node.put("Description", p.getDescription());
             }
             node.put("DataType", p.getDataType());
+            if (p.getArn() != null) {
+                node.put("ARN", p.getArn());
+            }
+            if (p.getTier() != null) {
+                node.put("Tier", p.getTier());
+            }
+            if (p.getAllowedPattern() != null) {
+                node.put("AllowedPattern", p.getAllowedPattern());
+            }
+            if (p.getKeyId() != null) {
+                node.put("KeyId", p.getKeyId());
+            }
             parametersArray.add(node);
         }
         response.set("Parameters", parametersArray);
@@ -284,15 +308,42 @@ public class SsmJsonHandler {
 
     private Response handleLabelParameterVersion(JsonNode request, String region) {
         String name = request.path("Name").asText();
+        Long parameterVersion = request.has("ParameterVersion") && !request.get("ParameterVersion").isNull()
+                ? request.get("ParameterVersion").asLong()
+                : null;
+        List<String> labels = new ArrayList<>();
+        request.path("Labels").forEach(l -> labels.add(l.asText()));
+
+        long version = ssmService.labelParameterVersion(name, parameterVersion, labels, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode invalid = objectMapper.createArrayNode();
+        for (String label : labels) {
+            if (label == null || label.isBlank() || label.length() > 100
+                    || label.toLowerCase().startsWith("aws") || label.toLowerCase().startsWith("ssm")) {
+                invalid.add(label);
+            }
+        }
+        response.set("InvalidLabels", invalid);
+        response.put("ParameterVersion", version);
+        return Response.ok(response).build();
+    }
+
+    private Response handleUnlabelParameterVersion(JsonNode request, String region) {
+        String name = request.path("Name").asText();
         long parameterVersion = request.path("ParameterVersion").asLong();
         List<String> labels = new ArrayList<>();
         request.path("Labels").forEach(l -> labels.add(l.asText()));
 
-        ssmService.labelParameterVersion(name, parameterVersion, labels, region);
+        SsmService.UnlabelResult result = ssmService.unlabelParameterVersion(name, parameterVersion, labels, region);
 
         ObjectNode response = objectMapper.createObjectNode();
-        response.set("InvalidLabels", objectMapper.createArrayNode());
-        response.put("ParameterVersion", parameterVersion);
+        ArrayNode removed = objectMapper.createArrayNode();
+        result.removedLabels().forEach(removed::add);
+        ArrayNode invalid = objectMapper.createArrayNode();
+        result.invalidLabels().forEach(invalid::add);
+        response.set("RemovedLabels", removed);
+        response.set("InvalidLabels", invalid);
         return Response.ok(response).build();
     }
 

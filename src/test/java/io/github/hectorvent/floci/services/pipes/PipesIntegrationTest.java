@@ -238,6 +238,94 @@ class PipesIntegrationTest {
 
     @Test
     @Order(13)
+    void tagResourceRoundTrip() {
+        String arn = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "Source": "arn:aws:sqs:us-east-1:000000000000:tag-source",
+                    "Target": "arn:aws:sqs:us-east-1:000000000000:tag-target",
+                    "RoleArn": "arn:aws:iam::000000000000:role/pipe-role",
+                    "Tags": {"env": "test"}
+                }
+                """)
+        .when()
+            .post("/v1/pipes/tag-pipe")
+        .then()
+            .statusCode(200)
+            .extract().path("Arn");
+
+        given()
+            .contentType("application/json")
+            .body("{\"tags\":{\"owner\":\"alice\"}}")
+        .when()
+            .post("/tags/" + arn)
+        .then()
+            .statusCode(204);
+
+        given()
+            .contentType("application/json")
+        .when()
+            .get("/tags/" + arn)
+        .then()
+            .statusCode(200)
+            .body("tags.env", equalTo("test"))
+            .body("tags.owner", equalTo("alice"));
+
+        given()
+            .contentType("application/json")
+        .when()
+            .delete("/tags/" + arn + "?tagKeys=env")
+        .then()
+            .statusCode(204);
+
+        given()
+            .contentType("application/json")
+        .when()
+            .get("/tags/" + arn)
+        .then()
+            .statusCode(200)
+            .body("tags.env", nullValue())
+            .body("tags.owner", equalTo("alice"));
+
+        given().when().delete("/v1/pipes/tag-pipe").then().statusCode(200);
+    }
+
+    @Test
+    @Order(14)
+    void createAndDescribePipeEchoLogConfiguration() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "Source": "arn:aws:sqs:us-east-1:000000000000:log-source",
+                    "Target": "arn:aws:sqs:us-east-1:000000000000:log-target",
+                    "RoleArn": "arn:aws:iam::000000000000:role/pipe-role",
+                    "LogConfiguration": {"Level": "ERROR"},
+                    "KmsKeyIdentifier": "alias/pipes"
+                }
+                """)
+        .when()
+            .post("/v1/pipes/log-pipe")
+        .then()
+            .statusCode(200)
+            .body("LogConfiguration.Level", equalTo("ERROR"))
+            .body("KmsKeyIdentifier", equalTo("alias/pipes"));
+
+        given()
+            .contentType("application/json")
+        .when()
+            .get("/v1/pipes/log-pipe")
+        .then()
+            .statusCode(200)
+            .body("LogConfiguration.Level", equalTo("ERROR"))
+            .body("KmsKeyIdentifier", equalTo("alias/pipes"));
+
+        given().when().delete("/v1/pipes/log-pipe").then().statusCode(200);
+    }
+
+    @Test
+    @Order(15)
     void createPipeMissingSourceReturns400() {
         given()
             .contentType("application/json")

@@ -81,21 +81,29 @@ public class CloudMapService {
     }
 
     public Operation createPublicDnsNamespace(String name, String creatorRequestId,
-                                              String description, Map<String, String> tags, String region) {
+                                              String description, Map<String, String> tags, String region,
+                                              Long soaTtl) {
         Namespace ns = newNamespace(name, "DNS_PUBLIC", description, creatorRequestId, tags, region);
         ns.setHostedZoneId(generateHostedZoneId());
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
         namespaceStore.put(ns.getId(), ns);
         return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
     }
 
     public Operation createPrivateDnsNamespace(String name, String vpc, String creatorRequestId,
-                                               String description, Map<String, String> tags, String region) {
+                                               String description, Map<String, String> tags, String region,
+                                               Long soaTtl) {
         if (vpc == null || vpc.isBlank()) {
             throw new AwsException("InvalidInput", "Vpc is required for a private DNS namespace.", 400);
         }
         Namespace ns = newNamespace(name, "DNS_PRIVATE", description, creatorRequestId, tags, region);
         ns.setVpc(vpc);
         ns.setHostedZoneId(generateHostedZoneId());
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
         namespaceStore.put(ns.getId(), ns);
         return submitOperation("CREATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
     }
@@ -132,13 +140,78 @@ public class CloudMapService {
     }
 
     public List<Namespace> listNamespaces(String region) {
+        return listNamespaces(region, Map.of());
+    }
+
+    public List<Namespace> listNamespaces(String region, Map<String, List<String>> filters) {
         List<Namespace> result = new ArrayList<>();
         for (Namespace n : scan(namespaceStore)) {
-            if (region.equals(n.getRegion())) {
+            if (region.equals(n.getRegion()) && matchesNamespaceFilters(n, filters)) {
                 result.add(n);
             }
         }
         return result;
+    }
+
+    private boolean matchesNamespaceFilters(Namespace ns, Map<String, List<String>> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<String, List<String>> f : filters.entrySet()) {
+            List<String> values = f.getValue();
+            if (values == null || values.isEmpty()) {
+                continue;
+            }
+            boolean ok = switch (f.getKey()) {
+                case "TYPE" -> values.contains(ns.getType());
+                case "NAME" -> values.contains(ns.getName());
+                default -> true;
+            };
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public Operation updateHttpNamespace(String id, String description, String region) {
+        Namespace ns = requireNamespace(id);
+        if (!"HTTP".equals(ns.getType())) {
+            throw new AwsException("InvalidInput", "Namespace " + id + " is not an HTTP namespace.", 400);
+        }
+        if (description != null) {
+            ns.setDescription(description);
+            namespaceStore.put(ns.getId(), ns);
+        }
+        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    public Operation updatePublicDnsNamespace(String id, String description, Long soaTtl, String region) {
+        Namespace ns = requireNamespace(id);
+        if (!"DNS_PUBLIC".equals(ns.getType())) {
+            throw new AwsException("InvalidInput", "Namespace " + id + " is not a public DNS namespace.", 400);
+        }
+        applyNamespaceUpdate(ns, description, soaTtl);
+        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    public Operation updatePrivateDnsNamespace(String id, String description, Long soaTtl, String region) {
+        Namespace ns = requireNamespace(id);
+        if (!"DNS_PRIVATE".equals(ns.getType())) {
+            throw new AwsException("InvalidInput", "Namespace " + id + " is not a private DNS namespace.", 400);
+        }
+        applyNamespaceUpdate(ns, description, soaTtl);
+        return submitOperation("UPDATE_NAMESPACE", "NAMESPACE", ns.getId(), region);
+    }
+
+    private void applyNamespaceUpdate(Namespace ns, String description, Long soaTtl) {
+        if (description != null) {
+            ns.setDescription(description);
+        }
+        if (soaTtl != null) {
+            ns.setSoaTtl(soaTtl);
+        }
+        namespaceStore.put(ns.getId(), ns);
     }
 
     public Operation deleteNamespace(String id, String region) {
@@ -224,6 +297,42 @@ public class CloudMapService {
         return result;
     }
 
+    public Operation updateService(String id, String description, String dnsConfig,
+                                   String healthCheckConfig, String region) {
+        Service service = requireService(id);
+        if (description != null) {
+            service.setDescription(description);
+        }
+        if (dnsConfig != null) {
+            service.setDnsConfig(mergeDnsConfig(service.getDnsConfig(), dnsConfig));
+        }
+        // AWS UpdateService replaces HealthCheckConfig with whatever was
+        // supplied — omitting it deletes the existing config.
+        service.setHealthCheckConfig(healthCheckConfig);
+        serviceStore.put(service.getId(), service);
+        return submitOperation("UPDATE_SERVICE", "SERVICE", service.getId(), region);
+    }
+
+    public Map<String, String> getServiceAttributes(String serviceId) {
+        return new LinkedHashMap<>(requireService(serviceId).getAttributes());
+    }
+
+    public void updateServiceAttributes(String serviceId, Map<String, String> attributes) {
+        Service service = requireService(serviceId);
+        if (attributes != null) {
+            service.getAttributes().putAll(attributes);
+            serviceStore.put(service.getId(), service);
+        }
+    }
+
+    public void deleteServiceAttributes(String serviceId, List<String> keys) {
+        Service service = requireService(serviceId);
+        if (keys != null) {
+            keys.forEach(service.getAttributes()::remove);
+            serviceStore.put(service.getId(), service);
+        }
+    }
+
     public void deleteService(String id) {
         Service service = requireService(id);
         boolean hasInstances = !scanInstances(service.getId()).isEmpty();
@@ -287,6 +396,15 @@ public class CloudMapService {
     public List<Instance> listInstances(String serviceId) {
         requireService(serviceId);
         return scanInstances(serviceId);
+    }
+
+    public void updateInstanceCustomHealthStatus(String serviceId, String instanceId, String status) {
+        Instance instance = getInstance(serviceId, instanceId);
+        if (status == null || (!"HEALTHY".equals(status) && !"UNHEALTHY".equals(status))) {
+            throw new AwsException("InvalidInput", "Status must be HEALTHY or UNHEALTHY.", 400);
+        }
+        instance.setHealthStatus(status);
+        instanceStore.put(instanceKey(serviceId, instanceId), instance);
     }
 
     public Map<String, String> getInstancesHealthStatus(String serviceId, List<String> instanceIds) {
@@ -544,6 +662,29 @@ public class CloudMapService {
             sb.append(ALNUM.charAt(random.nextInt(ALNUM.length())));
         }
         return sb.toString();
+    }
+
+    private String mergeDnsConfig(String existing, String incoming) {
+        if (existing == null || existing.isBlank()) {
+            return incoming;
+        }
+        if (incoming == null || incoming.isBlank()) {
+            return existing;
+        }
+        String namespaceId = dnsConfigNamespaceId(existing);
+        if (namespaceId == null) {
+            return incoming;
+        }
+        if (incoming.contains("\"NamespaceId\"")) {
+            return incoming;
+        }
+        int brace = incoming.indexOf('{');
+        if (brace < 0) {
+            return incoming;
+        }
+        return incoming.substring(0, brace + 1)
+                + "\"NamespaceId\":\"" + namespaceId + "\","
+                + incoming.substring(brace + 1);
     }
 
     private String generateHostedZoneId() {

@@ -4,7 +4,7 @@
 **Endpoint:** `http://localhost:4566/`
 **Target prefix:** `X-Amz-Target: AWSWAF_20190729.*`
 
-Floci emulates the AWS WAF v2 management API. Web ACLs, IP sets, regex pattern sets, rule groups, logging configurations, permission policies, tags, and resource associations are persisted in Floci's storage backend. Floci does not inspect or filter live traffic — this surface lets you create, read, update, and delete WAF resources and validate IaC (CloudFormation/CDK/Terraform) locally.
+Floci emulates the AWS WAF v2 management API. Web ACLs, IP sets, regex pattern sets, rule groups, logging configurations, permission policies, CAPTCHA API keys, tags, and resource associations are persisted in Floci's storage backend. The AWS managed-rule catalog is a static snapshot (enough for `List`/`Describe` round-trips). Sampled requests, rate-based managed keys, and top-path statistics return empty results — Floci does not inspect or filter live traffic. This surface lets you create, read, update, and delete WAF resources and validate IaC (CloudFormation/CDK/Terraform) locally.
 
 ## Supported Actions
 
@@ -46,6 +46,18 @@ Floci emulates the AWS WAF v2 management API. Web ACLs, IP sets, regex pattern s
 | `TagResource` | Adds tags to a WAF resource |
 | `UntagResource` | Removes tags from a WAF resource |
 | `ListTagsForResource` | Lists tags for a WAF resource |
+| `CreateAPIKey` | Mints a CAPTCHA/challenge API key for a set of token domains |
+| `GetDecryptedAPIKey` | Returns the token domains for an API key |
+| `ListAPIKeys` | Lists CAPTCHA/challenge API keys for a scope |
+| `DeleteAPIKey` | Deletes a CAPTCHA/challenge API key |
+| `ListAvailableManagedRuleGroups` | Lists the AWS managed rule-group catalog |
+| `ListAvailableManagedRuleGroupVersions` | Lists versions of a managed rule group |
+| `DescribeManagedRuleGroup` | Returns capacity and rule summaries for a managed rule group |
+| `DescribeAllManagedProducts` | Lists managed-rule products available in the account |
+| `DescribeManagedProductsByVendor` | Lists managed-rule products for a vendor |
+| `GetSampledRequests` | Returns sampled web requests (empty locally — no data plane) |
+| `GetRateBasedStatementManagedKeys` | Returns currently rate-limited IPs (empty locally) |
+| `GetTopPathStatisticsByTraffic` | Returns top-path bot statistics (empty locally) |
 <!-- floci:actions:end -->
 
 ## Scope

@@ -17,6 +17,14 @@ public class ResourceRecordSet {
     private String setIdentifier;
     private String failover;
     private String healthCheckId;
+    private String geoContinentCode;
+    private String geoCountryCode;
+    private String geoSubdivisionCode;
+    private String cidrCollectionId;
+    private String cidrLocationName;
+    private String geoProximityAwsRegion;
+    private String geoProximityLocalZoneGroup;
+    private Integer geoProximityBias;
 
     public ResourceRecordSet() {}
 
@@ -49,4 +57,32 @@ public class ResourceRecordSet {
 
     public String getHealthCheckId() { return healthCheckId; }
     public void setHealthCheckId(String healthCheckId) { this.healthCheckId = healthCheckId; }
+
+    public String getGeoContinentCode() { return geoContinentCode; }
+    public void setGeoContinentCode(String geoContinentCode) { this.geoContinentCode = geoContinentCode; }
+
+    public String getGeoCountryCode() { return geoCountryCode; }
+    public void setGeoCountryCode(String geoCountryCode) { this.geoCountryCode = geoCountryCode; }
+
+    public String getGeoSubdivisionCode() { return geoSubdivisionCode; }
+    public void setGeoSubdivisionCode(String geoSubdivisionCode) { this.geoSubdivisionCode = geoSubdivisionCode; }
+
+    public String getCidrCollectionId() { return cidrCollectionId; }
+    public void setCidrCollectionId(String cidrCollectionId) { this.cidrCollectionId = cidrCollectionId; }
+
+    public String getCidrLocationName() { return cidrLocationName; }
+    public void setCidrLocationName(String cidrLocationName) { this.cidrLocationName = cidrLocationName; }
+
+    public String getGeoProximityAwsRegion() { return geoProximityAwsRegion; }
+    public void setGeoProximityAwsRegion(String geoProximityAwsRegion) {
+        this.geoProximityAwsRegion = geoProximityAwsRegion;
+    }
+
+    public String getGeoProximityLocalZoneGroup() { return geoProximityLocalZoneGroup; }
+    public void setGeoProximityLocalZoneGroup(String geoProximityLocalZoneGroup) {
+        this.geoProximityLocalZoneGroup = geoProximityLocalZoneGroup;
+    }
+
+    public Integer getGeoProximityBias() { return geoProximityBias; }
+    public void setGeoProximityBias(Integer geoProximityBias) { this.geoProximityBias = geoProximityBias; }
 }

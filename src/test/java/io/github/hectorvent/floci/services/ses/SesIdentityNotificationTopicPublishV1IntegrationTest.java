@@ -118,6 +118,9 @@ class SesIdentityNotificationTopicPublishV1IntegrationTest {
         setIdentityNotificationTopic(SENDER, "Complaint", topicArn);
 
         verifyDomainIdentity(FALLBACK_DOMAIN);
+        // Domain VerifyDomainIdentity stays Pending (AWS). Sending still requires a
+        // verified email identity; topic inheritance is what the domain identity covers.
+        verifyEmailIdentity("anyone@" + FALLBACK_DOMAIN);
         setIdentityNotificationTopic(FALLBACK_DOMAIN, "Bounce", topicArn);
     }
 

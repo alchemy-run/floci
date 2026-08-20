@@ -49,6 +49,7 @@ public class CloudWatchMetricsJsonHandler {
             case "TagResource" -> handleTagResource(request, region);
             case "UntagResource" -> handleUntagResource(request, region);
             case "GetMetricData" -> handleGetMetricData(request, region);
+            case "DescribeInsightRules" -> handleDescribeInsightRules();
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported by CloudWatch JSON."))
                     .build();
@@ -368,6 +369,12 @@ public class CloudWatchMetricsJsonHandler {
             return Instant.ofEpochSecond(node.asLong());
         }
         return parseInstant(node.asText(null));
+    }
+
+    private Response handleDescribeInsightRules() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("InsightRules");
+        return Response.ok(response).build();
     }
 
     private Instant parseInstant(String value) {

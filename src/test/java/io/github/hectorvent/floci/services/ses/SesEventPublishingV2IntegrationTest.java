@@ -1216,6 +1216,15 @@ class SesEventPublishingV2IntegrationTest {
         String sesAuth =
                 "AWS4-HMAC-SHA256 Credential=AKID/20260101/" + region + "/ses/aws4_request";
 
+        given()
+                .contentType("application/json")
+                .header("Authorization", sesAuth)
+                .body("{\"EmailIdentity\":\"" + SENDER + "\"}")
+        .when()
+                .post("/v2/email/identities")
+        .then()
+                .statusCode(200);
+
         String euQueueUrl = given()
                 .contentType(SQS_CONTENT_TYPE)
                 .header("Authorization", sqsAuth)

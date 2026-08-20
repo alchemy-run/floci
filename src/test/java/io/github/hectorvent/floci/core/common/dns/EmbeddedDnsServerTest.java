@@ -97,6 +97,48 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_syncStatesHostMapsToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("sync-states.us-east-1.amazonaws.com", "172.19.0.2").orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("sync-states-fips.us-west-2.amazonaws.com", "172.19.0.2").orElseThrow());
+        assertTrue(dns.resolveARecord("states.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("my-bucket.s3.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
+    void resolveARecord_appSyncHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("747c6aee7d754b748a59438a17.appsync-api.us-east-1.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("appsync.us-east-1.amazonaws.com", "172.19.0.2").orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("appsync-fips.us-west-2.amazonaws.com", "172.19.0.2").orElseThrow());
+        assertTrue(dns.resolveARecord("appsync-api.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("not-appsync.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
+    void resolveARecord_executeApiHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("abc123xyz.execute-api.us-east-1.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("abc123xyz.execute-api.us-west-2.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertTrue(dns.resolveARecord("execute-api.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("abc123xyz.execute-api.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
     void resolveARecord_prefersEc2PrivateDnsAddressOverFlociWildcard() {
         assertEquals(
                 "172.16.128.9",

@@ -9,8 +9,10 @@ import io.github.hectorvent.floci.core.common.ReservedTags;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.cognito.model.CognitoGroup;
 import io.github.hectorvent.floci.services.cognito.model.CognitoUser;
+import io.github.hectorvent.floci.services.cognito.model.IdentityProvider;
 import io.github.hectorvent.floci.services.cognito.model.UserPool;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolClient;
+import io.github.hectorvent.floci.services.cognito.model.UserPoolDomain;
 import io.github.hectorvent.floci.services.cognito.verification.CognitoMessageDispatcher;
 import io.github.hectorvent.floci.services.cognito.verification.VerificationCode;
 import io.github.hectorvent.floci.services.cognito.verification.VerificationCodeService;
@@ -89,7 +91,8 @@ class CognitoServiceTest {
         assertNotNull(pool.getId());
         assertEquals("FullConfigPool", pool.getName());
         assertEquals("arn:aws:cognito-idp:us-east-1:000000000000:userpool/" + pool.getId(), pool.getArn());
-        assertEquals(schema, pool.getSchemaAttributes());
+        assertEquals(List.of(Map.of("Name", "custom:my-attr", "AttributeDataType", "String")),
+                pool.getSchemaAttributes());
         assertEquals(policies, pool.getPolicies());
         assertEquals(List.of("email"), pool.getUsernameAttributes());
     }
@@ -777,7 +780,7 @@ class CognitoServiceTest {
                 "us-east-1"
         );
 
-        assertEquals("http://localhost:4566/custompool", service.getIssuer(pool.getId()));
+        assertEquals("https://cognito-idp.us-east-1.amazonaws.com/custompool", service.getIssuer(pool.getId()));
     }
 
     // =========================================================================
@@ -1384,6 +1387,38 @@ class CognitoServiceTest {
         Map<String, Object> result = service.initiateAuth(client.getClientId(), "USER_PASSWORD_AUTH",
                 Map.of("USERNAME", "bob", "PASSWORD", "Perm1!"));
         assertNotNull(((Map<String, Object>) result.get("AuthenticationResult")).get("AccessToken"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserRemovesTheAuthenticatedUser() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "TestPool"), "us-east-1");
+        service.adminCreateUser(pool.getId(), "bob", Map.of("email", "bob@example.com"), null);
+        service.adminSetUserPassword(pool.getId(), "bob", "Perm1!", true);
+        UserPoolClient client = service.createUserPoolClient(pool.getId(), "c", false, false, List.of(), List.of());
+        Map<String, Object> result = service.initiateAuth(client.getClientId(), "USER_PASSWORD_AUTH",
+                Map.of("USERNAME", "bob", "PASSWORD", "Perm1!"));
+        String accessToken = (String) ((Map<String, Object>) result.get("AuthenticationResult")).get("AccessToken");
+
+        service.deleteUser(accessToken);
+
+        AwsException gone = assertThrows(AwsException.class, () -> service.adminGetUser(pool.getId(), "bob"));
+        assertEquals("UserNotFoundException", gone.getErrorCode());
+    }
+
+    @Test
+    void adminListDevicesReturnsEmptyForFreshUser() {
+        UserPool pool = createPoolAndUser();
+        assertTrue(service.adminListDevices(pool.getId(), "alice").isEmpty());
+    }
+
+    @Test
+    void createUserPoolPrefixesUnprefixedCustomSchemaAttributes() {
+        UserPool pool = service.createUserPool(Map.of(
+                "PoolName", "SchemaPool",
+                "Schema", List.of(Map.of("Name", "tenantId", "Mutable", true))
+        ), "us-east-1");
+        assertEquals("custom:tenantId", pool.getSchemaAttributes().getFirst().get("Name"));
     }
 
     // =========================================================================
@@ -2328,5 +2363,107 @@ class CognitoServiceTest {
                 ));
         assertEquals("InvalidParameterException", ex.getErrorCode());
 
+    }
+
+    @Test
+    void identityProviderRoundTrip() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "IdpPool"), "us-east-1");
+        IdentityProvider created = service.createIdentityProvider(
+                pool.getId(),
+                "corporate-oidc",
+                "OIDC",
+                Map.of(
+                        "client_id", "alchemy-test-client",
+                        "client_secret", "alchemy-test-secret",
+                        "oidc_issuer", "https://accounts.google.com"
+                ),
+                Map.of("email", "email"),
+                List.of()
+        );
+        assertEquals("OIDC", created.getProviderType());
+        assertEquals("https://accounts.google.com", created.getProviderDetails().get("oidc_issuer"));
+
+        IdentityProvider described = service.describeIdentityProvider(pool.getId(), "corporate-oidc");
+        assertEquals("corporate-oidc", described.getProviderName());
+        assertEquals("email", described.getAttributeMapping().get("email"));
+
+        IdentityProvider updated = service.updateIdentityProvider(
+                pool.getId(),
+                "corporate-oidc",
+                Map.of(
+                        "client_id", "alchemy-test-client",
+                        "client_secret", "alchemy-test-secret",
+                        "oidc_issuer", "https://accounts.google.com"
+                ),
+                Map.of("email", "email", "username", "sub"),
+                List.of("corp")
+        );
+        assertEquals("sub", updated.getAttributeMapping().get("username"));
+        assertEquals(List.of("corp"), updated.getIdpIdentifiers());
+
+        assertEquals(1, service.listIdentityProviders(pool.getId()).size());
+        service.deleteIdentityProvider(pool.getId(), "corporate-oidc");
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.describeIdentityProvider(pool.getId(), "corporate-oidc"));
+        assertEquals("ResourceNotFoundException", missing.getErrorCode());
+    }
+
+    @Test
+    void createIdentityProviderDuplicateThrows() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "IdpDupPool"), "us-east-1");
+        service.createIdentityProvider(pool.getId(), "corporate-oidc", "OIDC",
+                Map.of("oidc_issuer", "https://accounts.google.com"), Map.of(), List.of());
+        AwsException ex = assertThrows(AwsException.class, () ->
+                service.createIdentityProvider(pool.getId(), "corporate-oidc", "OIDC",
+                        Map.of("oidc_issuer", "https://accounts.google.com"), Map.of(), List.of()));
+        assertEquals("DuplicateProviderException", ex.getErrorCode());
+    }
+
+    @Test
+    void userPoolDomainRoundTripAndMissingDescribeIsEmpty() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        UserPoolDomain created = service.createUserPoolDomain(pool.getId(), "my-app-auth", 2, null);
+        assertEquals("ACTIVE", created.getStatus());
+        assertTrue(created.getCloudFrontDistribution().endsWith(".cloudfront.net"));
+        assertEquals(2, created.getManagedLoginVersion());
+
+        UserPoolDomain described = service.describeUserPoolDomain("my-app-auth").orElseThrow();
+        assertEquals(pool.getId(), described.getUserPoolId());
+        assertTrue(service.describeUserPoolDomain("missing-prefix").isEmpty());
+
+        UserPoolDomain updated = service.updateUserPoolDomain(pool.getId(), "my-app-auth", 1, null);
+        assertEquals(1, updated.getManagedLoginVersion());
+
+        service.deleteUserPoolDomain(pool.getId(), "my-app-auth");
+        assertTrue(service.describeUserPoolDomain("my-app-auth").isEmpty());
+    }
+
+    @Test
+    void createUserPoolDomainRejectsDuplicateDomain() {
+        UserPool first = service.createUserPool(Map.of("PoolName", "DomainOne"), "us-east-1");
+        UserPool second = service.createUserPool(Map.of("PoolName", "DomainTwo"), "us-east-1");
+        service.createUserPoolDomain(first.getId(), "shared-prefix", null, null);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                service.createUserPoolDomain(second.getId(), "shared-prefix", null, null));
+        assertEquals("InvalidParameterException", ex.getErrorCode());
+    }
+
+    @Test
+    void riskConfigurationSetAndReadBack() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "RiskPool"), "us-east-1");
+        Map<String, Object> set = service.setRiskConfiguration(
+                pool.getId(),
+                null,
+                Map.of("Actions", Map.of("EventAction", "BLOCK")),
+                null,
+                null
+        );
+        assertEquals("BLOCK", ((Map<?, ?>) ((Map<?, ?>) set.get("CompromisedCredentialsRiskConfiguration"))
+                .get("Actions")).get("EventAction"));
+
+        Map<String, Object> described = service.describeRiskConfiguration(pool.getId(), null);
+        assertEquals(pool.getId(), described.get("UserPoolId"));
+        assertEquals("BLOCK", ((Map<?, ?>) ((Map<?, ?>) described.get("CompromisedCredentialsRiskConfiguration"))
+                .get("Actions")).get("EventAction"));
     }
 }

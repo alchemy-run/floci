@@ -448,6 +448,144 @@ class BatchIntegrationTest {
     }
 
     @Test
+    void updateDeleteAndTagComputeEnvironmentAndQueue() {
+        String suffix = uniqueSuffix();
+        String envName = "batch-upd-ce-" + suffix;
+        String queueName = "batch-upd-queue-" + suffix;
+        String envArn = createComputeEnvironment(envName);
+        String queueArn = createQueue(queueName, envArn);
+
+        givenJson("""
+                {"resourceArn":"%s","tags":{"Environment":"test"}}
+                """.formatted(queueArn))
+        .when()
+            .post("/v1/tagresource")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"resourceArn\":\"%s\"}".formatted(queueArn))
+        .when()
+            .post("/v1/listtagsforresource")
+        .then()
+            .statusCode(200)
+            .body("tags.Environment", equalTo("test"));
+
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueArn))
+        .when()
+            .post("/v1/getjobqueuesnapshot")
+        .then()
+            .statusCode(200)
+            .body("frontOfQueue.jobs", hasSize(0));
+
+        givenJson("{\"jobQueue\":\"%s\",\"state\":\"DISABLED\"}".formatted(queueName))
+        .when()
+            .post("/v1/updatejobqueue")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueName))
+        .when()
+            .post("/v1/deletejobqueue")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironment\":\"%s\",\"state\":\"DISABLED\"}".formatted(envName))
+        .when()
+            .post("/v1/updatecomputeenvironment")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironment\":\"%s\"}".formatted(envName))
+        .when()
+            .post("/v1/deletecomputeenvironment")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironments\":[\"%s\"]}".formatted(envName))
+        .when()
+            .post("/v1/describecomputeenvironments")
+        .then()
+            .statusCode(200)
+            .body("computeEnvironments", hasSize(0));
+    }
+
+    @Test
+    void cancelAndTerminateSucceededJobsAreNoOps() {
+        String suffix = uniqueSuffix();
+        String queueArn = createQueue("batch-cancel-queue-" + suffix, createComputeEnvironment("batch-cancel-ce-" + suffix));
+        String definitionArn = registerJobDefinition("batch-cancel-job-" + suffix, "[\"ok\"]", "[]");
+        String jobId = submit(queueArn, definitionArn, "batch-cancel-" + suffix);
+
+        givenJson("{\"jobs\":[\"%s\"]}".formatted(jobId))
+        .when()
+            .post("/v1/describejobs")
+        .then()
+            .statusCode(200)
+            .body("jobs[0].status", equalTo("SUCCEEDED"));
+
+        givenJson("{\"jobId\":\"%s\",\"reason\":\"late cancel\"}".formatted(jobId))
+        .when()
+            .post("/v1/canceljob")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"jobId\":\"%s\",\"reason\":\"late terminate\"}".formatted(jobId))
+        .when()
+            .post("/v1/terminatejob")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"jobs\":[\"%s\"]}".formatted(jobId))
+        .when()
+            .post("/v1/describejobs")
+        .then()
+            .statusCode(200)
+            .body("jobs[0].status", equalTo("SUCCEEDED"));
+    }
+
+    @Test
+    void unmanagedComputeEnvironmentAndMissingResourceErrors() {
+        String suffix = uniqueSuffix();
+        String envName = "batch-unmanaged-" + suffix;
+        givenJson("""
+                {
+                  "computeEnvironmentName": "%s",
+                  "type": "UNMANAGED",
+                  "unmanagedvCpus": 4
+                }
+                """.formatted(envName))
+        .when()
+            .post("/v1/createcomputeenvironment")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironments\":[\"%s\"]}".formatted(envName))
+        .when()
+            .post("/v1/describecomputeenvironments")
+        .then()
+            .statusCode(200)
+            .body("computeEnvironments[0].type", equalTo("UNMANAGED"))
+            .body("computeEnvironments[0].unmanagedvCpus", equalTo(4))
+            .body("computeEnvironments[0].status", equalTo("VALID"));
+
+        givenJson("{\"jobQueue\":\"missing-queue-%s\"}".formatted(suffix))
+        .when()
+            .post("/v1/updatejobqueue")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ClientException"))
+            .body("message", containsString("job-queue/missing-queue-" + suffix + " does not exist"));
+
+        givenJson("{\"computeEnvironment\":\"missing-ce-%s\"}".formatted(suffix))
+        .when()
+            .post("/v1/updatecomputeenvironment")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ClientException"))
+            .body("message", containsString("compute-environment/missing-ce-" + suffix + " does not exist"));
+    }
+
+    @Test
     void describeUnknownJobsReturnsEmptyList() {
         givenJson("{\"jobs\":[\"does-not-exist\"]}")
         .when()

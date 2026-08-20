@@ -34,13 +34,24 @@ public class PortAllocator {
      */
     public synchronized int allocate(int basePort, int maxPort) {
         for (int port = basePort; port <= maxPort; port++) {
-            if (!reserved.contains(port) && isPortFree(port)) {
-                reserved.add(port);
+            if (tryAllocate(port)) {
                 LOG.debugv("Allocated port {0} from range {1}-{2}", String.valueOf(port), String.valueOf(basePort), String.valueOf(maxPort));
                 return port;
             }
         }
         throw new RuntimeException("No free port available in range " + basePort + "-" + maxPort);
+    }
+
+    /**
+     * Reserves {@code port} when it is free and not already held. Used to publish an
+     * EC2 app port on the same host port the guest listens on (e.g. 3000→3000).
+     */
+    public synchronized boolean tryAllocate(int port) {
+        if (port <= 0 || reserved.contains(port) || !isPortFree(port)) {
+            return false;
+        }
+        reserved.add(port);
+        return true;
     }
 
     /**

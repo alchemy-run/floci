@@ -284,4 +284,63 @@ class AutoScalingQueryHandlerTest {
         assertTrue(xml.contains("<OnDemandPercentageAboveBaseCapacity>25</OnDemandPercentageAboveBaseCapacity>"));
         assertTrue(xml.contains("<SpotAllocationStrategy>capacity-optimized</SpotAllocationStrategy>"));
     }
+
+    @Test
+    void scheduledActionQueryRoundTrip() {
+        AutoScalingService service = new AutoScalingService();
+        service.regionResolver = new RegionResolver(REGION, "000000000000");
+        service.createAutoScalingGroup(REGION,
+                "sched-asg",
+                null,
+                "lt-original",
+                null,
+                "1",
+                null,
+                0,
+                3,
+                0,
+                300,
+                List.of("us-east-1a"),
+                List.of(),
+                List.of(),
+                List.of(),
+                "EC2",
+                0,
+                List.of("Default"),
+                java.util.Map.of(),
+                java.util.Map.of());
+
+        AutoScalingQueryHandler handler = new AutoScalingQueryHandler(service);
+        MultivaluedHashMap<String, String> putParams = new MultivaluedHashMap<>();
+        putParams.add("AutoScalingGroupName", "sched-asg");
+        putParams.add("ScheduledActionName", "morning");
+        putParams.add("Recurrence", "0 9 * * *");
+        putParams.add("TimeZone", "America/New_York");
+        putParams.add("MinSize", "0");
+        putParams.add("MaxSize", "3");
+        putParams.add("DesiredCapacity", "1");
+
+        Response put = handler.handle("PutScheduledUpdateGroupAction", putParams, REGION);
+        assertEquals(200, put.getStatus());
+        assertTrue(((String) put.getEntity()).contains("PutScheduledUpdateGroupActionResponse"));
+
+        MultivaluedHashMap<String, String> describeParams = new MultivaluedHashMap<>();
+        describeParams.add("AutoScalingGroupName", "sched-asg");
+        describeParams.add("ScheduledActionNames.member.1", "morning");
+        Response describe = handler.handle("DescribeScheduledActions", describeParams, REGION);
+        String xml = (String) describe.getEntity();
+        assertEquals(200, describe.getStatus());
+        assertTrue(xml.contains("<ScheduledActionName>morning</ScheduledActionName>"));
+        assertTrue(xml.contains("<Recurrence>0 9 * * *</Recurrence>"));
+        assertTrue(xml.contains("<TimeZone>America/New_York</TimeZone>"));
+        assertTrue(xml.contains("<DesiredCapacity>1</DesiredCapacity>"));
+        assertTrue(xml.contains("<ScheduledActionARN>arn:aws:autoscaling:"));
+
+        MultivaluedHashMap<String, String> executeParams = new MultivaluedHashMap<>();
+        executeParams.add("AutoScalingGroupName", "sched-asg");
+        executeParams.add("PolicyName", "missing");
+        Response execute = handler.handle("ExecutePolicy", executeParams, REGION);
+        assertEquals(400, execute.getStatus());
+        assertTrue(((String) execute.getEntity()).contains("ValidationError"));
+    }
 }

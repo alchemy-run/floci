@@ -36,6 +36,10 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -51,6 +55,19 @@ public class LambdaUrlInvocationController {
 
     private static final Logger LOG = Logger.getLogger(LambdaUrlInvocationController.class);
 
+    /**
+     * Function URL waits for the container off the JAX-RS worker pool so a
+     * nested emulator call (the Lambda talking back to Floci) can still be
+     * served. Holding the request thread across {@code invoke()} deadlocks
+     * under parallel Function URL traffic — Alchemy bindings suites burst
+     * ~8 routes at the default 3s timeout and get 502s.
+     */
+    private static final ExecutorService INVOKE_POOL = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "lambda-url-invoke");
+        t.setDaemon(true);
+        return t;
+    });
+
     private final LambdaService lambdaService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
@@ -65,40 +82,41 @@ public class LambdaUrlInvocationController {
 
     @GET
     @Path("/{proxy: .*}")
-    public Response handleGet(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handleGet(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                               @Context HttpHeaders headers, @Context UriInfo uriInfo) {
         return invoke("GET", urlId, proxy, headers, uriInfo, null);
     }
 
     @POST
     @Path("/{proxy: .*}")
-    public Response handlePost(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handlePost(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("POST", urlId, proxy, headers, uriInfo, body);
     }
 
     @PUT
     @Path("/{proxy: .*}")
-    public Response handlePut(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handlePut(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                               @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("PUT", urlId, proxy, headers, uriInfo, body);
     }
 
     @DELETE
     @Path("/{proxy: .*}")
-    public Response handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
-                                 @Context HttpHeaders headers, @Context UriInfo uriInfo) {
-        return invoke("DELETE", urlId, proxy, headers, uriInfo, null);
+    public CompletionStage<Response> handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+                                 @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
+        // AWS Function URLs forward DELETE request bodies to the event.
+        return invoke("DELETE", urlId, proxy, headers, uriInfo, body);
     }
 
     @PATCH
     @Path("/{proxy: .*}")
-    public Response handlePatch(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
+    public CompletionStage<Response> handlePatch(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                 @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("PATCH", urlId, proxy, headers, uriInfo, body);
     }
 
-    private Response invoke(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body) {
+    private CompletionStage<Response> invoke(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body) {
         Object target = lambdaService.getTargetByUrlId(urlId);
         String functionName;
         String region;
@@ -113,7 +131,8 @@ public class LambdaUrlInvocationController {
             region = AwsArnUtils.parse(fn.getFunctionArn()).region();
             urlConfig = fn.getUrlConfig();
         } else {
-            return Response.status(404).entity(jsonMessage("Function URL not found")).type(MediaType.APPLICATION_JSON).build();
+            return CompletableFuture.completedFuture(
+                    Response.status(404).entity(jsonMessage("Function URL not found")).type(MediaType.APPLICATION_JSON).build());
         }
 
         String requestId = UUID.randomUUID().toString();
@@ -121,16 +140,45 @@ public class LambdaUrlInvocationController {
 
         LOG.infov("Lambda URL invocation: {0} {1} -> {2} (region: {3})", method, urlId, functionName, region);
 
-        boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
-        try {
-            InvokeResult result = lambdaService.invoke(region, functionName, event.getBytes(), InvocationType.RequestResponse);
-            if (result.isStreaming()) {
-                return buildStreamedResponse(result, responseStream);
-            }
-            return buildResponse(result);
-        } catch (AwsException e) {
-            return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
+        // AWS_IAM Function URLs reject unsigned requests at the URL edge
+        // (HTTP 403) without invoking the function. Unsigned GET against a
+        // RESPONSE_STREAM URL would otherwise hang the caller on a container.
+        if (urlConfig != null && "AWS_IAM".equals(urlConfig.getAuthType())
+                && !hasSigV4(headers, uriInfo)) {
+            return CompletableFuture.completedFuture(
+                    Response.status(403)
+                            .entity("{\"Message\":\"Forbidden\"}")
+                            .type(MediaType.APPLICATION_JSON)
+                            .build());
         }
+
+        boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
+        byte[] eventBytes = event.getBytes();
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                InvokeResult result = lambdaService.invoke(region, functionName, eventBytes, InvocationType.RequestResponse);
+                if (result.isStreaming()) {
+                    return buildStreamedResponse(result, responseStream);
+                }
+                return buildResponse(result);
+            } catch (AwsException e) {
+                return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
+            }
+        }, INVOKE_POOL);
+    }
+
+    /** Visible for tests: AWS SigV4 via Authorization header or query-string signing. */
+    static boolean hasSigV4(HttpHeaders headers, UriInfo uriInfo) {
+        String authorization = headers != null ? headers.getHeaderString("Authorization") : null;
+        String algorithm = uriInfo != null ? uriInfo.getQueryParameters().getFirst("X-Amz-Algorithm") : null;
+        return hasSigV4(authorization, algorithm);
+    }
+
+    static boolean hasSigV4(String authorization, String amzAlgorithmQuery) {
+        if (authorization != null && authorization.contains("AWS4-HMAC-SHA256")) {
+            return true;
+        }
+        return "AWS4-HMAC-SHA256".equals(amzAlgorithmQuery);
     }
 
     private String buildEvent(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body, String requestId, String region) {
@@ -178,7 +226,8 @@ public class LambdaUrlInvocationController {
 
     private Response buildResponse(InvokeResult result) {
         if (result.getPayload() == null || result.getPayload().length == 0) {
-            return Response.status(result.getStatusCode()).build();
+            int status = result.getFunctionError() != null ? 502 : result.getStatusCode();
+            return Response.status(status).build();
         }
         try {
             JsonNode node = objectMapper.readTree(result.getPayload());
@@ -195,11 +244,16 @@ public class LambdaUrlInvocationController {
                     builder.entity(bytes);
                 }
                 return builder.build();
-            } else {
-                return Response.ok(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
             }
+            // AWS Function URLs return 502 when the runtime reports a function
+            // error (timeout, unhandled) and the payload is not an HTTP result.
+            if (result.getFunctionError() != null) {
+                return Response.status(502).entity(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
+            }
+            return Response.ok(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
         } catch (Exception e) {
-            return Response.ok(result.getPayload()).build();
+            int status = result.getFunctionError() != null ? 502 : 200;
+            return Response.status(status).entity(result.getPayload()).build();
         }
     }
 

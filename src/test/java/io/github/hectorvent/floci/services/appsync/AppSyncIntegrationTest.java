@@ -116,7 +116,7 @@ class AppSyncIntegrationTest {
             .body("graphqlApi.name", equalTo("my-api"))
             .body("graphqlApi.authenticationType", equalTo("API_KEY"))
             .body("graphqlApi.arn", containsString("arn:aws:appsync:"))
-            .body("graphqlApi.uris.GRAPHQL", containsString("/v1/apis/"))
+            .body("graphqlApi.uris.GRAPHQL", containsString("appsync-api"))
             .body("graphqlApi.tags.env", equalTo("test"))
             .extract().path("graphqlApi.apiId");
     }
@@ -208,7 +208,7 @@ class AppSyncIntegrationTest {
             .get("/v1/apis/" + apiId + "/schema")
         .then()
             .statusCode(200)
-            .body("schema.definition", containsString("type Query"));
+            .body(containsString("type Query"));
     }
 
     // ── API Keys ─────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ class AppSyncIntegrationTest {
             .post("/v1/apis/" + apiId + "/apikeys")
         .then()
             .statusCode(200)
-            .body("apiKey.id", notNullValue())
+            .body("apiKey.id", startsWith("da2-"))
             .body("apiKey.apiKey", startsWith("da2-"))
             .body("apiKey.description", equalTo("test-key"))
             .extract().path("apiKey.id");
@@ -2409,7 +2409,207 @@ class AppSyncIntegrationTest {
             .get("/v1/apis/" + apiId + "/schema")
         .then()
             .statusCode(200)
-            .body("schema.definition", containsString("type Query"));
+            .body(containsString("type Query"));
+    }
+
+    @Test
+    @Order(229)
+    void createDomainName_missingCertificate() {
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {
+                  "domainName": "alchemy-appsync-probe.example.com",
+                  "certificateArn": "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+                }
+                """)
+        .when()
+            .post("/v1/domainnames")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("BadRequestException"));
+    }
+
+    @Test
+    @Order(230)
+    void getApiCache_missingReturns404() {
+        given()
+            .header("Authorization", AUTH)
+        .when()
+            .get("/v1/apis/" + apiId + "/ApiCaches")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    @Order(231)
+    void flushApiCache_missingReturns404() {
+        given()
+            .header("Authorization", AUTH)
+        .when()
+            .delete("/v1/apis/" + apiId + "/FlushCache")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    @Order(232)
+    void createGetUpdateDeleteApiCache() {
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {
+                  "ttl": 60,
+                  "apiCachingBehavior": "FULL_REQUEST_CACHING",
+                  "type": "SMALL"
+                }
+                """)
+        .when()
+            .post("/v1/apis/" + apiId + "/ApiCaches")
+        .then()
+            .statusCode(200)
+            .body("apiCache.ttl", equalTo(60))
+            .body("apiCache.apiCachingBehavior", equalTo("FULL_REQUEST_CACHING"))
+            .body("apiCache.type", equalTo("SMALL"))
+            .body("apiCache.status", equalTo("AVAILABLE"));
+
+        given()
+            .header("Authorization", AUTH)
+        .when()
+            .get("/v1/apis/" + apiId + "/ApiCaches")
+        .then()
+            .statusCode(200)
+            .body("apiCache.ttl", equalTo(60));
+
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {
+                  "ttl": 120,
+                  "apiCachingBehavior": "PER_RESOLVER_CACHING",
+                  "type": "SMALL"
+                }
+                """)
+        .when()
+            .post("/v1/apis/" + apiId + "/ApiCaches/update")
+        .then()
+            .statusCode(200)
+            .body("apiCache.ttl", equalTo(120))
+            .body("apiCache.apiCachingBehavior", equalTo("PER_RESOLVER_CACHING"));
+
+        given()
+            .header("Authorization", AUTH)
+        .when()
+            .delete("/v1/apis/" + apiId + "/FlushCache")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("Authorization", AUTH)
+        .when()
+            .delete("/v1/apis/" + apiId + "/ApiCaches")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("Authorization", AUTH)
+        .when()
+            .get("/v1/apis/" + apiId + "/ApiCaches")
+        .then()
+            .statusCode(404);
+    }
+
+    @Test
+    @Order(240)
+    void evaluateCode_requestFunction() {
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {
+                  "runtime": {"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+                  "code": "export function request(ctx) { return { payload: ctx.args.a + ctx.args.b }; }\\nexport function response(ctx) { return ctx.result; }",
+                  "context": "{\\"arguments\\":{\\"a\\":2,\\"b\\":3}}",
+                  "function": "request"
+                }
+                """)
+        .when()
+            .post("/v1/dataplane-evaluatecode")
+        .then()
+            .statusCode(200)
+            .body("evaluationResult", containsString("5"))
+            .body("outErrors", equalTo("[]"));
+    }
+
+    @Test
+    @Order(241)
+    void evaluateMappingTemplate_addsArgs() {
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {
+                  "template": "#set($sum = $ctx.args.a + $ctx.args.b)\\n{ \\"sum\\": $util.toJson($sum) }",
+                  "context": "{\\"arguments\\":{\\"a\\":2,\\"b\\":3}}"
+                }
+                """)
+        .when()
+            .post("/v1/dataplane-evaluatetemplate")
+        .then()
+            .statusCode(200)
+            .body("evaluationResult", containsString("5"));
+    }
+
+    @Test
+    @Order(250)
+    void executeGraphql_fieldErrorAndUnauthorized() {
+        given()
+            .header("Authorization", AUTH)
+            .header("x-api-key", keyId)
+            .contentType("application/json")
+            .body("""
+                {"query": "query { nonexistentField }"}
+                """)
+        .when()
+            .post("/v1/apis/" + apiId + "/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors", hasSize(greaterThanOrEqualTo(1)));
+
+        given()
+            .header("Authorization", AUTH)
+            .contentType("application/json")
+            .body("""
+                {"query": "query { hello }"}
+                """)
+        .when()
+            .post("/v1/apis/" + apiId + "/graphql")
+        .then()
+            .statusCode(401)
+            .body("__type", equalTo("UnauthorizedException"));
+    }
+
+    @Test
+    @Order(251)
+    void executeGraphql_hostHeaderRoutesToDataPlane() {
+        given()
+            .header("Host", apiId + ".appsync-api.us-east-1.amazonaws.com")
+            .header("Authorization", AUTH)
+            .header("x-api-key", keyId)
+            .contentType("application/json")
+            .body("""
+                {"query": "query { nonexistentField }"}
+                """)
+        .when()
+            .post("/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors", hasSize(greaterThanOrEqualTo(1)));
     }
 
     // ── Phase 2: Domain Names ────────────────────────────────────────────────
@@ -3833,9 +4033,7 @@ class AppSyncIntegrationTest {
     @Test
     @Order(623)
     void createDomainName_invalidCertificateArn() {
-        // Our emulator doesn't validate certificate ARN format, so this should succeed (200).
-        // AWS itself validates the pattern, but we're permissive.
-        String tempDomain = given()
+        given()
             .header("Authorization", AUTH)
             .contentType("application/json")
             .body("""
@@ -3847,11 +4045,8 @@ class AppSyncIntegrationTest {
         .when()
             .post("/v1/domainnames")
         .then()
-            .statusCode(200)
-            .extract().path("domainNameConfig.domainName");
-
-        given().header("Authorization", AUTH)
-            .delete("/v1/domainnames/" + tempDomain).then().statusCode(204);
+            .statusCode(400)
+            .body("__type", equalTo("BadRequestException"));
     }
 
     @Test

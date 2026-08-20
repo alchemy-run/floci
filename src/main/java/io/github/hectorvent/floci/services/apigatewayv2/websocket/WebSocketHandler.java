@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiRoutingFilter;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Api;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Integration;
@@ -18,6 +19,7 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -74,31 +76,87 @@ public class WebSocketHandler {
      * This runs before JAX-RS routing and intercepts WebSocket upgrade requests.
      */
     void init(@Observes Router router) {
-        router.route("/ws/*").handler(this::handleWebSocketUpgrade);
-        LOG.debug("Registered WebSocket handler on /ws/*");
+        router.route("/ws/*").handler(this::handlePathStyleWebSocketUpgrade);
+        // AWS invoke URLs are virtual-hosted: wss://{apiId}.execute-api.{region}.amazonaws.com/{stage}.
+        // Alchemy's test harness rewrites the URL onto the gateway and keeps the Host.
+        router.route().order(-50).handler(this::handleVirtualHostWebSocketUpgrade);
+        LOG.debug("Registered WebSocket handler on /ws/* and execute-api virtual hosts");
     }
 
     /**
-     * Handle a WebSocket upgrade request.
-     * Parses apiId and stageName from the path, validates the API and stage,
-     * generates a unique connectionId, and proceeds with the $connect lifecycle.
+     * Path-style upgrades at {@code /ws/{apiId}/{stageName}}.
      */
-    private void handleWebSocketUpgrade(RoutingContext ctx) {
+    private void handlePathStyleWebSocketUpgrade(RoutingContext ctx) {
         String path = ctx.request().path();
-
-        // Strip the /ws/ prefix and parse apiId/stageName
-        String pathAfterPrefix = path.substring("/ws/".length());
-        String[] segments = pathAfterPrefix.split("/", 2);
-
-        if (segments.length < 2 || segments[0].isEmpty() || segments[1].isEmpty()) {
+        String[] parsed = parsePathStyle(path);
+        if (parsed == null) {
             ctx.response().setStatusCode(403).end();
             return;
         }
+        beginUpgrade(ctx, parsed[0], parsed[1]);
+    }
 
+    /**
+     * Virtual-host upgrades: {@code Host: {apiId}.execute-api.{region}.amazonaws.com}
+     * and path {@code /{stageName}}. Non-upgrade or non-execute-api traffic
+     * falls through to JAX-RS (HTTP APIs, @connections).
+     */
+    private void handleVirtualHostWebSocketUpgrade(RoutingContext ctx) {
+        if (!isWebSocketUpgrade(ctx)) {
+            ctx.next();
+            return;
+        }
+        String apiId = ApiGatewayExecuteApiRoutingFilter.extractApiId(
+                ApiGatewayExecuteApiRoutingFilter.resolveHost(
+                        ctx.request().getHeader("Host"),
+                        URI.create(ctx.request().absoluteURI())));
+        if (apiId == null) {
+            ctx.next();
+            return;
+        }
+        String path = ctx.request().path();
+        if (path != null && ApiGatewayExecuteApiRoutingFilter.alreadyPathStyle(path)) {
+            ctx.next();
+            return;
+        }
+        String stageName = ApiGatewayExecuteApiRoutingFilter.firstSegment(path);
+        if (stageName == null || stageName.isEmpty()) {
+            ctx.response().setStatusCode(403).end();
+            return;
+        }
+        beginUpgrade(ctx, apiId, stageName);
+    }
+
+    static boolean isWebSocketUpgrade(RoutingContext ctx) {
+        String upgrade = ctx.request().getHeader("Upgrade");
+        if (upgrade == null || !"websocket".equalsIgnoreCase(upgrade.trim())) {
+            return false;
+        }
+        String connection = ctx.request().getHeader("Connection");
+        return connection != null && connection.toLowerCase().contains("upgrade");
+    }
+
+    /**
+     * @return {@code [apiId, stageName]} or {@code null} when the path is not {@code /ws/{apiId}/{stage}}
+     */
+    static String[] parsePathStyle(String path) {
+        if (path == null || !path.startsWith("/ws/")) {
+            return null;
+        }
+        String pathAfterPrefix = path.substring("/ws/".length());
+        String[] segments = pathAfterPrefix.split("/", 2);
+        if (segments.length < 2 || segments[0].isEmpty() || segments[1].isEmpty()) {
+            return null;
+        }
         String apiId = segments[0];
-        // stageName may contain additional path segments — take only the first segment
         String stageName = segments[1].contains("/") ? segments[1].split("/")[0] : segments[1];
+        return new String[] { apiId, stageName };
+    }
 
+    /**
+     * Validate the API and stage, generate a connectionId, and run the $connect lifecycle.
+     */
+    private void beginUpgrade(RoutingContext ctx, String apiId, String stageName) {
         // Resolve region from the request Authorization header
         String region = resolveRegionFromVertxRequest(ctx);
 
@@ -107,7 +165,7 @@ public class WebSocketHandler {
         try {
             api = apiGatewayV2Service.getApi(region, apiId);
         } catch (AwsException e) {
-            LOG.debugv("WebSocket upgrade rejected: API {0} not found in region {1}", apiId, region);
+            LOG.infov("WebSocket upgrade rejected: API {0} not found in region {1}", apiId, region);
             ctx.response().setStatusCode(403).end();
             return;
         }
@@ -124,7 +182,7 @@ public class WebSocketHandler {
         try {
             stage = apiGatewayV2Service.getStage(region, apiId, stageName);
         } catch (AwsException e) {
-            LOG.debugv("WebSocket upgrade rejected: stage {0} not found on API {1}", stageName, apiId);
+            LOG.infov("WebSocket upgrade rejected: stage {0} not found on API {1}", stageName, apiId);
             ctx.response().setStatusCode(403).end();
             return;
         }
@@ -277,7 +335,7 @@ public class WebSocketHandler {
                     connectedAt, connectedAt, sourceIp, userAgent);
             connectionManager.register(connectionId, connectionInfo, ws);
 
-            LOG.debugv("WebSocket connection {0} established for API {1}/{2}",
+            LOG.infov("WebSocket connection {0} established for API {1}/{2}",
                     connectionId, apiId, stageName);
 
             // Attach text message handler

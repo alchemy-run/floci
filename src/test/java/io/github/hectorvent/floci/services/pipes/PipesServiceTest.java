@@ -287,6 +287,26 @@ class PipesServiceTest {
     }
 
     @Test
+    void createPipeStoresLogConfigurationAndKmsKey() {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        com.fasterxml.jackson.databind.JsonNode logConfig = mapper.createObjectNode()
+                .put("Level", "INFO");
+        Pipe pipe = pipesService.createPipe("log-pipe",
+                "arn:aws:sqs:us-east-1:000000000000:source",
+                "arn:aws:sqs:us-east-1:000000000000:target",
+                "arn:aws:iam::000000000000:role/role",
+                null, null, null, null, null, null, Map.of(),
+                logConfig, "alias/pipes-key", "us-east-1");
+
+        assertEquals("INFO", pipe.getLogConfiguration().get("Level").asText());
+        assertEquals("alias/pipes-key", pipe.getKmsKeyIdentifier());
+
+        Pipe described = pipesService.describePipe("log-pipe", "us-east-1");
+        assertEquals("INFO", described.getLogConfiguration().get("Level").asText());
+        assertEquals("alias/pipes-key", described.getKmsKeyIdentifier());
+    }
+
+    @Test
     void regionIsolation() {
         pipesService.createPipe("region-pipe",
                 "arn:aws:sqs:us-east-1:000000000000:source",

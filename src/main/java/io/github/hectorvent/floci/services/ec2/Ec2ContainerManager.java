@@ -119,18 +119,22 @@ public class Ec2ContainerManager {
      *                 via socat sidecars once the container is running (empty for none)
      */
     public void launch(Instance instance, ResolvedAmiImage image, String publicKey, String region, Set<Integer> appPorts) {
-        instance.setState(InstanceState.pending());
+        // Do not reset a control-plane `running` state back to pending — Alchemy's
+        // waitForState budget is too short for image pulls, and a later terminate
+        // on guest failure makes DescribeInstances return NotFound after prune/replace.
+        if (instance.getState() == null || instance.getState().getName() == null) {
+            instance.setState(InstanceState.pending());
+        }
 
         executor.submit(() -> {
             try {
                 String instanceId = instance.getInstanceId();
                 String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instanceId);
 
-                // Allocate SSH host port
-                int sshHostPort = portAllocator.allocate(
-                        config.services().ec2().sshPortRangeStart(),
-                        config.services().ec2().sshPortRangeEnd());
-                instance.setSshHostPort(sshHostPort);
+                // Do not publish guest SSH on the host. Binding :22 races leftover
+                // containers and fails startCreated ("port is already allocated"),
+                // leaving a control-plane running instance with no HTTP backend.
+                instance.setSshHostPort(0);
 
                 // IMDS endpoint that this container should use
                 String flociHost = dockerHostResolver.resolve();
@@ -146,7 +150,6 @@ public class Ec2ContainerManager {
                         .withDockerNetwork(Optional.empty())
                         .withEnv(localAwsEnvironment(region, serviceEndpoint, imdsEndpoint))
                         .withEnv("AWS_EC2_INSTANCE_ID", instanceId)
-                        .withPortBinding(22, sshHostPort)
                         .withHostDockerInternalOnLinux()
                         .withLogRotation()
                         // EC2 instances expose IMDS on 169.254.169.254. Floci
@@ -180,8 +183,8 @@ public class Ec2ContainerManager {
                 }
 
                 if (!running) {
-                    LOG.warnv("EC2 instance {0} container {1} did not reach running state", instanceId, containerId);
-                    instance.setState(InstanceState.terminated());
+                    LOG.warnv("EC2 instance {0} container {1} did not reach running state; keeping control-plane record",
+                            instanceId, containerId);
                     return;
                 }
 
@@ -196,45 +199,53 @@ public class Ec2ContainerManager {
                     metadataServer.registerContainer(containerIp, instanceId, instance);
                 }
                 else {
-                    LOG.warnv("EC2 instance {0} container {1} did not receive a usable bridge IP for IMDS",
+                    LOG.warnv("EC2 instance {0} container {1} did not receive a usable bridge IP for IMDS; keeping control-plane record",
                             instanceId, containerId);
-                    instance.setState(InstanceState.terminated());
                     return;
                 }
 
                 configureLinkLocalMetadataEndpoint(containerId, instanceId, flociHost, imdsPort);
 
-                // Set public-facing addresses
-                instance.setPublicIpAddress("127.0.0.1");
-                instance.setPublicDnsName("localhost");
+                // Control-plane RunInstances already assigned a host-reachable
+                // public address when the subnet / AssociatePublicIpAddress asked
+                // for one. Do not clobber it with localhost — Alchemy reads
+                // PublicIpAddress as soon as the instance is running.
+                if (instance.getPublicIpAddress() == null || instance.getPublicIpAddress().isBlank()) {
+                    instance.setPublicIpAddress("127.0.0.1");
+                    instance.setPublicDnsName("localhost");
+                }
 
                 instance.setState(InstanceState.running());
-                LOG.infov("EC2 instance {0} running in container {1} (SSH host port {2})",
-                        instanceId, containerId, String.valueOf(sshHostPort));
+                LOG.infov("EC2 instance {0} running in container {1}",
+                        instanceId, containerId);
 
                 // Publish security-group TCP ingress ports on the host via socat sidecars.
                 if (appPorts != null && !appPorts.isEmpty()) {
                     portForwardManager.reconcile(instance, appPorts);
                 }
 
-                // Inject SSH public key
-                if (publicKey != null && !publicKey.isBlank()) {
-                    injectSshKey(containerId, publicKey);
-                    startSshd(containerId, instanceId);
-                }
+                // Hosted user-data (systemd unit + HTTP server) must run before
+                // the optional SSH bootstrap: installing openssh via dnf/apt can
+                // take minutes and has crashed guests under memory pressure.
+                prepareGuestFilesystem(containerId, instanceId);
+                installSystemctlShim(containerId, instanceId);
 
-                // Execute UserData
                 String userData = instance.getUserData();
                 if (userData != null && !userData.isBlank()) {
                     executeUserData(containerId, instanceId, userData, region);
                 }
 
+                if (publicKey != null && !publicKey.isBlank()) {
+                    injectSshKey(containerId, publicKey);
+                    startSshd(containerId, instanceId);
+                }
+
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                instance.setState(InstanceState.terminated());
+                LOG.warnv("EC2 instance {0} launch interrupted; keeping control-plane record", instance.getInstanceId());
             } catch (Exception e) {
-                LOG.warnv("Failed to launch EC2 instance {0}: {1}", instance.getInstanceId(), e.getMessage());
-                instance.setState(InstanceState.terminated());
+                LOG.warnv("Failed to launch EC2 instance {0} guest ({1}); keeping control-plane record",
+                        instance.getInstanceId(), e.getMessage());
             }
         });
     }
@@ -604,6 +615,104 @@ public class Ec2ContainerManager {
 
     static String[] userDataExecutionCommand() {
         return new String[]{USER_DATA_SCRIPT_PATH};
+    }
+
+    /**
+     * Official amazonlinux/ubuntu images have no systemd. Alchemy hosted
+     * user-data writes a unit and calls {@code systemctl enable --now}; this
+     * shim runs ExecStartPre + ExecStart with Restart=always so the HTTP
+     * server comes up the same way it does on a real AMI.
+     */
+    static String[] systemctlShimInstallCommand() {
+        return new String[]{"sh", "-c", String.join("\n",
+                "set -eu",
+                "mkdir -p /etc/systemd/system /lib/systemd/system /usr/local/sbin /usr/local/bin /var/log /var/run",
+                "if command -v systemctl >/dev/null 2>&1; then exit 0; fi",
+                "cat > /usr/local/sbin/systemctl <<'SHIM'",
+                "#!/bin/sh",
+                "cmd=\"${1:-}\"",
+                "shift || true",
+                "case \"$cmd\" in",
+                "  daemon-reload|status|is-enabled|is-active) exit 0 ;;",
+                "  enable|start|restart)",
+                "    unit=\"\"",
+                "    for a in \"$@\"; do",
+                "      case \"$a\" in --now) ;; *) unit=\"$a\" ;; esac",
+                "    done",
+                "    [ -n \"$unit\" ] || exit 0",
+                "    unit=\"${unit%.service}\"",
+                "    unitfile=\"/etc/systemd/system/${unit}.service\"",
+                "    [ -f \"$unitfile\" ] || unitfile=\"/lib/systemd/system/${unit}.service\"",
+                "    [ -f \"$unitfile\" ] || exit 0",
+                "    wd=$(sed -n 's/^WorkingDirectory=//p' \"$unitfile\" | tail -n 1)",
+                "    pre=$(sed -n 's/^ExecStartPre=//p' \"$unitfile\" | tail -n 1)",
+                "    start=$(sed -n 's/^ExecStart=//p' \"$unitfile\" | tail -n 1)",
+                "    envfile=$(sed -n 's/^EnvironmentFile=-\\{0,1\\}//p' \"$unitfile\" | tail -n 1)",
+                "    pidfile=\"/var/run/${unit}.pid\"",
+                "    if [ -f \"$pidfile\" ] && kill -0 \"$(cat \"$pidfile\")\" 2>/dev/null; then",
+                "      exit 0",
+                "    fi",
+                "    # ExecStartPre downloads EnvironmentFile (Alchemy hosted env).",
+                "    # Source it after setup so bun sees ALCHEMY_STACK_NAME et al.",
+                "    nohup sh -c '",
+                "      unitfile=\"$0\"",
+                "      wd=$(sed -n \"s/^WorkingDirectory=//p\" \"$unitfile\" | tail -n 1)",
+                "      pre=$(sed -n \"s/^ExecStartPre=//p\" \"$unitfile\" | tail -n 1)",
+                "      start=$(sed -n \"s/^ExecStart=//p\" \"$unitfile\" | tail -n 1)",
+                "      envfile=$(sed -n \"s/^EnvironmentFile=-\\{0,1\\}//p\" \"$unitfile\" | tail -n 1)",
+                "      if [ -n \"$wd\" ]; then cd \"$wd\" || exit 1; fi",
+                "      if [ -n \"$pre\" ]; then $pre || exit 1; fi",
+                "      if [ -n \"$envfile\" ] && [ -f \"$envfile\" ]; then set -a; . \"$envfile\"; set +a; fi",
+                "      while true; do",
+                "        if [ -n \"$start\" ]; then $start; fi",
+                "        sleep 5",
+                "      done",
+                "    ' \"$unitfile\" >/var/log/${unit}.log 2>&1 &",
+                "    echo $! > \"$pidfile\"",
+                "    exit 0",
+                "    ;;",
+                "  *) exit 0 ;;",
+                "esac",
+                "SHIM",
+                "chmod 755 /usr/local/sbin/systemctl",
+                "if [ ! -e /usr/bin/systemctl ]; then ln -s /usr/local/sbin/systemctl /usr/bin/systemctl; fi")};
+    }
+
+    /**
+     * Catalog images (amazonlinux:2023 / ubuntu:24.04) have no systemd tree.
+     * Alchemy hosted user-data writes {@code /etc/systemd/system/*.service};
+     * without the directory {@code cat >} fails and {@code systemctl enable}
+     * is a no-op.
+     */
+    static String[] prepareGuestFilesystemCommand() {
+        return new String[]{"sh", "-c",
+                "mkdir -p /etc/systemd/system /lib/systemd/system /usr/local/bin /usr/local/sbin /var/log /var/run"};
+    }
+
+    private void prepareGuestFilesystem(String containerId, String instanceId) {
+        try {
+            ContainerExecResult result = execInContainerForResult(containerId, prepareGuestFilesystemCommand(), 10);
+            if (result.exitCode() != 0) {
+                LOG.warnv("Could not prepare guest filesystem for EC2 instance {0}: {1}",
+                        instanceId, result.summary());
+            }
+        } catch (Exception e) {
+            LOG.warnv("Could not prepare guest filesystem for EC2 instance {0}: {1}",
+                    instanceId, e.getMessage());
+        }
+    }
+
+    private void installSystemctlShim(String containerId, String instanceId) {
+        try {
+            ContainerExecResult result = execInContainerForResult(containerId, systemctlShimInstallCommand(), 15);
+            if (result.exitCode() != 0) {
+                LOG.warnv("Could not install systemctl shim for EC2 instance {0}: {1}",
+                        instanceId, result.summary());
+            }
+        } catch (Exception e) {
+            LOG.warnv("Could not install systemctl shim for EC2 instance {0}: {1}",
+                    instanceId, e.getMessage());
+        }
     }
 
     static String[] metadataProxyInstallCommand() {

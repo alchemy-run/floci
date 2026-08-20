@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -152,6 +153,80 @@ class IamEnforcementFilterTest {
     }
 
     @Test
+    void roleSessionEnforcedActionIsEvaluatedWhenGlobalEnforcementIsOff() {
+        when(iamConfig.enforcementEnabled()).thenReturn(false);
+        ContainerRequestContext containerRequest = mock(ContainerRequestContext.class);
+
+        String auth = "AWS4-HMAC-SHA256 Credential=ASIASESSION/20260819/us-east-1/ses/aws4_request, "
+                + "SignedHeaders=host, Signature=abc";
+        requestContext.setAccountId("000000000000");
+        requestContext.setRegion("us-east-1");
+
+        when(accountResolver.extractAccessKeyId(auth)).thenReturn("ASIASESSION");
+        when(containerRequest.getHeaderString("Authorization")).thenReturn(auth);
+        when(actionRegistry.resolve("ses", containerRequest)).thenReturn("ses:SendEmail");
+        when(actionRegistry.isRoleEnforcedAction("ses:SendEmail")).thenReturn(true);
+        when(iamService.isAssumedRoleSession("ASIASESSION")).thenReturn(true);
+        when(iamService.resolveCallerContext("ASIASESSION"))
+                .thenReturn(CallerContext.of(List.of("""
+                        {"Version":"2012-10-17","Statement":[
+                          {"Effect":"Allow","Action":"ses:SendEmail",
+                           "Resource":"arn:aws:ses:us-east-1:000000000000:identity/*@bound.example.com"}
+                        ]}""")));
+        when(arnBuilder.build(eq("ses"), eq(containerRequest), anyString(), anyString()))
+                .thenReturn("arn:aws:ses:us-east-1:000000000000:identity/outsider@other.test");
+        when(evaluator.evaluate(any(), any(), eq("ses:SendEmail"), any(), any()))
+                .thenReturn(IamPolicyEvaluator.Decision.DENY);
+
+        newFilter().filter(containerRequest);
+
+        verify(containerRequest).abortWith(any(Response.class));
+    }
+
+    @Test
+    void roleSessionUnmappedActionStaysPermissiveWhenGlobalEnforcementIsOff() {
+        when(iamConfig.enforcementEnabled()).thenReturn(false);
+        ContainerRequestContext containerRequest = mock(ContainerRequestContext.class);
+
+        String auth = "AWS4-HMAC-SHA256 Credential=ASIASESSION/20260819/us-east-1/dynamodb/aws4_request, "
+                + "SignedHeaders=host, Signature=abc";
+
+        when(accountResolver.extractAccessKeyId(auth)).thenReturn("ASIASESSION");
+        when(containerRequest.getHeaderString("Authorization")).thenReturn(auth);
+        when(actionRegistry.resolve("dynamodb", containerRequest)).thenReturn("dynamodb:PutItem");
+        when(actionRegistry.isRoleEnforcedAction("dynamodb:PutItem")).thenReturn(false);
+        when(iamService.isAssumedRoleSession("ASIASESSION")).thenReturn(true);
+        when(iamService.resolveCallerContext("ASIASESSION"))
+                .thenReturn(CallerContext.of(List.of("{\"Version\":\"2012-10-17\",\"Statement\":[]}")));
+
+        newFilter().filter(containerRequest);
+
+        verify(evaluator, never()).evaluate(any(), any(), any(), any(), any());
+        verify(containerRequest, never()).abortWith(any(Response.class));
+    }
+
+    @Test
+    void userAccessKeyStaysPermissiveWhenGlobalEnforcementIsOff() {
+        when(iamConfig.enforcementEnabled()).thenReturn(false);
+        ContainerRequestContext containerRequest = mock(ContainerRequestContext.class);
+
+        String auth = "AWS4-HMAC-SHA256 Credential=AKIAUSER/20260819/us-east-1/ses/aws4_request, "
+                + "SignedHeaders=host, Signature=abc";
+
+        when(accountResolver.extractAccessKeyId(auth)).thenReturn("AKIAUSER");
+        when(containerRequest.getHeaderString("Authorization")).thenReturn(auth);
+        when(actionRegistry.resolve("ses", containerRequest)).thenReturn("ses:SendEmail");
+        when(iamService.isAssumedRoleSession("AKIAUSER")).thenReturn(false);
+        when(iamService.resolveCallerContext("AKIAUSER"))
+                .thenReturn(CallerContext.of(List.of("{\"Version\":\"2012-10-17\",\"Statement\":[]}")));
+
+        newFilter().filter(containerRequest);
+
+        verify(evaluator, never()).evaluate(any(), any(), any(), any(), any());
+        verify(containerRequest, never()).abortWith(any(Response.class));
+    }
+
+    @Test
     void aliasScopeIsEnforcedUnderItsCanonicalName() {
         // S3 Express clients sign with the s3express scope. Everything keyed by scope — action
         // rules, ARN building, condition keys — knows only "s3", so without normalisation the
@@ -185,6 +260,19 @@ class IamEnforcementFilterTest {
         verify(conditionContextResolver).resolve("s3", "s3:GetObject", containerRequest);
         // The policy above grants only s3:PutObject, so a GetObject signed as s3express is denied.
         verify(containerRequest).abortWith(any(Response.class));
+    }
+
+    @Test
+    void extractCredentialScopeHandlesSigV4AndSigV4a() {
+        assertEquals("ses", IamEnforcementFilter.extractCredentialScope(
+                "AWS4-HMAC-SHA256 Credential=ASIAKEY/20260819/us-east-1/ses/aws4_request, "
+                        + "SignedHeaders=host, Signature=abc"));
+        // SES v2 distilled client signs SigV4a — no region in the scope.
+        assertEquals("ses", IamEnforcementFilter.extractCredentialScope(
+                "AWS4-ECDSA-P256-SHA256 Credential=ASIAKEY/20260819/ses/aws4_request, "
+                        + "SignedHeaders=host, Signature=abc"));
+        assertEquals("s3", IamEnforcementFilter.extractCredentialScope(
+                "AWS4-HMAC-SHA256 Credential=test/20260819/us-east-1/s3/aws4_request, Signature=x"));
     }
 
     @Test

@@ -102,6 +102,19 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
     }
 
     @Test
+    void startAtMissingState_returnsFail() {
+        String def = "{\\\"StartAt\\\":\\\"Missing\\\",\\\"States\\\":{\\\"Done\\\":{\\\"Type\\\":\\\"Pass\\\",\\\"End\\\":true}}}";
+        given().contentType(CT).header("X-Amz-Target", TARGET)
+                .body("{\"definition\":\"" + def + "\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("result", equalTo("FAIL"))
+                .body("diagnostics.size()", greaterThanOrEqualTo(1))
+                .body("diagnostics[0].severity", equalTo("ERROR"))
+                .body("diagnostics[0].code", equalTo("SCHEMA_VALIDATION_FAILED"));
+    }
+
+    @Test
     void malformedJson_returnsFailWithInvalidJson() {
         given().contentType(CT).header("X-Amz-Target", TARGET)
                 .body("{\"definition\":\"{not json\"}")

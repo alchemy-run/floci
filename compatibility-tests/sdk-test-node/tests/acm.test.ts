@@ -61,14 +61,19 @@ describe('ACM Certificate Lifecycle', () => {
       new DescribeCertificateCommand({ CertificateArn: certificateArn })
     );
     expect(response.Certificate?.DomainName).toBeTruthy();
-    expect(response.Certificate?.Status).toBe('ISSUED');
+    // Real ACM: a freshly requested public certificate stays
+    // PENDING_VALIDATION until its DNS/email validation completes.
+    expect(response.Certificate?.Status).toBe('PENDING_VALIDATION');
   });
 
-  it('should get certificate', async () => {
-    const response = await acm.send(
-      new GetCertificateCommand({ CertificateArn: certificateArn })
-    );
-    expect(response.Certificate).toBeTruthy();
+  it('should reject get certificate while validation is pending', async () => {
+    // Real ACM: GetCertificate on a pending certificate fails with
+    // RequestInProgressException. The JS SDK surfaces the error MESSAGE
+    // ("The certificate request is in progress. ..."), not the code, in
+    // the thrown error's message.
+    await expect(
+      acm.send(new GetCertificateCommand({ CertificateArn: certificateArn }))
+    ).rejects.toThrow(/in progress/);
   });
 
   it('should list certificates', async () => {

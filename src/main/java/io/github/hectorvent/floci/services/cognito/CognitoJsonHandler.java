@@ -9,11 +9,13 @@ import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cognito.model.CognitoGroup;
 import io.github.hectorvent.floci.services.cognito.model.CognitoUser;
+import io.github.hectorvent.floci.services.cognito.model.IdentityProvider;
 import io.github.hectorvent.floci.services.cognito.model.ResourceServer;
 import io.github.hectorvent.floci.services.cognito.model.ResourceServerScope;
 import io.github.hectorvent.floci.services.cognito.model.UserPool;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolClient;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolClientSecret;
+import io.github.hectorvent.floci.services.cognito.model.UserPoolDomain;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -83,6 +85,8 @@ public class CognitoJsonHandler {
             case "GetUser" -> handleGetUser(request);
             case "UpdateUserAttributes" -> handleUpdateUserAttributes(request);
             case "DeleteUserAttributes" -> handleDeleteUserAttributes(request);
+            case "DeleteUser" -> handleDeleteUser(request);
+            case "AdminListDevices" -> handleAdminListDevices(request);
             case "GlobalSignOut" -> handleGlobalSignOut(request);
             case "CreateGroup" -> handleCreateGroup(request);
             case "GetGroup" -> handleGetGroup(request);
@@ -98,6 +102,17 @@ public class CognitoJsonHandler {
             case "ListUserPoolClientSecrets" -> handleListUserPoolClientSecrets(request);
             case "AddUserPoolClientSecret" -> handleAddUserPoolClientSecret(request);
             case "DeleteUserPoolClientSecret" -> handleDeleteUserPoolClientSecret(request);
+            case "CreateIdentityProvider" -> handleCreateIdentityProvider(request);
+            case "DescribeIdentityProvider" -> handleDescribeIdentityProvider(request);
+            case "UpdateIdentityProvider" -> handleUpdateIdentityProvider(request);
+            case "DeleteIdentityProvider" -> handleDeleteIdentityProvider(request);
+            case "ListIdentityProviders" -> handleListIdentityProviders(request);
+            case "CreateUserPoolDomain" -> handleCreateUserPoolDomain(request);
+            case "DescribeUserPoolDomain" -> handleDescribeUserPoolDomain(request);
+            case "UpdateUserPoolDomain" -> handleUpdateUserPoolDomain(request);
+            case "DeleteUserPoolDomain" -> handleDeleteUserPoolDomain(request);
+            case "SetRiskConfiguration" -> handleSetRiskConfiguration(request);
+            case "DescribeRiskConfiguration" -> handleDescribeRiskConfiguration(request);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                     .build();
@@ -645,6 +660,21 @@ public class CognitoJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    private Response handleDeleteUser(JsonNode request) {
+        service.deleteUser(request.path("AccessToken").asText());
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleAdminListDevices(JsonNode request) {
+        List<Map<String, Object>> devices = service.adminListDevices(
+                request.path("UserPoolId").asText(),
+                request.path("Username").asText()
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("Devices", objectMapper.valueToTree(devices));
+        return Response.ok(response).build();
+    }
+
     private Response handleGlobalSignOut(JsonNode request) {
         service.globalSignOut(request.path("AccessToken").asText());
         return Response.ok(objectMapper.createObjectNode()).build();
@@ -697,6 +727,13 @@ public class CognitoJsonHandler {
         node.set("UsernameConfiguration", objectMapper.valueToTree(p.getUsernameConfiguration() != null ? p.getUsernameConfiguration() : new HashMap<>()));
         node.set("AccountRecoverySetting", objectMapper.valueToTree(p.getAccountRecoverySetting() != null ? p.getAccountRecoverySetting() : new HashMap<>()));
         node.put("UserPoolTier", p.getUserPoolTier() != null ? p.getUserPoolTier() : "ESSENTIALS");
+        for (UserPoolDomain domain : p.getDomains()) {
+            if (domain.isCustom()) {
+                node.put("CustomDomain", domain.getDomain());
+            } else {
+                node.put("Domain", domain.getDomain());
+            }
+        }
 
         return node;
     }
@@ -919,6 +956,192 @@ public class CognitoJsonHandler {
         node.put("CreationDate", g.getCreationDate());
         node.put("LastModifiedDate", g.getLastModifiedDate());
         return node;
+    }
+
+    private Response handleCreateIdentityProvider(JsonNode request) {
+        IdentityProvider provider = service.createIdentityProvider(
+                request.path("UserPoolId").asText(),
+                request.path("ProviderName").asText(),
+                request.path("ProviderType").asText(),
+                readStringMap(request.path("ProviderDetails")),
+                request.has("AttributeMapping") ? readStringMap(request.path("AttributeMapping")) : null,
+                request.has("IdpIdentifiers") ? readStringList(request.path("IdpIdentifiers")) : List.of()
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("IdentityProvider", identityProviderToNode(provider));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeIdentityProvider(JsonNode request) {
+        IdentityProvider provider = service.describeIdentityProvider(
+                request.path("UserPoolId").asText(),
+                request.path("ProviderName").asText()
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("IdentityProvider", identityProviderToNode(provider));
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateIdentityProvider(JsonNode request) {
+        IdentityProvider provider = service.updateIdentityProvider(
+                request.path("UserPoolId").asText(),
+                request.path("ProviderName").asText(),
+                request.has("ProviderDetails") ? readStringMap(request.path("ProviderDetails")) : null,
+                request.has("AttributeMapping") ? readStringMap(request.path("AttributeMapping")) : null,
+                request.has("IdpIdentifiers") ? readStringList(request.path("IdpIdentifiers")) : null
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("IdentityProvider", identityProviderToNode(provider));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteIdentityProvider(JsonNode request) {
+        service.deleteIdentityProvider(
+                request.path("UserPoolId").asText(),
+                request.path("ProviderName").asText()
+        );
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleListIdentityProviders(JsonNode request) {
+        List<IdentityProvider> providers = service.listIdentityProviders(request.path("UserPoolId").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode items = response.putArray("Providers");
+        providers.forEach(provider -> items.add(identityProviderDescriptionNode(provider)));
+        return Response.ok(response).build();
+    }
+
+    private Response handleCreateUserPoolDomain(JsonNode request) {
+        UserPoolDomain domain = service.createUserPoolDomain(
+                request.path("UserPoolId").asText(),
+                request.path("Domain").asText(),
+                request.has("ManagedLoginVersion") ? request.path("ManagedLoginVersion").asInt() : null,
+                request.path("CustomDomainConfig").isObject()
+                        ? objectMapper.convertValue(request.path("CustomDomainConfig"),
+                                new TypeReference<Map<String, Object>>() {})
+                        : null
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ManagedLoginVersion", domain.getManagedLoginVersion());
+        response.put("CloudFrontDomain", domain.getCloudFrontDistribution());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeUserPoolDomain(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        Optional<UserPoolDomain> domain = service.describeUserPoolDomain(request.path("Domain").asText());
+        response.set("DomainDescription", domain.map(this::domainDescriptionNode).orElseGet(objectMapper::createObjectNode));
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateUserPoolDomain(JsonNode request) {
+        UserPoolDomain domain = service.updateUserPoolDomain(
+                request.path("UserPoolId").asText(),
+                request.path("Domain").asText(),
+                request.has("ManagedLoginVersion") ? request.path("ManagedLoginVersion").asInt() : null,
+                request.path("CustomDomainConfig").isObject()
+                        ? objectMapper.convertValue(request.path("CustomDomainConfig"),
+                                new TypeReference<Map<String, Object>>() {})
+                        : null
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ManagedLoginVersion", domain.getManagedLoginVersion());
+        response.put("CloudFrontDomain", domain.getCloudFrontDistribution());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteUserPoolDomain(JsonNode request) {
+        service.deleteUserPoolDomain(
+                request.path("UserPoolId").asText(),
+                request.path("Domain").asText()
+        );
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleSetRiskConfiguration(JsonNode request) {
+        String clientId = optionalText(request, "ClientId");
+        Map<String, Object> config = service.setRiskConfiguration(
+                request.path("UserPoolId").asText(),
+                clientId,
+                objectMap(request.path("CompromisedCredentialsRiskConfiguration")),
+                objectMap(request.path("AccountTakeoverRiskConfiguration")),
+                objectMap(request.path("RiskExceptionConfiguration"))
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("RiskConfiguration", objectMapper.valueToTree(config));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeRiskConfiguration(JsonNode request) {
+        Map<String, Object> config = service.describeRiskConfiguration(
+                request.path("UserPoolId").asText(),
+                optionalText(request, "ClientId")
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("RiskConfiguration", objectMapper.valueToTree(config));
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode identityProviderToNode(IdentityProvider provider) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("UserPoolId", provider.getUserPoolId());
+        node.put("ProviderName", provider.getProviderName());
+        node.put("ProviderType", provider.getProviderType());
+        node.set("ProviderDetails", objectMapper.valueToTree(
+                provider.getProviderDetails() != null ? provider.getProviderDetails() : Map.of()));
+        node.set("AttributeMapping", objectMapper.valueToTree(
+                provider.getAttributeMapping() != null ? provider.getAttributeMapping() : Map.of()));
+        ArrayNode identifiers = node.putArray("IdpIdentifiers");
+        provider.getIdpIdentifiers().forEach(identifiers::add);
+        node.put("CreationDate", (double) provider.getCreationDate());
+        node.put("LastModifiedDate", (double) provider.getLastModifiedDate());
+        return node;
+    }
+
+    private ObjectNode identityProviderDescriptionNode(IdentityProvider provider) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ProviderName", provider.getProviderName());
+        node.put("ProviderType", provider.getProviderType());
+        node.put("CreationDate", (double) provider.getCreationDate());
+        node.put("LastModifiedDate", (double) provider.getLastModifiedDate());
+        return node;
+    }
+
+    private ObjectNode domainDescriptionNode(UserPoolDomain domain) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("UserPoolId", domain.getUserPoolId());
+        node.put("AWSAccountId", domain.getAwsAccountId());
+        node.put("Domain", domain.getDomain());
+        node.put("CloudFrontDistribution", domain.getCloudFrontDistribution());
+        node.put("Status", domain.getStatus());
+        node.put("ManagedLoginVersion", domain.getManagedLoginVersion());
+        if (domain.getCustomDomainConfig() != null && !domain.getCustomDomainConfig().isEmpty()) {
+            node.set("CustomDomainConfig", objectMapper.valueToTree(domain.getCustomDomainConfig()));
+        }
+        return node;
+    }
+
+    private Map<String, String> readStringMap(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return new HashMap<>();
+        }
+        return objectMapper.convertValue(node, new TypeReference<Map<String, String>>() {});
+    }
+
+    private Map<String, Object> objectMap(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        return objectMapper.convertValue(node, new TypeReference<Map<String, Object>>() {});
+    }
+
+    private static String optionalText(JsonNode request, String field) {
+        JsonNode node = request.path(field);
+        if (node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        String value = node.asText();
+        return value.isBlank() ? null : value;
     }
 
     private Response handleListUserPoolClientSecrets(JsonNode request) {

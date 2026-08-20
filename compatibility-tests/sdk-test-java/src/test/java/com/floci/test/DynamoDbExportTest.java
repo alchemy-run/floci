@@ -54,6 +54,15 @@ class DynamoDbExportTest {
                 .build());
         tableArn = tableResp.tableDescription().tableArn();
 
+        // Real AWS ExportTableToPointInTime requires PITR. Without it AWS
+        // returns PointInTimeRecoveryUnavailableException.
+        ddb.updateContinuousBackups(UpdateContinuousBackupsRequest.builder()
+                .tableName(TABLE_NAME)
+                .pointInTimeRecoverySpecification(PointInTimeRecoverySpecification.builder()
+                        .pointInTimeRecoveryEnabled(true)
+                        .build())
+                .build());
+
         // Insert 3 items
         ddb.putItem(PutItemRequest.builder().tableName(TABLE_NAME)
                 .item(Map.of(

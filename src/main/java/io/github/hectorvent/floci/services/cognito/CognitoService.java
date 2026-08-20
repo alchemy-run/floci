@@ -245,12 +245,40 @@ public class CognitoService {
         LOG.infov("Added custom attributes to User Pool: {0}", userPoolId);
     }
 
+    /**
+     * AWS prefixes custom schema attributes with {@code custom:} (or {@code dev:}
+     * for developer-only) on create. Standard attribute names are left unprefixed.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> normalizeSchemaAttributes(List<Map<String, Object>> schema) {
+        if (schema == null) {
+            return new ArrayList<>();
+        }
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        for (Map<String, Object> attr : schema) {
+            Map<String, Object> copy = attr == null ? new HashMap<>() : new HashMap<>(attr);
+            String name = (String) copy.get("Name");
+            if (name != null && !name.startsWith("custom:") && !name.startsWith("dev:")) {
+                boolean standard = CognitoStandardAttributes.DEFAULTS.stream()
+                        .anyMatch(existing -> name.equals(existing.get("Name")));
+                if (!standard) {
+                    boolean developerOnly = Boolean.TRUE.equals(copy.get("DeveloperOnlyAttribute"));
+                    copy.put("Name", (developerOnly ? "dev:" : "custom:") + name);
+                }
+            }
+            normalized.add(copy);
+        }
+        return normalized;
+    }
+
     @SuppressWarnings("unchecked")
     private void populateUserPool(UserPool pool, Map<String, Object> request) {
         if (request.containsKey("Policies")) pool.setPolicies((Map<String, Object>) request.get("Policies"));
         if (request.containsKey("DeletionProtection")) pool.setDeletionProtection((String) request.get("DeletionProtection"));
         if (request.containsKey("LambdaConfig")) pool.setLambdaConfig((Map<String, Object>) request.get("LambdaConfig"));
-        if (request.containsKey("Schema")) pool.setSchemaAttributes((List<Map<String, Object>>) request.get("Schema"));
+        if (request.containsKey("Schema")) {
+            pool.setSchemaAttributes(normalizeSchemaAttributes((List<Map<String, Object>>) request.get("Schema")));
+        }
         if (request.containsKey("AutoVerifiedAttributes")) pool.setAutoVerifiedAttributes((List<String>) request.get("AutoVerifiedAttributes"));
         if (request.containsKey("AliasAttributes")) pool.setAliasAttributes((List<String>) request.get("AliasAttributes"));
         if (request.containsKey("UsernameAttributes")) pool.setUsernameAttributes((List<String>) request.get("UsernameAttributes"));
@@ -347,9 +375,16 @@ public class CognitoService {
     }
 
     public void deleteUserPool(String id) {
+        describeUserPool(id);
         String prefix = id + "::";
         groupStore.scan(k -> k.startsWith(prefix))
                 .forEach(g -> groupStore.delete(groupKey(id, g.getGroupName())));
+        userStore.scan(k -> k.startsWith(prefix))
+                .forEach(u -> userStore.delete(userKey(id, u.getUsername())));
+        resourceServerStore.scan(k -> k.startsWith(prefix))
+                .forEach(s -> resourceServerStore.delete(resourceServerKey(id, s.getIdentifier())));
+        clientStore.scan(k -> clientStore.get(k).map(c -> id.equals(c.getUserPoolId())).orElse(false))
+                .forEach(c -> clientStore.delete(c.getClientId()));
         poolStore.delete(id);
     }
 
@@ -767,6 +802,261 @@ public class CognitoService {
         resourceServerStore.delete(resourceServerKey(userPoolId, identifier));
     }
 
+    // ──────────────────────────── Identity Providers ────────────────────────────
+
+    public IdentityProvider createIdentityProvider(String userPoolId, String providerName, String providerType,
+                                                   Map<String, String> providerDetails,
+                                                   Map<String, String> attributeMapping,
+                                                   List<String> idpIdentifiers) {
+        UserPool pool = describeUserPool(userPoolId);
+        validateProviderName(providerName);
+        validateProviderType(providerType, providerName);
+        synchronized (pool) {
+            if (findIdentityProvider(pool, providerName).isPresent()) {
+                throw new AwsException("DuplicateProviderException",
+                        "An IdP already exists for " + providerName, 400);
+            }
+            IdentityProvider provider = new IdentityProvider();
+            provider.setUserPoolId(userPoolId);
+            provider.setProviderName(providerName);
+            provider.setProviderType(providerType);
+            provider.setProviderDetails(copyStringMap(providerDetails));
+            provider.setAttributeMapping(copyStringMap(attributeMapping));
+            provider.setIdpIdentifiers(normalizeStringList(idpIdentifiers));
+            pool.getIdentityProviders().add(provider);
+            poolStore.put(userPoolId, pool);
+            return provider;
+        }
+    }
+
+    public IdentityProvider describeIdentityProvider(String userPoolId, String providerName) {
+        UserPool pool = describeUserPool(userPoolId);
+        return findIdentityProvider(pool, providerName)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Identity provider not found", 404));
+    }
+
+    public IdentityProvider updateIdentityProvider(String userPoolId, String providerName,
+                                                   Map<String, String> providerDetails,
+                                                   Map<String, String> attributeMapping,
+                                                   List<String> idpIdentifiers) {
+        UserPool pool = describeUserPool(userPoolId);
+        synchronized (pool) {
+            IdentityProvider provider = findIdentityProvider(pool, providerName)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Identity provider not found", 404));
+            if (providerDetails != null) {
+                provider.setProviderDetails(copyStringMap(providerDetails));
+            }
+            if (attributeMapping != null) {
+                provider.setAttributeMapping(copyStringMap(attributeMapping));
+            }
+            if (idpIdentifiers != null) {
+                provider.setIdpIdentifiers(normalizeStringList(idpIdentifiers));
+            }
+            provider.setLastModifiedDate(System.currentTimeMillis() / 1000L);
+            poolStore.put(userPoolId, pool);
+            return provider;
+        }
+    }
+
+    public void deleteIdentityProvider(String userPoolId, String providerName) {
+        UserPool pool = describeUserPool(userPoolId);
+        synchronized (pool) {
+            IdentityProvider provider = findIdentityProvider(pool, providerName)
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Identity provider not found", 404));
+            pool.getIdentityProviders().remove(provider);
+            poolStore.put(userPoolId, pool);
+        }
+    }
+
+    public List<IdentityProvider> listIdentityProviders(String userPoolId) {
+        return new ArrayList<>(describeUserPool(userPoolId).getIdentityProviders());
+    }
+
+    private Optional<IdentityProvider> findIdentityProvider(UserPool pool, String providerName) {
+        if (providerName == null || providerName.isBlank()) {
+            throw new AwsException("InvalidParameterException", "ProviderName is required", 400);
+        }
+        return pool.getIdentityProviders().stream()
+                .filter(p -> providerName.equals(p.getProviderName()))
+                .findFirst();
+    }
+
+    private void validateProviderName(String providerName) {
+        if (providerName == null || providerName.isBlank() || providerName.length() > 32
+                || providerName.contains(" ")) {
+            throw new AwsException("InvalidParameterException",
+                    "ProviderName must be 1-32 characters with no spaces", 400);
+        }
+    }
+
+    private void validateProviderType(String providerType, String providerName) {
+        if (providerType == null || providerType.isBlank()) {
+            throw new AwsException("InvalidParameterException", "ProviderType is required", 400);
+        }
+        if (NAMED_PROVIDER_TYPES.contains(providerType) && !providerType.equals(providerName)) {
+            throw new AwsException("InvalidParameterException",
+                    "ProviderName must match ProviderType for social providers", 400);
+        }
+    }
+
+    // ──────────────────────────── User Pool Domains ────────────────────────────
+
+    public UserPoolDomain createUserPoolDomain(String userPoolId, String domain,
+                                               Integer managedLoginVersion,
+                                               Map<String, Object> customDomainConfig) {
+        if (domain == null || domain.isBlank()) {
+            throw new AwsException("InvalidParameterException", "Domain is required", 400);
+        }
+        UserPool pool = describeUserPool(userPoolId);
+        if (findDomain(domain).isPresent()) {
+            throw new AwsException("InvalidParameterException",
+                    "Domain already associated with another user pool", 400);
+        }
+        boolean custom = hasCertificate(customDomainConfig);
+        synchronized (pool) {
+            if (pool.getDomains().stream().anyMatch(d -> d.isCustom() == custom)) {
+                throw new AwsException("InvalidParameterException",
+                        custom ? "User pool already has a custom domain"
+                                : "User pool already has a Cognito domain", 400);
+            }
+            UserPoolDomain created = new UserPoolDomain();
+            created.setUserPoolId(userPoolId);
+            created.setDomain(domain);
+            created.setCustom(custom);
+            created.setManagedLoginVersion(managedLoginVersion == null ? 2 : managedLoginVersion);
+            created.setCustomDomainConfig(customDomainConfig);
+            created.setAwsAccountId(regionResolver.getAccountId());
+            created.setCloudFrontDistribution(generateCloudFrontDomain());
+            created.setStatus("ACTIVE");
+            pool.getDomains().add(created);
+            poolStore.put(userPoolId, pool);
+            return created;
+        }
+    }
+
+    public Optional<UserPoolDomain> describeUserPoolDomain(String domain) {
+        if (domain == null || domain.isBlank()) {
+            throw new AwsException("InvalidParameterException", "Domain is required", 400);
+        }
+        return findDomain(domain);
+    }
+
+    public UserPoolDomain updateUserPoolDomain(String userPoolId, String domain,
+                                               Integer managedLoginVersion,
+                                               Map<String, Object> customDomainConfig) {
+        UserPool pool = describeUserPool(userPoolId);
+        synchronized (pool) {
+            UserPoolDomain existing = pool.getDomains().stream()
+                    .filter(d -> domain.equals(d.getDomain()))
+                    .findFirst()
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Domain not found", 404));
+            if (managedLoginVersion != null) {
+                existing.setManagedLoginVersion(managedLoginVersion);
+            }
+            if (customDomainConfig != null) {
+                existing.setCustomDomainConfig(customDomainConfig);
+                existing.setCustom(hasCertificate(customDomainConfig));
+            }
+            existing.setLastModifiedDate(System.currentTimeMillis() / 1000L);
+            poolStore.put(userPoolId, pool);
+            return existing;
+        }
+    }
+
+    public void deleteUserPoolDomain(String userPoolId, String domain) {
+        UserPool pool = describeUserPool(userPoolId);
+        synchronized (pool) {
+            UserPoolDomain existing = pool.getDomains().stream()
+                    .filter(d -> domain.equals(d.getDomain()))
+                    .findFirst()
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "Domain not found", 404));
+            pool.getDomains().remove(existing);
+            poolStore.put(userPoolId, pool);
+        }
+    }
+
+    private Optional<UserPoolDomain> findDomain(String domain) {
+        for (UserPool pool : poolStore.scan(k -> true)) {
+            for (UserPoolDomain candidate : pool.getDomains()) {
+                if (domain.equals(candidate.getDomain())) {
+                    return Optional.of(candidate);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static boolean hasCertificate(Map<String, Object> customDomainConfig) {
+        if (customDomainConfig == null) {
+            return false;
+        }
+        Object certificateArn = customDomainConfig.get("CertificateArn");
+        return certificateArn instanceof String s && !s.isBlank();
+    }
+
+    private static String generateCloudFrontDomain() {
+        return "d" + UUID.randomUUID().toString().replace("-", "").substring(0, 14) + ".cloudfront.net";
+    }
+
+    // ──────────────────────────── Risk Configuration ────────────────────────────
+
+    public Map<String, Object> setRiskConfiguration(String userPoolId, String clientId,
+                                                    Map<String, Object> compromised,
+                                                    Map<String, Object> accountTakeover,
+                                                    Map<String, Object> riskException) {
+        UserPool pool = describeUserPool(userPoolId);
+        if (clientId != null && !clientId.isBlank()) {
+            describeUserPoolClient(userPoolId, clientId);
+        }
+        String key = riskConfigKey(clientId);
+        synchronized (pool) {
+            Map<String, Object> config = new LinkedHashMap<>();
+            config.put("UserPoolId", userPoolId);
+            if (clientId != null && !clientId.isBlank()) {
+                config.put("ClientId", clientId);
+            }
+            if (compromised != null) {
+                config.put("CompromisedCredentialsRiskConfiguration", compromised);
+            }
+            if (accountTakeover != null) {
+                config.put("AccountTakeoverRiskConfiguration", accountTakeover);
+            }
+            if (riskException != null) {
+                config.put("RiskExceptionConfiguration", riskException);
+            }
+            config.put("LastModifiedDate", System.currentTimeMillis() / 1000L);
+            pool.getRiskConfigurations().put(key, config);
+            poolStore.put(userPoolId, pool);
+            return new LinkedHashMap<>(config);
+        }
+    }
+
+    public Map<String, Object> describeRiskConfiguration(String userPoolId, String clientId) {
+        UserPool pool = describeUserPool(userPoolId);
+        if (clientId != null && !clientId.isBlank()) {
+            describeUserPoolClient(userPoolId, clientId);
+        }
+        Map<String, Object> stored = pool.getRiskConfigurations().get(riskConfigKey(clientId));
+        if (stored != null) {
+            return new LinkedHashMap<>(stored);
+        }
+        Map<String, Object> empty = new LinkedHashMap<>();
+        empty.put("UserPoolId", userPoolId);
+        if (clientId != null && !clientId.isBlank()) {
+            empty.put("ClientId", clientId);
+        }
+        return empty;
+    }
+
+    private static String riskConfigKey(String clientId) {
+        return clientId == null || clientId.isBlank() ? "" : clientId;
+    }
+
     // ──────────────────────────── Users ────────────────────────────
 
     public CognitoUser adminCreateUser(String userPoolId, String username, Map<String, String> attributes,
@@ -822,11 +1112,15 @@ public class CognitoService {
             user.getAttributes().put("sub", UUID.randomUUID().toString());
         }
 
-        if (temporaryPassword != null && !temporaryPassword.isEmpty()) {
-            updateUserPassword(user, temporaryPassword);
-            user.setTemporaryPassword(true);
-            user.setUserStatus("FORCE_CHANGE_PASSWORD");
-        }
+        // AWS always creates admin-created users in FORCE_CHANGE_PASSWORD,
+        // generating a temporary password when the caller omits one.
+        String effectiveTemporaryPassword =
+                temporaryPassword != null && !temporaryPassword.isEmpty()
+                        ? temporaryPassword
+                        : "Temp-" + UUID.randomUUID() + "1!";
+        updateUserPassword(user, effectiveTemporaryPassword);
+        user.setTemporaryPassword(true);
+        user.setUserStatus("FORCE_CHANGE_PASSWORD");
 
         userStore.put(key, user);
         LOG.infov("Created user {0} in pool {1}", username, userPoolId);
@@ -1562,6 +1856,30 @@ public class CognitoService {
         adminDeleteUserAttributes(poolId, username, attributeNames);
     }
 
+    public void deleteUser(String accessToken) {
+        String username = extractUsernameFromToken(accessToken);
+        String poolId = extractPoolIdFromToken(accessToken);
+        String jti = extractJtiFromToken(accessToken);
+
+        if (username == null || poolId == null) {
+            throw new AwsException("NotAuthorizedException", "Invalid access token", 400);
+        }
+
+        validateTokenNotRevoked(jti, poolId, "access");
+        validateOriginJtiNotRevoked(accessToken, poolId);
+        Long iat = extractIatFromToken(accessToken);
+        validateUserNotGloballySignedOut(username, poolId, "access", iat != null ? iat : 0L);
+
+        adminDeleteUser(poolId, username);
+    }
+
+    public List<Map<String, Object>> adminListDevices(String userPoolId, String username) {
+        adminGetUser(userPoolId, username);
+        // Device tracking is off unless DeviceConfiguration is set; a fresh user
+        // has no remembered devices either way.
+        return List.of();
+    }
+
     public Map<String, Object> issueClientCredentialsToken(String clientId, String clientSecret, String scope) {
         UserPoolClient client = clientStore.get(clientId)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Client not found", 404));
@@ -1577,8 +1895,13 @@ public class CognitoService {
         return response;
     }
 
+    /**
+     * AWS-shaped issuer so local JWTs satisfy clients that assert
+     * {@code iss} contains {@code cognito-idp.} and {@code /{userPoolId}}.
+     * JWKS stays on the emulator base URL (see {@link #getJwksUri(String)}).
+     */
     public String getIssuer(String poolId) {
-        return baseUrl + "/" + poolId;
+        return "https://cognito-idp." + regionFromPoolId(poolId) + ".amazonaws.com/" + poolId;
     }
 
     private String resolveUserPoolId(String region, Map<String, String> tags) {
@@ -1590,7 +1913,17 @@ public class CognitoService {
     }
 
     public String getJwksUri(String poolId) {
-        return getIssuer(poolId) + "/.well-known/jwks.json";
+        return baseUrl + "/" + poolId + "/.well-known/jwks.json";
+    }
+
+    private String regionFromPoolId(String poolId) {
+        if (poolId != null) {
+            int underscore = poolId.indexOf('_');
+            if (underscore > 0) {
+                return poolId.substring(0, underscore);
+            }
+        }
+        return regionResolver.getDefaultRegion();
     }
 
     public String getTokenEndpoint() {

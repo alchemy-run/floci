@@ -12,11 +12,14 @@ import io.github.hectorvent.floci.services.ec2.model.EbsBlockDevice;
 import io.github.hectorvent.floci.services.ec2.model.GroupIdentifier;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
+import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
+import io.github.hectorvent.floci.services.ec2.model.NetworkAclAssociation;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Snapshot;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
+import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
 import io.github.hectorvent.floci.services.ec2.model.Volume;
 import io.github.hectorvent.floci.services.ec2.model.VolumeAttachment;
@@ -28,6 +31,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -520,6 +525,105 @@ class Ec2ServiceTest {
     }
 
     @Test
+    void createVolumeStoresKmsKeyIdAndAcceptsForeignAz() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        String keyArn = "arn:aws:kms:us-east-1:000000000000:key/abc";
+        Volume volume = service.createVolume("us-east-1", "us-west-2a", "gp3", 1,
+                true, 0, null, null, keyArn, List.of());
+
+        assertTrue(volume.isEncrypted());
+        assertEquals(keyArn, volume.getKmsKeyId());
+        assertEquals("us-west-2a", volume.getAvailabilityZone());
+        Volume observed = service.describeVolumes("us-east-1", List.of(volume.getVolumeId()), Map.of()).getFirst();
+        assertEquals(keyArn, observed.getKmsKeyId());
+        assertTrue(observed.isEncrypted());
+    }
+
+    @Test
+    void deleteVpcRemovesDefaultFurnitureAndRejectsSubnets() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        var vpc = service.createVpc("us-east-1", "10.90.0.0/16", false);
+        SecurityGroup extra = service.createSecurityGroup("us-east-1", "extra", "user sg", vpc.getVpcId());
+
+        AwsException blocked = assertThrows(AwsException.class,
+                () -> service.deleteVpc("us-east-1", vpc.getVpcId()));
+        assertEquals("DependencyViolation", blocked.getErrorCode());
+
+        service.deleteSecurityGroup("us-east-1", extra.getGroupId());
+        service.deleteVpc("us-east-1", vpc.getVpcId());
+
+        assertEquals("InvalidVpcID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeVpcs("us-east-1", List.of(vpc.getVpcId()), Map.of()))
+                        .getErrorCode());
+    }
+
+    @Test
+    void runInstancesOnDefaultSubnetAssignsPublicAddressImmediately() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        Reservation reservation = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), null, null, List.of(), null, null);
+        Instance inst = reservation.getInstances().getFirst();
+        assertNotNull(inst.getPublicIpAddress());
+        assertTrue(inst.getPublicIpAddress().startsWith(inst.getInstanceId()));
+        assertTrue(inst.getPublicIpAddress().endsWith(".localhost.floci.io"));
+        assertEquals(inst.getPublicIpAddress(), inst.getPublicDnsName());
+    }
+
+    @Test
+    void runInstancesHonorsAssociatePublicIpAddressOnPrivateSubnet() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        var vpc = service.createVpc("us-east-1", "10.90.0.0/16", false);
+        var subnet = service.createSubnet("us-east-1", vpc.getVpcId(), "10.90.1.0/24", "us-east-1a");
+        assertFalse(subnet.isMapPublicIpOnLaunch());
+
+        Instance without = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), subnet.getSubnetId(), null, List.of(), null, null, null)
+                .getInstances().getFirst();
+        assertNull(without.getPublicIpAddress());
+
+        Instance with = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), subnet.getSubnetId(), null, List.of(), null, null, true)
+                .getInstances().getFirst();
+        assertNotNull(with.getPublicIpAddress());
+        assertTrue(with.getPublicIpAddress().endsWith(".localhost.floci.io"));
+    }
+
+    @Test
+    void runInstancesIsControlPlaneRunningWithoutDocker() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        Reservation reservation = service.runInstances("us-east-1", "ami-1234567890abcdef0", "t3.micro",
+                1, 1, null, List.of(), null, null, List.of(), null, null);
+        assertEquals("running", reservation.getInstances().getFirst().getState().getName());
+    }
+
+    @Test
+    void describeTagsClassifiesFlowLogIdsAsVpcFlowLog() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
+                new Ec2InstanceTypeCatalog(), new InMemoryStorageFactory());
+        service.createTags("us-east-1", List.of("fl-abc123"), List.of(new Tag("env", "prod")));
+
+        List<Map<String, String>> items = service.describeTags("us-east-1",
+                Map.of("resource-id", List.of("fl-abc123"), "resource-type", List.of("vpc-flow-log")));
+
+        assertEquals(1, items.size());
+        assertEquals("vpc-flow-log", items.getFirst().get("resourceType"));
+        assertEquals("env", items.getFirst().get("key"));
+        assertEquals("prod", items.getFirst().get("value"));
+    }
+
+    @Test
     void detachRootVolumeRequiresForceAndStopped() {
         Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
                 mock(Ec2PortForwardManager.class), mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class),
@@ -559,6 +663,196 @@ class Ec2ServiceTest {
 
         Volume detached = service.describeVolumes("us-east-1", List.of(rootVolumeId), Map.of()).getFirst();
         assertEquals("available", detached.getState());
+    }
+
+    @Test
+    void describeSubnetsHonorsDefaultForAzFilter() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        service.createSubnet("us-east-1", "vpc-default", "172.31.64.0/20", "us-east-1a");
+
+        var defaults = service.describeSubnets("us-east-1", List.of(),
+                Map.of("vpc-id", List.of("vpc-default"), "default-for-az", List.of("true")));
+        assertEquals(3, defaults.size());
+        assertTrue(defaults.stream().allMatch(s -> s.getSubnetId().startsWith("subnet-default-")));
+
+        var custom = service.describeSubnets("us-east-1", List.of(),
+                Map.of("vpc-id", List.of("vpc-default"), "default-for-az", List.of("false")));
+        assertEquals(1, custom.size());
+        assertFalse(custom.getFirst().isDefaultForAz());
+    }
+
+    @Test
+    void findSubnetByIdSeesSubnetStoredUnderAnotherRegionKey() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        var created = service.createSubnet("us-west-2", "vpc-default", "172.31.80.0/20", "us-west-2a");
+
+        var found = service.findSubnetById("us-east-1", created.getSubnetId());
+        assertTrue(found.isPresent());
+        assertEquals(created.getSubnetId(), found.get().getSubnetId());
+        assertEquals("us-west-2", found.get().getRegion());
+    }
+
+    @Test
+    void describeByIdThrowsAwsNotFoundInsteadOfEmptyList() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+
+        assertEquals("InvalidSubnetID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeSubnets("us-east-1", List.of("subnet-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidInternetGatewayID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeInternetGateways("us-east-1", List.of("igw-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidRouteTableID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeRouteTables("us-east-1", List.of("rtb-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidGroup.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeSecurityGroups("us-east-1", List.of("sg-missing"), List.of(), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidAllocationID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeAddresses("us-east-1", List.of("eipalloc-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidNetworkAclID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeNetworkAcls("us-east-1", List.of("acl-missing"), Map.of()))
+                        .getErrorCode());
+        assertEquals("InvalidVpcID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeVpcs("us-east-1", List.of("vpc-missing"), Map.of()))
+                        .getErrorCode());
+    }
+
+    @Test
+    void describeVpcsByIdDoesNotSubstituteDefaultAfterDelete() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        var vpc = service.createVpc("us-east-1", "10.90.0.0/16", false);
+        assertTrue(service.describeVpcs("us-east-1", List.of(), Map.of()).stream()
+                .anyMatch(Vpc::isDefault));
+
+        service.deleteVpc("us-east-1", vpc.getVpcId());
+
+        assertEquals("InvalidVpcID.NotFound",
+                assertThrows(AwsException.class,
+                        () -> service.describeVpcs("us-east-1", List.of(vpc.getVpcId()), Map.of()))
+                        .getErrorCode());
+        assertTrue(service.describeVpcs("us-east-1", List.of(), Map.of()).stream()
+                .anyMatch(Vpc::isDefault));
+    }
+
+    @Test
+    void createSubnetAcceptsForeignVpcIdByUsingDefault() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        var subnet = service.createSubnet("us-east-1", "vpc-0abcdef1234567890", "172.31.96.0/20", "us-east-1a");
+        assertEquals("vpc-0abcdef1234567890", subnet.getVpcId());
+        assertEquals("available", subnet.getState());
+        // Foreign vpc ids still get a fully-populated default-NACL association
+        // (the 0dfca94 create-path substitution must not skip this).
+        assertCompleteAssociation(associationForSubnet(service, "us-east-1", subnet.getSubnetId()),
+                subnet.getSubnetId());
+    }
+
+    @Test
+    void createSubnetAssociatesWithDefaultNetworkAcl() {
+        Ec2Service service = newService();
+        var subnet = service.createSubnet("us-east-1", "vpc-default", "172.31.112.0/20", "us-east-1a");
+
+        NetworkAclAssociation assoc = associationForSubnet(service, "us-east-1", subnet.getSubnetId());
+        assertCompleteAssociation(assoc, subnet.getSubnetId());
+        assertEquals("acl-default", assoc.getNetworkAclId());
+
+        List<NetworkAcl> filtered = service.describeNetworkAcls("us-east-1", List.of(),
+                Map.of("association.subnet-id", List.of(subnet.getSubnetId())));
+        assertEquals(1, filtered.size());
+        assertEquals("acl-default", filtered.getFirst().getNetworkAclId());
+        NetworkAclAssociation described = filtered.getFirst().getAssociations().stream()
+                .filter(a -> subnet.getSubnetId().equals(a.getSubnetId()))
+                .findFirst()
+                .orElseThrow();
+        assertCompleteAssociation(described, subnet.getSubnetId());
+    }
+
+    @Test
+    void replaceNetworkAclAssociationReturnsNewIdAndMovesSubnet() {
+        Ec2Service service = newService();
+        var subnet = service.createSubnet("us-east-1", "vpc-default", "172.31.128.0/20", "us-east-1a");
+        NetworkAcl custom = service.createNetworkAcl("us-east-1", "vpc-default");
+        NetworkAclAssociation current = associationForSubnet(service, "us-east-1", subnet.getSubnetId());
+
+        NetworkAclAssociation moved = service.replaceNetworkAclAssociation(
+                "us-east-1", current.getNetworkAclAssociationId(), custom.getNetworkAclId());
+
+        assertCompleteAssociation(moved, subnet.getSubnetId());
+        assertEquals(custom.getNetworkAclId(), moved.getNetworkAclId());
+        assertTrue(moved.getNetworkAclAssociationId().startsWith("aclassoc-"));
+        assertFalse(moved.getNetworkAclAssociationId().equals(current.getNetworkAclAssociationId()));
+
+        List<NetworkAcl> onCustom = service.describeNetworkAcls("us-east-1", List.of(),
+                Map.of("association.subnet-id", List.of(subnet.getSubnetId())));
+        assertEquals(1, onCustom.size());
+        assertEquals(custom.getNetworkAclId(), onCustom.getFirst().getNetworkAclId());
+        NetworkAclAssociation described = onCustom.getFirst().getAssociations().stream()
+                .filter(a -> subnet.getSubnetId().equals(a.getSubnetId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(moved.getNetworkAclAssociationId(), described.getNetworkAclAssociationId());
+        assertCompleteAssociation(described, subnet.getSubnetId());
+    }
+
+    @Test
+    void deleteSubnetRemovesNetworkAclAssociation() {
+        Ec2Service service = newService();
+        var subnet = service.createSubnet("us-east-1", "vpc-default", "172.31.144.0/20", "us-east-1a");
+        assertNotNull(associationForSubnet(service, "us-east-1", subnet.getSubnetId()));
+
+        service.deleteSubnet("us-east-1", subnet.getSubnetId());
+
+        assertTrue(service.describeNetworkAcls("us-east-1", List.of(),
+                Map.of("association.subnet-id", List.of(subnet.getSubnetId()))).isEmpty());
+    }
+
+    private static Ec2Service newService() {
+        return new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+    }
+
+    private static NetworkAclAssociation associationForSubnet(Ec2Service service, String region, String subnetId) {
+        return service.describeNetworkAcls(region, List.of(),
+                        Map.of("association.subnet-id", List.of(subnetId)))
+                .stream()
+                .flatMap(acl -> acl.getAssociations().stream())
+                .filter(a -> subnetId.equals(a.getSubnetId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static void assertCompleteAssociation(NetworkAclAssociation assoc, String subnetId) {
+        assertNotNull(assoc, "subnet " + subnetId + " must have a network ACL association");
+        assertNotNull(assoc.getNetworkAclAssociationId());
+        assertTrue(assoc.getNetworkAclAssociationId().startsWith("aclassoc-"));
+        assertNotNull(assoc.getNetworkAclId());
+        assertTrue(assoc.getNetworkAclId().startsWith("acl-"));
+        assertEquals(subnetId, assoc.getSubnetId());
     }
 
     private static EmulatorConfig mockConfig(boolean ec2Mock) {

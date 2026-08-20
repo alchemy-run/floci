@@ -22,6 +22,7 @@
 | `PutTargets` | Add targets to a rule |
 | `RemoveTargets` | Remove targets from a rule |
 | `ListTargetsByRule` | List targets for a rule |
+| `ListRuleNamesByTarget` | List rule names that target a given ARN |
 | `PutEvents` | Publish custom events to an event bus |
 | `TestEventPattern` | Test whether a sample event matches a given pattern (no targets fired) |
 | `ListTagsForResource` | - |
@@ -38,6 +39,16 @@
 | `DescribeReplay` | - |
 | `CancelReplay` | - |
 | `ListReplays` | - |
+| `CreateConnection` | Create an API connection (API key / basic / OAuth). Secrets stay in-memory and are never returned |
+| `DescribeConnection` | Get connection details (secret values omitted; `SecretArn` is a synthetic Secrets Manager ARN) |
+| `UpdateConnection` | Update description, authorization, or KMS key |
+| `DeleteConnection` | Delete a connection (`ConcurrentModificationException` while API destinations still reference it) |
+| `ListConnections` | List connections |
+| `CreateApiDestination` | Create an HTTPS API destination bound to a connection |
+| `DescribeApiDestination` | Get API destination details |
+| `UpdateApiDestination` | Update endpoint, method, connection, or rate limit |
+| `DeleteApiDestination` | Delete an API destination |
+| `ListApiDestinations` | List API destinations |
 <!-- floci:actions:end -->
 
 ## Configuration

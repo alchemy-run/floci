@@ -21,6 +21,12 @@
 | `AddTagsToStream` | Tag a stream |
 | `RemoveTagsFromStream` | Remove tags |
 | `ListTagsForStream` | List tags |
+| `ListTagsForResource` | List tags by stream ARN |
+| `TagResource` | Tag a stream by ARN |
+| `UntagResource` | Remove tags by stream ARN |
+| `GetResourcePolicy` | Get a stream resource policy |
+| `PutResourcePolicy` | Attach a resource policy to a stream |
+| `DeleteResourcePolicy` | Remove a stream resource policy |
 | `StartStreamEncryption` | Enable KMS encryption |
 | `StopStreamEncryption` | Disable encryption |
 | `SplitShard` | Split a shard into two |
@@ -35,11 +41,20 @@
 | `EnableEnhancedMonitoring` | - |
 | `DisableEnhancedMonitoring` | - |
 | `UpdateStreamMode` | - |
+| `UpdateShardCount` | Uniform-scaling split/merge to a target open-shard count |
+| `UpdateMaxRecordSize` | Persist `MaxRecordSizeInKiB` (1024–10240) |
+| `UpdateStreamWarmThroughput` | Persist on-demand warm throughput |
+| `DescribeAccountSettings` | Returns `MinimumThroughputBillingCommitment.Status=ENABLED` |
+| `DescribeLimits` | Account shard / on-demand stream limits |
 <!-- floci:actions:end -->
 
 ## Stream Addressing
 
 Most actions accept either `StreamName` or `StreamARN` to identify a stream. When both are provided, `StreamName` takes precedence. `CreateStream` only accepts `StreamName`.
+
+`ListStreams` returns both `StreamNames` and `StreamSummaries` (name, ARN, status, mode, creation timestamp). `CreateStream` accepts `Tags`, `WarmThroughputMiBps`, and `MaxRecordSizeInKiB`. `TagResource` / `ListTagsForResource` / `UntagResource` address either a stream ARN or a consumer ARN (`…/consumer/…`).
+
+Shards created together are given adjacent, non-overlapping hash-key ranges. `SplitShard` / `MergeShards` / `UpdateShardCount` (`UNIFORM_SCALING`) keep that invariant: merge requires adjacent open shards and the child records `ParentShardId` / `AdjacentParentShardId`.
 
 ```bash
 # By name

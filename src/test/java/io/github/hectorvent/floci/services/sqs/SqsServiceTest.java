@@ -829,6 +829,27 @@ class SqsServiceTest {
     }
 
     @Test
+    void listDeadLetterSourceQueues_presentsUrlsUsingIncomingHost() {
+        Queue dlq = sqsService.createQueue("dlq-host", null, "us-east-1");
+        String dlqArn = queueArn("dlq-host");
+        Queue source = sqsService.createQueue("src-host",
+                Map.of("RedrivePolicy",
+                        "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":\"1\"}"),
+                "us-east-1");
+
+        // CreateQueue / GetQueueUrl persist the emulator base URL.
+        assertEquals(BASE_URL + "/000000000000/src-host", source.getQueueUrl());
+        assertEquals(List.of(source.getQueueUrl()),
+                sqsService.listDeadLetterSourceQueues(dlq.getQueueUrl(), "us-east-1"));
+
+        // A Lambda-rewritten QueueUrl must get sibling URLs on the same host
+        // so they compare equal to the CreateQueue value the caller already holds.
+        String incoming = "https://host.docker.internal:4566/000000000000/dlq-host";
+        assertEquals(List.of("https://host.docker.internal:4566/000000000000/src-host"),
+                sqsService.listDeadLetterSourceQueues(incoming, "us-east-1"));
+    }
+
+    @Test
     void startMessageMoveTask_concurrentSecondTaskOnSameSource_throwsInvalidParameterValue() {
         sqsService.createQueue("d-concurrent", null, "us-east-1");
         String dlqArn = queueArn("d-concurrent");

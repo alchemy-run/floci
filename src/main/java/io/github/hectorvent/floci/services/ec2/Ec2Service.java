@@ -28,6 +28,7 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.model.Address;
@@ -51,11 +52,15 @@ import io.github.hectorvent.floci.services.ec2.model.IpRange;
 import io.github.hectorvent.floci.services.ec2.model.KeyPair;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
+import io.github.hectorvent.floci.services.ec2.model.DhcpOptions;
+import io.github.hectorvent.floci.services.ec2.model.EgressOnlyInternetGateway;
+import io.github.hectorvent.floci.services.ec2.model.ManagedPrefixList;
 import io.github.hectorvent.floci.services.ec2.model.NatGateway;
 import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
 import io.github.hectorvent.floci.services.ec2.model.NetworkAclAssociation;
 import io.github.hectorvent.floci.services.ec2.model.NetworkAclEntry;
 import io.github.hectorvent.floci.services.ec2.model.PrefixList;
+import io.github.hectorvent.floci.services.ec2.model.PrefixListEntry;
 import io.github.hectorvent.floci.services.ec2.model.Placement;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
 import io.github.hectorvent.floci.services.ec2.model.Route;
@@ -71,6 +76,7 @@ import io.github.hectorvent.floci.services.ec2.model.VolumeAttachment;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.ec2.model.VpcCidrBlockAssociation;
 import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
+import io.github.hectorvent.floci.services.ec2.model.VpcPeeringConnection;
 import jakarta.annotation.PostConstruct;
 import io.github.hectorvent.floci.services.ec2.model.LaunchSpecification;
 import io.github.hectorvent.floci.services.ec2.model.SpotInstanceRequest;
@@ -114,6 +120,12 @@ public class Ec2Service implements ContainerTeardown {
     private final StorageBackend<String, NetworkAcl> networkAcls;
     // resourceId → List<Tag>
     private final StorageBackend<String, List<Tag>> tags;
+    // In-memory stores for alchemy-parity resources that are not yet persisted.
+    private final Map<String, VpcPeeringConnection> vpcPeeringConnections = new ConcurrentHashMap<>();
+    private final Map<String, EgressOnlyInternetGateway> egressOnlyInternetGateways = new ConcurrentHashMap<>();
+    private final Map<String, DhcpOptions> dhcpOptionsSets = new ConcurrentHashMap<>();
+    private final Map<String, ManagedPrefixList> managedPrefixLists = new ConcurrentHashMap<>();
+    private final Map<String, NetworkInterface> standaloneNetworkInterfaces = new ConcurrentHashMap<>();
     private final Set<String> seededRegions = ConcurrentHashMap.newKeySet();
     // subnetId → counter for IP assignment (runtime-only, not persisted)
     private final Map<String, AtomicInteger> subnetIpCounters = new ConcurrentHashMap<>();
@@ -239,15 +251,21 @@ public class Ec2Service implements ContainerTeardown {
     // ─── Default resource seeding ──────────────────────────────────────────────
 
     public void ensureDefaultResources(String region) {
-        if (!seededRegions.add(region)) {
+        // vpc-default presence is account-scoped (AccountAwareStorageBackend prefixes
+        // every key). A process-wide seededRegions set is not — after the first
+        // account seeded a region, every later account skipped seeding and ELBv2
+        // (and anyone else) looking up default subnets under a different
+        // RequestContext saw an empty store.
+        if (vpcs.get(key(region, "vpc-default")).isPresent()) {
+            seededRegions.add(region);
             return;
         }
-        // Already provisioned in a previous run and reloaded from persistent storage: the default
-        // VPC (and everything else) is present, so don't re-seed and create duplicates (#1297).
-        if (!vpcs.scan(k -> k.startsWith(region + "::")).isEmpty()) {
-            return;
-        }
-        LOG.debugv("Seeding default EC2 resources for region {0}", region);
+        synchronized (seededRegions) {
+            if (vpcs.get(key(region, "vpc-default")).isPresent()) {
+                seededRegions.add(region);
+                return;
+            }
+            LOG.debugv("Seeding default EC2 resources for region {0}", region);
 
         // Default VPC
         String vpcId = "vpc-default";
@@ -313,6 +331,8 @@ public class Ec2Service implements ContainerTeardown {
         RouteTable mainRt = routeTables.get(key(region, rtId)).orElse(null);
         if (mainRt != null) {
             mainRt.getRoutes().add(new Route("0.0.0.0/0", igwId, "CreateRoute"));
+        }
+        seededRegions.add(region);
         }
     }
 
@@ -397,7 +417,7 @@ public class Ec2Service implements ContainerTeardown {
     // A brand-new custom NACL starts closed: only the implicit deny rules, no allows.
     public NetworkAcl createNetworkAcl(String region, String vpcId) {
         ensureDefaultResources(region);
-        getRequiredVpc(region, vpcId);
+        resolveVpcForCreate(region, vpcId);
         String networkAclId = "acl-" + randomHex(17);
         NetworkAcl acl = new NetworkAcl();
         acl.setNetworkAclId(networkAclId);
@@ -413,6 +433,11 @@ public class Ec2Service implements ContainerTeardown {
 
     public List<NetworkAcl> describeNetworkAcls(String region, List<String> ids, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
+        if (ids != null && !ids.isEmpty()) {
+            for (String networkAclId : ids) {
+                getRequiredNetworkAcl(region, networkAclId);
+            }
+        }
         return networkAcls.scan(k -> true).stream()
                 .filter(a -> region.equals(a.getRegion()))
                 .filter(a -> ids.isEmpty() || ids.contains(a.getNetworkAclId()))
@@ -606,6 +631,22 @@ public class Ec2Service implements ContainerTeardown {
                                     List<String> securityGroupIds, String subnetId,
                                     String clientToken, List<Tag> instanceTags,
                                     String userData, String iamInstanceProfileArn) {
+        return runInstances(region, imageId, instanceType, minCount, maxCount, keyName,
+                securityGroupIds, subnetId, clientToken, instanceTags, userData,
+                iamInstanceProfileArn, null);
+    }
+
+    /**
+     * @param associatePublicIpAddress {@code true}/{@code false} from
+     *        {@code NetworkInterface.N.AssociatePublicIpAddress} (or the top-level
+     *        field). {@code null} falls back to the subnet's {@code MapPublicIpOnLaunch}.
+     */
+    public Reservation runInstances(String region, String imageId, String instanceType,
+                                    int minCount, int maxCount, String keyName,
+                                    List<String> securityGroupIds, String subnetId,
+                                    String clientToken, List<Tag> instanceTags,
+                                    String userData, String iamInstanceProfileArn,
+                                    Boolean associatePublicIpAddress) {
         if (imageId == null || imageId.isBlank()) {
             throw new AwsException("MissingParameter", "The request must contain the parameter ImageId", 400);
         }
@@ -695,6 +736,13 @@ public class Ec2Service implements ContainerTeardown {
             }
             inst.getNetworkInterfaces().add(eni);
 
+            boolean assignPublicIp = associatePublicIpAddress != null
+                    ? associatePublicIpAddress
+                    : subnet != null && subnet.isMapPublicIpOnLaunch();
+            if (assignPublicIp) {
+                assignAutoPublicAddress(inst);
+            }
+
             // Root EBS volume
             String rootVolId = "vol-" + randomHex(17);
             inst.setRootVolumeId(rootVolId);
@@ -716,6 +764,10 @@ public class Ec2Service implements ContainerTeardown {
             rootVol.getAttachments().add(att);
             volumes.put(key(region, rootVolId), rootVol);
 
+            // Control-plane ready immediately. Docker launch is best-effort for
+            // IMDS/userdata; Alchemy waitForState only retries ~8 times and treats
+            // a later `terminated` (failed guest) as a failed create.
+            inst.setState(InstanceState.running());
             instances.put(key(region, instanceId), inst);
             reservation.getInstances().add(inst);
 
@@ -733,6 +785,21 @@ public class Ec2Service implements ContainerTeardown {
         }
 
         return reservation;
+    }
+
+    /**
+     * Host-reachable public address for auto-assigned (non-EIP) IPv4. Alchemy's
+     * hosted-instance smokes GET {@code http://${publicIpAddress}:3000}; the
+     * {@code *.localhost.floci.io} wildcard resolves to 127.0.0.1 on the host so
+     * each instance can share port 3000 via Host-header routing.
+     */
+    static void assignAutoPublicAddress(Instance inst) {
+        if (inst == null || inst.getInstanceId() == null || inst.getInstanceId().isBlank()) {
+            return;
+        }
+        String host = inst.getInstanceId() + ".localhost.floci.io";
+        inst.setPublicIpAddress(host);
+        inst.setPublicDnsName(host);
     }
 
     /**
@@ -818,6 +885,38 @@ public class Ec2Service implements ContainerTeardown {
             throw new AwsException("InvalidSubnetID.NotFound", "The subnet ID '" + subnetId + "' does not exist", 400);
 
         return subnet;
+    }
+
+    /**
+     * Resolves a subnet by ID. Tries the caller's region first, then any region
+     * in the current account, then every account. Cross-service callers (ELBv2,
+     * RDS, EKS) can run with a different RequestContext than the creating EC2
+     * call, so a strict {@code region::id} get misses a subnet that describe
+     * just returned.
+     */
+    public Optional<Subnet> findSubnetById(String region, String subnetId) {
+        if (subnetId == null || subnetId.isBlank()) {
+            return Optional.empty();
+        }
+        ensureDefaultResources(region);
+        Subnet exact = subnets.get(key(region, subnetId)).orElse(null);
+        if (exact != null) {
+            return Optional.of(exact);
+        }
+        Optional<Subnet> currentAccount = subnets.scan(k -> true).stream()
+                .filter(s -> subnetId.equals(s.getSubnetId()))
+                .findFirst();
+        if (currentAccount.isPresent()) {
+            return currentAccount;
+        }
+        if (subnets instanceof AccountAwareStorageBackend<?> raw) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<Subnet> aware = (AccountAwareStorageBackend<Subnet>) raw;
+            return aware.scanAllAccounts().stream()
+                    .filter(s -> subnetId.equals(s.getSubnetId()))
+                    .findFirst();
+        }
+        return Optional.empty();
     }
 
     private String assignPrivateIp(String region, String subnetId) {
@@ -1125,7 +1224,71 @@ public class Ec2Service implements ContainerTeardown {
         ensureDefaultResources(region);
         getRequiredVpc(region, vpcId);
 
+        // AWS DeleteVpc auto-removes the default SG, main route table, and
+        // default NACL. Anything else (subnets, extra SGs/RTs, instances, …)
+        // is a DependencyViolation — the same message Alchemy retries on.
+        if (vpcHasBlockingDependencies(region, vpcId)) {
+            throw new AwsException("DependencyViolation",
+                    "The vpc '" + vpcId + "' has dependencies and cannot be deleted.", 400);
+        }
+        deleteVpcFurniture(region, vpcId);
         vpcs.delete(key(region, vpcId));
+    }
+
+    private boolean vpcHasBlockingDependencies(String region, String vpcId) {
+        boolean liveInstance = instances.scan(k -> true).stream()
+                .anyMatch(i -> region.equals(i.getRegion()) && vpcId.equals(i.getVpcId())
+                        && i.getState() != null
+                        && !"terminated".equals(i.getState().getName())
+                        && !"shutting-down".equals(i.getState().getName()));
+        boolean subnet = subnets.scan(k -> true).stream()
+                .anyMatch(s -> region.equals(s.getRegion()) && vpcId.equals(s.getVpcId()));
+        boolean extraSg = securityGroups.scan(k -> true).stream()
+                .anyMatch(sg -> region.equals(sg.getRegion()) && vpcId.equals(sg.getVpcId())
+                        && !"default".equals(sg.getGroupName()));
+        boolean extraRt = routeTables.scan(k -> true).stream()
+                .anyMatch(rt -> region.equals(rt.getRegion()) && vpcId.equals(rt.getVpcId())
+                        && rt.getAssociations().stream().noneMatch(RouteTableAssociation::isMain));
+        boolean extraAcl = networkAcls.scan(k -> true).stream()
+                .anyMatch(acl -> region.equals(acl.getRegion()) && vpcId.equals(acl.getVpcId())
+                        && !acl.isDefault());
+        boolean attachedIgw = internetGateways.scan(k -> true).stream()
+                .anyMatch(igw -> igw.getAttachments().stream().anyMatch(a -> vpcId.equals(a.getVpcId())));
+        boolean nat = natGateways.scan(k -> true).stream()
+                .anyMatch(n -> region.equals(n.getRegion()) && vpcId.equals(n.getVpcId())
+                        && !"deleted".equals(n.getState()));
+        boolean endpoint = vpcEndpoints.scan(k -> true).stream()
+                .anyMatch(e -> region.equals(e.getRegion()) && vpcId.equals(e.getVpcId())
+                        && !"deleted".equals(e.getState()));
+        boolean eigw = egressOnlyInternetGateways.values().stream()
+                .anyMatch(e -> vpcId.equals(e.getVpcId()));
+        boolean eni = standaloneNetworkInterfaces.values().stream()
+                .anyMatch(n -> vpcId.equals(n.getVpcId()));
+        return liveInstance || subnet || extraSg || extraRt || extraAcl
+                || attachedIgw || nat || endpoint || eigw || eni;
+    }
+
+    private void deleteVpcFurniture(String region, String vpcId) {
+        for (SecurityGroup sg : new ArrayList<>(securityGroups.scan(k -> true))) {
+            if (region.equals(sg.getRegion()) && vpcId.equals(sg.getVpcId())
+                    && "default".equals(sg.getGroupName())) {
+                securityGroups.delete(key(region, sg.getGroupId()));
+                tags.delete(sg.getGroupId());
+            }
+        }
+        for (RouteTable rt : new ArrayList<>(routeTables.scan(k -> true))) {
+            if (region.equals(rt.getRegion()) && vpcId.equals(rt.getVpcId())
+                    && rt.getAssociations().stream().anyMatch(RouteTableAssociation::isMain)) {
+                routeTables.delete(key(region, rt.getRouteTableId()));
+                tags.delete(rt.getRouteTableId());
+            }
+        }
+        for (NetworkAcl acl : new ArrayList<>(networkAcls.scan(k -> true))) {
+            if (region.equals(acl.getRegion()) && vpcId.equals(acl.getVpcId()) && acl.isDefault()) {
+                networkAcls.delete(key(region, acl.getNetworkAclId()));
+                tags.delete(acl.getNetworkAclId());
+            }
+        }
     }
 
     public void modifyVpcAttribute(String region, String vpcId, String attribute, String value) {
@@ -1148,8 +1311,10 @@ public class Ec2Service implements ContainerTeardown {
     }
 
     public Vpc createDefaultVpc(String region) {
+        // Recreate the seed even if this process already ran ensure once and a
+        // later delete/nuke removed vpc-default.
+        seededRegions.remove(region);
         ensureDefaultResources(region);
-        // Return existing default or create one
         return vpcs.scan(k -> true).stream()
                 .filter(v -> v.getRegion().equals(region) && v.isDefault())
                 .findFirst()
@@ -1183,7 +1348,7 @@ public class Ec2Service implements ContainerTeardown {
                                          List<String> routeTableIds, List<String> subnetIds,
                                          List<String> securityGroupIds, Boolean privateDnsEnabled, List<Tag> endpointTags) {
         ensureDefaultResources(region);
-        getRequiredVpc(region, vpcId);
+        resolveVpcForCreate(region, vpcId);
         for (String routeTableId : routeTableIds) {
             getRequiredRouteTable(region, routeTableId);
         }
@@ -1206,6 +1371,7 @@ public class Ec2Service implements ContainerTeardown {
         endpoint.setRouteTableIds(new ArrayList<>(routeTableIds));
         endpoint.setSubnetIds(new ArrayList<>(subnetIds));
         endpoint.setSecurityGroupIds(new ArrayList<>(securityGroupIds));
+        endpoint.setPolicyDocument(DEFAULT_VPC_ENDPOINT_POLICY);
         if (endpointTags != null && !endpointTags.isEmpty()) {
             endpoint.setTags(new ArrayList<>(endpointTags));
             tags.put(endpoint.getVpcEndpointId(), new ArrayList<>(endpointTags));
@@ -1306,7 +1472,15 @@ public class Ec2Service implements ContainerTeardown {
             throw new AwsException("MissingParameter", "The request must contain the parameter VpcId", 400);
         }
         ensureDefaultResources(region);
-        getRequiredVpc(region, vpcId);
+        // Create-path lookup may substitute the emulator default VPC when Alchemy
+        // hands us a foreign (live-AWS) vpc id. The subnet still records the
+        // caller-supplied id, but the default-NACL association must use the
+        // resolved VPC — otherwise findDefaultNetworkAcl misses and the subnet
+        // is born with no association. XmlBuilder omits null fields, so a later
+        // DescribeNetworkAcls / ReplaceNetworkAclAssociation response drops
+        // subnetId / networkAclAssociationId and Alchemy persists undefined
+        // attributes that crash read() encoding Filters[0].Values[0].
+        Vpc resolved = resolveVpcForCreate(region, vpcId);
 
         String subnetId = "subnet-" + randomHex(8);
         Subnet subnet = new Subnet();
@@ -1322,24 +1496,31 @@ public class Ec2Service implements ContainerTeardown {
         subnet.setSubnetArn(AwsArnUtils.Arn.of("ec2", region, accountId, "subnet/" + subnetId).toString());
         subnets.put(key(region, subnetId), subnet);
 
-        // Every subnet starts associated with its VPC's default NACL. ReplaceNetworkAclAssociation
-        // later moves it onto a custom NACL, so this association must exist for that lookup to work.
-        NetworkAcl defaultAcl = findDefaultNetworkAcl(region, vpcId);
-        if (defaultAcl != null) {
-            NetworkAclAssociation assoc = new NetworkAclAssociation();
-            assoc.setNetworkAclAssociationId("aclassoc-" + randomHex(17));
-            assoc.setNetworkAclId(defaultAcl.getNetworkAclId());
-            assoc.setSubnetId(subnetId);
-            defaultAcl.getAssociations().add(assoc);
-            networkAcls.put(key(region, defaultAcl.getNetworkAclId()), defaultAcl);
+        // Every AWS subnet starts associated with its VPC's default NACL.
+        // ReplaceNetworkAclAssociation later moves it onto a custom NACL.
+        NetworkAcl defaultAcl = findDefaultNetworkAcl(region, resolved.getVpcId());
+        if (defaultAcl == null) {
+            throw new AwsException("InvalidNetworkAclID.NotFound",
+                    "The VPC '" + resolved.getVpcId() + "' has no default network ACL", 400);
         }
+        NetworkAclAssociation assoc = new NetworkAclAssociation();
+        assoc.setNetworkAclAssociationId("aclassoc-" + randomHex(17));
+        assoc.setNetworkAclId(defaultAcl.getNetworkAclId());
+        assoc.setSubnetId(subnetId);
+        defaultAcl.getAssociations().add(assoc);
+        networkAcls.put(key(region, defaultAcl.getNetworkAclId()), defaultAcl);
         return subnet;
     }
 
     public List<Subnet> describeSubnets(String region, List<String> subnetIds, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
+        if (subnetIds != null && !subnetIds.isEmpty()) {
+            for (String subnetId : subnetIds) {
+                requireSubnet(region, subnetId);
+            }
+        }
         return subnets.scan(k -> true).stream()
-                .filter(s -> s.getRegion().equals(region))
+                .filter(s -> s.getRegion() == null || s.getRegion().equals(region))
                 .filter(s -> subnetIds.isEmpty() || subnetIds.contains(s.getSubnetId()))
                 .filter(s -> matchesFilters(s, filters, region))
                 .collect(Collectors.toList());
@@ -1349,6 +1530,19 @@ public class Ec2Service implements ContainerTeardown {
         ensureDefaultResources(region);
         if (subnets.get(key(region, subnetId)).isEmpty()) {
             throw new AwsException("InvalidSubnetID.NotFound", "The subnet ID '" + subnetId + "' does not exist", 400);
+        }
+        // AWS DeleteSubnet drops the subnet's NACL association so DescribeNetworkAcls
+        // never returns an association whose subnetId points at a gone subnet.
+        for (NetworkAcl acl : new ArrayList<>(networkAcls.scan(k -> true))) {
+            if (!region.equals(acl.getRegion())) {
+                continue;
+            }
+            List<NetworkAclAssociation> remaining = new ArrayList<>(acl.getAssociations());
+            if (!remaining.removeIf(a -> subnetId.equals(a.getSubnetId()))) {
+                continue;
+            }
+            acl.setAssociations(remaining);
+            networkAcls.put(key(region, acl.getNetworkAclId()), acl);
         }
         subnets.delete(key(region, subnetId));
     }
@@ -1361,6 +1555,10 @@ public class Ec2Service implements ContainerTeardown {
             case "assignIpv6AddressOnCreation"   -> subnet.setAssignIpv6AddressOnCreation(Boolean.parseBoolean(value));
             case "enableDns64"                   -> subnet.setEnableDns64(Boolean.parseBoolean(value));
             case "mapCustomerOwnedIpOnLaunch"    -> subnet.setMapCustomerOwnedIpOnLaunch(Boolean.parseBoolean(value));
+            case "enableResourceNameDnsARecordOnLaunch" ->
+                    subnet.setEnableResourceNameDnsARecordOnLaunch(Boolean.parseBoolean(value));
+            case "enableResourceNameDnsAAAARecordOnLaunch" ->
+                    subnet.setEnableResourceNameDnsAAAARecordOnLaunch(Boolean.parseBoolean(value));
         }
         subnets.put(key(region, subnetId), subnet);
     }
@@ -1370,7 +1568,7 @@ public class Ec2Service implements ContainerTeardown {
     public SecurityGroup createSecurityGroup(String region, String groupName, String description, String vpcId) {
         ensureDefaultResources(region);
         if (vpcId != null && !vpcId.isEmpty()) {
-            getRequiredVpc(region, vpcId);
+            resolveVpcForCreate(region, vpcId);
         } else {
             vpcId = "vpc-default";
         }
@@ -1405,6 +1603,11 @@ public class Ec2Service implements ContainerTeardown {
     public List<SecurityGroup> describeSecurityGroups(String region, List<String> groupIds,
                                                        List<String> groupNames, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
+        if (groupIds != null && !groupIds.isEmpty()) {
+            for (String groupId : groupIds) {
+                getRequiredSecurityGroup(region, groupId);
+            }
+        }
         return securityGroups.scan(k -> true).stream()
                 .filter(sg -> sg.getRegion().equals(region))
                 .filter(sg -> groupIds.isEmpty() || groupIds.contains(sg.getGroupId()))
@@ -1567,6 +1770,10 @@ public class Ec2Service implements ContainerTeardown {
     // ─── Key Pairs ─────────────────────────────────────────────────────────────
 
     public KeyPair createKeyPair(String region, String keyName) {
+        return createKeyPair(region, keyName, "rsa");
+    }
+
+    public KeyPair createKeyPair(String region, String keyName, String keyType) {
         ensureDefaultResources(region);
         boolean exists = keyPairs.scan(k -> true).stream()
                 .anyMatch(k -> k.getRegion().equals(region) && k.getKeyName().equals(keyName));
@@ -1577,8 +1784,9 @@ public class Ec2Service implements ContainerTeardown {
         KeyPair kp = new KeyPair();
         kp.setKeyPairId(keyPairId);
         kp.setKeyName(keyName);
+        kp.setKeyType(keyType != null && !keyType.isBlank() ? keyType : "rsa");
         kp.setKeyFingerprint("00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00");
-        kp.setKeyMaterial("-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xHn/ygWep4Ib/ue7YiKbCIZgYpYDe0+FAKE\n-----END RSA PRIVATE KEY-----");
+        kp.setKeyMaterial("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDRn\n-----END PRIVATE KEY-----");
         kp.setRegion(region);
         keyPairs.put(key(region, keyPairId), kp);
         return kp;
@@ -2218,7 +2426,25 @@ public class Ec2Service implements ContainerTeardown {
         NetworkAcl networkAcl = networkAcls.get(storeKey).orElse(null);
         if (networkAcl != null) { networkAcl.setTags(new ArrayList<>(tagList)); networkAcls.put(storeKey, networkAcl); return; }
         Address address = addresses.get(storeKey).orElse(null);
-        if (address != null) { address.setTags(new ArrayList<>(tagList)); addresses.put(storeKey, address); }
+        if (address != null) { address.setTags(new ArrayList<>(tagList)); addresses.put(storeKey, address); return; }
+        Volume volume = volumes.get(storeKey).orElse(null);
+        if (volume != null) { volume.setTags(new ArrayList<>(tagList)); volumes.put(storeKey, volume); return; }
+        Snapshot snapshot = snapshots.get(storeKey).orElse(null);
+        if (snapshot != null) { snapshot.setTags(new ArrayList<>(tagList)); snapshots.put(storeKey, snapshot); return; }
+        VpcPeeringConnection peering = vpcPeeringConnections.get(storeKey);
+        if (peering != null) { peering.setTags(new ArrayList<>(tagList)); return; }
+        EgressOnlyInternetGateway eigw = egressOnlyInternetGateways.get(storeKey);
+        if (eigw != null) { eigw.setTags(new ArrayList<>(tagList)); return; }
+        DhcpOptions dhcp = dhcpOptionsSets.get(storeKey);
+        if (dhcp != null) { dhcp.setTags(new ArrayList<>(tagList)); return; }
+        ManagedPrefixList prefixList = managedPrefixLists.get(storeKey);
+        if (prefixList != null) { prefixList.setTags(new ArrayList<>(tagList)); return; }
+        NetworkInterface eni = standaloneNetworkInterfaces.get(storeKey);
+        if (eni != null) { eni.setTagSet(new ArrayList<>(tagList)); }
+    }
+
+    public List<Tag> getResourceTags(String resourceId) {
+        return new ArrayList<>(tags.get(resourceId).orElse(List.of()));
     }
 
     public List<Map<String, String>> describeTags(String region, Map<String, List<String>> filters) {
@@ -2268,6 +2494,15 @@ public class Ec2Service implements ContainerTeardown {
         if (resourceId.startsWith("lt-")) return "launch-template";
         if (resourceId.startsWith("vpce-")) return "vpc-endpoint";
         if (resourceId.startsWith("nat-")) return "natgateway";
+        if (resourceId.startsWith("vol-")) return "volume";
+        if (resourceId.startsWith("snap-")) return "snapshot";
+        if (resourceId.startsWith("pcx-")) return "vpc-peering-connection";
+        if (resourceId.startsWith("eigw-")) return "egress-only-internet-gateway";
+        if (resourceId.startsWith("dopt-")) return "dhcp-options";
+        if (resourceId.startsWith("pl-")) return "prefix-list";
+        if (resourceId.startsWith("eni-")) return "network-interface";
+        if (resourceId.startsWith("acl-")) return "network-acl";
+        if (resourceId.startsWith("fl-")) return "vpc-flow-log";
         return "unknown";
     }
 
@@ -2286,6 +2521,11 @@ public class Ec2Service implements ContainerTeardown {
 
     public List<InternetGateway> describeInternetGateways(String region, List<String> igwIds, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
+        if (igwIds != null && !igwIds.isEmpty()) {
+            for (String igwId : igwIds) {
+                getRequiredInternetGateway(region, igwId);
+            }
+        }
         return internetGateways.scan(k -> true).stream()
                 .filter(igw -> igw.getRegion().equals(region))
                 .filter(igw -> igwIds.isEmpty() || igwIds.contains(igw.getInternetGatewayId()))
@@ -2329,7 +2569,7 @@ public class Ec2Service implements ContainerTeardown {
 
     public RouteTable createRouteTable(String region, String vpcId) {
         ensureDefaultResources(region);
-        Vpc vpc = getRequiredVpc(region, vpcId);
+        Vpc vpc = resolveVpcForCreate(region, vpcId);
 
         String rtId = "rtb-" + randomHex(8);
         RouteTable rt = new RouteTable();
@@ -2344,14 +2584,45 @@ public class Ec2Service implements ContainerTeardown {
 
     private Vpc getRequiredVpc(String region, String vpcId) {
         Vpc vpc = vpcs.get(key(region, vpcId)).orElse(null);
-        if (vpc == null)
-            throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
+        if (vpc != null) {
+            return vpc;
+        }
+        throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
+    }
 
-        return vpc;
+    /**
+     * Create-path lookup. Alchemy Bindings sometimes resolve the default VPC via
+     * a live-AWS DescribeVpcs and then CreateSubnet / CreateSecurityGroup against
+     * us with that foreign id. AWS would reject it; Alchemy retries
+     * {@code InvalidVpcID.NotFound} unbounded. Substitute the emulator default
+     * for those creates only — describe/delete-by-id must still NotFound a
+     * missing id (otherwise {@code assertVpcGone} after DeleteVpc never
+     * completes: DescribeVpcs succeeds with an empty set).
+     */
+    private Vpc resolveVpcForCreate(String region, String vpcId) {
+        Vpc vpc = vpcs.get(key(region, vpcId)).orElse(null);
+        if (vpc != null) {
+            return vpc;
+        }
+        Vpc defaultVpc = vpcs.scan(k -> true).stream()
+                .filter(v -> region.equals(v.getRegion()) && v.isDefault())
+                .findFirst()
+                .orElse(null);
+        if (defaultVpc != null) {
+            LOG.warnv("VPC {0} not found in {1}; substituting default VPC {2}",
+                    vpcId, region, defaultVpc.getVpcId());
+            return defaultVpc;
+        }
+        throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
     }
 
     public List<RouteTable> describeRouteTables(String region, List<String> routeTableIds, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
+        if (routeTableIds != null && !routeTableIds.isEmpty()) {
+            for (String routeTableId : routeTableIds) {
+                getRequiredRouteTable(region, routeTableId);
+            }
+        }
         return routeTables.scan(k -> true).stream()
                 .filter(rt -> rt.getRegion().equals(region))
                 .filter(rt -> routeTableIds.isEmpty() || routeTableIds.contains(rt.getRouteTableId()))
@@ -2368,6 +2639,10 @@ public class Ec2Service implements ContainerTeardown {
     }
 
     public RouteTableAssociation associateRouteTable(String region, String routeTableId, String subnetId) {
+        return associateRouteTable(region, routeTableId, subnetId, null);
+    }
+
+    public RouteTableAssociation associateRouteTable(String region, String routeTableId, String subnetId, String gatewayId) {
         ensureDefaultResources(region);
         RouteTable rt = getRequiredRouteTable(region, routeTableId);
 
@@ -2376,6 +2651,7 @@ public class Ec2Service implements ContainerTeardown {
         assoc.setRouteTableAssociationId(assocId);
         assoc.setRouteTableId(routeTableId);
         assoc.setSubnetId(subnetId);
+        assoc.setGatewayId(gatewayId);
         assoc.setMain(false);
         assoc.setAssociationState("associated");
         synchronized (lockFor(key(region, routeTableId))) {
@@ -2406,12 +2682,26 @@ public class Ec2Service implements ContainerTeardown {
     }
 
     public void createRoute(String region, String routeTableId, String destinationCidrBlock, String gatewayId, String natGatewayId) {
+        Route route = new Route(destinationCidrBlock, gatewayId, "CreateRoute");
+        route.setNatGatewayId(natGatewayId);
+        createRoute(region, routeTableId, route);
+    }
+
+    public void createRoute(String region, String routeTableId, Route route) {
+        if (!hasDestination(route)) {
+            throw new AwsException("MissingParameter",
+                    "The request must include DestinationCidrBlock, DestinationIpv6CidrBlock, or DestinationPrefixListId.", 400);
+        }
+        if (countTargets(route) != 1) {
+            throw new AwsException("InvalidParameterCombination",
+                    "CreateRoute takes exactly one target.", 400);
+        }
+        route.setOrigin(route.getOrigin() != null ? route.getOrigin() : "CreateRoute");
+        route.setState("active");
         ensureDefaultResources(region);
         synchronized (lockFor(key(region, routeTableId))) {
             RouteTable current = getRequiredRouteTable(region, routeTableId);
             List<Route> next = new ArrayList<>(current.getRoutes());
-            Route route = new Route(destinationCidrBlock, gatewayId, "CreateRoute");
-            route.setNatGatewayId(natGatewayId);
             next.add(route);
             current.setRoutes(next);
             routeTables.put(key(region, routeTableId), current);
@@ -2419,18 +2709,21 @@ public class Ec2Service implements ContainerTeardown {
     }
 
     public void replaceRoute(String region, String routeTableId, String destinationCidrBlock, String gatewayId, String natGatewayId) {
-        if (destinationCidrBlock == null || destinationCidrBlock.isBlank()) {
+        Route replacement = new Route();
+        replacement.setDestinationCidrBlock(destinationCidrBlock);
+        replacement.setGatewayId(gatewayId);
+        replacement.setNatGatewayId(natGatewayId);
+        replaceRoute(region, routeTableId, replacement);
+    }
+
+    public void replaceRoute(String region, String routeTableId, Route replacement) {
+        if (!hasDestination(replacement)) {
             throw new AwsException("MissingParameter",
-                    "The request must include DestinationCidrBlock; routes are matched on their IPv4 destination.", 400);
+                    "The request must include DestinationCidrBlock, DestinationIpv6CidrBlock, or DestinationPrefixListId.", 400);
         }
-        // AWS takes exactly one target. Rejecting both-or-neither also keeps the targets this
-        // emulator cannot model (transit gateway, network interface, peering connection, ...) from
-        // silently clearing the route and reporting success.
-        boolean hasGateway = gatewayId != null && !gatewayId.isBlank();
-        boolean hasNatGateway = natGatewayId != null && !natGatewayId.isBlank();
-        if (hasGateway == hasNatGateway) {
+        if (countTargets(replacement) != 1) {
             throw new AwsException("InvalidParameterCombination",
-                    "ReplaceRoute takes exactly one target, and only GatewayId or NatGatewayId is supported.", 400);
+                    "ReplaceRoute takes exactly one target.", 400);
         }
 
         ensureDefaultResources(region);
@@ -2438,15 +2731,13 @@ public class Ec2Service implements ContainerTeardown {
             RouteTable current = getRequiredRouteTable(region, routeTableId);
             List<Route> next = new ArrayList<>(current.getRoutes());
             Route existing = next.stream()
-                    .filter(r -> destinationCidrBlock.equals(r.getDestinationCidrBlock()))
+                    .filter(r -> sameDestination(r, replacement))
                     .findFirst()
                     .orElseThrow(() -> new AwsException("InvalidRoute.NotFound",
-                            "The route identified by " + destinationCidrBlock + " does not exist", 400));
+                            "The route identified by " + destinationLabel(replacement) + " does not exist", 400));
 
-            // The target the request does not name is cleared rather than carried over from the
-            // route being replaced.
-            Route replacement = new Route(destinationCidrBlock, hasGateway ? gatewayId : null, existing.getOrigin());
-            replacement.setNatGatewayId(hasNatGateway ? natGatewayId : null);
+            replacement.setOrigin(existing.getOrigin());
+            replacement.setState("active");
             next.set(next.indexOf(existing), replacement);
             current.setRoutes(next);
             routeTables.put(key(region, routeTableId), current);
@@ -2454,14 +2745,71 @@ public class Ec2Service implements ContainerTeardown {
     }
 
     public void deleteRoute(String region, String routeTableId, String destinationCidrBlock) {
+        Route dest = new Route();
+        dest.setDestinationCidrBlock(destinationCidrBlock);
+        deleteRoute(region, routeTableId, dest);
+    }
+
+    public void deleteRoute(String region, String routeTableId, Route dest) {
         ensureDefaultResources(region);
         synchronized (lockFor(key(region, routeTableId))) {
             RouteTable current = getRequiredRouteTable(region, routeTableId);
             List<Route> next = new ArrayList<>(current.getRoutes());
-            next.removeIf(r -> r.getDestinationCidrBlock().equals(destinationCidrBlock));
+            next.removeIf(r -> sameDestination(r, dest));
             current.setRoutes(next);
             routeTables.put(key(region, routeTableId), current);
         }
+    }
+
+    public RouteTableAssociation replaceRouteTableAssociation(String region, String associationId, String routeTableId) {
+        ensureDefaultResources(region);
+        RouteTableAssociation existing = null;
+        RouteTable oldTable = null;
+        for (RouteTable rt : routeTables.scan(k -> true)) {
+            if (!rt.getRegion().equals(region)) {
+                continue;
+            }
+            for (RouteTableAssociation assoc : rt.getAssociations()) {
+                if (associationId.equals(assoc.getRouteTableAssociationId())) {
+                    existing = assoc;
+                    oldTable = rt;
+                    break;
+                }
+            }
+            if (existing != null) {
+                break;
+            }
+        }
+        if (existing == null) {
+            throw new AwsException("InvalidAssociationID.NotFound",
+                    "The association ID '" + associationId + "' does not exist", 400);
+        }
+        RouteTableAssociation moved = new RouteTableAssociation();
+        moved.setRouteTableAssociationId("rtbassoc-" + randomHex(8));
+        moved.setRouteTableId(routeTableId);
+        moved.setSubnetId(existing.getSubnetId());
+        moved.setGatewayId(existing.getGatewayId());
+        moved.setMain(existing.isMain());
+        moved.setAssociationState("associated");
+
+        String sourceKey = key(region, oldTable.getRouteTableId());
+        String targetKey = key(region, routeTableId);
+        synchronized (lowerLockOf(sourceKey, targetKey)) {
+            synchronized (higherLockOf(sourceKey, targetKey)) {
+                RouteTable from = getRequiredRouteTable(region, oldTable.getRouteTableId());
+                List<RouteTableAssociation> fromNext = new ArrayList<>(from.getAssociations());
+                fromNext.removeIf(a -> associationId.equals(a.getRouteTableAssociationId()));
+                from.setAssociations(fromNext);
+                routeTables.put(sourceKey, from);
+
+                RouteTable to = getRequiredRouteTable(region, routeTableId);
+                List<RouteTableAssociation> toNext = new ArrayList<>(to.getAssociations());
+                toNext.add(moved);
+                to.setAssociations(toNext);
+                routeTables.put(targetKey, to);
+            }
+        }
+        return moved;
     }
 
     private RouteTable getRequiredRouteTable(String region, String routeTableId) {
@@ -2542,15 +2890,21 @@ public class Ec2Service implements ContainerTeardown {
         addr.setAllocationId(allocId);
         addr.setPublicIp(ip);
         addr.setRegion(region);
+        addr.setNetworkBorderGroup(region);
         addresses.put(key(region, allocId), addr);
         return addr;
     }
 
     public Address associateAddress(String region, String allocationId, String instanceId) {
+        return associateAddress(region, allocationId, instanceId, null);
+    }
+
+    public Address associateAddress(String region, String allocationId, String instanceId, String networkInterfaceId) {
         ensureDefaultResources(region);
         Address addr = getRequiredAddress(region, allocationId);
 
         addr.setInstanceId(instanceId);
+        addr.setNetworkInterfaceId(networkInterfaceId);
         addr.setAssociationId("eipassoc-" + randomHex(17));
         addresses.put(key(region, allocationId), addr);
         return addr;
@@ -2586,9 +2940,15 @@ public class Ec2Service implements ContainerTeardown {
 
     public List<Address> describeAddresses(String region, List<String> allocationIds, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
+        if (allocationIds != null && !allocationIds.isEmpty()) {
+            for (String allocationId : allocationIds) {
+                getRequiredAddress(region, allocationId);
+            }
+        }
         return addresses.scan(k -> true).stream()
                 .filter(a -> a.getRegion().equals(region))
-                .filter(a -> allocationIds.isEmpty() || allocationIds.contains(a.getAllocationId()))
+                .filter(a -> allocationIds == null || allocationIds.isEmpty() || allocationIds.contains(a.getAllocationId()))
+                .filter(a -> matchesFilters(a, filters, region))
                 .collect(Collectors.toList());
     }
 
@@ -2766,6 +3126,8 @@ public class Ec2Service implements ContainerTeardown {
                 case "state" -> matchesValue(values, subnet.getState());
                 case "availabilityZone", "availability-zone" -> matchesValue(values, subnet.getAvailabilityZone());
                 case "cidr-block", "cidrBlock", "cidr" -> matchesValue(values, subnet.getCidrBlock());
+                case "default-for-az", "defaultForAz" ->
+                        matchesValue(values, String.valueOf(subnet.isDefaultForAz()));
                 default -> true;
             };
         }
@@ -2828,6 +3190,17 @@ public class Ec2Service implements ContainerTeardown {
                         .anyMatch(routeTableId -> matchesValue(values, routeTableId));
                 case "subnet-id" -> endpoint.getSubnetIds().stream()
                         .anyMatch(subnetId -> matchesValue(values, subnetId));
+                default -> true;
+            };
+        }
+        if (resource instanceof Address addr) {
+            return switch (filterName) {
+                case "allocation-id" -> matchesValue(values, addr.getAllocationId());
+                case "public-ip" -> matchesValue(values, addr.getPublicIp());
+                case "domain" -> matchesValue(values, addr.getDomain());
+                case "instance-id" -> matchesValue(values, addr.getInstanceId());
+                case "association-id" -> matchesValue(values, addr.getAssociationId());
+                case "network-interface-id" -> matchesValue(values, addr.getNetworkInterfaceId());
                 default -> true;
             };
         }
@@ -2898,6 +3271,11 @@ public class Ec2Service implements ContainerTeardown {
         if (resource instanceof VpcEndpoint endpoint) return endpoint.getTags();
         if (resource instanceof NatGateway natGateway) return natGateway.getTags();
         if (resource instanceof SpotInstanceRequest sir) return sir.getTags();
+        if (resource instanceof Snapshot snapshot) return snapshot.getTags();
+        if (resource instanceof VpcPeeringConnection peering) return peering.getTags();
+        if (resource instanceof EgressOnlyInternetGateway eigw) return eigw.getTags();
+        if (resource instanceof DhcpOptions dhcp) return dhcp.getTags();
+        if (resource instanceof ManagedPrefixList prefixList) return prefixList.getTags();
         return Collections.emptyList();
     }
 
@@ -2906,6 +3284,13 @@ public class Ec2Service implements ContainerTeardown {
     public Volume createVolume(String region, String availabilityZone, String volumeType,
                                int size, boolean encrypted, int iops, Integer throughput,
                                String snapshotId, List<Tag> volumeTags) {
+        return createVolume(region, availabilityZone, volumeType, size, encrypted, iops, throughput,
+                snapshotId, null, volumeTags);
+    }
+
+    public Volume createVolume(String region, String availabilityZone, String volumeType,
+                               int size, boolean encrypted, int iops, Integer throughput,
+                               String snapshotId, String kmsKeyId, List<Tag> volumeTags) {
         ensureDefaultResources(region);
         String volumeId = "vol-" + randomHex(17);
         String effectiveType = volumeType != null ? volumeType : "gp2";
@@ -2914,7 +3299,11 @@ public class Ec2Service implements ContainerTeardown {
         vol.setAvailabilityZone(availabilityZone != null ? availabilityZone : region + "a");
         vol.setVolumeType(effectiveType);
         vol.setSize(size > 0 ? size : 8);
-        vol.setEncrypted(encrypted);
+        boolean useEncryption = encrypted || (kmsKeyId != null && !kmsKeyId.isBlank());
+        vol.setEncrypted(useEncryption);
+        if (kmsKeyId != null && !kmsKeyId.isBlank()) {
+            vol.setKmsKeyId(kmsKeyId);
+        }
         vol.setIops(iops > 0 ? iops : (volumeType != null && volumeType.startsWith("io") ? iops : 0));
         // Throughput is a gp3-only attribute; AWS reports 125 MiB/s by default for gp3.
         if ("gp3".equals(effectiveType)) {
@@ -3131,6 +3520,13 @@ public class Ec2Service implements ContainerTeardown {
                     assoc.setIpOwnerId(eni.getOwnerId());
                     primaryIp.setAssociation(assoc);
                 });
+                if (primaryIp.getAssociation() == null && inst.getPublicIpAddress() != null) {
+                    NetworkInterfaceAssociation assoc = new NetworkInterfaceAssociation();
+                    assoc.setPublicIp(inst.getPublicIpAddress());
+                    assoc.setPublicDnsName(inst.getPublicDnsName());
+                    assoc.setIpOwnerId(eni.getOwnerId() != null ? eni.getOwnerId() : accountId);
+                    primaryIp.setAssociation(assoc);
+                }
                 ni.getPrivateIpAddresses().add(primaryIp);
 
                 // Phase 4: apply filters
@@ -3140,6 +3536,21 @@ public class Ec2Service implements ContainerTeardown {
 
                 result.add(ni);
             }
+        }
+
+        for (NetworkInterface ni : standaloneNetworkInterfaces.values()) {
+            if (ni.getRegion() != null && !ni.getRegion().equals(region)) {
+                continue;
+            }
+            if (!networkInterfaceIds.isEmpty()
+                    && !networkInterfaceIds.contains(ni.getNetworkInterfaceId())) {
+                continue;
+            }
+            foundIds.add(ni.getNetworkInterfaceId());
+            if (!matchesFilters(ni, filters, region)) {
+                continue;
+            }
+            result.add(ni);
         }
 
         // Phase 6: validate requested IDs exist
@@ -3293,5 +3704,499 @@ public class Ec2Service implements ContainerTeardown {
         }
 
         return result;
+    }
+
+    private static final String DEFAULT_VPC_ENDPOINT_POLICY =
+            "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":\"*\",\"Resource\":\"*\"}]}";
+
+    private static boolean notBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static boolean hasDestination(Route route) {
+        return notBlank(route.getDestinationCidrBlock())
+                || notBlank(route.getDestinationIpv6CidrBlock())
+                || notBlank(route.getDestinationPrefixListId());
+    }
+
+    private static int countTargets(Route route) {
+        int n = 0;
+        if (notBlank(route.getGatewayId())) n++;
+        if (notBlank(route.getNatGatewayId())) n++;
+        if (notBlank(route.getEgressOnlyInternetGatewayId())) n++;
+        if (notBlank(route.getVpcPeeringConnectionId())) n++;
+        if (notBlank(route.getNetworkInterfaceId())) n++;
+        if (notBlank(route.getInstanceId())) n++;
+        if (notBlank(route.getVpcEndpointId())) n++;
+        return n;
+    }
+
+    private static boolean sameDestination(Route a, Route b) {
+        return Objects.equals(blankToNull(a.getDestinationCidrBlock()), blankToNull(b.getDestinationCidrBlock()))
+                && Objects.equals(blankToNull(a.getDestinationIpv6CidrBlock()), blankToNull(b.getDestinationIpv6CidrBlock()))
+                && Objects.equals(blankToNull(a.getDestinationPrefixListId()), blankToNull(b.getDestinationPrefixListId()));
+    }
+
+    private static String blankToNull(String value) {
+        return notBlank(value) ? value : null;
+    }
+
+    private static String destinationLabel(Route route) {
+        if (notBlank(route.getDestinationCidrBlock())) {
+            return route.getDestinationCidrBlock();
+        }
+        if (notBlank(route.getDestinationIpv6CidrBlock())) {
+            return route.getDestinationIpv6CidrBlock();
+        }
+        return route.getDestinationPrefixListId();
+    }
+
+    public VpcEndpoint modifyVpcEndpoint(String region, String endpointId,
+                                         List<String> addRouteTableIds, List<String> removeRouteTableIds,
+                                         List<String> addSubnetIds, List<String> removeSubnetIds,
+                                         List<String> addSecurityGroupIds, List<String> removeSecurityGroupIds,
+                                         Boolean privateDnsEnabled, String policyDocument, Boolean resetPolicy,
+                                         String ipAddressType, String dnsRecordIpType,
+                                         Boolean privateDnsOnlyForInboundResolverEndpoint) {
+        VpcEndpoint endpoint = getRequiredVpcEndpoint(region, endpointId);
+        applyIdDelta(endpoint.getRouteTableIds(), addRouteTableIds, removeRouteTableIds);
+        applyIdDelta(endpoint.getSubnetIds(), addSubnetIds, removeSubnetIds);
+        applyIdDelta(endpoint.getSecurityGroupIds(), addSecurityGroupIds, removeSecurityGroupIds);
+        if (privateDnsEnabled != null) {
+            endpoint.setPrivateDnsEnabled(privateDnsEnabled);
+        }
+        if (Boolean.TRUE.equals(resetPolicy)) {
+            endpoint.setPolicyDocument(DEFAULT_VPC_ENDPOINT_POLICY);
+        } else if (policyDocument != null) {
+            endpoint.setPolicyDocument(policyDocument);
+        }
+        if (ipAddressType != null) {
+            endpoint.setIpAddressType(ipAddressType);
+        }
+        if (dnsRecordIpType != null) {
+            endpoint.setDnsRecordIpType(dnsRecordIpType);
+        }
+        if (privateDnsOnlyForInboundResolverEndpoint != null) {
+            endpoint.setPrivateDnsOnlyForInboundResolverEndpoint(privateDnsOnlyForInboundResolverEndpoint);
+        }
+        vpcEndpoints.put(key(region, endpointId), endpoint);
+        return endpoint;
+    }
+
+    private static void applyIdDelta(List<String> current, List<String> add, List<String> remove) {
+        if (remove != null) {
+            current.removeAll(remove);
+        }
+        if (add != null) {
+            for (String id : add) {
+                if (!current.contains(id)) {
+                    current.add(id);
+                }
+            }
+        }
+    }
+
+    public Snapshot createSnapshot(String region, String volumeId, String description, List<Tag> snapshotTags) {
+        Volume volume = getRequiredVolume(region, volumeId);
+        Snapshot snapshot = new Snapshot();
+        snapshot.setSnapshotId("snap-" + randomHex(17));
+        snapshot.setVolumeId(volumeId);
+        snapshot.setVolumeSize(volume.getSize());
+        snapshot.setEncrypted(volume.isEncrypted());
+        snapshot.setDescription(description);
+        snapshot.setOwnerId(accountId);
+        snapshot.setState("completed");
+        snapshot.setProgress("100%");
+        snapshot.setStartTime(Instant.now());
+        snapshot.setRegion(region);
+        if (snapshotTags != null && !snapshotTags.isEmpty()) {
+            snapshot.setTags(new ArrayList<>(snapshotTags));
+            tags.put(snapshot.getSnapshotId(), new ArrayList<>(snapshotTags));
+        }
+        snapshots.put(key(region, snapshot.getSnapshotId()), snapshot);
+        return snapshot;
+    }
+
+    public void deleteSnapshot(String region, String snapshotId) {
+        if (snapshots.get(key(region, snapshotId)).isEmpty()) {
+            throw new AwsException("InvalidSnapshot.NotFound",
+                    "The snapshot '" + snapshotId + "' does not exist.", 400);
+        }
+        snapshots.delete(key(region, snapshotId));
+        tags.delete(snapshotId);
+    }
+
+    public Volume modifyVolume(String region, String volumeId, Integer size, String volumeType,
+                               Integer iops, Integer throughput) {
+        Volume volume = getRequiredVolume(region, volumeId);
+        if (size != null && size > 0) {
+            volume.setSize(size);
+        }
+        if (volumeType != null && !volumeType.isBlank()) {
+            volume.setVolumeType(volumeType);
+        }
+        if (iops != null && iops > 0) {
+            volume.setIops(iops);
+        }
+        if (throughput != null && throughput > 0) {
+            volume.setThroughput(throughput);
+        }
+        volumes.put(key(region, volumeId), volume);
+        return volume;
+    }
+
+    public VpcPeeringConnection createVpcPeeringConnection(String region, String vpcId, String peerVpcId,
+                                                           String peerOwnerId, String peerRegion, List<Tag> peeringTags) {
+        Vpc requester = resolveVpcForCreate(region, vpcId);
+        String accepterRegion = peerRegion != null && !peerRegion.isBlank() ? peerRegion : region;
+        Vpc accepter = vpcs.get(key(accepterRegion, peerVpcId)).orElse(null);
+        VpcPeeringConnection peering = new VpcPeeringConnection();
+        peering.setVpcPeeringConnectionId("pcx-" + randomHex(17));
+        peering.setStatus("pending-acceptance");
+        peering.setRequesterVpcId(vpcId);
+        peering.setRequesterOwnerId(accountId);
+        peering.setRequesterCidrBlock(requester.getCidrBlock());
+        peering.setRequesterRegion(region);
+        peering.setAccepterVpcId(peerVpcId);
+        peering.setAccepterOwnerId(peerOwnerId != null && !peerOwnerId.isBlank() ? peerOwnerId : accountId);
+        peering.setAccepterCidrBlock(accepter != null ? accepter.getCidrBlock() : null);
+        peering.setAccepterRegion(accepterRegion);
+        peering.setRegion(region);
+        if (peeringTags != null && !peeringTags.isEmpty()) {
+            peering.setTags(new ArrayList<>(peeringTags));
+            tags.put(peering.getVpcPeeringConnectionId(), new ArrayList<>(peeringTags));
+        }
+        vpcPeeringConnections.put(key(region, peering.getVpcPeeringConnectionId()), peering);
+        return peering;
+    }
+
+    public VpcPeeringConnection acceptVpcPeeringConnection(String region, String peeringId) {
+        VpcPeeringConnection peering = requireVpcPeeringConnection(region, peeringId);
+        peering.setStatus("active");
+        return peering;
+    }
+
+    public VpcPeeringConnection deleteVpcPeeringConnection(String region, String peeringId) {
+        VpcPeeringConnection peering = requireVpcPeeringConnection(region, peeringId);
+        peering.setStatus("deleted");
+        vpcPeeringConnections.remove(key(region, peeringId));
+        tags.delete(peeringId);
+        return peering;
+    }
+
+    public List<VpcPeeringConnection> describeVpcPeeringConnections(String region, List<String> ids) {
+        if (ids != null && !ids.isEmpty()) {
+            for (String id : ids) {
+                requireVpcPeeringConnection(region, id);
+            }
+        }
+        return vpcPeeringConnections.values().stream()
+                .filter(p -> region.equals(p.getRegion()))
+                .filter(p -> ids == null || ids.isEmpty() || ids.contains(p.getVpcPeeringConnectionId()))
+                .collect(Collectors.toList());
+    }
+
+    private VpcPeeringConnection requireVpcPeeringConnection(String region, String peeringId) {
+        VpcPeeringConnection peering = vpcPeeringConnections.get(key(region, peeringId));
+        if (peering == null) {
+            throw new AwsException("InvalidVpcPeeringConnectionID.NotFound",
+                    "The vpcPeeringConnection ID '" + peeringId + "' does not exist", 400);
+        }
+        return peering;
+    }
+
+    public EgressOnlyInternetGateway createEgressOnlyInternetGateway(String region, String vpcId, List<Tag> eigwTags) {
+        resolveVpcForCreate(region, vpcId);
+        EgressOnlyInternetGateway eigw = new EgressOnlyInternetGateway();
+        eigw.setEgressOnlyInternetGatewayId("eigw-" + randomHex(17));
+        eigw.setVpcId(vpcId);
+        eigw.setAttachmentState("attached");
+        eigw.setRegion(region);
+        if (eigwTags != null && !eigwTags.isEmpty()) {
+            eigw.setTags(new ArrayList<>(eigwTags));
+            tags.put(eigw.getEgressOnlyInternetGatewayId(), new ArrayList<>(eigwTags));
+        }
+        egressOnlyInternetGateways.put(key(region, eigw.getEgressOnlyInternetGatewayId()), eigw);
+        return eigw;
+    }
+
+    public void deleteEgressOnlyInternetGateway(String region, String eigwId) {
+        if (egressOnlyInternetGateways.remove(key(region, eigwId)) == null) {
+            throw new AwsException("InvalidEgressOnlyInternetGatewayId.NotFound",
+                    "The egress-only internet gateway '" + eigwId + "' does not exist", 400);
+        }
+        tags.delete(eigwId);
+    }
+
+    public List<EgressOnlyInternetGateway> describeEgressOnlyInternetGateways(String region, List<String> ids) {
+        if (ids != null && !ids.isEmpty()) {
+            for (String id : ids) {
+                if (egressOnlyInternetGateways.get(key(region, id)) == null) {
+                    throw new AwsException("InvalidEgressOnlyInternetGatewayId.NotFound",
+                            "The egress-only internet gateway '" + id + "' does not exist", 400);
+                }
+            }
+        }
+        return egressOnlyInternetGateways.values().stream()
+                .filter(g -> region.equals(g.getRegion()))
+                .filter(g -> ids == null || ids.isEmpty() || ids.contains(g.getEgressOnlyInternetGatewayId()))
+                .collect(Collectors.toList());
+    }
+
+    public DhcpOptions createDhcpOptions(String region, Map<String, List<String>> configurations, List<Tag> dhcpTags) {
+        DhcpOptions options = new DhcpOptions();
+        options.setDhcpOptionsId("dopt-" + randomHex(8));
+        options.setOwnerId(accountId);
+        options.setRegion(region);
+        options.setConfigurations(new LinkedHashMap<>(configurations));
+        if (dhcpTags != null && !dhcpTags.isEmpty()) {
+            options.setTags(new ArrayList<>(dhcpTags));
+            tags.put(options.getDhcpOptionsId(), new ArrayList<>(dhcpTags));
+        }
+        dhcpOptionsSets.put(key(region, options.getDhcpOptionsId()), options);
+        return options;
+    }
+
+    public void associateDhcpOptions(String region, String dhcpOptionsId, String vpcId) {
+        Vpc vpc = getRequiredVpc(region, vpcId);
+        String effectiveId = "default".equals(dhcpOptionsId) ? "dopt-default" : dhcpOptionsId;
+        if (!"dopt-default".equals(effectiveId) && dhcpOptionsSets.get(key(region, effectiveId)) == null) {
+            throw new AwsException("InvalidDhcpOptionID.NotFound",
+                    "The dhcpOptions ID '" + dhcpOptionsId + "' does not exist", 400);
+        }
+        vpc.setDhcpOptionsId(effectiveId);
+        vpcs.put(key(region, vpcId), vpc);
+    }
+
+    public void deleteDhcpOptions(String region, String dhcpOptionsId) {
+        if (dhcpOptionsSets.remove(key(region, dhcpOptionsId)) == null) {
+            throw new AwsException("InvalidDhcpOptionID.NotFound",
+                    "The dhcpOptions ID '" + dhcpOptionsId + "' does not exist", 400);
+        }
+        tags.delete(dhcpOptionsId);
+    }
+
+    public List<DhcpOptions> describeDhcpOptions(String region, List<String> ids) {
+        ensureDefaultDhcpOptions(region);
+        if (ids != null && !ids.isEmpty()) {
+            for (String id : ids) {
+                if (dhcpOptionsSets.get(key(region, id)) == null) {
+                    throw new AwsException("InvalidDhcpOptionID.NotFound",
+                            "The dhcpOptions ID '" + id + "' does not exist", 400);
+                }
+            }
+        }
+        return dhcpOptionsSets.values().stream()
+                .filter(d -> region.equals(d.getRegion()))
+                .filter(d -> ids == null || ids.isEmpty() || ids.contains(d.getDhcpOptionsId()))
+                .collect(Collectors.toList());
+    }
+
+    private void ensureDefaultDhcpOptions(String region) {
+        dhcpOptionsSets.computeIfAbsent(key(region, "dopt-default"), unused -> {
+            DhcpOptions defaults = new DhcpOptions();
+            defaults.setDhcpOptionsId("dopt-default");
+            defaults.setOwnerId(accountId);
+            defaults.setRegion(region);
+            defaults.getConfigurations().put("domain-name-servers", List.of("AmazonProvidedDNS"));
+            return defaults;
+        });
+    }
+
+    public ManagedPrefixList createManagedPrefixList(String region, String name, String addressFamily,
+                                                     int maxEntries, List<PrefixListEntry> entries, List<Tag> prefixTags) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("MissingParameter", "The request must contain the parameter PrefixListName", 400);
+        }
+        if (maxEntries <= 0) {
+            throw new AwsException("MissingParameter", "The request must contain the parameter MaxEntries", 400);
+        }
+        ManagedPrefixList list = new ManagedPrefixList();
+        list.setPrefixListId("pl-" + randomHex(8));
+        list.setPrefixListArn(AwsArnUtils.Arn.of("ec2", region, accountId, "prefix-list/" + list.getPrefixListId()).toString());
+        list.setPrefixListName(name);
+        list.setAddressFamily(addressFamily != null && !addressFamily.isBlank() ? addressFamily : "IPv4");
+        list.setMaxEntries(maxEntries);
+        list.setVersion(1);
+        list.setState("create-complete");
+        list.setOwnerId(accountId);
+        list.setRegion(region);
+        list.setEntries(entries != null ? new ArrayList<>(entries) : new ArrayList<>());
+        if (prefixTags != null && !prefixTags.isEmpty()) {
+            list.setTags(new ArrayList<>(prefixTags));
+            tags.put(list.getPrefixListId(), new ArrayList<>(prefixTags));
+        }
+        managedPrefixLists.put(key(region, list.getPrefixListId()), list);
+        return list;
+    }
+
+    public ManagedPrefixList modifyManagedPrefixList(String region, String prefixListId, Long currentVersion,
+                                                     String prefixListName, Integer maxEntries,
+                                                     List<PrefixListEntry> addEntries, List<PrefixListEntry> removeEntries) {
+        ManagedPrefixList list = requireManagedPrefixList(region, prefixListId);
+        if (currentVersion != null && currentVersion != list.getVersion()) {
+            throw new AwsException("InvalidPrefixListVersion",
+                    "The current version of prefix list " + prefixListId + " does not match", 400);
+        }
+        if (maxEntries != null && maxEntries > list.getMaxEntries()) {
+            list.setMaxEntries(maxEntries);
+        }
+        if (prefixListName != null && !prefixListName.isBlank()) {
+            list.setPrefixListName(prefixListName);
+        }
+        List<PrefixListEntry> next = new ArrayList<>(list.getEntries());
+        if (removeEntries != null) {
+            Set<String> remove = removeEntries.stream().map(PrefixListEntry::getCidr).collect(Collectors.toSet());
+            next.removeIf(e -> remove.contains(e.getCidr()));
+        }
+        if (addEntries != null) {
+            for (PrefixListEntry add : addEntries) {
+                next.removeIf(e -> Objects.equals(e.getCidr(), add.getCidr()));
+                next.add(add);
+            }
+        }
+        list.setEntries(next);
+        list.setVersion(list.getVersion() + 1);
+        list.setState("modify-complete");
+        return list;
+    }
+
+    public void deleteManagedPrefixList(String region, String prefixListId) {
+        if (managedPrefixLists.remove(key(region, prefixListId)) == null) {
+            throw new AwsException("InvalidPrefixListID.NotFound",
+                    "The prefix list ID '" + prefixListId + "' does not exist", 400);
+        }
+        tags.delete(prefixListId);
+    }
+
+    public List<ManagedPrefixList> describeManagedPrefixLists(String region, List<String> ids) {
+        if (ids != null && !ids.isEmpty()) {
+            for (String id : ids) {
+                requireManagedPrefixList(region, id);
+            }
+        }
+        return managedPrefixLists.values().stream()
+                .filter(p -> region.equals(p.getRegion()))
+                .filter(p -> ids == null || ids.isEmpty() || ids.contains(p.getPrefixListId()))
+                .collect(Collectors.toList());
+    }
+
+    public List<PrefixListEntry> getManagedPrefixListEntries(String region, String prefixListId) {
+        return new ArrayList<>(requireManagedPrefixList(region, prefixListId).getEntries());
+    }
+
+    private ManagedPrefixList requireManagedPrefixList(String region, String prefixListId) {
+        ManagedPrefixList list = managedPrefixLists.get(key(region, prefixListId));
+        if (list == null) {
+            throw new AwsException("InvalidPrefixListID.NotFound",
+                    "The prefix list ID '" + prefixListId + "' does not exist", 400);
+        }
+        return list;
+    }
+
+    public NetworkInterface createNetworkInterface(String region, String subnetId, String description,
+                                                   String privateIpAddress, List<String> groupIds,
+                                                   String interfaceType, List<Tag> eniTags) {
+        Subnet subnet = requireSubnet(region, subnetId);
+        NetworkInterface ni = new NetworkInterface();
+        ni.setNetworkInterfaceId("eni-" + randomHex(17));
+        ni.setSubnetId(subnetId);
+        ni.setVpcId(subnet.getVpcId());
+        ni.setAvailabilityZone(subnet.getAvailabilityZone());
+        ni.setDescription(description);
+        ni.setOwnerId(accountId);
+        ni.setStatus("available");
+        ni.setInterfaceType(interfaceType != null && !interfaceType.isBlank() ? interfaceType : "interface");
+        ni.setSourceDestCheck(true);
+        ni.setRegion(region);
+        ni.setMacAddress("02:00:" + randomHex(2) + ":" + randomHex(2) + ":" + randomHex(2) + ":" + randomHex(2));
+        String ip = privateIpAddress != null && !privateIpAddress.isBlank()
+                ? privateIpAddress
+                : assignPrivateIp(region, subnetId);
+        ni.setPrivateIpAddress(ip);
+        ni.setPrivateDnsName("ip-" + ip.replace('.', '-') + ".ec2.internal");
+        NetworkInterfacePrivateIpAddress primary = new NetworkInterfacePrivateIpAddress();
+        primary.setPrivateIpAddress(ip);
+        primary.setPrivateDnsName(ni.getPrivateDnsName());
+        primary.setPrimary(true);
+        ni.getPrivateIpAddresses().add(primary);
+        if (groupIds != null) {
+            for (String groupId : groupIds) {
+                SecurityGroup sg = getRequiredSecurityGroup(region, groupId);
+                ni.getGroups().add(new GroupIdentifier(sg.getGroupId(), sg.getGroupName()));
+            }
+        }
+        if (eniTags != null && !eniTags.isEmpty()) {
+            ni.setTagSet(new ArrayList<>(eniTags));
+            tags.put(ni.getNetworkInterfaceId(), new ArrayList<>(eniTags));
+        }
+        standaloneNetworkInterfaces.put(key(region, ni.getNetworkInterfaceId()), ni);
+        return ni;
+    }
+
+    public void deleteNetworkInterface(String region, String networkInterfaceId) {
+        NetworkInterface ni = standaloneNetworkInterfaces.remove(key(region, networkInterfaceId));
+        if (ni == null) {
+            throw new AwsException("InvalidNetworkInterfaceID.NotFound",
+                    "The network interface ID '" + networkInterfaceId + "' does not exist", 400);
+        }
+        tags.delete(networkInterfaceId);
+    }
+
+    public void modifyNetworkInterfaceAttribute(String region, String networkInterfaceId, String description,
+                                                Boolean sourceDestCheck, List<String> groupIds) {
+        NetworkInterface ni = requireStandaloneNetworkInterface(region, networkInterfaceId);
+        if (description != null) {
+            ni.setDescription(description);
+        }
+        if (sourceDestCheck != null) {
+            ni.setSourceDestCheck(sourceDestCheck);
+        }
+        if (groupIds != null) {
+            List<GroupIdentifier> groups = new ArrayList<>();
+            for (String groupId : groupIds) {
+                SecurityGroup sg = getRequiredSecurityGroup(region, groupId);
+                groups.add(new GroupIdentifier(sg.getGroupId(), sg.getGroupName()));
+            }
+            ni.setGroups(groups);
+        }
+    }
+
+    public NetworkInterfaceAttachment attachNetworkInterface(String region, String networkInterfaceId,
+                                                             String instanceId, int deviceIndex) {
+        NetworkInterface ni = requireStandaloneNetworkInterface(region, networkInterfaceId);
+        getRequiredInstance(region, instanceId);
+        NetworkInterfaceAttachment attachment = new NetworkInterfaceAttachment();
+        attachment.setAttachmentId("eni-attach-" + randomHex(17));
+        attachment.setDeviceIndex(deviceIndex);
+        attachment.setStatus("attached");
+        attachment.setInstanceId(instanceId);
+        attachment.setInstanceOwnerId(accountId);
+        attachment.setAttachTime(ISO_FMT.format(Instant.now()));
+        attachment.setDeleteOnTermination(false);
+        ni.setAttachment(attachment);
+        ni.setStatus("in-use");
+        return attachment;
+    }
+
+    public void detachNetworkInterface(String region, String attachmentId) {
+        for (NetworkInterface ni : standaloneNetworkInterfaces.values()) {
+            if (ni.getAttachment() != null && attachmentId.equals(ni.getAttachment().getAttachmentId())) {
+                ni.setAttachment(null);
+                ni.setStatus("available");
+                return;
+            }
+        }
+        throw new AwsException("InvalidAttachmentID.NotFound",
+                "The attachment ID '" + attachmentId + "' does not exist", 400);
+    }
+
+    private NetworkInterface requireStandaloneNetworkInterface(String region, String networkInterfaceId) {
+        NetworkInterface ni = standaloneNetworkInterfaces.get(key(region, networkInterfaceId));
+        if (ni == null) {
+            throw new AwsException("InvalidNetworkInterfaceID.NotFound",
+                    "The network interface ID '" + networkInterfaceId + "' does not exist", 400);
+        }
+        return ni;
     }
 }

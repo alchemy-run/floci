@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.lambda;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageService;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -31,18 +32,23 @@ import java.util.Map;
 public class LambdaTagController {
 
     private final LambdaService lambdaService;
+    private final MicrovmImageService microvmImageService;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public LambdaTagController(LambdaService lambdaService, ObjectMapper objectMapper) {
+    public LambdaTagController(LambdaService lambdaService, MicrovmImageService microvmImageService,
+                               ObjectMapper objectMapper) {
         this.lambdaService = lambdaService;
+        this.microvmImageService = microvmImageService;
         this.objectMapper = objectMapper;
     }
 
     @GET
     @Path("/tags/{arn}")
     public Response listTags(@PathParam("arn") String arn) {
-        Map<String, String> tags = lambdaService.listTags(arn);
+        Map<String, String> tags = microvmImageService.isMicrovmImageArn(arn)
+                ? microvmImageService.listTags(regionFromArn(arn), arn)
+                : lambdaService.listTags(arn);
         ObjectNode root = objectMapper.createObjectNode();
         ObjectNode tagsNode = root.putObject("Tags");
         tags.forEach(tagsNode::put);
@@ -60,7 +66,11 @@ public class LambdaTagController {
             if (tags == null) {
                 throw new AwsException("InvalidParameterValueException", "Tags is required", 400);
             }
-            lambdaService.tagResource(arn, tags);
+            if (microvmImageService.isMicrovmImageArn(arn)) {
+                microvmImageService.tagResource(regionFromArn(arn), arn, tags);
+            } else {
+                lambdaService.tagResource(arn, tags);
+            }
             return Response.noContent().build();
         } catch (AwsException e) {
             throw e;
@@ -73,7 +83,20 @@ public class LambdaTagController {
     @Path("/tags/{arn}")
     public Response untagResource(@PathParam("arn") String arn,
                                   @QueryParam("tagKeys") List<String> tagKeys) {
-        lambdaService.untagResource(arn, tagKeys);
+        if (microvmImageService.isMicrovmImageArn(arn)) {
+            microvmImageService.untagResource(regionFromArn(arn), arn, tagKeys);
+        } else {
+            lambdaService.untagResource(arn, tagKeys);
+        }
         return Response.noContent().build();
+    }
+
+    /** {@code arn:aws:lambda:us-east-1:...} → {@code us-east-1}. */
+    private static String regionFromArn(String arn) {
+        String[] parts = arn.split(":");
+        if (parts.length < 4 || parts[3].isBlank()) {
+            throw new AwsException("InvalidParameterValueException", "Invalid ARN: " + arn, 400);
+        }
+        return parts[3];
     }
 }

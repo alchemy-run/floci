@@ -47,6 +47,9 @@ public final class CognitoMessageDispatcher {
             if ("EMAIL".equalsIgnoreCase(medium) && email != null) {
                 String subject = stringOr(template.get("EmailSubject"), DEFAULT_EMAIL_SUBJECT);
                 String body = renderTemplate(stringOr(template.get(emailTemplateKey()), DEFAULT_EMAIL_BODY), code);
+                // Cognito owns this FROM on AWS; SES identity checks must not
+                // block the built-in verification path.
+                ses.verifyEmailIdentity(DEFAULT_FROM, DEFAULT_REGION);
                 ses.sendEmail(
                     DEFAULT_FROM,
                     List.of(email),

@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.cloudfront.model;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @RegisterForReflection
 public class CloudFrontFunction {
@@ -16,6 +18,7 @@ public class CloudFrontFunction {
     private String etag;
     private Instant createdTime;
     private Instant lastModifiedTime;
+    private List<String> keyValueStoreArns = new ArrayList<>();
 
     public CloudFrontFunction() {}
 
@@ -45,4 +48,24 @@ public class CloudFrontFunction {
 
     public Instant getLastModifiedTime() { return lastModifiedTime; }
     public void setLastModifiedTime(Instant lastModifiedTime) { this.lastModifiedTime = lastModifiedTime; }
+
+    public List<String> getKeyValueStoreArns() { return keyValueStoreArns; }
+    public void setKeyValueStoreArns(List<String> keyValueStoreArns) {
+        this.keyValueStoreArns = keyValueStoreArns != null ? keyValueStoreArns : new ArrayList<>();
+    }
+
+    public CloudFrontFunction copy() {
+        CloudFrontFunction copy = new CloudFrontFunction();
+        copy.name = name;
+        copy.stage = stage;
+        copy.status = status;
+        copy.functionCode = functionCode;
+        copy.runtime = runtime;
+        copy.comment = comment;
+        copy.etag = etag;
+        copy.createdTime = createdTime;
+        copy.lastModifiedTime = lastModifiedTime;
+        copy.keyValueStoreArns = new ArrayList<>(keyValueStoreArns);
+        return copy;
+    }
 }
