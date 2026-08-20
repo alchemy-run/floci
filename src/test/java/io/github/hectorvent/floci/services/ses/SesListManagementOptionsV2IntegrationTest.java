@@ -38,6 +38,11 @@ class SesListManagementOptionsV2IntegrationTest {
                     }
                     """.formatted(LIST))
         .when().post("/v2/email/contact-lists").then().statusCode(200);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", AUTH)
+                .formParam("Action", "VerifyEmailIdentity")
+                .formParam("EmailAddress", FROM)
+        .when().post("/").then().statusCode(200);
     }
 
     @Test

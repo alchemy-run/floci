@@ -164,13 +164,20 @@ class SesDedicatedIpPoolV2IntegrationTest {
     @Test
     @Order(13)
     void putDedicatedIpPoolScalingAttributes_standardToManaged() {
+        // Order 7 deleted v2-pool-alpha; recreate a STANDARD pool to exercise the
+        // STANDARD → MANAGED scaling update.
+        given().contentType("application/json").header("Authorization", AUTH_HEADER)
+            .body("{\"PoolName\": \"v2-pool-scale\"}")
+        .when().post("/v2/email/dedicated-ip-pools")
+        .then().statusCode(200);
+
         given().contentType("application/json").header("Authorization", AUTH_HEADER)
             .body("{\"ScalingMode\": \"MANAGED\"}")
-        .when().put("/v2/email/dedicated-ip-pools/v2-pool-alpha/scaling")
+        .when().put("/v2/email/dedicated-ip-pools/v2-pool-scale/scaling")
         .then().statusCode(200);
 
         given().header("Authorization", AUTH_HEADER)
-        .when().get("/v2/email/dedicated-ip-pools/v2-pool-alpha")
+        .when().get("/v2/email/dedicated-ip-pools/v2-pool-scale")
         .then().statusCode(200)
             .body("DedicatedIpPool.ScalingMode", equalTo("MANAGED"));
     }

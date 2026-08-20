@@ -74,6 +74,7 @@ class SesServiceListManagementTest {
                 smtpRelay,
                 new ObjectMapper(),
                 Clock.systemUTC());
+        service.verifyEmailIdentity(FROM, REGION);
 
         // Sports defaults OPT_IN, Promos defaults OPT_OUT.
         service.createContactList(LIST, "desc", List.of(

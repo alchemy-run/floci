@@ -49,6 +49,16 @@ class SesBulkV1IntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .header("Authorization", AUTH)
+            .formParam("Action", "VerifyEmailIdentity")
+            .formParam("EmailAddress", "bulk@example.com")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
     }
 
     @Test

@@ -39,6 +39,13 @@ class SesDeliverabilityV2IntegrationTest {
     @Test
     @Order(3)
     void batchGetMetricData_withoutVdm_isBadRequest() {
+        // Account VDM is shared across the Quarkus test process; pin DISABLED so a
+        // sibling suite that enabled VDM cannot make this path succeed.
+        given().contentType("application/json").header("Authorization", AUTH)
+                .body("{\"VdmAttributes\":{\"VdmEnabled\":\"DISABLED\"}}")
+                .when().put("/v2/email/account/vdm")
+                .then().statusCode(200);
+
         given().contentType("application/json").header("Authorization", AUTH)
                 .body("{\"Queries\":[{\"Id\":\"sends\",\"Namespace\":\"VDM\",\"Metric\":\"SEND\","
                         + "\"StartDate\":0,\"EndDate\":86400}]}")
