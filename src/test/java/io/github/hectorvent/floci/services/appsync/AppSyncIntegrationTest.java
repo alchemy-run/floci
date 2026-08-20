@@ -4033,9 +4033,7 @@ class AppSyncIntegrationTest {
     @Test
     @Order(623)
     void createDomainName_invalidCertificateArn() {
-        // Our emulator doesn't validate certificate ARN format, so this should succeed (200).
-        // AWS itself validates the pattern, but we're permissive.
-        String tempDomain = given()
+        given()
             .header("Authorization", AUTH)
             .contentType("application/json")
             .body("""
@@ -4047,11 +4045,8 @@ class AppSyncIntegrationTest {
         .when()
             .post("/v1/domainnames")
         .then()
-            .statusCode(200)
-            .extract().path("domainNameConfig.domainName");
-
-        given().header("Authorization", AUTH)
-            .delete("/v1/domainnames/" + tempDomain).then().statusCode(204);
+            .statusCode(400)
+            .body("__type", equalTo("BadRequestException"));
     }
 
     @Test
