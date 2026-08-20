@@ -135,7 +135,7 @@ class EcrIntegrationTest {
 
     @Test
     @Order(6)
-    void doubleHyphenRepoNameFailsLikeAws() {
+    void doubleHyphenRepoNameSucceedsLikeAws() {
         given()
             .header("X-Amz-Target", PREFIX + "CreateRepository")
             .contentType(CT)
@@ -145,8 +145,8 @@ class EcrIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", equalTo("InvalidParameterException"));
+            .statusCode(200)
+            .body("repository.repositoryName", equalTo("aws-ecs-service-image-form--task"));
     }
 
     @Test
