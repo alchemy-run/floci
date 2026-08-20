@@ -54,6 +54,13 @@ class AthenaGlueDdlTest {
     }
 
     @Test
+    void skipUnreadableLocationWhenBucketIsMissing() {
+        assertTrue(AthenaGlueDdl.skipUnreadableLocation(List.of(), false));
+        assertFalse(AthenaGlueDdl.skipUnreadableLocation(List.of(), true));
+        assertFalse(AthenaGlueDdl.skipUnreadableLocation(List.of("s3://b/k"), false));
+    }
+
+    @Test
     void unionsListedCsvFiles() {
         Table table = csvTable(Map.of("field.delim", ","));
         String sql = AthenaGlueDdl.selectFromFiles(

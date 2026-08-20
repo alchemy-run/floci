@@ -156,6 +156,15 @@ final class AthenaGlueDdl {
         return "VARCHAR";
     }
 
+    /**
+     * AWS does not fail a query against one Glue database because another
+     * database has a table whose S3 location bucket is gone. Skip that table
+     * rather than emitting a DuckDB glob that 404s.
+     */
+    static boolean skipUnreadableLocation(List<String> listedFiles, boolean bucketExists) {
+        return (listedFiles == null || listedFiles.isEmpty()) && !bucketExists;
+    }
+
     static String globForPrefix(String location) {
         if (location == null || location.isBlank()) {
             return null;

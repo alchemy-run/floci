@@ -606,8 +606,15 @@ public class AthenaService {
                     if (location == null || location.isBlank()) {
                         continue;
                     }
+                    List<String> files = listDataFiles(location);
+                    // AWS does not fail a query in database A because database B
+                    // has a table whose S3 location bucket is missing. Skip those
+                    // tables instead of handing DuckDB a fallback glob that 404s.
+                    if (AthenaGlueDdl.skipUnreadableLocation(files, s3BucketExists(extractBucket(location)))) {
+                        continue;
+                    }
                     String selectSql = AthenaGlueDdl.selectFromFiles(
-                            table, listDataFiles(location), AthenaGlueDdl.globForPrefix(location));
+                            table, files, AthenaGlueDdl.globForPrefix(location));
                     if (selectSql == null) {
                         continue;
                     }
@@ -621,6 +628,18 @@ public class AthenaService {
             LOG.debugv("Could not inject Glue DDL for database {0}: {1}", contextDatabase, e.getMessage());
         }
         return sb.toString();
+    }
+
+    private boolean s3BucketExists(String bucket) {
+        if (bucket == null || bucket.isBlank()) {
+            return false;
+        }
+        try {
+            s3Service.headBucket(bucket);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private List<String> listDataFiles(String location) {
