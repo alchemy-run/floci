@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.lambda.microvm.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -12,6 +13,7 @@ import java.util.Map;
  * CREATING/CREATED/CREATE_FAILED/UPDATING/UPDATED/UPDATE_FAILED/DELETING/
  * DELETED/DELETE_FAILED.
  */
+@RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MicrovmImageRecord {
 

@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.lambda.microvm.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import java.util.Map;
  * states mirror the distilled {@code MicrovmState} enum:
  * PENDING/RUNNING/SUSPENDING/SUSPENDED/TERMINATING/TERMINATED.
  */
+@RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MicrovmRecord {
 

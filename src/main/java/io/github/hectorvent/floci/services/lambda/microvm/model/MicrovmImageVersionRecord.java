@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.lambda.microvm.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -10,6 +11,7 @@ import java.util.Map;
  * version was created with, plus its build outcome. States mirror the
  * distilled {@code MicrovmImageVersionState} / {@code BuildState} enums.
  */
+@RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MicrovmImageVersionRecord {
 
