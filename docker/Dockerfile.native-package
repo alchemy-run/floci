@@ -6,6 +6,13 @@ ARG TARGETARCH
 
 ENV FLOCI_VERSION=${VERSION}
 ENV FLOCI_STORAGE_PERSISTENT_PATH=/app/data
+# Match docker/Dockerfile (the JVM image): without TLS the https data planes
+# (Lambda MicroVM endpoints, wss execute-api, sync-states.{region}:443) and
+# the /_floci/tls/ca endpoint silently don't exist.
+ENV FLOCI_TLS_ENABLED=true
+
+ENV AWS_DEFAULT_REGION=us-east-1
+ENV AWS_CONFIG_FILE=/etc/floci/aws/config
 
 ENV GOSU_VERSION=1.17
 ENV GOSU_AMD64_SHA256=bbc4136d03ab138b1ad66fa4fc051bafc6cc7ffae632b069a53657279a450de3
@@ -28,7 +35,9 @@ RUN set -eux; \
 
 WORKDIR /app
 
-RUN mkdir -p /app/data \
+RUN mkdir -p /etc/floci/aws \
+    && printf '[default]\nendpoint_url = http://localhost:4566\n' > /etc/floci/aws/config \
+    && mkdir -p /app/data \
     && chown -R 1001:root /app \
     && chmod -R g+rwX /app
 
