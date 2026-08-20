@@ -55,13 +55,20 @@ class CredentialScopeAliasTest {
     }
 
     @Test
-    void scopeWhoseExternalKeyIsNotItsIamNamespaceIsLeftAlone() {
-        // These are the traps: the catalog routes SES under "email" and Bedrock Runtime under
-        // "bedrock-runtime", but their IAM namespaces are "ses:" and "bedrock:". Deriving the
-        // canonical scope from the external key would rewrite valid scopes onto prefixes AWS
-        // never issues, so every action would resolve to null and enforcement would be skipped.
+    void sesAliasesNormaliseToSes() {
+        // SES v1 signs as "email", SES v2 as "sesv2"; IAM actions live under ses:.
+        assertEquals("ses", catalog.canonicalCredentialScope("email"));
+        assertEquals("ses", catalog.canonicalCredentialScope("sesv2"));
         assertEquals("ses", catalog.canonicalCredentialScope("ses"));
-        assertEquals("sesv2", catalog.canonicalCredentialScope("sesv2"));
+    }
+
+    @Test
+    void scopeWhoseExternalKeyIsNotItsIamNamespaceIsLeftAlone() {
+        // These are the traps: the catalog routes Bedrock Runtime under "bedrock-runtime"
+        // and CloudWatch Logs under "logs". Deriving the canonical scope from the external
+        // key would rewrite valid scopes onto prefixes AWS never issues, so every action
+        // would resolve to null and enforcement would be skipped. SES aliases are explicit
+        // (see sesAliasesNormaliseToSes); they must not be derived for every mismatch.
         assertEquals("bedrock", catalog.canonicalCredentialScope("bedrock"));
         assertEquals("logs", catalog.canonicalCredentialScope("logs"));
     }
@@ -76,7 +83,11 @@ class CredentialScopeAliasTest {
                 .filter(scope -> !scope.equals(catalog.canonicalCredentialScope(scope)))
                 .collect(Collectors.toMap(scope -> scope, catalog::canonicalCredentialScope));
 
-        assertEquals(Map.of("s3express", "s3", "iot-jobs-data", "iot"), rewritten);
+        assertEquals(Map.of(
+                "s3express", "s3",
+                "iot-jobs-data", "iot",
+                "email", "ses",
+                "sesv2", "ses"), rewritten);
     }
 
     @Test

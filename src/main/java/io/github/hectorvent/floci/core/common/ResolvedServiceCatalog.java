@@ -41,7 +41,8 @@ public class ResolvedServiceCatalog {
      * directory-bucket requests as {@code s3express} while the actions, ARNs and condition keys
      * remain {@code s3}; the IoT Jobs Data Plane signs as {@code iot-jobs-data} while its actions
      * are {@code iot:} ({@code iot:DescribeJobExecution} and peers in the Service Authorization
-     * Reference). Keep this minimal: every entry suppresses a distinct IAM namespace.
+     * Reference); SES v1 signs as {@code email} and SES v2 as {@code sesv2} while IAM actions
+     * remain {@code ses:}. Keep this minimal: every entry suppresses a distinct IAM namespace.
      */
     private static final java.util.Map<String, String> CREDENTIAL_SCOPE_ALIASES =
             java.util.Map.of(
