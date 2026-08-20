@@ -726,6 +726,7 @@ public class RuntimeApiServer {
             // mirroring the buffered route's tolerance.
             ctx.request().handler(buffer -> { });
             ctx.request().endHandler(v -> sendStatusOk(ctx));
+            ctx.request().resume();
             return;
         }
 
@@ -740,6 +741,9 @@ public class RuntimeApiServer {
             LOG.warnv("Streaming response for {0} aborted: {1}", requestId, t.getMessage());
             stream.close();
         });
+        // Vert.x 5 delivers the request paused. Setting handler/endHandler does not
+        // resume; without this, later chunks sit in the inbound queue until EOF.
+        ctx.request().resume();
 
         InvokeResult result = new InvokeResult(200, null, null, null, requestId);
         result.setStream(stream);
