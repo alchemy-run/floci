@@ -20,7 +20,6 @@
 | `TestState` | Execute a single ASL state without creating a machine |
 | `StartExecution` | Start a new execution |
 | `StartSyncExecution` | Synchronous EXPRESS execution (HTTP 200 even when the run FAILED) |
-| `lambda:invoke` (optimized) | Task result is the Lambda Invoke envelope (`Payload` / `StatusCode`), not the raw function body |
 | `DescribeExecution` | Get execution status and output |
 | `ListExecutions` | List executions for a state machine |
 | `StopExecution` | Stop a running execution |
