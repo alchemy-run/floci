@@ -62,7 +62,7 @@ class ScheduleDispatcherTest {
 
         dispatcher.tick(Instant.parse("2026-04-21T09:18:00Z"));
 
-        verify(invoker, times(1)).invoke(s.getTarget(), "eu-central-1");
+        verify(invoker, times(1)).invoke(s, Instant.parse("2026-04-21T09:18:00Z"));
     }
 
     @Test
@@ -72,7 +72,7 @@ class ScheduleDispatcherTest {
 
         dispatcher.tick(Instant.parse("2026-04-21T09:17:00Z"));
 
-        verify(invoker, never()).invoke(any(), anyString());
+        verify(invoker, never()).invoke(any(Schedule.class), any(Instant.class));
     }
 
     @Test
@@ -84,7 +84,7 @@ class ScheduleDispatcherTest {
         dispatcher.tick(Instant.parse("2026-04-21T09:19:00Z"));
         dispatcher.tick(Instant.parse("2026-04-21T09:20:00Z"));
 
-        verify(invoker, times(1)).invoke(eq(s.getTarget()), anyString());
+        verify(invoker, times(1)).invoke(eq(s), any(Instant.class));
     }
 
     @Test
@@ -117,7 +117,7 @@ class ScheduleDispatcherTest {
 
         dispatcher.tick(Instant.parse("2026-04-21T09:18:00Z"));
 
-        verify(invoker, never()).invoke(any(), anyString());
+        verify(invoker, never()).invoke(any(Schedule.class), any(Instant.class));
     }
 
     @Test
@@ -128,7 +128,7 @@ class ScheduleDispatcherTest {
 
         dispatcher.tick(Instant.parse("2026-04-21T09:18:00Z"));
 
-        verify(invoker, never()).invoke(any(), anyString());
+        verify(invoker, never()).invoke(any(Schedule.class), any(Instant.class));
     }
 
     @Test
@@ -139,7 +139,7 @@ class ScheduleDispatcherTest {
 
         dispatcher.tick(Instant.parse("2026-04-21T09:18:00Z"));
 
-        verify(invoker, never()).invoke(any(), anyString());
+        verify(invoker, never()).invoke(any(Schedule.class), any(Instant.class));
     }
 
     @Test
@@ -149,13 +149,13 @@ class ScheduleDispatcherTest {
         when(schedulerService.listAllSchedules()).thenReturn(List.of(s));
 
         dispatcher.tick(Instant.parse("2026-04-21T09:04:00Z"));
-        verify(invoker, never()).invoke(any(), anyString());
+        verify(invoker, never()).invoke(any(Schedule.class), any(Instant.class));
 
         dispatcher.tick(Instant.parse("2026-04-21T09:06:00Z"));
-        verify(invoker, times(1)).invoke(eq(s.getTarget()), anyString());
+        verify(invoker, times(1)).invoke(eq(s), any(Instant.class));
 
         dispatcher.tick(Instant.parse("2026-04-21T09:11:01Z"));
-        verify(invoker, times(2)).invoke(eq(s.getTarget()), anyString());
+        verify(invoker, times(2)).invoke(eq(s), any(Instant.class));
     }
 
     @Test
@@ -164,7 +164,7 @@ class ScheduleDispatcherTest {
         when(schedulerService.listAllSchedules()).thenReturn(List.of(s));
 
         assertDoesNotThrow(() -> dispatcher.tick(Instant.parse("2026-04-21T09:18:00Z")));
-        verify(invoker, never()).invoke(any(), anyString());
+        verify(invoker, never()).invoke(any(Schedule.class), any(Instant.class));
     }
 
     @Test
@@ -175,6 +175,6 @@ class ScheduleDispatcherTest {
 
         dispatcher.tick(Instant.parse("2026-04-21T09:18:00Z"));
 
-        verify(invoker, never()).invoke(any(), anyString());
+        verify(invoker, never()).invoke(any(Schedule.class), any(Instant.class));
     }
 }

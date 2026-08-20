@@ -134,7 +134,7 @@ public class ScheduleDispatcher implements Resettable {
             return;
         }
 
-        fire(schedule);
+        fire(schedule, now);
         recordFire(schedule, now);
 
         if (kind == Kind.AT && isDeleteAfterCompletion(schedule)) {
@@ -177,10 +177,9 @@ public class ScheduleDispatcher implements Resettable {
         };
     }
 
-    private void fire(Schedule schedule) {
-        String region = regionOf(schedule);
+    private void fire(Schedule schedule, Instant scheduledTime) {
         try {
-            invoker.invoke(schedule, Instant.now());
+            invoker.invoke(schedule, scheduledTime);
             LOG.infov("Fired schedule {0} in group {1}", schedule.getName(), schedule.getGroupName());
         } catch (Exception e) {
             LOG.warnv("Schedule {0} invocation failed: {1}", schedule.getArn(), e.getMessage());
