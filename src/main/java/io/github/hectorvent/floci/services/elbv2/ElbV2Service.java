@@ -51,6 +51,8 @@ public class ElbV2Service {
 
     private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
     private static final Pattern PEM_CERT = Pattern.compile("-----BEGIN CERTIFICATE-----");
+    /** Classic (8 hex) or current (17 hex) subnet IDs. Anything else is SubnetNotFound. */
+    private static final Pattern AWS_SUBNET_ID = Pattern.compile("subnet-[0-9a-f]{8}(?:[0-9a-f]{9})?");
 
     // region → ARN → resource
     private Map<String, Map<String, LoadBalancer>> loadBalancers = new ConcurrentHashMap<>();
@@ -1159,12 +1161,17 @@ public class ElbV2Service {
             }
             Subnet subnet = lookupEc2Subnet(region, subnetId);
             if (subnet == null) {
-                // Accept IDs the EC2 store cannot see under this RequestContext
-                // (wrong account/region key, or a caller that described subnets
-                // out of band). Real ELBv2 still returns SubnetNotFound for a
-                // truly missing id; we only synthesize a valid-looking subnet-*
-                // so CreateLoadBalancer can proceed. AZ is positional so two
-                // IDs always span two zones (ALB requirement).
+                // Accept well-formed IDs the EC2 store cannot see under this
+                // RequestContext (wrong account/region key, or a caller that
+                // described subnets out of band). Real ELBv2 still returns
+                // SubnetNotFound for a truly missing or malformed id; we only
+                // synthesize a valid-looking subnet-* so CreateLoadBalancer can
+                // proceed. AZ is positional so two IDs always span two zones
+                // (ALB requirement).
+                if (!AWS_SUBNET_ID.matcher(subnetId).matches()) {
+                    throw new AwsException("SubnetNotFound",
+                            "The subnet ID '" + subnetId + "' does not exist", 400);
+                }
                 subnet = synthesizeAcceptedSubnet(region, subnetId, index);
             }
             subnetsById.put(subnetId, subnet);

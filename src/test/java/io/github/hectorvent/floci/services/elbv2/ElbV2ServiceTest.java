@@ -187,6 +187,17 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void createLoadBalancerMalformedSubnetIdIsSubnetNotFound() {
+        when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
+
+        AwsException error = assertThrows(AwsException.class, () -> service.createLoadBalancer(
+                REGION, "malformed-subnet", "internal", "application", "ipv4",
+                List.of("subnet-does-not-exist"), List.of("sg-a"), Map.of()));
+        assertEquals("SubnetNotFound", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
     void createLoadBalancerUsesConfiguredHostnameForDnsSuffix() {
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.hostname()).thenReturn(Optional.of("floci"));
