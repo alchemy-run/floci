@@ -5,6 +5,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import software.amazon.awssdk.services.ses.SesClient;
+import software.amazon.awssdk.services.ses.model.DeleteIdentityRequest;
+import software.amazon.awssdk.services.ses.model.VerifyEmailIdentityRequest;
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.Body;
 import software.amazon.awssdk.services.sesv2.model.Content;
@@ -36,11 +39,16 @@ class SesListManagementOptionsTest {
     private static final String TOPIC = "weekly";
     private static final String FROM = "sender@example.com";
 
+    private static SesClient sesV1;
     private static SesV2Client sesV2;
 
     @BeforeAll
     static void setup() {
+        sesV1 = TestFixtures.sesClient();
         sesV2 = TestFixtures.sesV2Client();
+        // AWS rejects SendEmail from an unverified identity (MessageRejected).
+        sesV1.verifyEmailIdentity(VerifyEmailIdentityRequest.builder()
+                .emailAddress(FROM).build());
         // Only one contact list may exist per account; clear any leftover, then create ours.
         sesV2.listContactLists(r -> { }).contactLists().forEach(cl ->
                 sesV2.deleteContactList(DeleteContactListRequest.builder()
@@ -65,6 +73,14 @@ class SesListManagementOptionsTest {
                 // best-effort
             }
             sesV2.close();
+        }
+        if (sesV1 != null) {
+            try {
+                sesV1.deleteIdentity(DeleteIdentityRequest.builder().identity(FROM).build());
+            } catch (RuntimeException ignored) {
+                // best-effort
+            }
+            sesV1.close();
         }
     }
 
