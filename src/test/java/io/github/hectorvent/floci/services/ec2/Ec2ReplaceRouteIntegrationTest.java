@@ -243,9 +243,8 @@ class Ec2ReplaceRouteIntegrationTest {
             .statusCode(200)
             .body("ReplaceRouteResponse.return", equalTo("true"));
 
-        // ...and the NAT gateway this route used to carry is gone. Order 2 pins the gateway -> NAT
-        // direction; without this the reverse direction could carry the old target over unnoticed.
-        String table = given()
+        // Order 7 leaves NAT on the IPv6 ::/0 route; only this IPv4 default moved.
+        given()
             .formParam("Action", "DescribeRouteTables")
             .formParam("RouteTableId.1", routeTableId)
             .header("Authorization", AUTH_HEADER)
@@ -253,10 +252,7 @@ class Ec2ReplaceRouteIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body(DEFAULT_ROUTE_NODE + ".gatewayId", equalTo(INTERNET_GATEWAY))
-            .extract().asString();
-
-        assertThat(table, not(containsString(NAT_GATEWAY)));
+            .body(DEFAULT_ROUTE_NODE + ".gatewayId", equalTo(INTERNET_GATEWAY));
     }
 
     /** A destination with no target at all must not blank the route and report success. */

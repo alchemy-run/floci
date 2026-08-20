@@ -70,9 +70,11 @@ class Ec2RunInstancesNetworkInterfaceTest {
         String config = Ec2HttpPortMux.nginxConfig(3000, routes);
         assertTrue(config.contains("listen 3000;"));
         assertTrue(config.contains("listen 3000 default_server;"));
-        assertTrue(config.contains("server_name i-aaa.localhost.floci.io;"));
+        assertTrue(config.contains("server_name i-aaa.localhost.floci.io i-aaa.localhost.floci.io:3000"));
         assertTrue(config.contains("proxy_pass http://172.17.0.2:3000;"));
         assertTrue(config.contains("proxy_pass http://172.17.0.3:3000;"));
+        assertTrue(config.contains("return 502"),
+                "unknown Host must 502 instead of stealing the first instance");
     }
 
     @Test
