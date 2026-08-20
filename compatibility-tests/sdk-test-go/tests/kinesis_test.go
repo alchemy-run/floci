@@ -152,7 +152,13 @@ func TestKinesis(t *testing.T) {
 	})
 
 	t.Run("DeleteStream", func(t *testing.T) {
-		_, err := svc.DeleteStream(ctx, &kinesis.DeleteStreamInput{StreamName: aws.String(streamName)})
+		// Real Kinesis rejects DeleteStream while consumers are registered
+		// (the RegisterStreamConsumer subtest above) unless
+		// EnforceConsumerDeletion is set.
+		_, err := svc.DeleteStream(ctx, &kinesis.DeleteStreamInput{
+			StreamName:              aws.String(streamName),
+			EnforceConsumerDeletion: aws.Bool(true),
+		})
 		require.NoError(t, err)
 	})
 }

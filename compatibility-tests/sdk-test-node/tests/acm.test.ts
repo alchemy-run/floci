@@ -68,10 +68,12 @@ describe('ACM Certificate Lifecycle', () => {
 
   it('should reject get certificate while validation is pending', async () => {
     // Real ACM: GetCertificate on a pending certificate fails with
-    // RequestInProgressException (the body does not exist yet).
+    // RequestInProgressException. The JS SDK surfaces the error MESSAGE
+    // ("The certificate request is in progress. ..."), not the code, in
+    // the thrown error's message.
     await expect(
       acm.send(new GetCertificateCommand({ CertificateArn: certificateArn }))
-    ).rejects.toThrow(/RequestInProgress/);
+    ).rejects.toThrow(/in progress/);
   });
 
   it('should list certificates', async () => {

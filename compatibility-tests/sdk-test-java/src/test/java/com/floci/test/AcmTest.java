@@ -123,10 +123,12 @@ class AcmTest {
         Assumptions.assumeTrue(requestedCertArn != null, "RequestCertificate must succeed first");
 
         // Real ACM: GetCertificate on a certificate still pending validation
-        // fails with RequestInProgressException (the body does not exist yet).
+        // fails with RequestInProgressException. The Java SDK's exception
+        // message carries the error MESSAGE ("The certificate request is in
+        // progress. ..."), not the error code.
         assertThatThrownBy(() -> acm.getCertificate(b -> b
                 .certificateArn(requestedCertArn)))
-                .hasMessageContaining("RequestInProgress");
+                .hasMessageContaining("in progress");
     }
 
     @Test
