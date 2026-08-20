@@ -164,7 +164,12 @@ class DynamoDbPartiQLTest {
                                 .statement("UPDATE \"" + TABLE + "\" SET data = 'z' WHERE pk = 'txpk' AND sk = 'txsk2'")
                                 .build()
                 ));
-        assertThat(txResp.responses()).isEmpty();
+        // Real AWS ExecuteTransaction returns one ItemResponse per statement.
+        // Write statements without RETURNING yield empty ItemResponse objects
+        // ({}) rather than omitting Responses or returning an empty list.
+        // See https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_ExecuteTransaction.html
+        assertThat(txResp.responses()).hasSize(2);
+        assertThat(txResp.responses()).allMatch(r -> !r.hasItem());
 
         ExecuteStatementResponse verify = ddb.executeStatement(r -> r
                 .statement("SELECT * FROM \"" + TABLE + "\" WHERE pk = 'txpk' AND sk = 'txsk2'"));

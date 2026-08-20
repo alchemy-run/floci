@@ -460,7 +460,11 @@ class Ec2Tests {
         Instance launched = resp.instances().get(0);
 
         assertThat(instanceId).isNotNull().startsWith("i-");
-        assertThat(launched.state().name()).isEqualTo(InstanceStateName.PENDING);
+        // Control-plane marks the instance running immediately so Alchemy
+        // waitForState does not treat a later guest-launch failure as a
+        // failed create. Real AWS returns pending; DescribeInstances is
+        // where callers wait.
+        assertThat(launched.state().name()).isEqualTo(InstanceStateName.RUNNING);
         assertThat(launched.instanceType()).isEqualTo(InstanceType.T2_MICRO);
         assertThat(launched.keyName()).isEqualTo(keyName);
     }
