@@ -45,7 +45,7 @@ ENV GOSU_AMD64_SHA256=bbc4136d03ab138b1ad66fa4fc051bafc6cc7ffae632b069a53657279a
 ENV GOSU_ARM64_SHA256=c3805a85d17f4454c23d7059bcb97e1ec1af272b90126e79ed002342de08389b
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates passwd python3 python3-pip wget; \
+    apt-get install -y --no-install-recommends ca-certificates passwd python3 python3-pip wget nodejs; \
     rm -rf /var/lib/apt/lists/*; \
     pip3 install --no-cache-dir --break-system-packages awscli boto3; \
     aws_bin="$(command -v aws)"; \
@@ -81,6 +81,10 @@ VOLUME /app/data
 
 EXPOSE 4566
 EXPOSE 443
+
+# Emulated CloudFront edge ports: each distribution is served on one of these
+# as plain HTTP, so it is openable at http://localhost:<port>.
+EXPOSE 9500-9519
 
 # Need to expose separately due to https://github.com/floci-io/floci/issues/2095.
 # This preseres compatibility with https://github.com/docker-java/docker-java/blob/002b6eb7aa2b892be729c7c2a5e95f782924db38/docker-java-api/src/main/java/com/github/dockerjava/api/model/ExposedPort.java#L119

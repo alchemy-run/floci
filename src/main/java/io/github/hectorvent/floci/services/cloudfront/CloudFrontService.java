@@ -24,6 +24,7 @@ import io.github.hectorvent.floci.services.cloudfront.model.RealtimeLogConfig;
 import io.github.hectorvent.floci.services.cloudfront.model.ResponseHeadersPolicy;
 import io.github.hectorvent.floci.services.cloudfront.model.StreamingDistribution;
 import io.github.hectorvent.floci.services.cloudfront.model.VpcOrigin;
+import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgePorts;
 import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.elbv2.model.LoadBalancer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -70,13 +71,16 @@ public class CloudFrontService {
     private final String accountId;
     private final String domainSuffix;
     private final ElbV2Service elbV2;
+    /** Null in unit tests: a distribution without a local port is still Host-addressable. */
+    private final CloudFrontEdgePorts edgePorts;
 
     public CloudFrontService(StorageFactory factory, EmulatorConfig config) {
-        this(factory, config, null);
+        this(factory, config, null, null);
     }
 
     @Inject
-    public CloudFrontService(StorageFactory factory, EmulatorConfig config, ElbV2Service elbV2) {
+    public CloudFrontService(StorageFactory factory, EmulatorConfig config, ElbV2Service elbV2,
+                             CloudFrontEdgePorts edgePorts) {
         this.distStore = factory.create("cloudfront", "cloudfront-distributions.json",
                 new TypeReference<Map<String, Distribution>>() {});
         this.invalidationStore = factory.create("cloudfront", "cloudfront-invalidations.json",
@@ -120,6 +124,7 @@ public class CloudFrontService {
         this.accountId = config.defaultAccountId();
         this.domainSuffix = config.services().cloudfront().domainSuffix();
         this.elbV2 = elbV2;
+        this.edgePorts = edgePorts;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -137,6 +142,7 @@ public class CloudFrontService {
             tagStore.put("distribution/" + id, tags);
         }
         distStore.put(id, dist);
+        bindEdgePort(id);
         return dist;
     }
 
@@ -175,6 +181,51 @@ public class CloudFrontService {
         distStore.delete(id);
         invalidationStore.delete(id);
         tagStore.delete("distribution/" + id);
+        if (edgePorts != null) {
+            edgePorts.release(id);
+        }
+    }
+
+    /**
+     * Serve this distribution's emulated edge on its own local port, so it is
+     * reachable at {@code http://localhost:<port>} without a hosts entry. Never
+     * fails the control-plane call — {@link CloudFrontEdgePorts#bind} reports and
+     * swallows the failure, leaving the distribution Host-addressable.
+     */
+    public Integer bindEdgePort(String id) {
+        return edgePorts == null ? null : edgePorts.bind(id);
+    }
+
+    /** The local URL this distribution's edge is served on, or {@code null}. */
+    public String edgeUrl(String id) {
+        return edgePorts == null ? null : edgePorts.urlOf(id);
+    }
+
+    /**
+     * Find the distribution serving {@code host} — its CloudFront domain name or
+     * one of its alternate domain names. Returns {@code null} when no
+     * distribution claims the host, so the emulated edge can leave the request
+     * alone. Hostnames are case-insensitive.
+     */
+    public Distribution findDistributionByHost(String host) {
+        if (host == null || host.isBlank()) {
+            return null;
+        }
+        for (Distribution dist : distStore.scan(k -> true)) {
+            if (host.equalsIgnoreCase(dist.getDomainName())) {
+                return dist;
+            }
+            var config = dist.getConfig();
+            if (config == null || config.getAliases() == null) {
+                continue;
+            }
+            for (String alias : config.getAliases()) {
+                if (host.equalsIgnoreCase(alias)) {
+                    return dist;
+                }
+            }
+        }
+        return null;
     }
 
     public List<Distribution> listDistributions(String marker, int maxItems) {

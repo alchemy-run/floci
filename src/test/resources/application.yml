@@ -281,6 +281,7 @@ floci:
       enabled: true
     cloudfront:
       enabled: true
+      function-runtime-command: node
     appsync:
       enabled: true
       schema-worker-threads: 4

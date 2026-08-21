@@ -19,6 +19,8 @@ ENV GOSU_AMD64_SHA256=bbc4136d03ab138b1ad66fa4fc051bafc6cc7ffae632b069a53657279a
 ENV GOSU_ARM64_SHA256=c3805a85d17f4454c23d7059bcb97e1ec1af272b90126e79ed002342de08389b
 RUN set -eux; \
     microdnf install -y --nodocs shadow-utils; \
+    microdnf module enable -y nodejs:22; \
+    microdnf install -y --nodocs --setopt=install_weak_deps=0 nodejs; \
     microdnf clean all; \
     useradd -r -u 1001 -g root -d /app -s /sbin/nologin floci; \
     arch="$(uname -m)"; \

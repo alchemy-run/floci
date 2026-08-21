@@ -1317,6 +1317,55 @@ public interface EmulatorConfig {
 
         @WithDefault("cloudfront.net")
         String domainSuffix();
+
+        /**
+         * Command used to run CloudFront Functions. Must be a JavaScript runtime
+         * that supports {@code node:vm}. Env: FLOCI_SERVICES_CLOUDFRONT_FUNCTION_RUNTIME_COMMAND
+         */
+        @WithDefault("node")
+        String functionRuntimeCommand();
+
+        /** Wall-clock budget for one function invocation. Env: FLOCI_SERVICES_CLOUDFRONT_FUNCTION_TIMEOUT_MS */
+        @WithDefault("5000")
+        int functionTimeoutMs();
+
+        /** CloudFront's maximum function source size. Env: FLOCI_SERVICES_CLOUDFRONT_FUNCTION_MAX_CODE_BYTES */
+        @WithDefault("10240")
+        int functionMaxCodeBytes();
+
+        /**
+         * Host that loopback CloudFront origins resolve to when Floci itself runs
+         * in a container (a dev server on the developer's machine). Detected
+         * automatically when unset. Env: FLOCI_SERVICES_CLOUDFRONT_ORIGIN_LOOPBACK_HOST
+         */
+        Optional<String> originLoopbackHost();
+
+        /**
+         * Serve every distribution's emulated edge on its own local port, in
+         * addition to the Host-addressed route on the gateway. A distribution's
+         * {@code *.cloudfront.net} domain resolves to nothing on a developer
+         * machine, so the port is what makes the emulated edge openable in a
+         * browser. Env: FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS_ENABLED
+         */
+        @WithDefault("true")
+        boolean edgePortsEnabled();
+
+        /** First port of the emulated-edge port range. Env: FLOCI_SERVICES_CLOUDFRONT_EDGE_BASE_PORT */
+        @WithDefault("9500")
+        int edgeBasePort();
+
+        /** Last port of the emulated-edge port range. Env: FLOCI_SERVICES_CLOUDFRONT_EDGE_MAX_PORT */
+        @WithDefault("9519")
+        int edgeMaxPort();
+
+        /**
+         * Explicit edge ports, overriding the base/max range: a comma-separated
+         * list of ports and/or {@code from-to} ranges. A containerized emulator
+         * can only be reached on ports the container publishes, so whoever runs
+         * the container narrows the range to what it actually published.
+         * Env: FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS
+         */
+        Optional<String> edgePorts();
     }
 
     interface AppSyncServiceConfig {

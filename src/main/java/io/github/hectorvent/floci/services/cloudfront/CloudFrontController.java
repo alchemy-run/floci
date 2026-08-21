@@ -1,10 +1,13 @@
 package io.github.hectorvent.floci.services.cloudfront;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontFunctionRuntime;
 import io.github.hectorvent.floci.services.cloudfront.model.*;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -16,6 +19,7 @@ import javax.xml.stream.XMLStreamReader;
 import java.io.StringReader;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,10 +40,16 @@ public class CloudFrontController {
     }
 
     private final CloudFrontService service;
+    private final CloudFrontFunctionRuntime functionRuntime;
+    private final ObjectMapper mapper;
 
     @Inject
-    public CloudFrontController(CloudFrontService service) {
+    public CloudFrontController(CloudFrontService service,
+                                CloudFrontFunctionRuntime functionRuntime,
+                                ObjectMapper mapper) {
         this.service = service;
+        this.functionRuntime = functionRuntime;
+        this.mapper = mapper;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -881,6 +891,83 @@ public class CloudFrontController {
             return Response.ok(xmlFunctionResponse(fn), XML).header("ETag", fn.getEtag()).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
+        }
+    }
+
+    /**
+     * Runs a function against a caller-supplied event object and returns the
+     * result, its logs and its error message — the same runtime the emulated
+     * edge uses, so a local {@code test-function} result and a locally-served
+     * request agree.
+     */
+    @POST
+    @Path("/function/{Name}/test")
+    public Response testFunction(@PathParam("Name") String name,
+                                 @HeaderParam("If-Match") String ifMatch,
+                                 String body) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            String stage = XmlParser.extractFirst(body, "Stage", "DEVELOPMENT");
+            CloudFrontFunction fn = service.describeFunction(name, stage);
+            if (!ifMatch.equals(fn.getEtag())) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            JsonNode event = parseEventObject(XmlParser.extractFirst(body, "EventObject", null));
+            CloudFrontFunctionRuntime.Execution execution = functionRuntime.execute(fn, event);
+
+            XmlBuilder xml = new XmlBuilder()
+                    .start("TestResult", NS)
+                    .raw(xmlFunctionResponse(fn))
+                    .elem("ComputeUtilization", execution.computeUtilization())
+                    .start("FunctionExecutionLogs");
+            for (String log : execution.logs()) {
+                xml.elem("member", log);
+            }
+            xml.end("FunctionExecutionLogs");
+            if (execution.ok()) {
+                xml.elem("FunctionOutput", functionOutput(execution));
+            } else {
+                xml.elem("FunctionErrorMessage", execution.error());
+            }
+            xml.end("TestResult");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    /** The {@code EventObject} blob is base64 in the REST-XML wire format. */
+    private JsonNode parseEventObject(String encoded) {
+        if (encoded == null || encoded.isBlank()) {
+            throw new AwsException("InvalidArgument", "EventObject is required.", 400);
+        }
+        try {
+            byte[] decoded;
+            try {
+                decoded = Base64.getDecoder().decode(encoded.replaceAll("\\s", ""));
+            } catch (IllegalArgumentException notBase64) {
+                decoded = encoded.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            }
+            return mapper.readTree(decoded);
+        } catch (Exception e) {
+            throw new AwsException("InvalidArgument",
+                    "EventObject is not a valid JSON event object: " + e.getMessage(), 400);
+        }
+    }
+
+    /** CloudFront returns the result wrapped as {@code {"request":…}} or {@code {"response":…}}. */
+    private String functionOutput(CloudFrontFunctionRuntime.Execution execution) {
+        try {
+            var wrapper = mapper.createObjectNode();
+            wrapper.set(execution.isResponse() ? "response" : "request", execution.output());
+            return mapper.writeValueAsString(wrapper);
+        } catch (Exception e) {
+            throw new AwsException("InvalidArgument",
+                    "Could not serialize the function output: " + e.getMessage(), 400);
         }
     }
 
@@ -2029,7 +2116,7 @@ public class CloudFrontController {
         xml.raw(xmlQuantityItems("AllowedMethods", "Method", allowed.size(),
                 allowed.stream().map(m -> "<Method>" + XmlBuilder.escape(m) + "</Method>").toList()));
 
-        xml.start("FunctionAssociations").elem("Quantity", 0).end("FunctionAssociations");
+        xml.raw(xmlFunctionAssociations(dcb.getFunctionAssociations()));
         xml.start("LambdaFunctionAssociations").elem("Quantity", 0).end("LambdaFunctionAssociations");
 
         xml.end("DefaultCacheBehavior");
@@ -2055,7 +2142,7 @@ public class CloudFrontController {
         xml.raw(xmlQuantityItems("AllowedMethods", "Method", allowed.size(),
                 allowed.stream().map(m -> "<Method>" + XmlBuilder.escape(m) + "</Method>").toList()));
 
-        xml.start("FunctionAssociations").elem("Quantity", 0).end("FunctionAssociations");
+        xml.raw(xmlFunctionAssociations(cb.getFunctionAssociations()));
         xml.start("LambdaFunctionAssociations").elem("Quantity", 0).end("LambdaFunctionAssociations");
 
         xml.end("CacheBehavior");
@@ -2258,6 +2345,25 @@ public class CloudFrontController {
                 .end("FunctionMetadata")
                 .end("FunctionSummary")
                 .build();
+    }
+
+    private String xmlFunctionAssociations(List<Map<String, String>> associations) {
+        List<Map<String, String>> items = associations != null ? associations : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("FunctionAssociations")
+                .elem("Quantity", items.size());
+        if (!items.isEmpty()) {
+            xml.start("Items");
+            for (Map<String, String> association : items) {
+                xml.start("FunctionAssociation")
+                        .elem("FunctionARN", association.get("FunctionARN"))
+                        .elem("EventType", association.get("EventType"))
+                        .end("FunctionAssociation");
+            }
+            xml.end("Items");
+        }
+        xml.end("FunctionAssociations");
+        return xml.build();
     }
 
     private String xmlKeyValueStoreAssociations(List<String> arns) {
@@ -2562,7 +2668,10 @@ public class CloudFrontController {
             XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
             boolean inDcb = false;
             boolean inAllowedMethods = false;
+            boolean inFunctionAssociations = false;
             List<String> allowedMethods = new ArrayList<>();
+            List<Map<String, String>> functionAssociations = new ArrayList<>();
+            Map<String, String> currentAssociation = null;
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -2572,6 +2681,22 @@ public class CloudFrontController {
                         case "DefaultCacheBehavior" -> inDcb = true;
                         case "AllowedMethods" -> {
                             if (inDcb) inAllowedMethods = true;
+                        }
+                        case "FunctionAssociations" -> {
+                            if (inDcb) inFunctionAssociations = true;
+                        }
+                        case "FunctionAssociation" -> {
+                            if (inFunctionAssociations) currentAssociation = new LinkedHashMap<>();
+                        }
+                        case "FunctionARN" -> {
+                            if (currentAssociation != null) {
+                                currentAssociation.put("FunctionARN", r.getElementText());
+                            }
+                        }
+                        case "EventType" -> {
+                            if (currentAssociation != null) {
+                                currentAssociation.put("EventType", r.getElementText());
+                            }
                         }
                         case "TargetOriginId" -> {
                             if (inDcb) dcb.setTargetOriginId(r.getElementText());
@@ -2606,6 +2731,13 @@ public class CloudFrontController {
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
                         case "AllowedMethods" -> inAllowedMethods = false;
+                        case "FunctionAssociation" -> {
+                            if (currentAssociation != null) {
+                                functionAssociations.add(currentAssociation);
+                                currentAssociation = null;
+                            }
+                        }
+                        case "FunctionAssociations" -> inFunctionAssociations = false;
                         case "DefaultCacheBehavior" -> inDcb = false;
                         default -> {
                         }
@@ -2615,6 +2747,9 @@ public class CloudFrontController {
             r.close();
             if (!allowedMethods.isEmpty()) {
                 dcb.setAllowedMethods(allowedMethods);
+            }
+            if (!functionAssociations.isEmpty()) {
+                dcb.setFunctionAssociations(functionAssociations);
             }
         } catch (Exception ignored) {
         }
@@ -2631,8 +2766,11 @@ public class CloudFrontController {
             boolean inCacheBehaviors = false;
             boolean inCacheBehavior = false;
             boolean inAllowedMethods = false;
+            boolean inFunctionAssociations = false;
             CacheBehavior current = null;
             List<String> allowedMethods = new ArrayList<>();
+            List<Map<String, String>> functionAssociations = new ArrayList<>();
+            Map<String, String> currentAssociation = null;
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -2645,10 +2783,27 @@ public class CloudFrontController {
                                 inCacheBehavior = true;
                                 current = new CacheBehavior();
                                 allowedMethods = new ArrayList<>();
+                                functionAssociations = new ArrayList<>();
                             }
                         }
                         case "AllowedMethods" -> {
                             if (inCacheBehavior) inAllowedMethods = true;
+                        }
+                        case "FunctionAssociations" -> {
+                            if (inCacheBehavior) inFunctionAssociations = true;
+                        }
+                        case "FunctionAssociation" -> {
+                            if (inFunctionAssociations) currentAssociation = new LinkedHashMap<>();
+                        }
+                        case "FunctionARN" -> {
+                            if (currentAssociation != null) {
+                                currentAssociation.put("FunctionARN", r.getElementText());
+                            }
+                        }
+                        case "EventType" -> {
+                            if (currentAssociation != null) {
+                                currentAssociation.put("EventType", r.getElementText());
+                            }
                         }
                         case "PathPattern" -> {
                             if (inCacheBehavior && current != null) current.setPathPattern(r.getElementText());
@@ -2684,10 +2839,20 @@ public class CloudFrontController {
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
                         case "AllowedMethods" -> inAllowedMethods = false;
+                        case "FunctionAssociation" -> {
+                            if (currentAssociation != null) {
+                                functionAssociations.add(currentAssociation);
+                                currentAssociation = null;
+                            }
+                        }
+                        case "FunctionAssociations" -> inFunctionAssociations = false;
                         case "CacheBehavior" -> {
                             if (inCacheBehavior && current != null) {
                                 if (!allowedMethods.isEmpty()) {
                                     current.setAllowedMethods(allowedMethods);
+                                }
+                                if (!functionAssociations.isEmpty()) {
+                                    current.setFunctionAssociations(functionAssociations);
                                 }
                                 result.add(current);
                             }
@@ -2827,9 +2992,27 @@ public class CloudFrontController {
         fn.setName(XmlParser.extractFirst(body, "Name", null));
         fn.setComment(XmlParser.extractFirst(body, "Comment", null));
         fn.setRuntime(XmlParser.extractFirst(body, "Runtime", "cloudfront-js-2.0"));
-        fn.setFunctionCode(XmlParser.extractFirst(body, "FunctionCode", null));
+        fn.setFunctionCode(decodeFunctionCode(XmlParser.extractFirst(body, "FunctionCode", null)));
         fn.setKeyValueStoreArns(XmlParser.extractAll(body, "KeyValueStoreARN"));
         return fn;
+    }
+
+    /**
+     * {@code FunctionCode} is a blob, so the REST-XML wire format carries it
+     * base64-encoded. Store the source itself — that is what the runtime runs
+     * and what the size limit applies to. Hand-written XML that carries plain
+     * source is accepted as-is.
+     */
+    private String decodeFunctionCode(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(value.replaceAll("\\s", ""));
+            return new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException notBase64) {
+            return value;
+        }
     }
 
     private VpcOrigin parseVpcOrigin(String body) {
