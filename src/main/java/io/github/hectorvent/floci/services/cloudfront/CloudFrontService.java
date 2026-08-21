@@ -177,6 +177,33 @@ public class CloudFrontService {
         tagStore.delete("distribution/" + id);
     }
 
+    /**
+     * Find the distribution serving {@code host} — its CloudFront domain name or
+     * one of its alternate domain names. Returns {@code null} when no
+     * distribution claims the host, so the emulated edge can leave the request
+     * alone. Hostnames are case-insensitive.
+     */
+    public Distribution findDistributionByHost(String host) {
+        if (host == null || host.isBlank()) {
+            return null;
+        }
+        for (Distribution dist : distStore.scan(k -> true)) {
+            if (host.equalsIgnoreCase(dist.getDomainName())) {
+                return dist;
+            }
+            var config = dist.getConfig();
+            if (config == null || config.getAliases() == null) {
+                continue;
+            }
+            for (String alias : config.getAliases()) {
+                if (host.equalsIgnoreCase(alias)) {
+                    return dist;
+                }
+            }
+        }
+        return null;
+    }
+
     public List<Distribution> listDistributions(String marker, int maxItems) {
         List<Distribution> all = new ArrayList<>(distStore.scan(k -> true));
         all.sort((a, b) -> a.getId().compareTo(b.getId()));

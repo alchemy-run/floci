@@ -33,6 +33,7 @@ quarkus:
         - ui/*.html
         - ec2/*.yaml
         - i18n/*.properties
+        - cloudfront/*.mjs
         - org/apache/velocity/runtime/defaults/*.properties
     additional-build-args:
       - --report-unsupported-elements-at-runtime
@@ -463,6 +464,7 @@ floci:
       enabled: true
     cloudfront:
       enabled: true
+      function-runtime-command: node
     appsync:
       enabled: true
       schema-worker-threads: 4

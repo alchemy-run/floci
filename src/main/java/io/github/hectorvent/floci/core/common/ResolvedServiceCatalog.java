@@ -410,7 +410,8 @@ public class ResolvedServiceCatalog {
                         // cloudfront-keyvaluestore: the KVS data plane signs with its own scope
                         Set.of(), Set.of("cloudfront", "cloudfront-keyvaluestore"), Set.of(),
                         Set.of(CloudFrontController.class,
-                                io.github.hectorvent.floci.services.cloudfront.CloudFrontKvsDataPlaneController.class)),
+                                io.github.hectorvent.floci.services.cloudfront.CloudFrontKvsDataPlaneController.class,
+                                io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgeController.class)),
                 descriptor("appsync", "appsync", config.services().appsync().enabled(), true,
                         "appsync", storageMode(config.storage().services().appsync().mode(), config.storage().mode()),
                         config.storage().services().appsync().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

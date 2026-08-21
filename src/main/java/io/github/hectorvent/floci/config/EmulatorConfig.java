@@ -1317,6 +1317,28 @@ public interface EmulatorConfig {
 
         @WithDefault("cloudfront.net")
         String domainSuffix();
+
+        /**
+         * Command used to run CloudFront Functions. Must be a JavaScript runtime
+         * that supports {@code node:vm}. Env: FLOCI_SERVICES_CLOUDFRONT_FUNCTION_RUNTIME_COMMAND
+         */
+        @WithDefault("node")
+        String functionRuntimeCommand();
+
+        /** Wall-clock budget for one function invocation. Env: FLOCI_SERVICES_CLOUDFRONT_FUNCTION_TIMEOUT_MS */
+        @WithDefault("5000")
+        int functionTimeoutMs();
+
+        /** CloudFront's maximum function source size. Env: FLOCI_SERVICES_CLOUDFRONT_FUNCTION_MAX_CODE_BYTES */
+        @WithDefault("10240")
+        int functionMaxCodeBytes();
+
+        /**
+         * Host that loopback CloudFront origins resolve to when Floci itself runs
+         * in a container (a dev server on the developer's machine). Detected
+         * automatically when unset. Env: FLOCI_SERVICES_CLOUDFRONT_ORIGIN_LOOPBACK_HOST
+         */
+        Optional<String> originLoopbackHost();
     }
 
     interface AppSyncServiceConfig {

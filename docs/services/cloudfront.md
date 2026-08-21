@@ -1,6 +1,6 @@
 # CloudFront
 
-CloudFront management-plane emulation. Supports distribution lifecycle, cache policies, origin request policies, response headers policies, origin access controls, origin access identities, CloudFront Functions, invalidations, and tagging. Actual content delivery is not emulated — this is a management-plane-only implementation.
+CloudFront emulation: distribution lifecycle, cache policies, origin request policies, response headers policies, origin access controls, origin access identities, CloudFront Functions, invalidations, and tagging — plus an emulated edge that serves requests addressed to a distribution's domain name.
 
 **Protocol:** REST XML  
 **API version:** `2020-05-31`  
@@ -95,6 +95,7 @@ CloudFront management-plane emulation. Supports distribution lifecycle, cache po
 | `DescribeFunction` | GET | `/2020-05-31/function/{Name}/describe` |
 | `UpdateFunction` | PUT | `/2020-05-31/function/{Name}` |
 | `PublishFunction` | POST | `/2020-05-31/function/{Name}/publish` |
+| `TestFunction` | POST | `/2020-05-31/function/{Name}/test` |
 | `DeleteFunction` | DELETE | `/2020-05-31/function/{Name}` |
 | `ListFunctions` | GET | `/2020-05-31/function` |
 
@@ -315,8 +316,59 @@ ETAG=$(aws cloudfront get-distribution --id E1Z2X3C4V5B6N7 \
 aws cloudfront delete-distribution --id E1Z2X3C4V5B6N7 --if-match "$ETAG"
 ```
 
+## The Emulated Edge
+
+A request whose `Host` is a distribution's domain name (`{Id}.cloudfront.net`)
+or one of its alternate domain names is served by the emulated edge:
+
+1. the cache behavior whose path pattern matches is selected;
+2. a CloudFront event object is built from the request;
+3. the behavior's `viewer-request` function runs;
+4. the function's response is returned, or the (possibly rewritten) request is
+   forwarded to the resolved origin — including an origin the function chose
+   with `cf.updateRequestOrigin()`;
+5. the behavior's `viewer-response` function, if any, runs over the result.
+
+```bash
+curl -H "Host: E1Z2X3C4V5B6N7.cloudfront.net" http://localhost:4566/index.html
+```
+
+An origin that is itself an emulated AWS endpoint (an S3 bucket's virtual host,
+a Lambda function URL) is routed back into the emulator with its AWS `Host`
+intact, so bucket origins work without extra configuration.
+
+### CloudFront Functions
+
+Functions run in a JavaScript sandbox that matches the CloudFront Functions
+runtime rather than Node.js: only the ECMAScript built-ins, `console`, and the
+built-in `cloudfront` module (`cf.kvs().get/exists/meta`,
+`cf.updateRequestOrigin`, `cf.selectRequestOriginById`) are in scope. There is
+no `fetch`, no timer, no `require`/`import`, no `process`, and `eval` and the
+`Function` constructor are disabled. Code is always strict and must be within
+CloudFront's 10 KB limit. The same runtime backs `TestFunction`, so a local
+test result reflects what the edge will do.
+
+The runtime is a `node` child process. Both emulator images ship Node; set
+`FLOCI_SERVICES_CLOUDFRONT_FUNCTION_RUNTIME_COMMAND` to point at a different
+JavaScript runtime.
+
+| Setting | Env | Default |
+|---|---|---|
+| Function runtime command | `FLOCI_SERVICES_CLOUDFRONT_FUNCTION_RUNTIME_COMMAND` | `node` |
+| Function timeout (ms) | `FLOCI_SERVICES_CLOUDFRONT_FUNCTION_TIMEOUT_MS` | `5000` |
+| Max function source bytes | `FLOCI_SERVICES_CLOUDFRONT_FUNCTION_MAX_CODE_BYTES` | `10240` |
+| Loopback origin host | `FLOCI_SERVICES_CLOUDFRONT_ORIGIN_LOOPBACK_HOST` | auto-detected |
+
+When the emulator runs in a container, an origin pointing at `localhost` means
+the developer's machine, so it resolves to `host.docker.internal` (or the
+docker bridge). Run the container with
+`--add-host=host.docker.internal:host-gateway` on native Linux Docker.
+
 ## Not Supported
 
-- `TestFunction` execution (function is stored, not executed)
+- Caching, compression and the viewer protocol policy — every request reaches
+  the origin on the scheme it arrived on
+- `ComputeUtilization` is derived from the emulator's own JS engine and is not
+  comparable to the value AWS reports
+- Lambda@Edge associations
 - Anycast IP lists, distribution tenants, connection groups, trust stores
-- Actual CDN content delivery and caching
