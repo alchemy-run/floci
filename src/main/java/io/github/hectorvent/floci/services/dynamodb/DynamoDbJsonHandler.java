@@ -1324,7 +1324,21 @@ public class DynamoDbJsonHandler {
 
     private Response handleDescribeContinuousBackups(JsonNode request, String region) {
         String tableName = request.path("TableName").asText();
-        TableDefinition table = dynamoDbService.describeTable(tableName, region);
+        // DescribeContinuousBackups is one of the operations AWS answers with
+        // TableNotFoundException rather than the generic ResourceNotFoundException
+        // (it is the only not-found error the operation models), so a client whose
+        // SDK types the union off the AWS model cannot match what we return
+        // otherwise.
+        TableDefinition table;
+        try {
+            table = dynamoDbService.describeTable(tableName, region);
+        } catch (AwsException e) {
+            if ("ResourceNotFoundException".equals(e.getErrorCode())) {
+                throw new AwsException("TableNotFoundException",
+                        "Table not found: " + tableName, 400);
+            }
+            throw e;
+        }
 
         ObjectNode response = objectMapper.createObjectNode();
         response.set("ContinuousBackupsDescription", continuousBackupsDescriptionNode(table));
