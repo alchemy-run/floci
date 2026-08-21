@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.appsync.graphql.util;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -9,6 +10,26 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.Pattern;
 
+/**
+ * Velocity resolves `$util.foo()` — and `$util.str`, `$util.time`, ... — by
+ * reflecting over these classes at runtime. Native image strips methods it
+ * cannot see a call site for, and `RUNTIME_REFERENCES_STRICT` is off, so an
+ * unresolvable reference is echoed VERBATIM instead of failing: a template
+ * comes back as literal `$util.toJson(...)` text and the caller gets
+ * un-evaluated VTL. Register the whole `$util` surface so introspection
+ * still finds it in a native build.
+ */
+@RegisterForReflection(
+        targets = {
+                AppSyncUtil.class,
+                StrUtil.class,
+                TimeUtil.class,
+                MathUtil.class,
+                DynamoDbUtil.class,
+                TransformUtil.class,
+                ListUtil.class,
+                MapUtil.class,
+        })
 public class AppSyncUtil {
 
     private final ObjectMapper objectMapper;
