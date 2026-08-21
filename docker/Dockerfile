@@ -82,6 +82,10 @@ VOLUME /app/data
 EXPOSE 4566
 EXPOSE 443
 
+# Emulated CloudFront edge ports: each distribution is served on one of these
+# as plain HTTP, so it is openable at http://localhost:<port>.
+EXPOSE 9500-9519
+
 # Need to expose separately due to https://github.com/floci-io/floci/issues/2095.
 # This preseres compatibility with https://github.com/docker-java/docker-java/blob/002b6eb7aa2b892be729c7c2a5e95f782924db38/docker-java-api/src/main/java/com/github/dockerjava/api/model/ExposedPort.java#L119
 EXPOSE 6379

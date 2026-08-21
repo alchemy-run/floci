@@ -14,6 +14,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * The emulated CloudFront edge: a distribution's viewer-request function runs
@@ -328,5 +329,61 @@ class CloudFrontEdgeIntegrationTest {
                 .then()
                 .statusCode(400)
                 .body(containsString("InvalidIfMatchVersion"));
+    }
+
+    /**
+     * Every distribution also gets a plain-HTTP port of its own. That port is
+     * the only address of the emulated edge that actually works on a developer
+     * machine: {@code *.cloudfront.net} resolves to nothing without a hosts
+     * entry, and the emulator's TLS certificate is self-signed. The emulator
+     * assigns the port, so it reports it back.
+     */
+    @Test
+    void servesEachDistributionOnItsOwnPort() {
+        String kvsArn = createKeyValueStore("edge-port-kvs", "greeting", "by-port");
+        Function function = createFunction("edge-port-fn", """
+                import cf from "cloudfront";
+                async function handler(event) {
+                  var greeting = await cf.kvs().get("greeting");
+                  return {
+                    statusCode: 200,
+                    headers: { "content-type": { value: "text/plain" } },
+                    body: { encoding: "text", data: greeting + " " + event.request.headers.host.value }
+                  };
+                }
+                """, kvsArn);
+        String distributionId = createDistribution("edge-port", function.arn());
+
+        ExtractableResponse<Response> assigned = given()
+                .when()
+                .get("/_floci/cloudfront-edge/" + distributionId)
+                .then()
+                .statusCode(200)
+                .body("DistributionId", equalTo(distributionId))
+                .extract();
+        int port = assigned.path("Port");
+        assertEquals("http://localhost:" + port, assigned.path("Url"));
+
+        // Plain HTTP, no Host header games, no TLS: what a browser does.
+        given()
+                .baseUri("http://localhost")
+                .port(port)
+                .when()
+                .get("/greet/me")
+                .then()
+                .statusCode(200)
+                // The viewer's own Host reaches the function untouched, so edge
+                // code that reads it sees the address the request arrived on.
+                .body(equalTo("by-port localhost:" + port));
+
+        // The listing reports the same assignment.
+        given()
+                .when()
+                .get("/_floci/cloudfront-edge")
+                .then()
+                .statusCode(200)
+                .body("Enabled", equalTo(true))
+                .body("Distributions.find { it.DistributionId == '%s' }.Port".formatted(distributionId),
+                        equalTo(port));
     }
 }

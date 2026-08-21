@@ -1,6 +1,6 @@
 # CloudFront
 
-CloudFront emulation: distribution lifecycle, cache policies, origin request policies, response headers policies, origin access controls, origin access identities, CloudFront Functions, invalidations, and tagging — plus an emulated edge that serves requests addressed to a distribution's domain name.
+CloudFront emulation: distribution lifecycle, cache policies, origin request policies, response headers policies, origin access controls, origin access identities, CloudFront Functions, invalidations, and tagging — plus an emulated edge that serves requests addressed to a distribution's domain name or to its own local port.
 
 **Protocol:** REST XML  
 **API version:** `2020-05-31`  
@@ -319,7 +319,8 @@ aws cloudfront delete-distribution --id E1Z2X3C4V5B6N7 --if-match "$ETAG"
 ## The Emulated Edge
 
 A request whose `Host` is a distribution's domain name (`{Id}.cloudfront.net`)
-or one of its alternate domain names is served by the emulated edge:
+or one of its alternate domain names — or a request to the distribution's own
+[local port](#per-distribution-ports) — is served by the emulated edge:
 
 1. the cache behavior whose path pattern matches is selected;
 2. a CloudFront event object is built from the request;
@@ -336,6 +337,36 @@ curl -H "Host: E1Z2X3C4V5B6N7.cloudfront.net" http://localhost:4566/index.html
 An origin that is itself an emulated AWS endpoint (an S3 bucket's virtual host,
 a Lambda function URL) is routed back into the emulator with its AWS `Host`
 intact, so bucket origins work without extra configuration.
+
+### Per-distribution ports
+
+`{Id}.cloudfront.net` is a real AWS hostname that resolves to nothing on a
+developer's machine, so reaching the edge through it needs a `/etc/hosts` entry
+and a fight with TLS. Every distribution therefore also gets a plain-HTTP port
+of its own, openable in a browser like any other local dev server:
+
+```bash
+$ curl -s http://localhost:4566/_floci/cloudfront-edge/E1Z2X3C4V5B6N7
+{"DistributionId":"E1Z2X3C4V5B6N7","Port":9500,"Url":"http://localhost:9500"}
+
+$ curl http://localhost:9500/index.html
+```
+
+`GET /_floci/cloudfront-edge` lists every assignment. The viewer's `Host` is
+passed to the edge untouched, so `event.request.headers.host` is the address
+the request actually arrived on.
+
+The emulator assigns ports from a range. A containerized emulator is only
+reachable on ports the container publishes, so narrow the range to those with
+`FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS` — a comma-separated list of ports and/or
+`from-to` ranges — and publish them (`docker run -p 9500-9519:9500-9519 …`).
+
+| Setting | Env | Default |
+|---|---|---|
+| Per-distribution ports | `FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS_ENABLED` | `true` |
+| First port of the range | `FLOCI_SERVICES_CLOUDFRONT_EDGE_BASE_PORT` | `9500` |
+| Last port of the range | `FLOCI_SERVICES_CLOUDFRONT_EDGE_MAX_PORT` | `9519` |
+| Explicit port list (overrides the range) | `FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS` | unset |
 
 ### CloudFront Functions
 

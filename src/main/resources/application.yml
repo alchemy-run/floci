@@ -465,6 +465,14 @@ floci:
     cloudfront:
       enabled: true
       function-runtime-command: node
+      # Each distribution's emulated edge also gets its own plain-HTTP port, so
+      # it is openable at http://localhost:<port> with no hosts entry and no TLS.
+      # A containerized emulator is only reachable on published ports — narrow
+      # the range with edge-ports (FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS) to the
+      # ports the container actually publishes.
+      edge-ports-enabled: true
+      edge-base-port: 9500
+      edge-max-port: 9519
     appsync:
       enabled: true
       schema-worker-threads: 4
