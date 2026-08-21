@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cloudfront.edge;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontService;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import jakarta.annotation.Priority;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -35,10 +36,18 @@ public class CloudFrontEdgeRoutingFilter implements ContainerRequestFilter {
 
     static final String EDGE_PREFIX = "/_floci/cloudfront";
 
-    private final CloudFrontService service;
+    /**
+     * Looked up per request rather than injected directly: RESTEasy Reactive
+     * builds every {@code @PreMatching} filter during static init, and
+     * {@code CloudFrontService} is pinned to run-time initialization in the
+     * native image (see {@code --initialize-at-run-time} in application.yml),
+     * so holding its client proxy here would bake a run-time-initialized object
+     * into the image heap and fail the native build.
+     */
+    private final Instance<CloudFrontService> service;
 
     @Inject
-    public CloudFrontEdgeRoutingFilter(CloudFrontService service) {
+    public CloudFrontEdgeRoutingFilter(Instance<CloudFrontService> service) {
         this.service = service;
     }
 
@@ -53,7 +62,7 @@ public class CloudFrontEdgeRoutingFilter implements ContainerRequestFilter {
         if (host == null) {
             return;
         }
-        Distribution distribution = service.findDistributionByHost(stripPort(host));
+        Distribution distribution = service.get().findDistributionByHost(stripPort(host));
         if (distribution == null) {
             return;
         }
