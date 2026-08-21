@@ -1044,6 +1044,44 @@ class DynamoDbIntegrationTest {
             .body("__type", equalTo("ResourceNotFoundException"));
     }
 
+    /**
+     * AWS models exactly one not-found error on DescribeContinuousBackups —
+     * TableNotFoundException — while its siblings model the generic
+     * ResourceNotFoundException. A client that types its error union off the
+     * AWS model cannot match the generic one, so returning it there leaves the
+     * caller with an untyped catch-all. Both halves are asserted: the special
+     * case, and that the siblings did NOT get broadened along with it.
+     */
+    @Test
+    void describeContinuousBackupsReportsTableNotFoundForAMissingTable() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DescribeContinuousBackups")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "NoSuchTableForContinuousBackups"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("TableNotFoundException"));
+    }
+
+    @Test
+    void describeTimeToLiveStillReportsResourceNotFoundForAMissingTable() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DescribeTimeToLive")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "NoSuchTableForContinuousBackups"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
     // --- ConsumedCapacity tests ---
     // These use a dedicated table to avoid ordering dependencies.
 
