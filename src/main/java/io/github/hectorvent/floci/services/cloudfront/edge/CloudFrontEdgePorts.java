@@ -60,6 +60,8 @@ public class CloudFrontEdgePorts {
 
     private final EmulatorConfig config;
     private final Vertx vertx;
+    /** Quarkus's own view of the running gateway, not the Vert.x server type below. */
+    private final io.quarkus.vertx.http.HttpServer gateway;
 
     /** distributionId -> the port it is served on. */
     private final Map<String, Integer> ports = new ConcurrentHashMap<>();
@@ -69,9 +71,11 @@ public class CloudFrontEdgePorts {
     private HttpClient client;
 
     @Inject
-    public CloudFrontEdgePorts(EmulatorConfig config, Vertx vertx) {
+    public CloudFrontEdgePorts(EmulatorConfig config, Vertx vertx,
+                               io.quarkus.vertx.http.HttpServer gateway) {
         this.config = config;
         this.vertx = vertx;
+        this.gateway = gateway;
     }
 
     @PostConstruct
@@ -197,7 +201,7 @@ public class CloudFrontEdgePorts {
         req.body().compose(body -> client.request(new RequestOptions()
                         .setMethod(req.method() == null ? HttpMethod.GET : req.method())
                         .setHost("127.0.0.1")
-                        .setPort(config.port())
+                        .setPort(gatewayPort())
                         .setURI(uri)
                         .setTimeout(60_000))
                 .compose(edgeRequest -> {
@@ -232,6 +236,18 @@ public class CloudFrontEdgePorts {
                                 + error.getMessage());
                     }
                 });
+    }
+
+    /**
+     * The port the gateway is really listening on. {@code floci.port} is the
+     * port it was asked for; a test — or anyone running with
+     * {@code quarkus.http.port=0} — gets an ephemeral one instead, and the
+     * proxy has to follow the socket that exists rather than the configured
+     * number.
+     */
+    private int gatewayPort() {
+        int actual = gateway.getPort();
+        return actual > 0 ? actual : config.port();
     }
 
     private static String viewerHost(HttpServerRequest req, String distributionId) {

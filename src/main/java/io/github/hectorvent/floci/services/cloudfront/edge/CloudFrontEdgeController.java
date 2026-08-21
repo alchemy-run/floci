@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.services.cloudfront.model.CacheBehavior;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontFunction;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import io.github.hectorvent.floci.services.cloudfront.model.Origin;
+import io.quarkus.vertx.http.HttpServer;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClient;
@@ -90,6 +91,8 @@ public class CloudFrontEdgeController {
     private final EmulatorConfig config;
     private final ContainerDetector containerDetector;
     private final Vertx vertx;
+    /** Quarkus's view of the running gateway — its actual, bound HTTP port. */
+    private final HttpServer gateway;
 
     // Vert.x rather than java.net.http: the edge has to send the origin's own
     // Host header (a bucket's virtual host, a dev server's `localhost:<port>`
@@ -105,13 +108,15 @@ public class CloudFrontEdgeController {
                                     ObjectMapper mapper,
                                     EmulatorConfig config,
                                     ContainerDetector containerDetector,
-                                    Vertx vertx) {
+                                    Vertx vertx,
+                                    HttpServer gateway) {
         this.service = service;
         this.runtime = runtime;
         this.mapper = mapper;
         this.config = config;
         this.containerDetector = containerDetector;
         this.vertx = vertx;
+        this.gateway = gateway;
     }
 
     @PostConstruct
@@ -471,7 +476,9 @@ public class CloudFrontEdgeController {
         int targetPort;
         if (host.endsWith(".amazonaws.com") || host.endsWith(".amazonaws.com.cn")) {
             targetHost = "127.0.0.1";
-            targetPort = config.port();
+            // The port it is really listening on, which is the configured one
+            // everywhere except a test (quarkus.http.port=0 binds an ephemeral one).
+            targetPort = gateway.getPort() > 0 ? gateway.getPort() : config.port();
             scheme = "http";
         } else {
             targetHost = reachableHost(host);
