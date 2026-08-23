@@ -69,6 +69,27 @@ public class MicrovmRuntimeService {
         if (!(imageIdentifier instanceof String imageId) || imageId.isBlank()) {
             throw new AwsException("ValidationException", "imageIdentifier is required", 400);
         }
+        // RunMicrovm is idempotent on clientToken (the AWS semantic callers
+        // rely on to reattach to a session's live VM instead of launching a
+        // second one). A suspended match auto-resumes so the caller's
+        // wait-for-RUNNING converges.
+        String clientToken = request.get("clientToken") instanceof String t && !t.isBlank() ? t : null;
+        if (clientToken != null) {
+            Optional<MicrovmRecord> existing = microvmStore.list(region).stream()
+                    .filter(vm -> clientToken.equals(vm.getClientToken()))
+                    .filter(vm -> accountId.equals(vm.getAccountId()))
+                    .filter(vm -> !"TERMINATED".equals(vm.getState()))
+                    .findFirst();
+            if (existing.isPresent()) {
+                MicrovmRecord vm = existing.get();
+                if ("SUSPENDED".equals(vm.getState())) {
+                    resumeMicrovm(region, vm.getMicrovmId());
+                    vm = requireMicrovm(region, vm.getMicrovmId());
+                }
+                LOG.infov("RunMicrovm reattached {0} via clientToken", vm.getMicrovmId());
+                return microvmResponse(vm);
+            }
+        }
         MicrovmImageRecord image = imageService.requireImage(region, imageId);
         String requestedVersion = request.get("imageVersion") instanceof String v && !v.isBlank()
                 ? v
@@ -101,6 +122,8 @@ public class MicrovmRuntimeService {
             vm.setExecutionRoleArn(role);
         }
         vm.setIdlePolicy(normalizeIdlePolicy(objectMap(request.get("idlePolicy"))));
+        vm.setClientToken(clientToken);
+        vm.setLastActivityAt(vm.getStartedAt());
         if (request.get("maximumDurationInSeconds") instanceof Number n) {
             vm.setMaximumDurationInSeconds(n.intValue());
         } else {
@@ -178,6 +201,7 @@ public class MicrovmRuntimeService {
         requireState(vm, "RUNNING", "suspend");
         lifecycleManager.getDockerClient().pauseContainerCmd(vm.getContainerId()).exec();
         vm.setState("SUSPENDED");
+        vm.setSuspendedAt(System.currentTimeMillis());
         microvmStore.save(vm);
     }
 
@@ -189,13 +213,22 @@ public class MicrovmRuntimeService {
         requireState(vm, "SUSPENDED", "resume");
         lifecycleManager.getDockerClient().unpauseContainerCmd(vm.getContainerId()).exec();
         vm.setState("RUNNING");
+        vm.setSuspendedAt(null);
+        vm.setLastActivityAt(System.currentTimeMillis());
         microvmStore.save(vm);
     }
 
     public void terminateMicrovm(String region, String microvmIdentifier) {
+        terminateMicrovm(region, microvmIdentifier, null);
+    }
+
+    public void terminateMicrovm(String region, String microvmIdentifier, String reason) {
         MicrovmRecord vm = requireMicrovm(region, microvmIdentifier);
         if ("TERMINATED".equals(vm.getState())) {
             return;
+        }
+        if (reason != null) {
+            vm.setStateReason(reason);
         }
         if (vm.getContainerId() != null) {
             // A paused container cannot be stopped; unpause first (best-effort).
@@ -219,6 +252,79 @@ public class MicrovmRuntimeService {
 
     public Optional<MicrovmRecord> findById(String microvmId) {
         return microvmStore.findById(microvmId);
+    }
+
+    /** Records data-plane activity — the idle policy's input. */
+    public void touchActivity(MicrovmRecord vm) {
+        vm.setLastActivityAt(System.currentTimeMillis());
+        microvmStore.save(vm);
+    }
+
+    // ──────────────────────────── idle policy enforcement ────────────────────────────
+
+    /**
+     * One reaper pass over every MicroVM ({@link MicrovmReaper} drives it):
+     * enforce {@code maximumDurationInSeconds} and the {@code idlePolicy}
+     * (idle RUNNING VMs suspend, expired SUSPENDED VMs terminate) so
+     * abandoned VMs — and their backing containers — reap themselves,
+     * matching the AWS service behavior callers rely on.
+     */
+    public void sweepIdlePolicies() {
+        long now = System.currentTimeMillis();
+        for (MicrovmRecord vm : microvmStore.listAll()) {
+            String action = nextLifecycleAction(vm, now);
+            if (action == null) {
+                continue;
+            }
+            try {
+                switch (action) {
+                    case "suspend" -> {
+                        LOG.infov("Idle policy: suspending MicroVM {0}", vm.getMicrovmId());
+                        suspendMicrovm(vm.getRegion(), vm.getMicrovmId());
+                    }
+                    case "expire" -> terminateMicrovm(vm.getRegion(), vm.getMicrovmId(),
+                            "Suspended MicroVM exceeded idlePolicy.suspendedDurationSeconds");
+                    case "max-duration" -> terminateMicrovm(vm.getRegion(), vm.getMicrovmId(),
+                            "MicroVM exceeded maximumDurationInSeconds");
+                    default -> { }
+                }
+            } catch (Exception e) {
+                LOG.warnv("Idle policy sweep failed for MicroVM {0} ({1}): {2}",
+                        vm.getMicrovmId(), action, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * The lifecycle action a VM is due for at {@code now}, or null. Pure —
+     * the decision table for {@link #sweepIdlePolicies()} and its tests.
+     */
+    static String nextLifecycleAction(MicrovmRecord vm, long now) {
+        String state = vm.getState();
+        if ("TERMINATED".equals(state)) {
+            return null;
+        }
+        if (now - vm.getStartedAt() > vm.getMaximumDurationInSeconds() * 1000L) {
+            return "max-duration";
+        }
+        Map<String, Object> policy = vm.getIdlePolicy();
+        if (policy == null) {
+            return null;
+        }
+        if ("RUNNING".equals(state)
+                && policy.get("maxIdleDurationSeconds") instanceof Number maxIdle) {
+            long idleSince = Math.max(vm.getLastActivityAt(), vm.getStartedAt());
+            if (now - idleSince > maxIdle.longValue() * 1000L) {
+                return "suspend";
+            }
+        }
+        if ("SUSPENDED".equals(state)
+                && vm.getSuspendedAt() != null
+                && policy.get("suspendedDurationSeconds") instanceof Number suspended
+                && now - vm.getSuspendedAt() > suspended.longValue() * 1000L) {
+            return "expire";
+        }
+        return null;
     }
 
     /** The host:port the endpoint proxy forwards to (mode-aware). */

@@ -126,10 +126,19 @@ public class MicrovmEndpointProxyController {
         tokenService.validate(headers.getHeaderString(MicrovmAuthTokenService.HEADER),
                 microvmId, vm.getPort());
 
+        // The AWS proxy resumes an idle-suspended VM on the next request when
+        // the idle policy opted in — mirror it so suspension is transparent.
+        if ("SUSPENDED".equals(vm.getState()) && autoResumeEnabled(vm)) {
+            LOG.infov("Auto-resuming suspended MicroVM {0} on request", microvmId);
+            runtimeService.resumeMicrovm(vm.getRegion(), microvmId);
+            vm = runtimeService.requireMicrovm(vm.getRegion(), microvmId);
+        }
+
         if (!"RUNNING".equals(vm.getState())) {
             throw new AwsException("ConflictException",
                     "MicroVM " + microvmId + " is " + vm.getState(), 409);
         }
+        runtimeService.touchActivity(vm);
 
         ContainerLifecycleManager.EndpointInfo endpoint = runtimeService.resolveVmEndpoint(vm);
         LOG.debugv("MicroVM proxy: {0} {1} vm={2} bodyBytes={3}",
@@ -199,5 +208,10 @@ public class MicrovmEndpointProxyController {
                 .entity("{\"message\":\"MicroVM endpoint unreachable: "
                         + message.replace("\"", "'") + "\"}")
                 .build();
+    }
+
+    private static boolean autoResumeEnabled(MicrovmRecord vm) {
+        return vm.getIdlePolicy() != null
+                && Boolean.TRUE.equals(vm.getIdlePolicy().get("autoResumeEnabled"));
     }
 }
