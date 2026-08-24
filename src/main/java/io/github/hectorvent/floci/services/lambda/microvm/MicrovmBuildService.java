@@ -46,7 +46,23 @@ public class MicrovmBuildService {
     private static final String DEFAULT_LOCAL_BASE_IMAGE = "public.ecr.aws/amazonlinux/amazonlinux:2023";
 
     private static final Pattern S3_URI = Pattern.compile("^s3://([^/]+)/(.+)$");
+    /**
+     * Dev-mode artifact form: a pre-built local Docker image reference,
+     * {@code docker://<ref>}. Alchemy's `alchemy dev` builds the image on the
+     * HOST daemon itself (real BuildKit layer caching against the user's
+     * actual build context), so Floci only has to validate the image exists
+     * and run it — no S3 round-trip, no zip extraction, no server-side build.
+     */
+    private static final Pattern DOCKER_URI = Pattern.compile("^docker://(.+)$");
     private static final long BUILD_TIMEOUT_MINUTES = 15;
+    /**
+     * Fixed mtime applied to extracted zip entries. The classic docker
+     * builder keys COPY-layer cache on file metadata; a fresh extract with
+     * "now" mtimes invalidated every layer from the first COPY onward on
+     * every build, so identical content never cached.
+     */
+    private static final java.nio.file.attribute.FileTime FIXED_MTIME =
+            java.nio.file.attribute.FileTime.fromMillis(0L);
 
     private final S3Service s3Service;
     private final ContainerLifecycleManager lifecycleManager;
@@ -69,6 +85,10 @@ public class MicrovmBuildService {
      * caller records it as the version's {@code stateReason}.
      */
     public String build(String artifactUri, String imageTag) {
+        String localRef = localImageRef(artifactUri);
+        if (localRef != null) {
+            return resolveLocalImage(localRef);
+        }
         byte[] zipBytes = fetchArtifact(artifactUri);
         Path contextDir = null;
         try {
@@ -97,6 +117,33 @@ public class MicrovmBuildService {
                 deleteRecursively(contextDir);
             }
         }
+    }
+
+    /**
+     * The image reference of a {@code docker://} artifact URI, or
+     * {@code null} for any other (or absent) artifact form.
+     * Package-private for unit testing.
+     */
+    static String localImageRef(String artifactUri) {
+        Matcher m = DOCKER_URI.matcher(artifactUri != null ? artifactUri : "");
+        return m.matches() ? m.group(1) : null;
+    }
+
+    /**
+     * A {@code docker://} artifact: the image was built on the host daemon by
+     * the caller. Validate it exists and use its reference as the version's
+     * tag — the run path is identical to a Floci-built image.
+     */
+    private String resolveLocalImage(String imageRef) {
+        try {
+            lifecycleManager.getDockerClient().inspectImageCmd(imageRef).exec();
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Local Docker image not found for docker:// artifact: " + imageRef
+                            + " (" + e.getMessage() + ")");
+        }
+        LOG.infov("Using pre-built local Docker image {0} as MicroVM image", imageRef);
+        return imageRef;
     }
 
     /** Best-effort removal of a version's built Docker image tag. */
@@ -136,6 +183,9 @@ public class MicrovmBuildService {
                 } else {
                     Files.createDirectories(target.getParent());
                     Files.write(target, zis.readAllBytes());
+                    // Deterministic metadata so identical content produces
+                    // docker layer-cache hits across rebuilds.
+                    Files.setLastModifiedTime(target, FIXED_MTIME);
                 }
                 zis.closeEntry();
             }
