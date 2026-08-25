@@ -28,6 +28,19 @@ class EksNodegroupIntegrationTest {
 
     @Test
     @Order(1)
+    void describeNodegroupOnMissingClusterReturnsResourceNotFound() {
+        given()
+        .when()
+            .get("/clusters/alchemy-nonexistent-cluster-probe/node-groups/alchemy-nonexistent-nodegroup-probe")
+        .then()
+            .statusCode(404)
+            .contentType(containsString("application/json"))
+            .body("__type", equalTo("ResourceNotFoundException"))
+            .body("message", containsString("alchemy-nonexistent-cluster-probe"));
+    }
+
+    @Test
+    @Order(2)
     void createCluster() {
         given().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
@@ -38,7 +51,19 @@ class EksNodegroupIntegrationTest {
     }
 
     @Test
-    @Order(2)
+    @Order(3)
+    void describeNodegroupOnMissingNodegroupReturnsResourceNotFound() {
+        given()
+        .when()
+            .get("/clusters/" + CLUSTER + "/node-groups/alchemy-nonexistent-nodegroup-probe")
+        .then()
+            .statusCode(404)
+            .contentType(containsString("application/json"))
+            .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(4)
     void createNodeGroupRoutesToEksNotS3() {
         given().contentType(JSON)
                 .body("{\"nodegroupName\":\"ng1\",\"subnets\":[\"subnet-abc\"],\"nodeRole\":\"" + NODE_ROLE + "\","
@@ -56,7 +81,7 @@ class EksNodegroupIntegrationTest {
     }
 
     @Test
-    @Order(3)
+    @Order(5)
     void listNodeGroups() {
         given().contentType(JSON)
                 .when().get("/clusters/" + CLUSTER + "/node-groups")
@@ -65,7 +90,7 @@ class EksNodegroupIntegrationTest {
     }
 
     @Test
-    @Order(4)
+    @Order(6)
     void describeNodeGroup() {
         given().contentType(JSON)
                 .when().get("/clusters/" + CLUSTER + "/node-groups/ng1")
@@ -76,7 +101,7 @@ class EksNodegroupIntegrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(7)
     void deleteNodeGroup() {
         given().contentType(JSON)
                 .when().delete("/clusters/" + CLUSTER + "/node-groups/ng1")
