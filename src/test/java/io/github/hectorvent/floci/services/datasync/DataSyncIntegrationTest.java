@@ -162,6 +162,17 @@ class DataSyncIntegrationTest {
     }
 
     @Test
+    void describeTask_missing_invalidRequest() {
+        ds("DescribeTask",
+                "{\"TaskArn\":\"arn:aws:datasync:us-west-2:391965393224:task/task-00000000000000000\"}")
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidRequestException"))
+                .body("message", containsString("Task "))
+                .body("message", containsString("is not found"));
+    }
+
+    @Test
     void createLocationEfs_roundTrip() {
         String arn = ds("CreateLocationEfs", """
                 {"EfsFilesystemArn":"arn:aws:elasticfilesystem:us-east-1:000000000000:file-system/fs-abc",
