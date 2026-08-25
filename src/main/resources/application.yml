@@ -157,6 +157,8 @@ floci:
         flush-interval-ms: 5000
       appregistry:
         flush-interval-ms: 5000
+      apprunner:
+        flush-interval-ms: 5000
       application-signals:
         flush-interval-ms: 5000
 
@@ -526,6 +528,8 @@ floci:
     appintegrations:
       enabled: true
     appregistry:
+      enabled: true
+    apprunner:
       enabled: true
     application-signals:
       enabled: true

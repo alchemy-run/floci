@@ -289,6 +289,7 @@ public interface EmulatorConfig {
         AppFlowStorageConfig appflow();
         AppIntegrationsStorageConfig appintegrations();
         AppRegistryStorageConfig appregistry();
+        AppRunnerStorageConfig apprunner();
         ApplicationSignalsStorageConfig applicationSignals();
     }
 
@@ -561,6 +562,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface AppRunnerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface ApplicationSignalsStorageConfig {
         Optional<String> mode();
 
@@ -678,6 +686,7 @@ public interface EmulatorConfig {
         AppFlowServiceConfig appflow();
         AppIntegrationsServiceConfig appintegrations();
         AppRegistryServiceConfig appregistry();
+        AppRunnerServiceConfig apprunner();
         ApplicationSignalsServiceConfig applicationSignals();
     }
 
@@ -748,6 +757,11 @@ public interface EmulatorConfig {
     }
 
     interface AppRegistryServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppRunnerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

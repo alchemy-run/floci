@@ -32,6 +32,7 @@ import io.github.hectorvent.floci.services.amplify.AmplifyController;
 import io.github.hectorvent.floci.services.appflow.AppFlowController;
 import io.github.hectorvent.floci.services.appintegrations.AppIntegrationsController;
 import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
+import io.github.hectorvent.floci.services.apprunner.AppRunnerProxyController;
 import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignalsController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
@@ -500,6 +501,12 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("servicecatalog", "servicecatalog-appregistry"), Set.of(),
                         Set.of(AppRegistryController.class)),
+                descriptor("apprunner", "apprunner", config.services().apprunner().enabled(), true,
+                        "apprunner", storageMode(config.storage().services().apprunner().mode(),
+                                config.storage().mode()),
+                        config.storage().services().apprunner().flushIntervalMs(), null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AppRunner."), Set.of("apprunner"), Set.of(), Set.of(AppRunnerProxyController.class)),
                 descriptor("application-signals", "applicationsignals",
                         config.services().applicationSignals().enabled(), true,
                         "applicationsignals", storageMode(config.storage().services().applicationSignals().mode(),

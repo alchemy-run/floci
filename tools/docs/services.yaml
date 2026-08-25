@@ -22,6 +22,10 @@ services:
     doc: docs/services/applicationautoscaling.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/applicationautoscaling/ApplicationAutoScalingJsonHandler.java, mode: switch }
+  - service: apprunner
+    doc: docs/services/apprunner.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/apprunner/AppRunnerJsonHandler.java, mode: switch }
   - service: athena
     doc: docs/services/athena.md
     sources:

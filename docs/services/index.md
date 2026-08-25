@@ -63,6 +63,7 @@ Operation counts are exact. For dispatch-table services (Query and JSON 1.1) eac
 | [OpenSearch](opensearch.md) | `/2021-01-01/opensearch/...` | REST JSON | 24 |
 | [AppConfig](appconfig.md) | `/applications/...`, `/deploymentstrategies/...`, `/extensions/...` | REST JSON | 38 |
 | [AppConfigData](appconfig.md#data-plane) | `/configurationsessions`, `/configuration` | REST JSON | 2 |
+| [App Runner](apprunner.md) | `POST /` + `X-Amz-Target: AppRunner.*` | JSON 1.0 | 7 |
 | [AppSync](appsync.md) | `/v1/apis/...` | REST JSON | 33 |
 | [Bedrock Runtime](bedrock-runtime.md) | `/model/{modelId}/converse`, `/model/{modelId}/invoke` | REST JSON | 2 (stub; streaming returns 501) |
 | [EKS](eks.md) | `/clusters`, `/clusters/{name}`, `/tags/{resourceArn}` | REST JSON | 7 |
