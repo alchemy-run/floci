@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.AwsQueryResponse;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneCluster;
+import io.github.hectorvent.floci.services.neptune.model.NeptuneClusterSnapshot;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneInstance;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -41,6 +42,13 @@ public class NeptuneQueryHandler {
                 case "DescribeDBInstances"-> handleDescribeDbInstances(params);
                 case "DeleteDBInstance"   -> handleDeleteDbInstance(params);
                 case "ModifyDBInstance"   -> handleModifyDbInstance(params);
+                case "DescribeDBClusterSnapshots" -> handleDescribeDbClusterSnapshots(params);
+                case "DeleteDBClusterSnapshot" -> handleDeleteDbClusterSnapshot(params);
+                case "CopyDBClusterSnapshot" -> handleCopyDbClusterSnapshot(params);
+                case "DescribeDBClusterEndpoints" -> handleDescribeDbClusterEndpoints();
+                case "DescribeEvents" -> handleDescribeEvents();
+                case "DescribePendingMaintenanceActions" -> handleDescribePendingMaintenanceActions();
+                case "ApplyPendingMaintenanceAction" -> handleApplyPendingMaintenanceAction(params);
                 default -> AwsQueryResponse.error("UnsupportedOperation",
                         "Operation " + action + " is not supported by Neptune.", AwsNamespaces.RDS, 400);
             };
@@ -193,6 +201,63 @@ public class NeptuneQueryHandler {
                 instanceXml(instance))).build();
     }
 
+    // ── Snapshots, events, maintenance (Alchemy bindings) ─────────────────────
+
+    private Response handleDescribeDbClusterSnapshots(MultivaluedMap<String, String> params) {
+        Collection<NeptuneClusterSnapshot> result = service.listDbClusterSnapshots(
+                params.getFirst("DBClusterSnapshotIdentifier"), params.getFirst("DBClusterIdentifier"));
+        XmlBuilder xml = new XmlBuilder().start("DBClusterSnapshots");
+        for (NeptuneClusterSnapshot snapshot : result) {
+            xml.start("DBClusterSnapshot").raw(clusterSnapshotInnerXml(snapshot)).end("DBClusterSnapshot");
+        }
+        xml.end("DBClusterSnapshots");
+        return Response.ok(AwsQueryResponse.envelope("DescribeDBClusterSnapshots", AwsNamespaces.RDS, xml.build())).build();
+    }
+
+    private Response handleDeleteDbClusterSnapshot(MultivaluedMap<String, String> params) {
+        NeptuneClusterSnapshot snapshot = service.getDbClusterSnapshot(params.getFirst("DBClusterSnapshotIdentifier"));
+        service.deleteDbClusterSnapshot(params.getFirst("DBClusterSnapshotIdentifier"));
+        return Response.ok(AwsQueryResponse.envelope("DeleteDBClusterSnapshot", AwsNamespaces.RDS,
+                clusterSnapshotXml(snapshot))).build();
+    }
+
+    private Response handleCopyDbClusterSnapshot(MultivaluedMap<String, String> params) {
+        NeptuneClusterSnapshot snapshot = service.copyDbClusterSnapshot(
+                params.getFirst("SourceDBClusterSnapshotIdentifier"),
+                params.getFirst("TargetDBClusterSnapshotIdentifier"));
+        return Response.ok(AwsQueryResponse.envelope("CopyDBClusterSnapshot", AwsNamespaces.RDS,
+                clusterSnapshotXml(snapshot))).build();
+    }
+
+    private Response handleDescribeDbClusterEndpoints() {
+        String result = new XmlBuilder().start("DBClusterEndpoints").end("DBClusterEndpoints").build();
+        return Response.ok(AwsQueryResponse.envelope("DescribeDBClusterEndpoints", AwsNamespaces.RDS, result)).build();
+    }
+
+    private Response handleDescribeEvents() {
+        String result = new XmlBuilder().start("Events").end("Events").build();
+        return Response.ok(AwsQueryResponse.envelope("DescribeEvents", AwsNamespaces.RDS, result)).build();
+    }
+
+    private Response handleDescribePendingMaintenanceActions() {
+        String result = new XmlBuilder().start("PendingMaintenanceActions").end("PendingMaintenanceActions").build();
+        return Response.ok(AwsQueryResponse.envelope("DescribePendingMaintenanceActions", AwsNamespaces.RDS, result)).build();
+    }
+
+    private Response handleApplyPendingMaintenanceAction(MultivaluedMap<String, String> params) {
+        String resourceIdentifier = service.applyPendingMaintenanceAction(
+                params.getFirst("ResourceIdentifier"));
+        String result = new XmlBuilder()
+                .start("ResourcePendingMaintenanceActions")
+                .elem("ResourceIdentifier", resourceIdentifier)
+                .start("PendingMaintenanceActionDetails")
+                .end("PendingMaintenanceActionDetails")
+                .end("ResourcePendingMaintenanceActions")
+                .build();
+        return Response.ok(AwsQueryResponse.envelope(
+                "ApplyPendingMaintenanceAction", AwsNamespaces.RDS, result)).build();
+    }
+
     // ── XML builders ──────────────────────────────────────────────────────────
 
     private String clusterXml(NeptuneCluster c) {
@@ -249,6 +314,21 @@ public class NeptuneQueryHandler {
                 .elem("AvailabilityZone", config.defaultAvailabilityZone())
                 .elem("DbiResourceId", i.getDbiResourceId())
                 .elem("DBInstanceArn", i.getDbInstanceArn())
+                .build();
+    }
+
+    private String clusterSnapshotXml(NeptuneClusterSnapshot snapshot) {
+        return new XmlBuilder().start("DBClusterSnapshot").raw(clusterSnapshotInnerXml(snapshot)).end("DBClusterSnapshot").build();
+    }
+
+    private String clusterSnapshotInnerXml(NeptuneClusterSnapshot snapshot) {
+        return new XmlBuilder()
+                .elem("DBClusterSnapshotIdentifier", snapshot.getDbClusterSnapshotIdentifier())
+                .elem("DBClusterIdentifier", snapshot.getDbClusterIdentifier())
+                .elem("Status", snapshot.getStatus())
+                .elem("Engine", snapshot.getEngine())
+                .elem("SnapshotType", snapshot.getSnapshotType())
+                .elem("DBClusterSnapshotArn", snapshot.getDbClusterSnapshotArn())
                 .build();
     }
 

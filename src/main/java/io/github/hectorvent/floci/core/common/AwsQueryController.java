@@ -298,9 +298,13 @@ public class AwsQueryController {
                 String engine = formParams.getFirst("Engine");
                 String clusterId = formParams.getFirst("DBClusterIdentifier");
                 String instanceId = formParams.getFirst("DBInstanceIdentifier");
+                String snapshotId = formParams.getFirst("DBClusterSnapshotIdentifier");
+                String sourceSnapshotId = formParams.getFirst("SourceDBClusterSnapshotIdentifier");
                 if ("neptune".equalsIgnoreCase(engine)
                         || neptuneService.hasCluster(clusterId)
-                        || neptuneService.hasInstance(instanceId)) {
+                        || neptuneService.hasInstance(instanceId)
+                        || neptuneService.hasSnapshot(snapshotId)
+                        || neptuneService.hasSnapshot(sourceSnapshotId)) {
                     yield neptuneQueryHandler.handle(action, formParams);
                 }
 

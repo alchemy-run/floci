@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.neptune;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -9,6 +10,7 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerHandle;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerManager;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneCluster;
+import io.github.hectorvent.floci.services.neptune.model.NeptuneClusterSnapshot;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneDbType;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneInstance;
 import io.github.hectorvent.floci.services.neptune.proxy.NeptuneProxyManager;
@@ -19,6 +21,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -32,6 +35,7 @@ public class NeptuneService {
 
     private final StorageBackend<String, NeptuneCluster> clusters;
     private final StorageBackend<String, NeptuneInstance> instances;
+    private final StorageBackend<String, NeptuneClusterSnapshot> clusterSnapshots;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final NeptuneContainerManager containerManager;
@@ -52,6 +56,8 @@ public class NeptuneService {
                 new TypeReference<Map<String, NeptuneCluster>>() {});
         this.instances = storageFactory.create("neptune", "neptune-instances.json",
                 new TypeReference<Map<String, NeptuneInstance>>() {});
+        this.clusterSnapshots = storageFactory.create("neptune", "neptune-cluster-snapshots.json",
+                new TypeReference<Map<String, NeptuneClusterSnapshot>>() {});
     }
 
     // ── Clusters ──────────────────────────────────────────────────────────────
@@ -169,6 +175,13 @@ public class NeptuneService {
             return false;
         }
         return instances.get(id).isPresent();
+    }
+
+    public boolean hasSnapshot(String id) {
+        if (id == null || id.isBlank()) {
+            return false;
+        }
+        return clusterSnapshots.get(id).isPresent();
     }
 
     public Collection<NeptuneCluster> listDbClusters(String filterId) {
@@ -308,6 +321,110 @@ public class NeptuneService {
 
         instances.delete(id);
         LOG.infov("Neptune instance {0} deleted", id);
+    }
+
+    // ── Cluster snapshots ─────────────────────────────────────────────────────
+
+    public NeptuneClusterSnapshot getDbClusterSnapshot(String snapshotId) {
+        if (snapshotId == null || snapshotId.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBClusterSnapshotIdentifier is required.", 400);
+        }
+        return clusterSnapshots.get(snapshotId).orElseThrow(() ->
+                new AwsException("DBClusterSnapshotNotFoundFault",
+                        "DBClusterSnapshot " + snapshotId + " not found.", 404));
+    }
+
+    public Collection<NeptuneClusterSnapshot> listDbClusterSnapshots(String snapshotId, String clusterId) {
+        if (snapshotId != null && !snapshotId.isBlank()) {
+            return clusterSnapshots.get(snapshotId).map(List::of).orElse(List.of());
+        }
+        return clusterSnapshots.scan(k -> true).stream()
+                .filter(s -> clusterId == null || clusterId.isBlank()
+                        || clusterId.equals(s.getDbClusterIdentifier()))
+                .toList();
+    }
+
+    public void deleteDbClusterSnapshot(String snapshotId) {
+        getDbClusterSnapshot(snapshotId);
+        clusterSnapshots.delete(snapshotId);
+        LOG.infov("Neptune cluster snapshot {0} deleted", snapshotId);
+    }
+
+    public NeptuneClusterSnapshot copyDbClusterSnapshot(String sourceId, String targetId) {
+        NeptuneClusterSnapshot source = getDbClusterSnapshot(sourceId);
+        if (targetId == null || targetId.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "TargetDBClusterSnapshotIdentifier is required.", 400);
+        }
+        if (clusterSnapshots.get(targetId).isPresent()) {
+            throw new AwsException("DBClusterSnapshotAlreadyExistsFault",
+                    "DB cluster snapshot " + targetId + " already exists.", 400);
+        }
+        NeptuneClusterSnapshot copy = new NeptuneClusterSnapshot();
+        copy.setDbClusterSnapshotIdentifier(targetId);
+        copy.setDbClusterIdentifier(source.getDbClusterIdentifier());
+        copy.setEngine(source.getEngine());
+        copy.setSnapshotType(source.getSnapshotType());
+        copy.setStatus("available");
+        copy.setSnapshotCreateTime(Instant.now());
+        copy.setDbClusterSnapshotArn(
+                regionResolver.buildArn("rds", regionResolver.getDefaultRegion(), "cluster-snapshot:" + targetId));
+        clusterSnapshots.put(targetId, copy);
+        LOG.infov("Neptune cluster snapshot {0} copied to {1}", sourceId, targetId);
+        return copy;
+    }
+
+    /**
+     * Apply a pending maintenance action. Floci has no real Neptune maintenance
+     * window, so an existing resource is a no-op that echoes the identifier. A
+     * missing ARN is {@code ResourceNotFoundFault} — the typed tag Alchemy
+     * bindings decode for {@code ApplyPendingMaintenanceAction}.
+     */
+    public String applyPendingMaintenanceAction(String resourceIdentifier) {
+        if (resourceIdentifier == null || resourceIdentifier.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "ResourceIdentifier is required.", 400);
+        }
+        if (!resourceExists(resourceIdentifier)) {
+            throw new AwsException("ResourceNotFoundFault",
+                    "The resource identified by ResourceIdentifier " + resourceIdentifier + " does not exist.",
+                    404);
+        }
+        return resourceIdentifier;
+    }
+
+    private boolean resourceExists(String resourceName) {
+        String type = "cluster";
+        String id = resourceName;
+        if (resourceName.startsWith("arn:")) {
+            AwsArnUtils.Arn arn;
+            try {
+                arn = AwsArnUtils.parse(resourceName);
+            } catch (IllegalArgumentException malformed) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            // Neptune publishes ARNs under the rds service prefix; floci historically
+            // also minted arn:aws:neptune:... for clusters.
+            if (!"rds".equals(arn.service()) && !"neptune".equals(arn.service())) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            String resource = arn.resource();
+            int sep = resource.indexOf(':');
+            if (sep < 0) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            type = resource.substring(0, sep);
+            id = resource.substring(sep + 1);
+        }
+        return switch (type) {
+            case "db" -> instances.get(id).isPresent();
+            case "cluster" -> clusters.get(id).isPresent();
+            case "cluster-snapshot" -> clusterSnapshots.get(id).isPresent();
+            default -> false;
+        };
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
