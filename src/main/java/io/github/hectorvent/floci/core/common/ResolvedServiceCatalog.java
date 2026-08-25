@@ -28,6 +28,8 @@ import io.github.hectorvent.floci.services.mwaa.MwaaController;
 import io.github.hectorvent.floci.services.iot.IotController;
 import io.github.hectorvent.floci.services.iot.IotDataController;
 import io.github.hectorvent.floci.services.ivs.IvsController;
+import io.github.hectorvent.floci.services.ivs.IvsRecordingConfigurationController;
+import io.github.hectorvent.floci.services.ivschat.IvsChatController;
 import io.github.hectorvent.floci.services.pipes.PipesController;
 import io.github.hectorvent.floci.services.lambda.LambdaController;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
@@ -40,6 +42,7 @@ import io.github.hectorvent.floci.services.appsync.AppSyncController;
 import io.github.hectorvent.floci.services.rdsdata.RdsDataController;
 import io.github.hectorvent.floci.services.amp.AmpController;
 import io.github.hectorvent.floci.services.amp.AmpRuleController;
+import io.github.hectorvent.floci.services.grafana.GrafanaController;
 import io.github.hectorvent.floci.services.account.AccountController;
 import io.github.hectorvent.floci.services.account.AccountRegionController;
 import io.github.hectorvent.floci.services.aiops.AiOpsController;
@@ -60,10 +63,13 @@ import io.github.hectorvent.floci.services.emrserverless.EmrServerlessController
 import io.github.hectorvent.floci.services.entityresolution.EntityResolutionController;
 import io.github.hectorvent.floci.services.fis.FisController;
 import io.github.hectorvent.floci.services.georoutes.GeoRoutesController;
+import io.github.hectorvent.floci.services.geoplaces.GeoPlacesController;
 import io.github.hectorvent.floci.services.finspace.FinSpaceController;
 import io.github.hectorvent.floci.services.finspace.FinSpaceDataController;
+import io.github.hectorvent.floci.services.geomaps.GeoMapsController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
+import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -582,7 +588,7 @@ public class ResolvedServiceCatalog {
                         "globalaccelerator", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("GlobalAccelerator_V20180706."),
-                        Set.of("globalaccelerator"), Set.of(), Set.of()),
+                        Set.of("globalaccelerator"), Set.of("Global Accelerator"), Set.of()),
                 descriptor("comprehend", "comprehend", config.services().comprehend().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -643,7 +649,13 @@ public class ResolvedServiceCatalog {
                         "ivs", storageMode(config.storage().services().ivs().mode(), config.storage().mode()),
                         config.storage().services().ivs().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("ivs"), Set.of(), Set.of(IvsController.class)),
+                        Set.of(), Set.of("ivs"), Set.of(), Set.of(IvsController.class,
+                                IvsRecordingConfigurationController.class)),
+                descriptor("ivschat", "ivschat", config.services().ivschat().enabled(), true,
+                        "ivschat", storageMode(config.storage().services().ivschat().mode(), config.storage().mode()),
+                        config.storage().services().ivschat().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ivschat"), Set.of(), Set.of(IvsChatController.class)),
                 descriptor("iot", "iot", config.services().iot().enabled(), true,
                         "iot", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
@@ -661,10 +673,18 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
+                descriptor("geo-maps", "geomaps", config.services().geoMaps().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-maps"), Set.of(), Set.of(GeoMapsController.class)),
                 descriptor("geo-routes", "georoutes", config.services().geoRoutes().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("geo-routes"), Set.of(), Set.of(GeoRoutesController.class)),
+                descriptor("geo-places", "geoplaces", config.services().geoPlaces().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-places"), Set.of(), Set.of(GeoPlacesController.class)),
                 descriptor("fis", "fis", config.services().fis().enabled(), true,
                         "fis", storageMode(config.storage().services().fis().mode(), config.storage().mode()),
                         config.storage().services().fis().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -682,6 +702,11 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("aps"), Set.of(), Set.of(
                                 AmpController.class, AmpRuleController.class)),
+                descriptor("grafana", "grafana", config.services().grafana().enabled(), true,
+                        "grafana", storageMode(config.storage().services().grafana().mode(), config.storage().mode()),
+                        config.storage().services().grafana().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("grafana"), Set.of(), Set.of(GrafanaController.class)),
                 descriptor("aiops", "aiops", config.services().aiops().enabled(), true,
                         "aiops", storageMode(config.storage().services().aiops().mode(), config.storage().mode()),
                         config.storage().services().aiops().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -777,11 +802,17 @@ public class ResolvedServiceCatalog {
                         "cloudhsmv2", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("BaldrApiService."), Set.of("cloudhsm", "cloudhsmv2"), Set.of(), Set.of()),
-                descriptor("glacier", "glacier", true, true,
+                descriptor("glacier", "glacier", config.services().glacier().enabled(), true,
                         "glacier", config.storage().mode(),
                         5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("glacier"), Set.of(), Set.of(GlacierController.class)),
+                descriptor("greengrass", "greengrassv2", config.services().greengrassv2().enabled(), true,
+                        "greengrassv2", storageMode(config.storage().services().greengrassv2().mode(),
+                                config.storage().mode()),
+                        config.storage().services().greengrassv2().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("greengrass"), Set.of(), Set.of(GreengrassV2Controller.class)),
                 descriptor("guardduty", "guardduty", config.services().guardduty().enabled(), true,
                         "guardduty", storageMode(config.storage().services().guardduty().mode(),
                                 config.storage().mode()),

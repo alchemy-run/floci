@@ -284,6 +284,7 @@ public interface EmulatorConfig {
         CodeConnectionsStorageConfig codeconnections();
         S3VectorsStorageConfig s3vectors();
         IvsStorageConfig ivs();
+        IvsChatStorageConfig ivschat();
         EcsStorageConfig ecs();
         EfsStorageConfig efs();
         CodeBuildStorageConfig codebuild();
@@ -297,6 +298,7 @@ public interface EmulatorConfig {
         FisStorageConfig fis();
         FinSpaceStorageConfig finspace();
         AmpStorageConfig amp();
+        GrafanaStorageConfig grafana();
         AiOpsStorageConfig aiops();
         AccountStorageConfig account();
         AccessAnalyzerStorageConfig accessanalyzer();
@@ -315,6 +317,7 @@ public interface EmulatorConfig {
         BedrockAgentCoreStorageConfig bedrockAgentCore();
         BedrockDataAutomationStorageConfig bedrockDataAutomation();
         DeadlineStorageConfig deadline();
+        GreengrassV2StorageConfig greengrassv2();
         EmrContainersStorageConfig emrContainers();
         EmrServerlessStorageConfig emrServerless();
         EntityResolutionStorageConfig entityresolution();
@@ -554,6 +557,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface IvsChatStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface EcsStorageConfig {
         Optional<String> mode();
 
@@ -659,6 +669,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface GreengrassV2StorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface EmrContainersStorageConfig {
         Optional<String> mode();
 
@@ -681,6 +698,13 @@ public interface EmulatorConfig {
     }
 
     interface AmpStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface GrafanaStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -866,6 +890,7 @@ public interface EmulatorConfig {
         EcsServiceConfig ecs();
         EfsServiceConfig efs();
         GlacierServiceConfig glacier();
+        GreengrassV2ServiceConfig greengrassv2();
         GuardDutyServiceConfig guardduty();
         FsxServiceConfig fsx();
         AppConfigServiceConfig appconfig();
@@ -925,13 +950,17 @@ public interface EmulatorConfig {
         UiServiceConfig ui();
         S3VectorsServiceConfig s3vectors();
         IvsServiceConfig ivs();
+        IvsChatServiceConfig ivschat();
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
+        GeoMapsServiceConfig geoMaps();
         GeoRoutesServiceConfig geoRoutes();
+        GeoPlacesServiceConfig geoPlaces();
         FisServiceConfig fis();
         FinSpaceServiceConfig finspace();
         AmpServiceConfig amp();
+        GrafanaServiceConfig grafana();
         AiOpsServiceConfig aiops();
         AccountServiceConfig account();
         AccessAnalyzerServiceConfig accessanalyzer();
@@ -980,7 +1009,17 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface GeoMapsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface GeoRoutesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GeoPlacesServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -996,6 +1035,11 @@ public interface EmulatorConfig {
     }
 
     interface AmpServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GrafanaServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1090,6 +1134,11 @@ public interface EmulatorConfig {
     }
 
     interface IvsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IvsChatServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1757,6 +1806,11 @@ public interface EmulatorConfig {
     }
 
     interface GlacierServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GreengrassV2ServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -48,6 +48,8 @@ floci:
         flush-interval-ms: 60000
       ivs:
         flush-interval-ms: 60000
+      ivschat:
+        flush-interval-ms: 60000
       ecs:
         flush-interval-ms: 60000
       efs:
@@ -74,6 +76,8 @@ floci:
       finspace:
         flush-interval-ms: 60000
       amp:
+        flush-interval-ms: 60000
+      grafana:
         flush-interval-ms: 60000
       aiops:
         flush-interval-ms: 60000
@@ -136,6 +140,8 @@ floci:
       bedrock-agent-core:
         flush-interval-ms: 60000
       bedrock-data-automation:
+        flush-interval-ms: 60000
+      greengrassv2:
         flush-interval-ms: 60000
 
   auth:
@@ -314,6 +320,8 @@ floci:
       enabled: true
     glacier:
       enabled: true
+    greengrassv2:
+      enabled: true
     guardduty:
       enabled: true
     fsx:
@@ -434,6 +442,8 @@ floci:
       enabled: true
     ivs:
       enabled: true
+    ivschat:
+      enabled: true
     iot:
       enabled: true
       mqtt:
@@ -445,13 +455,19 @@ floci:
       enabled: true
     rum:
       enabled: true
+    geo-maps:
+      enabled: true
     geo-routes:
+      enabled: true
+    geo-places:
       enabled: true
     fis:
       enabled: true
     finspace:
       enabled: true
     amp:
+      enabled: true
+    grafana:
       enabled: true
     aiops:
       enabled: true
