@@ -147,6 +147,8 @@ floci:
         flush-interval-ms: 5000
       fis:
         flush-interval-ms: 5000
+      finspace:
+        flush-interval-ms: 5000
       amp:
         flush-interval-ms: 5000
       aiops:
@@ -617,7 +619,11 @@ floci:
       enabled: true
     rum:
       enabled: true
+    geo-routes:
+      enabled: true
     fis:
+      enabled: true
+    finspace:
       enabled: true
     amp:
       enabled: true

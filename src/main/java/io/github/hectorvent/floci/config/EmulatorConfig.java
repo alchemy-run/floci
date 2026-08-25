@@ -293,6 +293,7 @@ public interface EmulatorConfig {
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
         FisStorageConfig fis();
+        FinSpaceStorageConfig finspace();
         AmpStorageConfig amp();
         AiOpsStorageConfig aiops();
         AccountStorageConfig account();
@@ -607,6 +608,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface FinSpaceStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface BedrockAgentStorageConfig {
         Optional<String> mode();
 
@@ -897,7 +905,9 @@ public interface EmulatorConfig {
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
+        GeoRoutesServiceConfig geoRoutes();
         FisServiceConfig fis();
+        FinSpaceServiceConfig finspace();
         AmpServiceConfig amp();
         AiOpsServiceConfig aiops();
         AccountServiceConfig account();
@@ -947,7 +957,17 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface GeoRoutesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface FisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FinSpaceServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
