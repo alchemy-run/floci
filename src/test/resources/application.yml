@@ -324,6 +324,8 @@ floci:
       enabled: true
     guardduty:
       enabled: true
+    inspector2:
+      enabled: true
     fsx:
       enabled: true
     appconfig:

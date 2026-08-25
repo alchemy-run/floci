@@ -892,6 +892,7 @@ public interface EmulatorConfig {
         GlacierServiceConfig glacier();
         GreengrassV2ServiceConfig greengrassv2();
         GuardDutyServiceConfig guardduty();
+        Inspector2ServiceConfig inspector2();
         FsxServiceConfig fsx();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
@@ -1816,6 +1817,11 @@ public interface EmulatorConfig {
     }
 
     interface GuardDutyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Inspector2ServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
