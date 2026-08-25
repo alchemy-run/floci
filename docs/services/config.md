@@ -42,6 +42,14 @@
 | `DescribeConformancePacks` | List conformance packs |
 | `DescribeConformancePackStatus` | Get the deployment status of conformance packs |
 
+### Aggregation Authorizations
+
+| Action | Description |
+|---|---|
+| `PutAggregationAuthorization` | Authorize an aggregator account and region to collect Config data (idempotent; create-time tags only) |
+| `DescribeAggregationAuthorizations` | List aggregation authorizations |
+| `DeleteAggregationAuthorization` | Revoke an aggregation authorization (idempotent) |
+
 ### Tagging
 
 | Action | Description |

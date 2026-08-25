@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.configservice.model.AggregationAuthorization;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRule;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRuleEvaluationStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRuleSource;
@@ -36,6 +37,8 @@ public class AwsConfigService {
     private Map<String, Map<String, ConfigRule>> configRules = new ConcurrentHashMap<>();
     // region -> packName -> pack (nested)
     private Map<String, Map<String, ConformancePack>> conformancePacks = new ConcurrentHashMap<>();
+    // region -> authorizedAccountId/authorizedAwsRegion -> authorization (nested)
+    private Map<String, Map<String, AggregationAuthorization>> aggregationAuthorizations = new ConcurrentHashMap<>();
 
     // region -> recorder / channel (flat)
     private Map<String, ConfigurationRecorder> configurationRecorders = new ConcurrentHashMap<>();
@@ -64,6 +67,8 @@ public class AwsConfigService {
                 new TypeReference<Map<String, Map<String, ConfigRule>>>() {});
         this.conformancePacks = storageBacked("config-conformance-packs.json",
                 new TypeReference<Map<String, Map<String, ConformancePack>>>() {});
+        this.aggregationAuthorizations = storageBacked("config-aggregation-authorizations.json",
+                new TypeReference<Map<String, Map<String, AggregationAuthorization>>>() {});
         this.configurationRecorders = storageBacked("config-recorders.json",
                 new TypeReference<Map<String, ConfigurationRecorder>>() {});
         this.deliveryChannels = storageBacked("config-delivery-channels.json",
@@ -72,6 +77,7 @@ public class AwsConfigService {
                 new TypeReference<Map<String, Map<String, String>>>() {});
         normalizeRegionMaps(configRules);
         normalizeRegionMaps(conformancePacks);
+        normalizeRegionMaps(aggregationAuthorizations);
         normalizeRegionMaps(tags);
     }
 
@@ -337,6 +343,50 @@ public class AwsConfigService {
         return result;
     }
 
+    // --- Aggregation Authorizations ---
+
+    public AggregationAuthorization putAggregationAuthorization(String region,
+                                                                String authorizedAccountId,
+                                                                String authorizedAwsRegion,
+                                                                List<Map<String, String>> tagList) {
+        requireAccountId(authorizedAccountId);
+        requireAuthorizedRegion(authorizedAwsRegion);
+        Map<String, AggregationAuthorization> store = authorizationsFor(region);
+        String key = authorizationKey(authorizedAccountId, authorizedAwsRegion);
+        AggregationAuthorization existing = store.get(key);
+        if (existing != null) {
+            // Put is idempotent: a subsequent request does not create a duplicate
+            // and create-time tags on an existing authorization are ignored.
+            return existing;
+        }
+        String arn = AwsArnUtils.Arn.of("config", region, regionResolver.getAccountId(),
+                "aggregation-authorization/" + authorizedAccountId + "/" + authorizedAwsRegion).toString();
+        AggregationAuthorization auth = new AggregationAuthorization(
+                arn, authorizedAccountId, authorizedAwsRegion, System.currentTimeMillis() / 1000);
+        store.put(key, auth);
+        persistRegion(aggregationAuthorizations, region);
+        if (tagList != null && !tagList.isEmpty()) {
+            tagResource(arn, tagList);
+        }
+        return auth;
+    }
+
+    public List<AggregationAuthorization> describeAggregationAuthorizations(String region) {
+        return new ArrayList<>(authorizationsFor(region).values());
+    }
+
+    public void deleteAggregationAuthorization(String region, String authorizedAccountId,
+                                               String authorizedAwsRegion) {
+        requireAccountId(authorizedAccountId);
+        requireAuthorizedRegion(authorizedAwsRegion);
+        Map<String, AggregationAuthorization> store = authorizationsFor(region);
+        AggregationAuthorization removed = store.remove(authorizationKey(authorizedAccountId, authorizedAwsRegion));
+        persistRegion(aggregationAuthorizations, region);
+        if (removed != null) {
+            tags.remove(removed.aggregationAuthorizationArn());
+        }
+    }
+
     // --- Tagging ---
 
     public void tagResource(String arn, List<Map<String, String>> tagList) {
@@ -370,6 +420,28 @@ public class AwsConfigService {
 
     private Map<String, ConformancePack> packsFor(String region) {
         return conformancePacks.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, AggregationAuthorization> authorizationsFor(String region) {
+        return aggregationAuthorizations.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private static String authorizationKey(String authorizedAccountId, String authorizedAwsRegion) {
+        return authorizedAccountId + "/" + authorizedAwsRegion;
+    }
+
+    private static void requireAccountId(String accountId) {
+        if (accountId == null || !accountId.matches("\\d{12}")) {
+            throw new AwsException("InvalidParameterValueException",
+                    "AuthorizedAccountId must be a 12-digit AWS account ID.", 400);
+        }
+    }
+
+    private static void requireAuthorizedRegion(String authorizedAwsRegion) {
+        if (authorizedAwsRegion == null || authorizedAwsRegion.isBlank() || authorizedAwsRegion.length() > 64) {
+            throw new AwsException("InvalidParameterValueException",
+                    "AuthorizedAwsRegion is invalid.", 400);
+        }
     }
 
     private static String shortId() {
