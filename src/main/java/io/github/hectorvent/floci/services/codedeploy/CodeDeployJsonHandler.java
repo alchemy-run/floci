@@ -116,6 +116,10 @@ public class CodeDeployJsonHandler {
         Map<String, Object> fields = extractGroupFields(req);
         DeploymentGroup group = service.createDeploymentGroup(region, appName, groupName,
                 deploymentConfigName, serviceRoleArn, fields);
+        List<Map<String, String>> tags = parseTags(req, "tags");
+        if (!tags.isEmpty()) {
+            service.tagResource(service.deploymentGroupArn(region, appName, groupName), tags);
+        }
         return Response.ok(Map.of("deploymentGroupId", group.getDeploymentGroupId())).build();
     }
 

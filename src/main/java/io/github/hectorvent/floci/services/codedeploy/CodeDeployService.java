@@ -357,11 +357,10 @@ public class CodeDeployService {
     }
 
     public void deleteApplication(String region, String name) {
-        if (applicationsFor(region).remove(name) == null) {
-            throw new AwsException("ApplicationDoesNotExistException",
-                    "Application does not exist: " + name, 400);
+        // AWS DeleteApplication is idempotent — a missing application is success.
+        if (applicationsFor(region).remove(name) != null) {
+            persistRegion(applications, region);
         }
-        persistRegion(applications, region);
     }
 
     public List<String> listApplications(String region) {
@@ -387,7 +386,7 @@ public class CodeDeployService {
     public DeploymentGroup createDeploymentGroup(String region, String appName, String groupName,
                                                   String deploymentConfigName, String serviceRoleArn,
                                                   Map<String, Object> fields) {
-        getApplication(region, appName);
+        Application app = getApplication(region, appName);
         Map<String, Map<String, DeploymentGroup>> appGroups = deploymentGroupsFor(region);
         Map<String, DeploymentGroup> groupStore = appGroups.computeIfAbsent(appName, a -> new ConcurrentHashMap<>());
         if (groupStore.containsKey(groupName)) {
@@ -401,6 +400,8 @@ public class CodeDeployService {
         group.setDeploymentGroupName(groupName);
         group.setDeploymentConfigName(deploymentConfigName != null ? deploymentConfigName : "CodeDeployDefault.OneAtATime");
         group.setServiceRoleArn(serviceRoleArn);
+        // AWS GetDeploymentGroup always returns the application's compute platform.
+        group.setComputePlatform(app.getComputePlatform());
         applyGroupFields(group, fields);
         groupStore.put(groupName, group);
         persistRegion(deploymentGroups, region);
@@ -408,13 +409,16 @@ public class CodeDeployService {
     }
 
     public DeploymentGroup getDeploymentGroup(String region, String appName, String groupName) {
-        getApplication(region, appName);
+        Application app = getApplication(region, appName);
         Map<String, Map<String, DeploymentGroup>> appGroups = deploymentGroupsFor(region);
         Map<String, DeploymentGroup> groupStore = appGroups.get(appName);
         DeploymentGroup group = groupStore != null ? groupStore.get(groupName) : null;
         if (group == null) {
             throw new AwsException("DeploymentGroupDoesNotExistException",
                     "Deployment group does not exist: " + groupName, 400);
+        }
+        if (group.getComputePlatform() == null) {
+            group.setComputePlatform(app.getComputePlatform());
         }
         return group;
     }
@@ -441,14 +445,16 @@ public class CodeDeployService {
     }
 
     public void deleteDeploymentGroup(String region, String appName, String groupName) {
-        getApplication(region, appName);
+        // AWS DeleteDeploymentGroup is idempotent — a missing group (or a
+        // missing parent application) is success, not an error.
+        if (applicationsFor(region).get(appName) == null) {
+            return;
+        }
         Map<String, Map<String, DeploymentGroup>> appGroups = deploymentGroupsFor(region);
         Map<String, DeploymentGroup> groupStore = appGroups.get(appName);
-        if (groupStore == null || groupStore.remove(groupName) == null) {
-            throw new AwsException("DeploymentGroupDoesNotExistException",
-                    "Deployment group does not exist: " + groupName, 400);
+        if (groupStore != null && groupStore.remove(groupName) != null) {
+            persistRegion(deploymentGroups, region);
         }
-        persistRegion(deploymentGroups, region);
     }
 
     public List<String> listDeploymentGroups(String region, String appName) {
@@ -514,11 +520,10 @@ public class CodeDeployService {
             throw new AwsException("InvalidDeploymentConfigNameException",
                     "Cannot delete a built-in deployment configuration.", 400);
         }
-        if (deploymentConfigsFor(region).remove(name) == null) {
-            throw new AwsException("DeploymentConfigDoesNotExistException",
-                    "Deployment configuration does not exist: " + name, 400);
+        // AWS DeleteDeploymentConfig is idempotent for a missing custom config.
+        if (deploymentConfigsFor(region).remove(name) != null) {
+            persistRegion(deploymentConfigs, region);
         }
-        persistRegion(deploymentConfigs, region);
     }
 
     public List<String> listDeploymentConfigs(String region) {

@@ -185,6 +185,7 @@ class CodeDeployIntegrationTest {
             .statusCode(200)
             .body("deploymentGroupInfo.deploymentGroupName", equalTo("my-lambda-dg"))
             .body("deploymentGroupInfo.applicationName", equalTo("my-lambda-app"))
+            .body("deploymentGroupInfo.computePlatform", equalTo("Lambda"))
             .body("deploymentGroupInfo.deploymentConfigName", equalTo("CodeDeployDefault.LambdaAllAtOnce"))
             .body("deploymentGroupInfo.serviceRoleArn", equalTo("arn:aws:iam::000000000000:role/codedeploy-role"));
     }
@@ -408,5 +409,211 @@ class CodeDeployIntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", containsString("InvalidDeploymentConfigNameException"));
+    }
+
+    @Test
+    @Order(19)
+    void lambdaCanaryConfigAndInPlaceGroupUpdate() {
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.CreateApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"applicationName": "alchemy-test-cd-app", "computePlatform": "Lambda"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.CreateDeploymentConfig")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "deploymentConfigName": "alchemy-test-cd-config",
+                    "computePlatform": "Lambda",
+                    "trafficRoutingConfig": {
+                        "type": "TimeBasedCanary",
+                        "timeBasedCanary": {"canaryPercentage": 10, "canaryInterval": 1}
+                    }
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.GetDeploymentConfig")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"deploymentConfigName": "alchemy-test-cd-config"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("deploymentConfigInfo.computePlatform", equalTo("Lambda"))
+            .body("deploymentConfigInfo.trafficRoutingConfig.timeBasedCanary.canaryPercentage", equalTo(10));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.CreateDeploymentGroup")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "applicationName": "alchemy-test-cd-app",
+                    "deploymentGroupName": "alchemy-test-cd-dg",
+                    "deploymentConfigName": "CodeDeployDefault.LambdaAllAtOnce",
+                    "serviceRoleArn": "arn:aws:iam::000000000000:role/codedeploy-role",
+                    "deploymentStyle": {
+                        "deploymentType": "BLUE_GREEN",
+                        "deploymentOption": "WITH_TRAFFIC_CONTROL"
+                    },
+                    "autoRollbackConfiguration": {
+                        "enabled": true,
+                        "events": ["DEPLOYMENT_FAILURE"]
+                    },
+                    "tags": [{"Key": "env", "Value": "test"}]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.GetDeploymentGroup")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "applicationName": "alchemy-test-cd-app",
+                    "deploymentGroupName": "alchemy-test-cd-dg"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("deploymentGroupInfo.computePlatform", equalTo("Lambda"))
+            .body("deploymentGroupInfo.deploymentConfigName", equalTo("CodeDeployDefault.LambdaAllAtOnce"));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.ListTagsForResource")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ResourceArn": "arn:aws:codedeploy:us-east-1:000000000000:deploymentgroup:alchemy-test-cd-app/alchemy-test-cd-dg"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Tags.Key", hasItems("env"));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.UpdateDeploymentGroup")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "applicationName": "alchemy-test-cd-app",
+                    "currentDeploymentGroupName": "alchemy-test-cd-dg",
+                    "deploymentConfigName": "alchemy-test-cd-config"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.GetDeploymentGroup")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "applicationName": "alchemy-test-cd-app",
+                    "deploymentGroupName": "alchemy-test-cd-dg"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("deploymentGroupInfo.deploymentConfigName", equalTo("alchemy-test-cd-config"))
+            .body("deploymentGroupInfo.computePlatform", equalTo("Lambda"));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.DeleteDeploymentGroup")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "applicationName": "alchemy-test-cd-app",
+                    "deploymentGroupName": "alchemy-test-cd-dg"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.DeleteApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"applicationName": "alchemy-test-cd-app"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.DeleteDeploymentConfig")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"deploymentConfigName": "alchemy-test-cd-config"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    @Order(20)
+    void deleteMissingGroupAppAndConfigIsIdempotent() {
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.DeleteDeploymentGroup")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "applicationName": "does-not-exist-app",
+                    "deploymentGroupName": "does-not-exist-dg"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.DeleteApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"applicationName": "does-not-exist-app"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.DeleteDeploymentConfig")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"deploymentConfigName": "does-not-exist-config"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
     }
 }
