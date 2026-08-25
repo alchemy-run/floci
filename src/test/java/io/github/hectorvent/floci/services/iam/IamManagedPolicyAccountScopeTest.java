@@ -85,6 +85,7 @@ class IamManagedPolicyAccountScopeTest {
         assertTrue(arns.contains(AwsManagedPolicies.ARN_PREFIX + "/AWSCloudFormationReadOnlyAccess"));
         assertTrue(arns.contains(AwsManagedPolicies.ARN_PREFIX + "/AWSCloudFormationFullAccess"));
         assertTrue(arns.contains(AwsManagedPolicies.ARN_PREFIX + "/AmazonElasticFileSystemClientFullAccess"));
+        assertTrue(arns.contains(AwsManagedPolicies.ARN_PREFIX + "/service-role/AwsGlueDataBrewServiceRole"));
     }
 
     @Test

@@ -157,6 +157,9 @@ final class AwsManagedPolicies {
         // Glue job/crawler execution role — Alchemy Job/Crawler/Bindings attach this ARN.
         new ManagedPolicyDef("AWSGlueServiceRole", "/service-role/",
                 "Policy for AWS Glue service role."),
+        // Glue DataBrew project/job execution role — Alchemy DataBrew Project/Job attach this ARN.
+        new ManagedPolicyDef("AwsGlueDataBrewServiceRole", "/service-role/",
+                "Policy for AWS Glue DataBrew service role."),
 
         // Batch unmanaged CE service role — Alchemy Batch Bindings attach this ARN.
         new ManagedPolicyDef("AWSBatchServiceRole", "/service-role/",
