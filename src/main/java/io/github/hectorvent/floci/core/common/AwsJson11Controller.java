@@ -40,6 +40,7 @@ import io.github.hectorvent.floci.services.cognito.CognitoJsonHandler;
 import io.github.hectorvent.floci.services.cloudmap.CloudMapHandler;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler;
 import io.github.hectorvent.floci.services.emr.EmrHandler;
+import io.github.hectorvent.floci.services.dax.DaxJsonHandler;
 import io.github.hectorvent.floci.services.memorydb.MemoryDbHandler;
 import io.github.hectorvent.floci.services.wafv2.WafV2Handler;
 import io.github.hectorvent.floci.services.kinesis.KinesisJsonHandler;
@@ -117,6 +118,7 @@ public class AwsJson11Controller {
     private final LightsailJsonHandler lightsailJsonHandler;
     private final CloudControlJsonHandler cloudControlJsonHandler;
     private final ApplicationAutoScalingJsonHandler applicationAutoScalingJsonHandler;
+    private final DaxJsonHandler daxJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -159,7 +161,8 @@ public class AwsJson11Controller {
                                CloudHsmV2JsonHandler cloudHsmV2JsonHandler,
                                LightsailJsonHandler lightsailJsonHandler,
                                CloudControlJsonHandler cloudControlJsonHandler,
-                               ApplicationAutoScalingJsonHandler applicationAutoScalingJsonHandler) {
+                               ApplicationAutoScalingJsonHandler applicationAutoScalingJsonHandler,
+                               DaxJsonHandler daxJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -207,6 +210,7 @@ public class AwsJson11Controller {
         this.lightsailJsonHandler = lightsailJsonHandler;
         this.cloudControlJsonHandler = cloudControlJsonHandler;
         this.applicationAutoScalingJsonHandler = applicationAutoScalingJsonHandler;
+        this.daxJsonHandler = daxJsonHandler;
     }
 
     @POST
@@ -247,6 +251,7 @@ public class AwsJson11Controller {
                 case "elasticmapreduce" -> emrHandler.handle(action, request, region);
                 case "wafv2" -> wafV2Handler.handle(action, request, region);
                 case "memorydb" -> memoryDbHandler.handle(action, request, region);
+                case "dax" -> daxJsonHandler.handle(action, request, region);
                 case "logs" -> cloudWatchLogsHandler.handle(action, request, region);
                 case "secretsmanager" -> secretsManagerJsonHandler.handle(action, request, region);
                 case "kinesis" -> kinesisJsonHandler.handle(action, request, region);

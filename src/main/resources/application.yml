@@ -308,6 +308,8 @@ floci:
       proxy-base-port: 6400
       proxy-max-port: 6419
       default-image: "valkey/valkey:8"
+    dax:
+      enabled: true
     rds:
       enabled: true
       mock: false                                 # FLOCI_SERVICES_RDS_MOCK — true = metadata only, no Docker (useful for CI)

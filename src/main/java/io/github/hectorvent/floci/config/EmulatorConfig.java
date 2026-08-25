@@ -694,6 +694,7 @@ public interface EmulatorConfig {
         KinesisAnalyticsServiceConfig kinesisAnalytics();
         ElastiCacheServiceConfig elasticache();
         MemoryDbServiceConfig memorydb();
+        DaxServiceConfig dax();
         RdsServiceConfig rds();
         RdsDataServiceConfig rdsData();
         EventBridgeServiceConfig eventbridge();
@@ -1158,6 +1159,11 @@ public interface EmulatorConfig {
 
         /** Docker network to attach MemoryDB containers to. Empty = default bridge. */
         Optional<String> dockerNetwork();
+    }
+
+    interface DaxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface RdsServiceConfig {
