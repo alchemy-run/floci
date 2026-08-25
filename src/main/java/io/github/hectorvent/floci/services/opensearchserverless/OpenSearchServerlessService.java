@@ -35,6 +35,7 @@ import java.util.regex.Pattern;
 public class OpenSearchServerlessService implements Resettable {
 
     private static final Pattern GROUP_NAME = Pattern.compile("^[a-z][a-z0-9-]{2,31}$");
+    private static final Pattern INDEX_NAME = Pattern.compile("^[a-z0-9][a-z0-9._-]{0,254}$");
     private static final String DEFAULT_GENERATION = "2.0";
     private static final int DEFAULT_CAPACITY_OCU = 10;
     private static final int MIN_CAPACITY_OCU = 2;
@@ -80,6 +81,7 @@ public class OpenSearchServerlessService implements Resettable {
         long createdDate;
         long lastModifiedDate;
         final Map<String, String> tags = new LinkedHashMap<>();
+        final ConcurrentHashMap<String, JsonNode> indexes = new ConcurrentHashMap<>();
     }
 
     static final class AccountSettings {
@@ -739,6 +741,55 @@ public class OpenSearchServerlessService implements Resettable {
         return response;
     }
 
+    public ObjectNode createIndex(JsonNode request) {
+        Collection collection = requireCollectionById(requireText(request, "id"));
+        String indexName = requireIndexName(request);
+        JsonNode schema = copy(request.get("indexSchema"));
+        JsonNode stored = schema == null ? objectMapper.nullNode() : schema;
+        JsonNode existing = collection.indexes.putIfAbsent(indexName, stored);
+        if (existing != null) {
+            throw conflict("Index " + indexName + " already exists.");
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    public ObjectNode getIndex(JsonNode request) {
+        Collection collection = requireCollectionById(requireText(request, "id"));
+        String indexName = requireIndexName(request);
+        JsonNode schema = collection.indexes.get(indexName);
+        if (schema == null) {
+            throw notFound("Index " + indexName + " not found.");
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        if (!schema.isNull()) {
+            response.set("indexSchema", schema);
+        }
+        return response;
+    }
+
+    public ObjectNode updateIndex(JsonNode request) {
+        Collection collection = requireCollectionById(requireText(request, "id"));
+        String indexName = requireIndexName(request);
+        if (!collection.indexes.containsKey(indexName)) {
+            throw notFound("Index " + indexName + " not found.");
+        }
+        JsonNode schema = copy(request.get("indexSchema"));
+        if (schema != null) {
+            collection.indexes.put(indexName, schema);
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    public ObjectNode deleteIndex(JsonNode request) {
+        Collection collection = requireCollectionById(requireText(request, "id"));
+        String indexName = requireIndexName(request);
+        JsonNode removed = collection.indexes.remove(indexName);
+        if (removed == null) {
+            throw notFound("Index " + indexName + " not found.");
+        }
+        return objectMapper.createObjectNode();
+    }
+
     public ObjectNode tagResource(JsonNode request) {
         String arn = requireText(request, "resourceArn");
         Map<String, String> incoming = readTags(request.get("tags"));
@@ -909,7 +960,7 @@ public class OpenSearchServerlessService implements Resettable {
         if (textOrNull(options, "metadata") == null) {
             throw invalid("samlOptions.metadata is required.");
         }
-        ObjectNode copy = options.deepCopy();
+        ObjectNode copy = (ObjectNode) options.deepCopy();
         int timeout = 60;
         if (copy.hasNonNull("sessionTimeout")) {
             timeout = copy.get("sessionTimeout").asInt();
@@ -1359,6 +1410,15 @@ public class OpenSearchServerlessService implements Resettable {
             throw invalid("name must be 3-32 characters, start with a lowercase letter, "
                     + "and contain only lowercase letters, numbers, and hyphens.");
         }
+    }
+
+    private String requireIndexName(JsonNode request) {
+        String name = requireText(request, "indexName");
+        if (!INDEX_NAME.matcher(name).matches()) {
+            throw invalid("indexName must be 1-255 characters of lowercase letters, numbers, "
+                    + "hyphens, underscores, or dots, and must start with a letter or number.");
+        }
+        return name;
     }
 
     private String requireStandbyReplicas(JsonNode request) {

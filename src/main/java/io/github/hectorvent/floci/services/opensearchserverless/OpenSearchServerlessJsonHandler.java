@@ -68,6 +68,10 @@ public class OpenSearchServerlessJsonHandler {
             case "UpdateCollection" -> ok(service.updateCollection(body));
             case "DeleteCollection" -> ok(service.deleteCollection(body));
             case "ListCollections" -> ok(service.listCollections(body));
+            case "CreateIndex" -> ok(service.createIndex(body));
+            case "GetIndex" -> ok(service.getIndex(body));
+            case "UpdateIndex" -> ok(service.updateIndex(body));
+            case "DeleteIndex" -> ok(service.deleteIndex(body));
             case "TagResource" -> ok(service.tagResource(body));
             case "UntagResource" -> ok(service.untagResource(body));
             case "ListTagsForResource" -> ok(service.listTagsForResource(body));
