@@ -119,9 +119,11 @@ public class EksController {
 
     @GET
     @Path("/clusters/{name}/fargate-profiles")
-    public Response listFargateProfiles(@PathParam("name") String name) {
-        List<String> profileNames = eksService.listFargateProfiles(name);
-        return Response.ok(Map.of("fargateProfileNames", profileNames)).build();
+    public Response listFargateProfiles(@PathParam("name") String name,
+            @QueryParam("maxResults") Integer maxResults,
+            @QueryParam("nextToken") String nextToken) {
+        return Response.ok(eksService.page(eksService.listFargateProfiles(name), maxResults, nextToken,
+                "fargateProfileNames")).build();
     }
 
     @GET

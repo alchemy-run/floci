@@ -194,6 +194,12 @@ public class EksService implements TagHandler {
                 addonStorage.delete(key);
             }
         }
+        String fargatePrefix = name + "/";
+        for (String key : fargateProfileStorage.keys()) {
+            if (key.startsWith(fargatePrefix)) {
+                fargateProfileStorage.delete(key);
+            }
+        }
         insightsRefreshByCluster.remove(name);
         storage.delete(name);
         return cluster;
@@ -728,6 +734,16 @@ public class EksService implements TagHandler {
             addonStorage.put(addonKey(addon.getClusterName(), addon.getAddonName()), addon);
             return;
         }
+        if (resource.startsWith("fargateprofile/")) {
+            FargateProfile profile = requireFargateProfileByArn(resourceArn);
+            if (profile.getTags() == null) {
+                profile.setTags(new HashMap<>());
+            }
+            profile.getTags().putAll(tags);
+            fargateProfileStorage.put(fargateProfileKey(profile.getClusterName(),
+                    profile.getFargateProfileName()), profile);
+            return;
+        }
         Cluster cluster = requireClusterByArn(resourceArn);
         if (cluster.getTags() == null) {
             cluster.setTags(new HashMap<>());
@@ -757,6 +773,15 @@ public class EksService implements TagHandler {
             addonStorage.put(addonKey(addon.getClusterName(), addon.getAddonName()), addon);
             return;
         }
+        if (resource.startsWith("fargateprofile/")) {
+            FargateProfile profile = requireFargateProfileByArn(resourceArn);
+            if (profile.getTags() != null && tagKeys != null) {
+                tagKeys.forEach(profile.getTags()::remove);
+            }
+            fargateProfileStorage.put(fargateProfileKey(profile.getClusterName(),
+                    profile.getFargateProfileName()), profile);
+            return;
+        }
         Cluster cluster = requireClusterByArn(resourceArn);
         if (cluster.getTags() != null && tagKeys != null) {
             tagKeys.forEach(cluster.getTags()::remove);
@@ -774,6 +799,10 @@ public class EksService implements TagHandler {
         if (resource.startsWith("addon/")) {
             Addon addon = requireAddonByArn(resourceArn);
             return addon.getTags() != null ? addon.getTags() : Map.of();
+        }
+        if (resource.startsWith("fargateprofile/")) {
+            FargateProfile profile = requireFargateProfileByArn(resourceArn);
+            return profile.getTags() != null ? profile.getTags() : Map.of();
         }
         Cluster cluster = requireClusterByArn(resourceArn);
         return cluster.getTags() != null ? cluster.getTags() : Map.of();
@@ -815,6 +844,14 @@ public class EksService implements TagHandler {
     private Addon requireAddonByArn(String resourceArn) {
         return addonStorage.scan(k -> true).stream()
                 .filter(addon -> resourceArn.equals(addon.getAddonArn()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Resource not found: " + resourceArn, 404));
+    }
+
+    private FargateProfile requireFargateProfileByArn(String resourceArn) {
+        return fargateProfileStorage.scan(k -> true).stream()
+                .filter(profile -> resourceArn.equals(profile.getFargateProfileArn()))
                 .findFirst()
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Resource not found: " + resourceArn, 404));
