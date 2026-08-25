@@ -269,6 +269,7 @@ public interface EmulatorConfig {
         BackupSearchStorageConfig backupsearch();
         DataBrewStorageConfig databrew();
         DataExchangeStorageConfig dataexchange();
+        DataZoneStorageConfig datazone();
         DlmStorageConfig dlm();
         DsqlStorageConfig dsql();
         CloudFrontStorageConfig cloudfront();
@@ -440,6 +441,13 @@ public interface EmulatorConfig {
     }
 
     interface DataExchangeStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DataZoneStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -777,6 +785,7 @@ public interface EmulatorConfig {
         BackupSearchServiceConfig backupsearch();
         DataBrewServiceConfig databrew();
         DataExchangeServiceConfig dataexchange();
+        DataZoneServiceConfig datazone();
         DlmServiceConfig dlm();
         DsqlServiceConfig dsql();
         NeptuneServiceConfig neptune();
@@ -967,6 +976,11 @@ public interface EmulatorConfig {
     }
 
     interface DataExchangeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DataZoneServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

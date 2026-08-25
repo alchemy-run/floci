@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.services.backup.BackupController;
 import io.github.hectorvent.floci.services.backupsearch.BackupSearchController;
 import io.github.hectorvent.floci.services.databrew.DataBrewController;
 import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
+import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.appconfig.AppConfigDataController;
@@ -463,6 +464,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().dataexchange().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("dataexchange"), Set.of(), Set.of(DataExchangeController.class)),
+                descriptor("datazone", "datazone", config.services().datazone().enabled(), true,
+                        "datazone", storageMode(config.storage().services().datazone().mode(),
+                                config.storage().mode()),
+                        config.storage().services().datazone().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("datazone"), Set.of(), Set.of(DataZoneController.class)),
                 descriptor("dlm", "dlm", config.services().dlm().enabled(), true,
                         "dlm", storageMode(config.storage().services().dlm().mode(), config.storage().mode()),
                         config.storage().services().dlm().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

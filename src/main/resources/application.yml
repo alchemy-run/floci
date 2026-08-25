@@ -157,6 +157,8 @@ floci:
         flush-interval-ms: 5000
       dataexchange:
         flush-interval-ms: 5000
+      datazone:
+        flush-interval-ms: 5000
       dlm:
         flush-interval-ms: 5000
       dsql:
@@ -507,6 +509,8 @@ floci:
     databrew:
       enabled: true
     dataexchange:
+      enabled: true
+    datazone:
       enabled: true
     dlm:
       enabled: true
