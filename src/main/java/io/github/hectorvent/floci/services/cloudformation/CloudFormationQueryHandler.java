@@ -62,6 +62,11 @@ public class CloudFormationQueryHandler {
             case "ValidateTemplate" -> validateTemplate(params);
             case "ListStacks" -> listStacks(params, region);
             case "ListExports" -> listExports(params, region);
+            case "ListImports" -> listImports(params, region);
+            case "SignalResource" -> signalResource(params, region);
+            case "DetectStackDrift" -> detectStackDrift(params, region);
+            case "DescribeStackDriftDetectionStatus" -> describeStackDriftDetectionStatus(params);
+            case "DescribeStackResourceDrifts" -> describeStackResourceDrifts(params, region);
             case "SetStackPolicy" -> Response.ok(emptyResult("SetStackPolicyResponse")).build();
             case "GetStackPolicy" -> Response.ok(emptyResult("GetStackPolicyResponse")).build();
             case "DescribeStackResource" -> describeStackResource(params, region);
@@ -359,8 +364,14 @@ public class CloudFormationQueryHandler {
 
     private Response describeStackResources(MultivaluedMap<String, String> params, String region) {
         String stackName = params.getFirst("StackName");
+        String logicalId = params.getFirst("LogicalResourceId");
         try {
             List<StackResource> resources = cfnService.describeStackResources(stackName, region);
+            if (logicalId != null && !logicalId.isBlank()) {
+                resources = resources.stream()
+                        .filter(r -> logicalId.equals(r.getLogicalId()))
+                        .toList();
+            }
             return stackResourcesXml(resources, stackName, region);
         } catch (AwsException e) {
             return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
@@ -446,15 +457,137 @@ public class CloudFormationQueryHandler {
     // ── ValidateTemplate ──────────────────────────────────────────────────────
 
     private Response validateTemplate(MultivaluedMap<String, String> params) {
-        String xml = new XmlBuilder()
-                .start("ValidateTemplateResponse", CF_NS)
-                .start("ValidateTemplateResult")
-                .raw("<Parameters/><Capabilities/><CapabilitiesReason/>")
-                .end("ValidateTemplateResult")
-                .raw(AwsQueryResponse.responseMetadata())
-                .end("ValidateTemplateResponse")
-                .build();
-        return Response.ok(xml).type("text/xml").build();
+        try {
+            CloudFormationService.ValidateTemplateResult result = cfnService.validateTemplate(
+                    params.getFirst("TemplateBody"), params.getFirst("TemplateURL"));
+            XmlBuilder xml = new XmlBuilder()
+                    .start("ValidateTemplateResponse", CF_NS)
+                    .start("ValidateTemplateResult")
+                    .start("Parameters");
+            for (CloudFormationService.TemplateParameterInfo parameter : result.parameters()) {
+                xml.start("member")
+                   .elem("ParameterKey", parameter.parameterKey())
+                   .elem("DefaultValue", parameter.defaultValue())
+                   .elem("NoEcho", String.valueOf(parameter.noEcho()))
+                   .elem("Description", parameter.description())
+                   .end("member");
+            }
+            xml.end("Parameters").start("Capabilities");
+            for (String capability : result.capabilities()) {
+                xml.elem("member", capability);
+            }
+            xml.end("Capabilities")
+               .elem("Description", result.description())
+               .end("ValidateTemplateResult")
+               .raw(AwsQueryResponse.responseMetadata())
+               .end("ValidateTemplateResponse");
+            return Response.ok(xml.build()).type("text/xml").build();
+        } catch (AwsException e) {
+            return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response listImports(MultivaluedMap<String, String> params, String region) {
+        try {
+            List<String> imports = cfnService.listImports(params.getFirst("ExportName"), region);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("ListImportsResponse", CF_NS)
+                    .start("ListImportsResult")
+                    .start("Imports");
+            for (String stackName : imports) {
+                xml.elem("member", stackName);
+            }
+            xml.end("Imports").end("ListImportsResult")
+               .raw(AwsQueryResponse.responseMetadata())
+               .end("ListImportsResponse");
+            return Response.ok(xml.build()).type("text/xml").build();
+        } catch (AwsException e) {
+            return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response signalResource(MultivaluedMap<String, String> params, String region) {
+        try {
+            cfnService.signalResource(
+                    params.getFirst("StackName"),
+                    params.getFirst("LogicalResourceId"),
+                    params.getFirst("UniqueId"),
+                    params.getFirst("Status"),
+                    region);
+            return Response.ok(emptyResult("SignalResourceResponse")).type("text/xml").build();
+        } catch (AwsException e) {
+            return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response detectStackDrift(MultivaluedMap<String, String> params, String region) {
+        try {
+            String detectionId = cfnService.detectStackDrift(
+                    params.getFirst("StackName"),
+                    extractList(params, "LogicalResourceIds.member."),
+                    region);
+            String xml = new XmlBuilder()
+                    .start("DetectStackDriftResponse", CF_NS)
+                    .start("DetectStackDriftResult")
+                    .elem("StackDriftDetectionId", detectionId)
+                    .end("DetectStackDriftResult")
+                    .raw(AwsQueryResponse.responseMetadata())
+                    .end("DetectStackDriftResponse")
+                    .build();
+            return Response.ok(xml).type("text/xml").build();
+        } catch (AwsException e) {
+            return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response describeStackDriftDetectionStatus(MultivaluedMap<String, String> params) {
+        try {
+            CloudFormationService.DriftDetection detection =
+                    cfnService.describeStackDriftDetectionStatus(params.getFirst("StackDriftDetectionId"));
+            String xml = new XmlBuilder()
+                    .start("DescribeStackDriftDetectionStatusResponse", CF_NS)
+                    .start("DescribeStackDriftDetectionStatusResult")
+                    .elem("StackId", detection.stackId())
+                    .elem("StackDriftDetectionId", detection.detectionId())
+                    .elem("StackDriftStatus", detection.stackDriftStatus())
+                    .elem("DetectionStatus", detection.detectionStatus())
+                    .elem("DriftedStackResourceCount", String.valueOf(detection.driftedStackResourceCount()))
+                    .elem("Timestamp", ISO.format(detection.timestamp()))
+                    .end("DescribeStackDriftDetectionStatusResult")
+                    .raw(AwsQueryResponse.responseMetadata())
+                    .end("DescribeStackDriftDetectionStatusResponse")
+                    .build();
+            return Response.ok(xml).type("text/xml").build();
+        } catch (AwsException e) {
+            return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
+    }
+
+    private Response describeStackResourceDrifts(MultivaluedMap<String, String> params, String region) {
+        try {
+            List<CloudFormationService.ResourceDrift> drifts =
+                    cfnService.describeStackResourceDrifts(params.getFirst("StackName"), region);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("DescribeStackResourceDriftsResponse", CF_NS)
+                    .start("DescribeStackResourceDriftsResult")
+                    .start("StackResourceDrifts");
+            for (CloudFormationService.ResourceDrift drift : drifts) {
+                xml.start("member")
+                   .elem("StackId", drift.stackId())
+                   .elem("LogicalResourceId", drift.logicalResourceId())
+                   .elem("PhysicalResourceId", drift.physicalResourceId())
+                   .elem("ResourceType", drift.resourceType())
+                   .elem("StackResourceDriftStatus", drift.stackResourceDriftStatus())
+                   .elem("Timestamp", ISO.format(drift.timestamp()))
+                   .end("member");
+            }
+            xml.end("StackResourceDrifts").end("DescribeStackResourceDriftsResult")
+               .raw(AwsQueryResponse.responseMetadata())
+               .end("DescribeStackResourceDriftsResponse");
+            return Response.ok(xml.build()).type("text/xml").build();
+        } catch (AwsException e) {
+            return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
     }
 
     // ── ListStacks ────────────────────────────────────────────────────────────
