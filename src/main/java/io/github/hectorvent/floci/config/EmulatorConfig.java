@@ -889,6 +889,7 @@ public interface EmulatorConfig {
         CloudWatchMetricsServiceConfig cloudwatchmetrics();
         SecretsManagerServiceConfig secretsmanager();
         ApiGatewayV2ServiceConfig apigatewayv2();
+        KendraServiceConfig kendra();
         KinesisServiceConfig kinesis();
         FirehoseServiceConfig firehose();
         FmsServiceConfig fms();
@@ -1706,6 +1707,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+
+    interface KendraServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
 
     interface KinesisServiceConfig {
         @WithDefault("true")

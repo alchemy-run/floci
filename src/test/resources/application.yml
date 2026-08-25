@@ -270,6 +270,8 @@ floci:
     secretsmanager:
       enabled: true
       default-recovery-window-days: 30
+    kendra:
+      enabled: true
     kinesis:
       enabled: true
     firehose:

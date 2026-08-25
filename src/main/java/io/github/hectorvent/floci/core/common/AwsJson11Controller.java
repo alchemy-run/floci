@@ -46,6 +46,7 @@ import io.github.hectorvent.floci.services.emr.EmrHandler;
 import io.github.hectorvent.floci.services.dax.DaxJsonHandler;
 import io.github.hectorvent.floci.services.memorydb.MemoryDbHandler;
 import io.github.hectorvent.floci.services.wafv2.WafV2Handler;
+import io.github.hectorvent.floci.services.kendra.KendraJsonHandler;
 import io.github.hectorvent.floci.services.kinesis.KinesisJsonHandler;
 import io.github.hectorvent.floci.services.kinesisanalytics.KinesisAnalyticsV2JsonHandler;
 import io.github.hectorvent.floci.services.kms.KmsJsonHandler;
@@ -92,6 +93,7 @@ public class AwsJson11Controller {
     private final WafV2Handler wafV2Handler;
     private final CloudWatchLogsHandler cloudWatchLogsHandler;
     private final SecretsManagerJsonHandler secretsManagerJsonHandler;
+    private final KendraJsonHandler kendraJsonHandler;
     private final KinesisJsonHandler kinesisJsonHandler;
     private final KinesisAnalyticsV2JsonHandler kinesisAnalyticsV2JsonHandler;
     private final ApiGatewayV2JsonHandler apigwV2JsonHandler;
@@ -148,6 +150,7 @@ public class AwsJson11Controller {
                                WafV2Handler wafV2Handler,
                                CloudWatchLogsHandler cloudWatchLogsHandler,
                                SecretsManagerJsonHandler secretsManagerJsonHandler,
+                               KendraJsonHandler kendraJsonHandler,
                                KinesisJsonHandler kinesisJsonHandler,
                                KinesisAnalyticsV2JsonHandler kinesisAnalyticsV2JsonHandler,
                                ApiGatewayV2JsonHandler apigwV2JsonHandler,
@@ -202,6 +205,7 @@ public class AwsJson11Controller {
         this.wafV2Handler = wafV2Handler;
         this.cloudWatchLogsHandler = cloudWatchLogsHandler;
         this.secretsManagerJsonHandler = secretsManagerJsonHandler;
+        this.kendraJsonHandler = kendraJsonHandler;
         this.kinesisJsonHandler = kinesisJsonHandler;
         this.kinesisAnalyticsV2JsonHandler = kinesisAnalyticsV2JsonHandler;
         this.apigwV2JsonHandler = apigwV2JsonHandler;
@@ -290,6 +294,7 @@ public class AwsJson11Controller {
                 case "dax" -> daxJsonHandler.handle(action, request, region);
                 case "logs" -> cloudWatchLogsHandler.handle(action, request, region);
                 case "secretsmanager" -> secretsManagerJsonHandler.handle(action, request, region);
+                case "kendra" -> kendraJsonHandler.handle(action, request, region);
                 case "kinesis" -> kinesisJsonHandler.handle(action, request, region);
                 case "kinesisanalytics" -> kinesisAnalyticsV2JsonHandler.handle(action, request, region);
                 case "apigatewayv2" -> apigwV2JsonHandler.handle(action, request, region);

@@ -161,3 +161,4 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/fms/FmsJsonHandler.java }  # alchemy admin-account coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/frauddetector/FraudDetectorJsonHandler.java }  # alchemy detector/list/event coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/fsx/FsxJsonHandler.java }  # alchemy fsx bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/kendra/KendraJsonHandler.java }  # alchemy index/datasource coverage; docs table later
