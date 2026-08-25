@@ -67,8 +67,10 @@ public class SharedTagsController {
 
     @GET
     public Response listTagsByQuery(@Context HttpHeaders headers,
-                                    @QueryParam("resourceArn") String arn) {
-        return listTagsForArn(headers, arn);
+                                    @QueryParam("resourceArn") String arn,
+                                    @QueryParam("ResourceArn") String resourceArn) {
+        String resolved = (arn != null && !arn.isBlank()) ? arn : resourceArn;
+        return listTagsForArn(headers, resolved);
     }
 
     @GET
