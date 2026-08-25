@@ -2,8 +2,10 @@ package io.github.hectorvent.floci.services.cloudwatch.metrics;
 
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
@@ -28,6 +30,7 @@ public class CloudWatchMetricsService {
 
     private final StorageBackend<String, MetricDatum> metricStore;
     private final StorageBackend<String, MetricAlarm> alarmStore;
+    private final StorageBackend<String, CompositeAlarm> compositeAlarmStore;
     private final RegionResolver regionResolver;
 
     @Inject
@@ -36,14 +39,24 @@ public class CloudWatchMetricsService {
                 new TypeReference<Map<String, MetricDatum>>() {});
         this.alarmStore = storageFactory.create("cloudwatchmetrics", "cwalarms.json",
                 new TypeReference<Map<String, MetricAlarm>>() {});
+        this.compositeAlarmStore = storageFactory.create("cloudwatchmetrics", "cwcompositealarms.json",
+                new TypeReference<Map<String, CompositeAlarm>>() {});
         this.regionResolver = regionResolver;
     }
 
     CloudWatchMetricsService(StorageBackend<String, MetricDatum> metricStore,
                              StorageBackend<String, MetricAlarm> alarmStore,
                              RegionResolver regionResolver) {
+        this(metricStore, alarmStore, new InMemoryStorage<>(), regionResolver);
+    }
+
+    CloudWatchMetricsService(StorageBackend<String, MetricDatum> metricStore,
+                             StorageBackend<String, MetricAlarm> alarmStore,
+                             StorageBackend<String, CompositeAlarm> compositeAlarmStore,
+                             RegionResolver regionResolver) {
         this.metricStore = metricStore;
         this.alarmStore = alarmStore;
+        this.compositeAlarmStore = compositeAlarmStore;
         this.regionResolver = regionResolver;
     }
 
@@ -244,6 +257,28 @@ public class CloudWatchMetricsService {
         LOG.infov("PutMetricAlarm: {0} in {1}", alarm.getAlarmName(), region);
     }
 
+    public void putCompositeAlarm(CompositeAlarm alarm, String region) {
+        String key = region + "::" + alarm.getAlarmName();
+        CompositeAlarm existing = compositeAlarmStore.get(key).orElse(null);
+        if (alarm.getAlarmArn() == null) {
+            if (existing != null && existing.getAlarmArn() != null) {
+                alarm.setAlarmArn(existing.getAlarmArn());
+            } else {
+                alarm.setAlarmArn(regionResolver.buildArn("cloudwatch", region, "alarm:" + alarm.getAlarmName()));
+            }
+        }
+        if (existing != null) {
+            alarm.setTags(new LinkedHashMap<>(existing.getTags()));
+        } else if (alarm.getTags() == null) {
+            alarm.setTags(new LinkedHashMap<>());
+        } else {
+            alarm.setTags(new LinkedHashMap<>(alarm.getTags()));
+        }
+        alarm.setAlarmConfigurationUpdatedTimestamp(Instant.now().getEpochSecond());
+        compositeAlarmStore.put(key, alarm);
+        LOG.infov("PutCompositeAlarm: {0} in {1}", alarm.getAlarmName(), region);
+    }
+
     public List<MetricAlarm> describeAlarms(List<String> alarmNames, String alarmNamePrefix, String region) {
         String prefix = region + "::";
         List<MetricAlarm> all = alarmStore.scan(k -> k.startsWith(prefix));
@@ -257,9 +292,23 @@ public class CloudWatchMetricsService {
         return all;
     }
 
+    public List<CompositeAlarm> describeCompositeAlarms(List<String> alarmNames, String alarmNamePrefix, String region) {
+        String prefix = region + "::";
+        List<CompositeAlarm> all = compositeAlarmStore.scan(k -> k.startsWith(prefix));
+
+        if (alarmNames != null && !alarmNames.isEmpty()) {
+            return all.stream().filter(a -> alarmNames.contains(a.getAlarmName())).toList();
+        }
+        if (alarmNamePrefix != null && !alarmNamePrefix.isBlank()) {
+            return all.stream().filter(a -> a.getAlarmName().startsWith(alarmNamePrefix)).toList();
+        }
+        return all;
+    }
+
     public void deleteAlarms(List<String> alarmNames, String region) {
         for (String name : alarmNames) {
             alarmStore.delete(region + "::" + name);
+            compositeAlarmStore.delete(region + "::" + name);
         }
         LOG.infov("Deleted alarms: {0} in {1}", alarmNames, region);
     }
@@ -279,33 +328,59 @@ public class CloudWatchMetricsService {
     }
 
     public Map<String, String> listTagsForResource(String resourceArn, String region) {
-        return alarmStore.scan(k -> k.startsWith(region + "::"))
+        var metricTags = alarmStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(a -> resourceArn.equals(a.getAlarmArn()))
                 .findFirst()
-                .map(MetricAlarm::getTags)
+                .map(MetricAlarm::getTags);
+        if (metricTags.isPresent()) {
+            return metricTags.get();
+        }
+        return compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(a -> resourceArn.equals(a.getAlarmArn()))
+                .findFirst()
+                .map(CompositeAlarm::getTags)
                 .orElse(Map.of());
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags, String region) {
-        alarmStore.scan(k -> k.startsWith(region + "::"))
+        var metric = alarmStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(a -> resourceArn.equals(a.getAlarmArn()))
+                .findFirst();
+        if (metric.isPresent()) {
+            metric.get().getTags().putAll(tags);
+            alarmStore.put(region + "::" + metric.get().getAlarmName(), metric.get());
+            return;
+        }
+        compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(a -> resourceArn.equals(a.getAlarmArn()))
                 .findFirst()
                 .ifPresent(alarm -> {
                     alarm.getTags().putAll(tags);
-                    alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
+                    compositeAlarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
                 });
     }
 
     public void untagResource(String resourceArn, List<String> tagKeys, String region) {
-        alarmStore.scan(k -> k.startsWith(region + "::"))
+        var metric = alarmStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(a -> resourceArn.equals(a.getAlarmArn()))
+                .findFirst();
+        if (metric.isPresent()) {
+            tagKeys.forEach(metric.get().getTags()::remove);
+            alarmStore.put(region + "::" + metric.get().getAlarmName(), metric.get());
+            return;
+        }
+        compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(a -> resourceArn.equals(a.getAlarmArn()))
                 .findFirst()
                 .ifPresent(alarm -> {
                     tagKeys.forEach(alarm.getTags()::remove);
-                    alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
+                    compositeAlarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
                 });
     }
 

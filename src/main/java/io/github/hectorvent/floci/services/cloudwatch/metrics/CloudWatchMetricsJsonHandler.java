@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
@@ -13,6 +14,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +44,7 @@ public class CloudWatchMetricsJsonHandler {
             case "ListMetrics" -> handleListMetrics(request, region);
             case "GetMetricStatistics" -> handleGetMetricStatistics(request, region);
             case "PutMetricAlarm" -> handlePutMetricAlarm(request, region);
+            case "PutCompositeAlarm" -> handlePutCompositeAlarm(request, region);
             case "DescribeAlarms" -> handleDescribeAlarms(request, region);
             case "DeleteAlarms" -> handleDeleteAlarms(request, region);
             case "SetAlarmState" -> handleSetAlarmState(request, region);
@@ -165,6 +168,44 @@ public class CloudWatchMetricsJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    private Response handlePutCompositeAlarm(JsonNode request, String region) {
+        CompositeAlarm alarm = new CompositeAlarm();
+        alarm.setAlarmName(request.path("AlarmName").asText());
+        alarm.setAlarmDescription(request.path("AlarmDescription").asText(null));
+        alarm.setAlarmRule(request.path("AlarmRule").asText(null));
+        alarm.setActionsEnabled(request.path("ActionsEnabled").asBoolean(true));
+        alarm.setActionsSuppressor(request.path("ActionsSuppressor").asText(null));
+        if (request.has("ActionsSuppressorWaitPeriod")) {
+            alarm.setActionsSuppressorWaitPeriod(request.path("ActionsSuppressorWaitPeriod").asInt());
+        }
+        if (request.has("ActionsSuppressorExtensionPeriod")) {
+            alarm.setActionsSuppressorExtensionPeriod(request.path("ActionsSuppressorExtensionPeriod").asInt());
+        }
+
+        JsonNode alarmActions = request.path("AlarmActions");
+        if (alarmActions.isArray()) {
+            alarmActions.forEach(a -> alarm.getAlarmActions().add(a.asText()));
+        }
+        JsonNode okActions = request.path("OKActions");
+        if (okActions.isArray()) {
+            okActions.forEach(a -> alarm.getOkActions().add(a.asText()));
+        }
+        JsonNode insufficientDataActions = request.path("InsufficientDataActions");
+        if (insufficientDataActions.isArray()) {
+            insufficientDataActions.forEach(a -> alarm.getInsufficientDataActions().add(a.asText()));
+        }
+
+        JsonNode tagsNode = request.has("Tags") ? request.path("Tags") : request.path("tags");
+        if (tagsNode.isArray()) {
+            Map<String, String> tags = new LinkedHashMap<>();
+            tagsNode.forEach(t -> tags.put(t.path("Key").asText(), t.path("Value").asText()));
+            alarm.setTags(tags);
+        }
+
+        metricsService.putCompositeAlarm(alarm, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     private Response handleDescribeAlarms(JsonNode request, String region) {
         List<String> alarmNames = new ArrayList<>();
         JsonNode namesNode = request.path("AlarmNames");
@@ -172,43 +213,81 @@ public class CloudWatchMetricsJsonHandler {
             namesNode.forEach(n -> alarmNames.add(n.asText()));
         }
         String prefix = request.has("AlarmNamePrefix") ? request.path("AlarmNamePrefix").asText() : null;
-
-        List<MetricAlarm> alarms = metricsService.describeAlarms(alarmNames, prefix, region);
+        List<String> alarmTypes = new ArrayList<>();
+        JsonNode typesNode = request.path("AlarmTypes");
+        if (typesNode.isArray()) {
+            typesNode.forEach(t -> alarmTypes.add(t.asText()));
+        }
+        boolean includeMetric = alarmTypes.isEmpty() || alarmTypes.contains("MetricAlarm");
+        boolean includeComposite = alarmTypes.contains("CompositeAlarm");
 
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode arr = response.putArray("MetricAlarms");
-        for (MetricAlarm a : alarms) {
-            ObjectNode node = arr.addObject();
-            node.put("AlarmName", a.getAlarmName());
-            if (a.getAlarmArn() != null) node.put("AlarmArn", a.getAlarmArn());
-            if (a.getAlarmDescription() != null) node.put("AlarmDescription", a.getAlarmDescription());
-            ArrayNode alarmActions = node.putArray("AlarmActions");
-            a.getAlarmActions().forEach(alarmActions::add);
-            ArrayNode okActions = node.putArray("OKActions");
-            a.getOkActions().forEach(okActions::add);
-            ArrayNode insufficientDataActions = node.putArray("InsufficientDataActions");
-            a.getInsufficientDataActions().forEach(insufficientDataActions::add);
-            if (a.getMetricName() != null) node.put("MetricName", a.getMetricName());
-            if (a.getNamespace() != null) node.put("Namespace", a.getNamespace());
-            if (a.getStatistic() != null) node.put("Statistic", a.getStatistic());
-            ArrayNode dimensions = node.putArray("Dimensions");
-            a.getDimensions().forEach(d -> {
-                ObjectNode dimNode = dimensions.addObject();
-                dimNode.put("Name", d.name());
-                dimNode.put("Value", d.value());
-            });
-            node.put("Period", a.getPeriod());
-            node.put("EvaluationPeriods", a.getEvaluationPeriods());
-            node.put("Threshold", a.getThreshold());
-            if (a.getComparisonOperator() != null) node.put("ComparisonOperator", a.getComparisonOperator());
-            node.put("ActionsEnabled", a.isActionsEnabled());
-            if (a.getStateValue() != null) node.put("StateValue", a.getStateValue());
-            if (a.getStateReason() != null) node.put("StateReason", a.getStateReason());
-            if (a.getStateReasonData() != null) node.put("StateReasonData", a.getStateReasonData());
-            node.put("StateUpdatedTimestamp", a.getStateUpdatedTimestamp());
-
+        if (includeMetric) {
+            ArrayNode arr = response.putArray("MetricAlarms");
+            for (MetricAlarm a : metricsService.describeAlarms(alarmNames, prefix, region)) {
+                ObjectNode node = arr.addObject();
+                node.put("AlarmName", a.getAlarmName());
+                if (a.getAlarmArn() != null) node.put("AlarmArn", a.getAlarmArn());
+                if (a.getAlarmDescription() != null) node.put("AlarmDescription", a.getAlarmDescription());
+                ArrayNode alarmActions = node.putArray("AlarmActions");
+                a.getAlarmActions().forEach(alarmActions::add);
+                ArrayNode okActions = node.putArray("OKActions");
+                a.getOkActions().forEach(okActions::add);
+                ArrayNode insufficientDataActions = node.putArray("InsufficientDataActions");
+                a.getInsufficientDataActions().forEach(insufficientDataActions::add);
+                if (a.getMetricName() != null) node.put("MetricName", a.getMetricName());
+                if (a.getNamespace() != null) node.put("Namespace", a.getNamespace());
+                if (a.getStatistic() != null) node.put("Statistic", a.getStatistic());
+                ArrayNode dimensions = node.putArray("Dimensions");
+                a.getDimensions().forEach(d -> {
+                    ObjectNode dimNode = dimensions.addObject();
+                    dimNode.put("Name", d.name());
+                    dimNode.put("Value", d.value());
+                });
+                node.put("Period", a.getPeriod());
+                node.put("EvaluationPeriods", a.getEvaluationPeriods());
+                node.put("Threshold", a.getThreshold());
+                if (a.getComparisonOperator() != null) node.put("ComparisonOperator", a.getComparisonOperator());
+                node.put("ActionsEnabled", a.isActionsEnabled());
+                if (a.getStateValue() != null) node.put("StateValue", a.getStateValue());
+                if (a.getStateReason() != null) node.put("StateReason", a.getStateReason());
+                if (a.getStateReasonData() != null) node.put("StateReasonData", a.getStateReasonData());
+                node.put("StateUpdatedTimestamp", a.getStateUpdatedTimestamp());
+            }
+        }
+        if (includeComposite) {
+            ArrayNode arr = response.putArray("CompositeAlarms");
+            for (CompositeAlarm a : metricsService.describeCompositeAlarms(alarmNames, prefix, region)) {
+                writeCompositeAlarm(arr.addObject(), a);
+            }
         }
         return Response.ok(response).build();
+    }
+
+    private void writeCompositeAlarm(ObjectNode node, CompositeAlarm a) {
+        node.put("AlarmName", a.getAlarmName());
+        if (a.getAlarmArn() != null) node.put("AlarmArn", a.getAlarmArn());
+        if (a.getAlarmDescription() != null) node.put("AlarmDescription", a.getAlarmDescription());
+        if (a.getAlarmRule() != null) node.put("AlarmRule", a.getAlarmRule());
+        node.put("ActionsEnabled", a.isActionsEnabled());
+        ArrayNode alarmActions = node.putArray("AlarmActions");
+        a.getAlarmActions().forEach(alarmActions::add);
+        ArrayNode okActions = node.putArray("OKActions");
+        a.getOkActions().forEach(okActions::add);
+        ArrayNode insufficientDataActions = node.putArray("InsufficientDataActions");
+        a.getInsufficientDataActions().forEach(insufficientDataActions::add);
+        if (a.getStateValue() != null) node.put("StateValue", a.getStateValue());
+        if (a.getStateReason() != null) node.put("StateReason", a.getStateReason());
+        if (a.getStateReasonData() != null) node.put("StateReasonData", a.getStateReasonData());
+        node.put("StateUpdatedTimestamp", a.getStateUpdatedTimestamp());
+        node.put("AlarmConfigurationUpdatedTimestamp", a.getAlarmConfigurationUpdatedTimestamp());
+        if (a.getActionsSuppressor() != null) node.put("ActionsSuppressor", a.getActionsSuppressor());
+        if (a.getActionsSuppressorWaitPeriod() != null) {
+            node.put("ActionsSuppressorWaitPeriod", a.getActionsSuppressorWaitPeriod());
+        }
+        if (a.getActionsSuppressorExtensionPeriod() != null) {
+            node.put("ActionsSuppressorExtensionPeriod", a.getActionsSuppressorExtensionPeriod());
+        }
     }
 
     private Response handleDeleteAlarms(JsonNode request, String region) {
@@ -388,5 +467,161 @@ public class CloudWatchMetricsJsonHandler {
                 return null;
             }
         }
+    }
+
+    private Response handleGetDashboard(JsonNode request, String region) {
+        Dashboard dashboard = metricsService.getDashboard(textOrNull(request, "DashboardName"), region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("DashboardName", dashboard.getName());
+        if (dashboard.getArn() != null) {
+            response.put("DashboardArn", dashboard.getArn());
+        }
+        if (dashboard.getBody() != null) {
+            response.put("DashboardBody", dashboard.getBody());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handlePutDashboard(JsonNode request, String region) {
+        metricsService.putDashboard(
+                textOrNull(request, "DashboardName"),
+                textOrNull(request, "DashboardBody"),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("DashboardValidationMessages");
+        return Response.ok(response).build();
+    }
+
+    private Response handleListDashboards(JsonNode request, String region) {
+        List<Dashboard> dashboards = metricsService.listDashboards(
+                textOrNull(request, "DashboardNamePrefix"), region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode entries = response.putArray("DashboardEntries");
+        for (Dashboard dashboard : dashboards) {
+            ObjectNode entry = entries.addObject();
+            entry.put("DashboardName", dashboard.getName());
+            if (dashboard.getArn() != null) {
+                entry.put("DashboardArn", dashboard.getArn());
+            }
+            entry.put("LastModified", dashboard.getLastModified());
+            entry.put("Size", dashboard.getSize());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteDashboards(JsonNode request, String region) {
+        List<String> names = new ArrayList<>();
+        JsonNode namesNode = request.path("DashboardNames");
+        if (namesNode.isArray()) {
+            namesNode.forEach(n -> names.add(n.asText()));
+        }
+        metricsService.deleteDashboards(names, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetMetricWidgetImage() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("MetricWidgetImage", TRANSPARENT_PNG);
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeAlarmsForMetric(JsonNode request, String region) {
+        Integer period = request.has("Period") ? request.path("Period").asInt() : null;
+        List<MetricAlarm> alarms = metricsService.describeAlarmsForMetric(
+                textOrNull(request, "Namespace"),
+                textOrNull(request, "MetricName"),
+                textOrNull(request, "Statistic"),
+                period,
+                parseDimensionsJson(request.path("Dimensions")),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("MetricAlarms");
+        for (MetricAlarm a : alarms) {
+            ObjectNode node = arr.addObject();
+            node.put("AlarmName", a.getAlarmName());
+            if (a.getAlarmArn() != null) node.put("AlarmArn", a.getAlarmArn());
+            if (a.getMetricName() != null) node.put("MetricName", a.getMetricName());
+            if (a.getNamespace() != null) node.put("Namespace", a.getNamespace());
+            if (a.getStatistic() != null) node.put("Statistic", a.getStatistic());
+            node.put("Period", a.getPeriod());
+            node.put("ActionsEnabled", a.isActionsEnabled());
+            if (a.getStateValue() != null) node.put("StateValue", a.getStateValue());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeAlarmHistory(JsonNode request, String region) {
+        Integer maxRecords = request.has("MaxRecords") ? request.path("MaxRecords").asInt() : null;
+        List<AlarmHistoryItem> items = metricsService.describeAlarmHistory(
+                textOrNull(request, "AlarmName"), maxRecords, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("AlarmHistoryItems");
+        for (AlarmHistoryItem item : items) {
+            ObjectNode node = arr.addObject();
+            node.put("AlarmName", item.getAlarmName());
+            node.put("AlarmType", item.getAlarmType());
+            node.put("Timestamp", item.getTimestamp());
+            node.put("HistoryItemType", item.getHistoryItemType());
+            if (item.getHistorySummary() != null) {
+                node.put("HistorySummary", item.getHistorySummary());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeAlarmContributors() {
+        throw new AwsException("ValidationException", "", 400);
+    }
+
+    private Response handleSetAlarmActions(JsonNode request, String region, boolean enabled) {
+        List<String> names = new ArrayList<>();
+        JsonNode namesNode = request.path("AlarmNames");
+        if (namesNode.isArray()) {
+            namesNode.forEach(n -> names.add(n.asText()));
+        }
+        metricsService.setAlarmActionsEnabled(names, enabled, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetInsightRuleReport(JsonNode request, String region) {
+        InsightRule rule = metricsService.requireInsightRule(textOrNull(request, "RuleName"), region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("KeyLabels");
+        String aggregation = "Sum";
+        if (rule.getDefinition() != null && rule.getDefinition().contains("\"AggregateOn\":\"Count\"")) {
+            aggregation = "Count";
+        }
+        response.put("AggregationStatistic", aggregation);
+        response.putArray("Contributors");
+        response.putArray("MetricDatapoints");
+        return Response.ok(response).build();
+    }
+
+    private Response handleSetInsightRulesState(JsonNode request, String region, String state) {
+        List<String> names = new ArrayList<>();
+        JsonNode namesNode = request.path("RuleNames");
+        if (namesNode.isArray()) {
+            namesNode.forEach(n -> names.add(n.asText()));
+        }
+        List<Map<String, String>> failures = metricsService.setInsightRulesState(names, state, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("Failures");
+        for (Map<String, String> failure : failures) {
+            ObjectNode node = arr.addObject();
+            failure.forEach(node::put);
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListManagedInsightRules() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("ManagedRules");
+        return Response.ok(response).build();
+    }
+
+    private Response handleListMetricStreams() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("Entries");
+        return Response.ok(response).build();
     }
 }

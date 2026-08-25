@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cloudwatch.metrics;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.AwsQueryResponse;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
@@ -38,6 +39,7 @@ public class CloudWatchMetricsQueryHandler {
             case "GetMetricStatistics" -> handleGetMetricStatistics(params, region);
             case "GetMetricData" -> handleGetMetricData(params, region);
             case "PutMetricAlarm" -> handlePutMetricAlarm(params, region);
+            case "PutCompositeAlarm" -> handlePutCompositeAlarm(params, region);
             case "DescribeAlarms" -> handleDescribeAlarms(params, region);
             case "DeleteAlarms" -> handleDeleteAlarms(params, region);
             case "SetAlarmState" -> handleSetAlarmState(params, region);
@@ -214,6 +216,12 @@ public class CloudWatchMetricsQueryHandler {
         return Response.ok(AwsQueryResponse.envelopeNoResult("PutMetricAlarm", null)).build();
     }
 
+    private Response handlePutCompositeAlarm(MultivaluedMap<String, String> params, String region) {
+        CompositeAlarm alarm = parseCompositeAlarm(params);
+        metricsService.putCompositeAlarm(alarm, region);
+        return Response.ok(AwsQueryResponse.envelopeNoResult("PutCompositeAlarm", null)).build();
+    }
+
     private Response handleDescribeAlarms(MultivaluedMap<String, String> params, String region) {
         List<String> alarmNames = new ArrayList<>();
         for (int i = 1; ; i++) {
@@ -221,15 +229,31 @@ public class CloudWatchMetricsQueryHandler {
             if (name == null) break;
             alarmNames.add(name);
         }
-        String prefix = params.getFirst("AlarmNamePrefix");
-
-        List<MetricAlarm> alarms = metricsService.describeAlarms(alarmNames, prefix, region);
-
-        var xml = new XmlBuilder().start("MetricAlarms");
-        for (MetricAlarm a : alarms) {
-            toAlarmXml(xml, a);
+        List<String> alarmTypes = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            String type = params.getFirst("AlarmTypes.member." + i);
+            if (type == null) break;
+            alarmTypes.add(type);
         }
-        xml.end("MetricAlarms");
+        String prefix = params.getFirst("AlarmNamePrefix");
+        boolean includeMetric = alarmTypes.isEmpty() || alarmTypes.contains("MetricAlarm");
+        boolean includeComposite = alarmTypes.contains("CompositeAlarm");
+
+        var xml = new XmlBuilder();
+        if (includeMetric) {
+            xml.start("MetricAlarms");
+            for (MetricAlarm a : metricsService.describeAlarms(alarmNames, prefix, region)) {
+                toAlarmXml(xml, a);
+            }
+            xml.end("MetricAlarms");
+        }
+        if (includeComposite) {
+            xml.start("CompositeAlarms");
+            for (CompositeAlarm a : metricsService.describeCompositeAlarms(alarmNames, prefix, region)) {
+                toCompositeAlarmXml(xml, a);
+            }
+            xml.end("CompositeAlarms");
+        }
         return Response.ok(AwsQueryResponse.envelope("DescribeAlarms", null, xml.build())).build();
     }
 
@@ -443,6 +467,81 @@ public class CloudWatchMetricsQueryHandler {
                 .elem("ComparisonOperator", a.getComparisonOperator())
                 .elem("TreatMissingData", a.getTreatMissingData());
 
+        xml.end("member");
+    }
+
+    private CompositeAlarm parseCompositeAlarm(MultivaluedMap<String, String> params) {
+        CompositeAlarm a = new CompositeAlarm();
+        a.setAlarmName(params.getFirst("AlarmName"));
+        a.setAlarmDescription(params.getFirst("AlarmDescription"));
+        a.setAlarmRule(params.getFirst("AlarmRule"));
+        String enabled = params.getFirst("ActionsEnabled");
+        a.setActionsEnabled(enabled == null || Boolean.parseBoolean(enabled));
+        a.setActionsSuppressor(params.getFirst("ActionsSuppressor"));
+        String waitPeriod = params.getFirst("ActionsSuppressorWaitPeriod");
+        if (waitPeriod != null) {
+            a.setActionsSuppressorWaitPeriod(parseIntParam(params, "ActionsSuppressorWaitPeriod", 0));
+        }
+        String extensionPeriod = params.getFirst("ActionsSuppressorExtensionPeriod");
+        if (extensionPeriod != null) {
+            a.setActionsSuppressorExtensionPeriod(parseIntParam(params, "ActionsSuppressorExtensionPeriod", 0));
+        }
+
+        for (int i = 1; ; i++) {
+            String act = params.getFirst("OKActions.member." + i);
+            if (act == null) break;
+            a.getOkActions().add(act);
+        }
+        for (int i = 1; ; i++) {
+            String act = params.getFirst("AlarmActions.member." + i);
+            if (act == null) break;
+            a.getAlarmActions().add(act);
+        }
+        for (int i = 1; ; i++) {
+            String act = params.getFirst("InsufficientDataActions.member." + i);
+            if (act == null) break;
+            a.getInsufficientDataActions().add(act);
+        }
+
+        Map<String, String> tags = new LinkedHashMap<>();
+        for (int i = 1; ; i++) {
+            String key = params.getFirst("Tags.member." + i + ".Key");
+            if (key == null) break;
+            tags.put(key, params.getFirst("Tags.member." + i + ".Value"));
+        }
+        a.setTags(tags);
+        return a;
+    }
+
+    private void toCompositeAlarmXml(XmlBuilder xml, CompositeAlarm a) {
+        xml.start("member")
+                .elem("AlarmName", a.getAlarmName())
+                .elem("AlarmArn", a.getAlarmArn())
+                .elem("AlarmDescription", a.getAlarmDescription())
+                .elem("AlarmRule", a.getAlarmRule())
+                .elem("ActionsEnabled", String.valueOf(a.isActionsEnabled()))
+                .elem("AlarmConfigurationUpdatedTimestamp",
+                        Instant.ofEpochSecond(a.getAlarmConfigurationUpdatedTimestamp()).toString());
+        xml.start("AlarmActions");
+        a.getAlarmActions().forEach(act -> xml.elem("member", act));
+        xml.end("AlarmActions");
+        xml.start("OKActions");
+        a.getOkActions().forEach(act -> xml.elem("member", act));
+        xml.end("OKActions");
+        xml.start("InsufficientDataActions");
+        a.getInsufficientDataActions().forEach(act -> xml.elem("member", act));
+        xml.end("InsufficientDataActions");
+        xml.elem("StateValue", a.getStateValue())
+                .elem("StateReason", a.getStateReason())
+                .elem("StateReasonData", a.getStateReasonData())
+                .elem("StateUpdatedTimestamp", Instant.ofEpochSecond(a.getStateUpdatedTimestamp()).toString())
+                .elem("ActionsSuppressor", a.getActionsSuppressor());
+        if (a.getActionsSuppressorWaitPeriod() != null) {
+            xml.elem("ActionsSuppressorWaitPeriod", String.valueOf(a.getActionsSuppressorWaitPeriod()));
+        }
+        if (a.getActionsSuppressorExtensionPeriod() != null) {
+            xml.elem("ActionsSuppressorExtensionPeriod", String.valueOf(a.getActionsSuppressorExtensionPeriod()));
+        }
         xml.end("member");
     }
 

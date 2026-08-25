@@ -176,4 +176,43 @@ class CloudWatchMetricsJsonHandlerTest {
         assertTrue(body.path("InsightRules").isArray());
         assertEquals(0, body.path("InsightRules").size());
     }
+
+    @Test
+    void putCompositeAlarm_describeAlarms_filtersByAlarmTypes() {
+        ObjectNode putMetric = MAPPER.createObjectNode();
+        putMetric.put("AlarmName", "metric-member");
+        putMetric.put("MetricName", "Errors");
+        putMetric.put("Namespace", "AWS/Lambda");
+        assertEquals(200, handler.handle("PutMetricAlarm", putMetric, REGION).getStatus());
+
+        ObjectNode putComposite = MAPPER.createObjectNode();
+        putComposite.put("AlarmName", "composite-parent");
+        putComposite.put("AlarmRule", "ALARM(\"metric-member\")");
+        assertEquals(200, handler.handle("PutCompositeAlarm", putComposite, REGION).getStatus());
+
+        ObjectNode compositeOnly = MAPPER.createObjectNode();
+        compositeOnly.putArray("AlarmTypes").add("CompositeAlarm");
+        ObjectNode compositeBody = (ObjectNode) handler.handle("DescribeAlarms", compositeOnly, REGION).getEntity();
+        assertEquals(1, compositeBody.path("CompositeAlarms").size());
+        assertEquals("composite-parent", compositeBody.path("CompositeAlarms").get(0).path("AlarmName").asText());
+        assertTrue(compositeBody.path("MetricAlarms").isMissingNode() || compositeBody.path("MetricAlarms").isEmpty());
+
+        ObjectNode both = MAPPER.createObjectNode();
+        both.putArray("AlarmNames").add("composite-parent").add("metric-member");
+        both.putArray("AlarmTypes").add("CompositeAlarm").add("MetricAlarm");
+        ObjectNode bothBody = (ObjectNode) handler.handle("DescribeAlarms", both, REGION).getEntity();
+        assertEquals(1, bothBody.path("CompositeAlarms").size());
+        assertEquals(1, bothBody.path("MetricAlarms").size());
+
+        ObjectNode delete = MAPPER.createObjectNode();
+        delete.putArray("AlarmNames").add("composite-parent").add("metric-member");
+        assertEquals(200, handler.handle("DeleteAlarms", delete, REGION).getStatus());
+
+        ObjectNode gone = MAPPER.createObjectNode();
+        gone.putArray("AlarmNames").add("composite-parent").add("metric-member");
+        gone.putArray("AlarmTypes").add("CompositeAlarm").add("MetricAlarm");
+        ObjectNode goneBody = (ObjectNode) handler.handle("DescribeAlarms", gone, REGION).getEntity();
+        assertEquals(0, goneBody.path("CompositeAlarms").size());
+        assertEquals(0, goneBody.path("MetricAlarms").size());
+    }
 }
