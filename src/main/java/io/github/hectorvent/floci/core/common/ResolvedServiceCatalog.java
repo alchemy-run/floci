@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.services.backup.BackupController;
 import io.github.hectorvent.floci.services.backupsearch.BackupSearchController;
 import io.github.hectorvent.floci.services.databrew.DataBrewController;
 import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
+import io.github.hectorvent.floci.services.mediapackagev2.MediaPackageV2Controller;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
@@ -580,6 +581,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().dataexchange().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("dataexchange"), Set.of(), Set.of(DataExchangeController.class)),
+                descriptor("mediapackagev2", "mediapackagev2", config.services().mediapackagev2().enabled(), true,
+                        "mediapackagev2", storageMode(config.storage().services().mediapackagev2().mode(),
+                                config.storage().mode()),
+                        config.storage().services().mediapackagev2().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediapackagev2"), Set.of(), Set.of(MediaPackageV2Controller.class)),
                 descriptor("datazone", "datazone", config.services().datazone().enabled(), true,
                         "datazone", storageMode(config.storage().services().datazone().mode(),
                                 config.storage().mode()),

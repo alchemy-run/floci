@@ -97,6 +97,8 @@ floci:
         flush-interval-ms: 60000
       mediaconnect:
         flush-interval-ms: 60000
+      mediapackagev2:
+        flush-interval-ms: 60000
       datazone:
         flush-interval-ms: 60000
       dlm:
@@ -227,6 +229,8 @@ floci:
       default-image: "valkey/valkey:8"
       default-memcached-image: "memcached:1.6"
     mediaconnect:
+      enabled: true
+    mediapackagev2:
       enabled: true
     memorydb:
       enabled: true

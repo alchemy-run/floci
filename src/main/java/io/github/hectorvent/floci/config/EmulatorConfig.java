@@ -264,6 +264,7 @@ public interface EmulatorConfig {
         ElastiCacheStorageConfig elasticache();
         MemoryDbStorageConfig memorydb();
         MediaConnectStorageConfig mediaconnect();
+        MediaPackageV2StorageConfig mediapackagev2();
         RdsStorageConfig rds();
         Ec2StorageConfig ec2();
         NeptuneStorageConfig neptune();
@@ -428,6 +429,13 @@ public interface EmulatorConfig {
     }
 
     interface MediaConnectStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface MediaPackageV2StorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -890,6 +898,7 @@ public interface EmulatorConfig {
         ElastiCacheServiceConfig elasticache();
         MemoryDbServiceConfig memorydb();
         MediaConnectServiceConfig mediaconnect();
+        MediaPackageV2ServiceConfig mediapackagev2();
         DaxServiceConfig dax();
         DsServiceConfig ds();
         RdsServiceConfig rds();
@@ -1547,6 +1556,11 @@ public interface EmulatorConfig {
     }
 
     interface MediaConnectServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MediaPackageV2ServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
