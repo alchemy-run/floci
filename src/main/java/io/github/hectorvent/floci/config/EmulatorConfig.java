@@ -293,6 +293,7 @@ public interface EmulatorConfig {
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
         ApplicationSignalsStorageConfig applicationSignals();
+        BedrockAgentCoreStorageConfig bedrockAgentCore();
     }
 
     interface SsmStorageConfig {
@@ -508,6 +509,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface BedrockAgentCoreStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AmpStorageConfig {
         Optional<String> mode();
 
@@ -530,6 +538,13 @@ public interface EmulatorConfig {
     }
 
     interface AccessAnalyzerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface BedrockAgentStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -660,6 +675,8 @@ public interface EmulatorConfig {
         EcrServiceConfig ecr();
         ResourceGroupsTaggingServiceConfig tagging();
         BedrockRuntimeServiceConfig bedrockRuntime();
+        BedrockAgentServiceConfig bedrockAgent();
+        BedrockAgentCoreServiceConfig bedrockAgentCore();
         EksServiceConfig eks();
         MwaaServiceConfig mwaa();
         PipesServiceConfig pipes();
@@ -1381,6 +1398,11 @@ public interface EmulatorConfig {
         String backend();
 
         BedrockProxyConfig proxy();
+    }
+
+    interface BedrockAgentCoreServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface BedrockProxyConfig {

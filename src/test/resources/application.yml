@@ -87,6 +87,8 @@ floci:
         flush-interval-ms: 60000
       application-signals:
         flush-interval-ms: 60000
+      bedrock-agent-core:
+        flush-interval-ms: 60000
 
   auth:
     validate-signatures: false
@@ -251,6 +253,8 @@ floci:
     ui:
       enabled: true
     bedrock-runtime:
+      enabled: true
+    bedrock-agent-core:
       enabled: true
     eks:
       enabled: true

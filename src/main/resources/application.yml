@@ -165,6 +165,8 @@ floci:
         flush-interval-ms: 5000
       application-signals:
         flush-interval-ms: 5000
+      bedrock-agent-core:
+        flush-interval-ms: 5000
 
   dns:
     # Extra hostname suffixes resolved to Floci's container IP by the embedded DNS server.
@@ -414,6 +416,8 @@ floci:
         # api-key: sk-...
         # default-model: llama3
         # model-mapping: "anthropic.claude-3-sonnet-20240229-v1:0=claude-3-sonnet"
+    bedrock-agent-core:
+      enabled: true
     eks:
       enabled: true
       mock: false
