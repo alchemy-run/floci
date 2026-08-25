@@ -163,3 +163,4 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/fsx/FsxJsonHandler.java }  # alchemy fsx bindings coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/kendra/KendraJsonHandler.java }  # alchemy index/datasource coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/keyspaces/KeyspacesJsonHandler.java }  # alchemy keyspace coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/mwaaserverless/MwaaServerlessJsonHandler.java }  # alchemy workflow coverage; docs table later

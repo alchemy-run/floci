@@ -361,6 +361,8 @@ floci:
     mwaa:
       enabled: true
       mock: true
+    mwaa-serverless:
+      enabled: true
     pipes:
       enabled: true
     elbv2:

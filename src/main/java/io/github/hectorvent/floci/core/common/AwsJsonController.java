@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.healthlake.HealthLakeJsonHandler;
 import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseJsonHandler;
 import io.github.hectorvent.floci.services.keyspaces.KeyspacesJsonHandler;
 import io.github.hectorvent.floci.services.keyspacesstreams.KeyspacesStreamsJsonHandler;
+import io.github.hectorvent.floci.services.mwaaserverless.MwaaServerlessJsonHandler;
 import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
@@ -59,6 +60,7 @@ public class AwsJsonController {
     private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
     private final KeyspacesJsonHandler keyspacesJsonHandler;
     private final KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler;
+    private final MwaaServerlessJsonHandler mwaaServerlessJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -75,7 +77,8 @@ public class AwsJsonController {
                              HealthLakeJsonHandler healthLakeJsonHandler,
                              IotFleetWiseJsonHandler iotFleetWiseJsonHandler,
                              KeyspacesJsonHandler keyspacesJsonHandler,
-                             KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler) {
+                             KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler,
+                             MwaaServerlessJsonHandler mwaaServerlessJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -94,6 +97,7 @@ public class AwsJsonController {
         this.iotFleetWiseJsonHandler = iotFleetWiseJsonHandler;
         this.keyspacesJsonHandler = keyspacesJsonHandler;
         this.keyspacesStreamsJsonHandler = keyspacesStreamsJsonHandler;
+        this.mwaaServerlessJsonHandler = mwaaServerlessJsonHandler;
     }
 
     @POST
@@ -147,6 +151,7 @@ public class AwsJsonController {
                 case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
                 case "cassandra" -> keyspacesJsonHandler.handle(action, request, region);
                 case "keyspacesstreams" -> keyspacesStreamsJsonHandler.handle(action, request, region);
+                case "mwaaserverless" -> mwaaServerlessJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

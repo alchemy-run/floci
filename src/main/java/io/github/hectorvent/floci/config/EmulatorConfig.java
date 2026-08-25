@@ -928,6 +928,7 @@ public interface EmulatorConfig {
         BedrockDataAutomationServiceConfig bedrockDataAutomation();
         EksServiceConfig eks();
         MwaaServiceConfig mwaa();
+        MwaaServerlessServiceConfig mwaaServerless();
         PipesServiceConfig pipes();
         ElbV2ServiceConfig elbv2();
         CodeBuildServiceConfig codebuild();
@@ -2536,6 +2537,11 @@ public interface EmulatorConfig {
          *  and on every DAG-sync pass in which the requirements file's ETag changed. */
         @WithDefault("true")
         boolean installRequirements();
+    }
+
+    interface MwaaServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface InitHooksConfig {
