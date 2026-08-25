@@ -79,6 +79,7 @@ import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorContro
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
 import io.github.hectorvent.floci.services.imagebuilder.ImageBuilderController;
+import io.github.hectorvent.floci.services.lakeformation.LakeFormationController;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -346,6 +347,10 @@ public class ResolvedServiceCatalog {
                         "glue", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSGlue."), Set.of("glue"), Set.of(), Set.of()),
+                descriptor("lakeformation", "lakeformation", config.services().lakeformation().enabled(), true,
+                        "lakeformation", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("lakeformation"), Set.of(), Set.of(LakeFormationController.class)),
                 descriptor("firehose", "firehose", config.services().firehose().enabled(), true,
                         "firehose", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

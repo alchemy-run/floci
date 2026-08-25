@@ -905,6 +905,7 @@ public interface EmulatorConfig {
         AcmPcaServiceConfig acmPca();
         AthenaServiceConfig athena();
         GlueServiceConfig glue();
+        LakeFormationServiceConfig lakeformation();
         SesServiceConfig ses();
         OpenSearchServiceConfig opensearch();
         Ec2ServiceConfig ec2();
@@ -1808,6 +1809,12 @@ public interface EmulatorConfig {
     }
 
     interface GlueServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LakeFormationServiceConfig {
+        /** AWS Lake Formation restJson1. */
         @WithDefault("true")
         boolean enabled();
     }
