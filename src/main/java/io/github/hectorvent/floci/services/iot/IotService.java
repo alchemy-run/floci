@@ -868,7 +868,20 @@ public class IotService {
 
     public IotTopicRule getTopicRule(String ruleName, String region) {
         return topicRuleStore.get(topicRuleKey(region, ruleName))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Topic rule not found: " + ruleName, 404));
+                .orElseThrow(() -> topicRuleAccessDenied(ruleName));
+    }
+
+    /**
+     * AWS IoT conceals missing topic rules behind {@code UnauthorizedException}
+     * (HTTP 401) with a message matching {@code Access to topic rule '<name>' was denied}
+     * so callers cannot enumerate rules. Distilled maps that pair onto the
+     * synthetic {@code TopicRuleNotFound} tag used by GetTopicRule/DeleteTopicRule.
+     */
+    private static AwsException topicRuleAccessDenied(String ruleName) {
+        return new AwsException(
+                "UnauthorizedException",
+                "Access to topic rule '" + ruleName + "' was denied",
+                401);
     }
 
     public List<IotTopicRule> listTopicRules(String region) {
