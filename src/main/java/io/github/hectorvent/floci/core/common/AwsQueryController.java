@@ -304,7 +304,11 @@ public class AwsQueryController {
                         || neptuneService.hasCluster(clusterId)
                         || neptuneService.hasInstance(instanceId)
                         || neptuneService.hasSnapshot(snapshotId)
-                        || neptuneService.hasSnapshot(sourceSnapshotId)) {
+                        || neptuneService.hasSnapshot(sourceSnapshotId)
+                        || neptuneService.handlesClusterParameterGroupRequest(
+                                formParams.getFirst("DBParameterGroupFamily"),
+                                formParams.getFirst("DBClusterParameterGroupName"),
+                                formParams.getFirst("ResourceName"))) {
                     yield neptuneQueryHandler.handle(action, formParams);
                 }
 

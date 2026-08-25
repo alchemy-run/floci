@@ -10,9 +10,11 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerHandle;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerManager;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneCluster;
+import io.github.hectorvent.floci.services.neptune.model.NeptuneClusterParameterGroup;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneClusterSnapshot;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneDbType;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneInstance;
+import io.github.hectorvent.floci.services.neptune.model.NeptuneParameterGroup;
 import io.github.hectorvent.floci.services.neptune.proxy.NeptuneProxyManager;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,7 +23,10 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -36,6 +41,9 @@ public class NeptuneService {
     private final StorageBackend<String, NeptuneCluster> clusters;
     private final StorageBackend<String, NeptuneInstance> instances;
     private final StorageBackend<String, NeptuneClusterSnapshot> clusterSnapshots;
+    private final StorageBackend<String, NeptuneClusterParameterGroup> clusterParameterGroups;
+    private final StorageBackend<String, NeptuneParameterGroup> parameterGroups;
+    private final Set<String> deletedParameterGroups = ConcurrentHashMap.newKeySet();
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final NeptuneContainerManager containerManager;
@@ -58,6 +66,10 @@ public class NeptuneService {
                 new TypeReference<Map<String, NeptuneInstance>>() {});
         this.clusterSnapshots = storageFactory.create("neptune", "neptune-cluster-snapshots.json",
                 new TypeReference<Map<String, NeptuneClusterSnapshot>>() {});
+        this.clusterParameterGroups = storageFactory.create("neptune", "neptune-cluster-parameter-groups.json",
+                new TypeReference<Map<String, NeptuneClusterParameterGroup>>() {});
+        this.parameterGroups = storageFactory.create("neptune", "neptune-parameter-groups.json",
+                new TypeReference<Map<String, NeptuneParameterGroup>>() {});
     }
 
     // ── Clusters ──────────────────────────────────────────────────────────────
@@ -182,6 +194,64 @@ public class NeptuneService {
             return false;
         }
         return clusterSnapshots.get(id).isPresent();
+    }
+
+    public boolean hasClusterParameterGroup(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        return clusterParameterGroups.get(name).isPresent();
+    }
+
+    public boolean hasParameterGroup(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        return parameterGroups.get(name).isPresent() || deletedParameterGroups.contains(name);
+    }
+
+    /**
+     * True when a Query-protocol request should be handled by Neptune rather than RDS:
+     * a {@code neptune*} family, an existing cluster parameter group, or a tag ARN
+     * that this service owns.
+     */
+    public boolean handlesClusterParameterGroupRequest(String family, String groupName, String resourceName) {
+        if (family != null && family.toLowerCase(Locale.ROOT).startsWith("neptune")) {
+            return true;
+        }
+        return hasClusterParameterGroup(groupName) || ownsTagResource(resourceName);
+    }
+
+    /**
+     * Instance-level DB parameter groups share the RDS Query wire and the
+     * {@code rds} signing name. Route by {@code neptune*} family, live or
+     * just-deleted group name, or a {@code pg:} tag ARN this service owns.
+     */
+    public boolean handlesParameterGroupRequest(String family, String groupName, String resourceName) {
+        if (family != null && family.toLowerCase(Locale.ROOT).startsWith("neptune")) {
+            return true;
+        }
+        return hasParameterGroup(groupName) || ownsTagResource(resourceName);
+    }
+
+    public boolean ownsTagResource(String resourceName) {
+        if (resourceName == null || resourceName.isBlank() || !resourceName.startsWith("arn:")) {
+            return false;
+        }
+        try {
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(resourceName);
+            String resource = arn.resource();
+            int sep = resource.indexOf(':');
+            if (sep < 0) {
+                return false;
+            }
+            String type = resource.substring(0, sep);
+            String id = resource.substring(sep + 1);
+            return ("cluster-pg".equals(type) && hasClusterParameterGroup(id))
+                    || ("pg".equals(type) && hasParameterGroup(id));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     public Collection<NeptuneCluster> listDbClusters(String filterId) {
@@ -323,6 +393,232 @@ public class NeptuneService {
         LOG.infov("Neptune instance {0} deleted", id);
     }
 
+    // ── Cluster parameter groups ──────────────────────────────────────────────
+
+    public NeptuneClusterParameterGroup createDbClusterParameterGroup(String name, String family,
+                                                                      String description,
+                                                                      Map<String, String> tags) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBClusterParameterGroupName is required.", 400);
+        }
+        if (family == null || family.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBParameterGroupFamily is required.", 400);
+        }
+        if (clusterParameterGroups.get(name).isPresent()) {
+            throw new AwsException("DBParameterGroupAlreadyExists",
+                    "DB cluster parameter group " + name + " already exists.", 400);
+        }
+        NeptuneClusterParameterGroup group = new NeptuneClusterParameterGroup(name, family, description);
+        group.setDbClusterParameterGroupArn(
+                regionResolver.buildArn("rds", regionResolver.getRegion(), "cluster-pg:" + name));
+        if (tags != null && !tags.isEmpty()) {
+            group.setTags(new HashMap<>(tags));
+        }
+        clusterParameterGroups.put(name, group);
+        LOG.infov("Neptune cluster parameter group {0} created", name);
+        return group;
+    }
+
+    public NeptuneClusterParameterGroup getDbClusterParameterGroup(String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBClusterParameterGroupName is required.", 400);
+        }
+        return clusterParameterGroups.get(name).orElseThrow(() ->
+                new AwsException("DBParameterGroupNotFound",
+                        "DBParameterGroupName doesn't refer to an existing DB parameter group.", 404));
+    }
+
+    public Collection<NeptuneClusterParameterGroup> listDbClusterParameterGroups(String filterName) {
+        if (filterName != null && !filterName.isBlank()) {
+            return List.of(getDbClusterParameterGroup(filterName));
+        }
+        return clusterParameterGroups.scan(k -> true);
+    }
+
+    public void deleteDbClusterParameterGroup(String name) {
+        getDbClusterParameterGroup(name);
+        clusterParameterGroups.delete(name);
+        LOG.infov("Neptune cluster parameter group {0} deleted", name);
+    }
+
+    public NeptuneClusterParameterGroup modifyDbClusterParameterGroup(String name,
+                                                                      Map<String, String> parameters) {
+        NeptuneClusterParameterGroup group = getDbClusterParameterGroup(name);
+        if (parameters != null) {
+            group.getParameters().putAll(parameters);
+        }
+        clusterParameterGroups.put(name, group);
+        return group;
+    }
+
+    public NeptuneClusterParameterGroup resetDbClusterParameterGroup(String name, boolean resetAll,
+                                                                     Collection<String> parameterNames) {
+        NeptuneClusterParameterGroup group = getDbClusterParameterGroup(name);
+        if (resetAll) {
+            group.getParameters().clear();
+        } else if (parameterNames != null) {
+            parameterNames.forEach(group.getParameters()::remove);
+        }
+        clusterParameterGroups.put(name, group);
+        return group;
+    }
+
+    // ── Instance parameter groups ─────────────────────────────────────────────
+
+    public NeptuneParameterGroup createDbParameterGroup(String name, String family,
+                                                        String description, Map<String, String> tags) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBParameterGroupName is required.", 400);
+        }
+        if (family == null || family.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBParameterGroupFamily is required.", 400);
+        }
+        if (parameterGroups.get(name).isPresent()) {
+            throw new AwsException("DBParameterGroupAlreadyExists",
+                    "DB parameter group " + name + " already exists.", 400);
+        }
+        deletedParameterGroups.remove(name);
+        NeptuneParameterGroup group = new NeptuneParameterGroup(name, family, description);
+        group.setDbParameterGroupArn(
+                regionResolver.buildArn("rds", regionResolver.getRegion(), "pg:" + name));
+        if (tags != null && !tags.isEmpty()) {
+            group.setTags(new HashMap<>(tags));
+        }
+        parameterGroups.put(name, group);
+        LOG.infov("Neptune DB parameter group {0} created", name);
+        return group;
+    }
+
+    public NeptuneParameterGroup getDbParameterGroup(String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBParameterGroupName is required.", 400);
+        }
+        return parameterGroups.get(name).orElseThrow(() ->
+                new AwsException("DBParameterGroupNotFound",
+                        "DBParameterGroupName doesn't refer to an existing DB parameter group.", 404));
+    }
+
+    public Collection<NeptuneParameterGroup> listDbParameterGroups(String filterName) {
+        if (filterName != null && !filterName.isBlank()) {
+            return List.of(getDbParameterGroup(filterName));
+        }
+        return parameterGroups.scan(k -> true);
+    }
+
+    public void deleteDbParameterGroup(String name) {
+        getDbParameterGroup(name);
+        parameterGroups.delete(name);
+        deletedParameterGroups.add(name);
+        LOG.infov("Neptune DB parameter group {0} deleted", name);
+    }
+
+    public NeptuneParameterGroup modifyDbParameterGroup(String name, Map<String, String> parameters) {
+        NeptuneParameterGroup group = getDbParameterGroup(name);
+        if (parameters != null) {
+            group.getParameters().putAll(parameters);
+        }
+        parameterGroups.put(name, group);
+        return group;
+    }
+
+    public NeptuneParameterGroup resetDbParameterGroup(String name, boolean resetAll,
+                                                       Collection<String> parameterNames) {
+        NeptuneParameterGroup group = getDbParameterGroup(name);
+        if (resetAll) {
+            group.getParameters().clear();
+        } else if (parameterNames != null) {
+            parameterNames.forEach(group.getParameters()::remove);
+        }
+        parameterGroups.put(name, group);
+        return group;
+    }
+
+    public void addTagsToResource(String resourceName, Map<String, String> tags) {
+        ArnTarget target = requireTagTarget(resourceName);
+        if (target.instanceGroup() != null) {
+            NeptuneParameterGroup group = target.instanceGroup();
+            Map<String, String> updated = new LinkedHashMap<>(group.getTags());
+            if (tags != null) {
+                updated.putAll(tags);
+            }
+            group.setTags(updated);
+            parameterGroups.put(group.getDbParameterGroupName(), group);
+            return;
+        }
+        NeptuneClusterParameterGroup group = target.clusterGroup();
+        Map<String, String> updated = new LinkedHashMap<>(group.getTags());
+        if (tags != null) {
+            updated.putAll(tags);
+        }
+        group.setTags(updated);
+        clusterParameterGroups.put(group.getDbClusterParameterGroupName(), group);
+    }
+
+    public Map<String, String> listTagsForResource(String resourceName) {
+        ArnTarget target = requireTagTarget(resourceName);
+        if (target.instanceGroup() != null) {
+            return new LinkedHashMap<>(target.instanceGroup().getTags());
+        }
+        return new LinkedHashMap<>(target.clusterGroup().getTags());
+    }
+
+    public void removeTagsFromResource(String resourceName, Collection<String> tagKeys) {
+        ArnTarget target = requireTagTarget(resourceName);
+        if (target.instanceGroup() != null) {
+            NeptuneParameterGroup group = target.instanceGroup();
+            Map<String, String> updated = new LinkedHashMap<>(group.getTags());
+            if (tagKeys != null) {
+                tagKeys.forEach(updated::remove);
+            }
+            group.setTags(updated);
+            parameterGroups.put(group.getDbParameterGroupName(), group);
+            return;
+        }
+        NeptuneClusterParameterGroup group = target.clusterGroup();
+        Map<String, String> updated = new LinkedHashMap<>(group.getTags());
+        if (tagKeys != null) {
+            tagKeys.forEach(updated::remove);
+        }
+        group.setTags(updated);
+        clusterParameterGroups.put(group.getDbClusterParameterGroupName(), group);
+    }
+
+    private record ArnTarget(NeptuneParameterGroup instanceGroup, NeptuneClusterParameterGroup clusterGroup) {}
+
+    private ArnTarget requireTagTarget(String resourceName) {
+        if (resourceName == null || resourceName.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "ResourceName is required.", 400);
+        }
+        if (!resourceName.startsWith("arn:")) {
+            throw new AwsException("InvalidParameterValue", "Invalid resource name: " + resourceName, 400);
+        }
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(resourceName);
+        } catch (IllegalArgumentException malformed) {
+            throw new AwsException("InvalidParameterValue", "Invalid resource name: " + resourceName, 400);
+        }
+        String resource = arn.resource();
+        int sep = resource.indexOf(':');
+        if (sep < 0) {
+            throw new AwsException("InvalidParameterValue", "Invalid resource name: " + resourceName, 400);
+        }
+        String type = resource.substring(0, sep);
+        String id = resource.substring(sep + 1);
+        return switch (type) {
+            case "pg" -> new ArnTarget(getDbParameterGroup(id), null);
+            case "cluster-pg" -> new ArnTarget(null, getDbClusterParameterGroup(id));
+            default -> throw new AwsException("InvalidParameterValue",
+                    "Invalid resource name: " + resourceName, 400);
+        };
+    }
+
     // ── Cluster snapshots ─────────────────────────────────────────────────────
 
     public NeptuneClusterSnapshot getDbClusterSnapshot(String snapshotId) {
@@ -423,6 +719,8 @@ public class NeptuneService {
             case "db" -> instances.get(id).isPresent();
             case "cluster" -> clusters.get(id).isPresent();
             case "cluster-snapshot" -> clusterSnapshots.get(id).isPresent();
+            case "cluster-pg" -> clusterParameterGroups.get(id).isPresent();
+            case "pg" -> parameterGroups.get(id).isPresent();
             default -> false;
         };
     }
