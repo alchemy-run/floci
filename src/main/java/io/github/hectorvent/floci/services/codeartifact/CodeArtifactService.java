@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.codeartifact.model.Asset;
@@ -91,8 +92,8 @@ public class CodeArtifactService {
     public synchronized Map<String, Object> createDomain(String region, String domainName, JsonNode body) {
         requireDomainName(domainName);
         String account = regionResolver.getAccountId();
-        String key = domainKey(account, region, domainName);
-        if (domains.get(key).isPresent()) {
+        String key = domainKey(region, domainName);
+        if (findDomain(region, domainName, account).isPresent()) {
             throw conflict(domainName, "domain", "Domain " + domainName + " already exists.");
         }
         long now = Instant.now().getEpochSecond();
@@ -124,12 +125,12 @@ public class CodeArtifactService {
             return Map.of();
         }
         Domain domain = existing.get();
-        String prefix = repoPrefix(domain.getOwner(), region, domain.getName());
+        String prefix = repoPrefix(region, domain.getName());
         if (!repositories.scan(key -> key.startsWith(prefix)).isEmpty()) {
             throw conflict(domain.getName(), "domain",
                     "Domain " + domain.getName() + " cannot be deleted because it contains repositories.");
         }
-        domains.delete(domainKey(domain.getOwner(), region, domain.getName()));
+        domains.delete(domainKey(region, domain.getName()));
         Map<String, Object> description = domainDescription(domain);
         description.put("status", "Deleted");
         return description;
@@ -137,9 +138,8 @@ public class CodeArtifactService {
 
     public synchronized Map<String, Object> listDomains(String region) {
         String account = regionResolver.getAccountId();
-        String prefix = account + "::" + region + "::";
         List<Map<String, Object>> summaries = new ArrayList<>();
-        for (Domain domain : domains.scan(key -> key.startsWith(prefix))) {
+        for (Domain domain : domains.scan(key -> key.startsWith(region + "::"))) {
             Map<String, Object> summary = new LinkedHashMap<>();
             summary.put("name", domain.getName());
             summary.put("owner", domain.getOwner());
@@ -158,7 +158,7 @@ public class CodeArtifactService {
                                                              String repositoryName, JsonNode body) {
         Domain domain = requireDomain(region, domainName, domainOwner);
         requireRepositoryName(repositoryName);
-        String key = repoKey(domain.getOwner(), region, domain.getName(), repositoryName);
+        String key = repoKey(region, domain.getName(), repositoryName);
         if (repositories.get(key).isPresent()) {
             throw conflict(repositoryName, "repository", "Repository " + repositoryName + " already exists.");
         }
@@ -192,7 +192,7 @@ public class CodeArtifactService {
         if (body != null && body.has("upstreams")) {
             repository.setUpstreams(readUpstreamNames(body));
         }
-        repositories.put(repoKey(repository.getDomainOwner(), region, repository.getDomainName(), repository.getName()),
+        repositories.put(repoKey(region, repository.getDomainName(), repository.getName()),
                 repository);
         return repositoryDescription(repository);
     }
@@ -200,21 +200,21 @@ public class CodeArtifactService {
     public synchronized Map<String, Object> deleteRepository(String region, String domainName, String domainOwner,
                                                              String repositoryName) {
         Repository repository = requireRepository(region, domainName, domainOwner, repositoryName);
-        String siblingPrefix = repoPrefix(repository.getDomainOwner(), region, repository.getDomainName());
+        String siblingPrefix = repoPrefix(region, repository.getDomainName());
         for (Repository other : repositories.scan(key -> key.startsWith(siblingPrefix))) {
             if (other.getUpstreams() != null && other.getUpstreams().contains(repository.getName())) {
                 throw conflict(repository.getName(), "repository",
                         "Repository " + repository.getName() + " is being used as an upstream repository.");
             }
         }
-        String prefix = packagePrefix(repository.getDomainOwner(), region, repository.getDomainName(),
+        String prefix = packagePrefix(region, repository.getDomainName(),
                 repository.getName());
         for (String key : new ArrayList<>(packages.keys())) {
             if (key.startsWith(prefix)) {
                 packages.delete(key);
             }
         }
-        repositories.delete(repoKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        repositories.delete(repoKey(region, repository.getDomainName(),
                 repository.getName()));
         return repositoryDescription(repository);
     }
@@ -233,7 +233,7 @@ public class CodeArtifactService {
             }
             connections.add(externalConnection);
             repository.setExternalConnections(connections);
-            repositories.put(repoKey(repository.getDomainOwner(), region, repository.getDomainName(),
+            repositories.put(repoKey(region, repository.getDomainName(),
                     repository.getName()), repository);
         }
         return repositoryDescription(repository);
@@ -246,7 +246,7 @@ public class CodeArtifactService {
         List<String> connections = new ArrayList<>(repository.getExternalConnections());
         connections.remove(externalConnection);
         repository.setExternalConnections(connections);
-        repositories.put(repoKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        repositories.put(repoKey(region, repository.getDomainName(),
                 repository.getName()), repository);
         return repositoryDescription(repository);
     }
@@ -255,10 +255,9 @@ public class CodeArtifactService {
         Domain domain = domainName == null || domainName.isBlank()
                 ? null
                 : requireDomain(region, domainName, domainOwner);
-        String account = domain != null ? domain.getOwner() : regionResolver.getAccountId();
         String prefix = domain != null
-                ? repoPrefix(account, region, domain.getName())
-                : account + "::" + region + "::";
+                ? repoPrefix(region, domain.getName())
+                : region + "::";
         List<Map<String, Object>> summaries = new ArrayList<>();
         for (Repository repository : repositories.scan(key -> key.startsWith(prefix))) {
             Map<String, Object> summary = new LinkedHashMap<>();
@@ -319,7 +318,7 @@ public class CodeArtifactService {
             throw validation("The provided asset SHA-256 does not match the uploaded content.");
         }
         String ns = namespace == null ? "" : namespace;
-        String key = packageKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        String key = packageKey(region, repository.getDomainName(),
                 repository.getName(), format, ns, packageName);
         CodePackage pkg = packages.get(key).orElseGet(() -> {
             CodePackage created = new CodePackage();
@@ -399,7 +398,7 @@ public class CodeArtifactService {
     public synchronized Map<String, Object> listPackages(String region, String domainName, String domainOwner,
                                                          String repositoryName, String format, String namespace) {
         Repository repository = requireRepository(region, domainName, domainOwner, repositoryName);
-        String prefix = packagePrefix(repository.getDomainOwner(), region, repository.getDomainName(),
+        String prefix = packagePrefix(region, repository.getDomainName(),
                 repository.getName());
         List<Map<String, Object>> summaries = new ArrayList<>();
         for (CodePackage pkg : packages.scan(key -> key.startsWith(prefix))) {
@@ -534,7 +533,7 @@ public class CodeArtifactService {
             successful.put(version, successInfo(pkgVersion));
             emitPackageEvent(repository, pkg, pkgVersion, "Updated", previous);
         }
-        packages.put(packageKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        packages.put(packageKey(region, repository.getDomainName(),
                 repository.getName(), pkg.getFormat(), ns(pkg), pkg.getName()), pkg);
         return versionBatchResult(successful, failed);
     }
@@ -554,7 +553,7 @@ public class CodeArtifactService {
         pkg.setPublishRestriction(publish);
         pkg.setUpstreamRestriction(upstream);
         Repository repository = requireRepository(region, domainName, domainOwner, repositoryName);
-        packages.put(packageKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        packages.put(packageKey(region, repository.getDomainName(),
                 repository.getName(), pkg.getFormat(), ns(pkg), pkg.getName()), pkg);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("originConfiguration", originConfiguration(pkg));
@@ -573,7 +572,7 @@ public class CodeArtifactService {
         List<String> versions = readStringList(body, "versions");
         Map<String, Object> successful = new LinkedHashMap<>();
         Map<String, Object> failed = new LinkedHashMap<>();
-        String destKey = packageKey(destination.getDomainOwner(), region, destination.getDomainName(),
+        String destKey = packageKey(region, destination.getDomainName(),
                 destination.getName(), sourcePkg.getFormat(), ns(sourcePkg), sourcePkg.getName());
         CodePackage destPkg = packages.get(destKey).orElseGet(() -> {
             CodePackage created = new CodePackage();
@@ -648,7 +647,7 @@ public class CodeArtifactService {
             pkgVersion.setStatus("Deleted");
             emitPackageEvent(repository, pkg, pkgVersion, "Deleted", "Disposed");
         }
-        packages.put(packageKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        packages.put(packageKey(region, repository.getDomainName(),
                 repository.getName(), pkg.getFormat(), ns(pkg), pkg.getName()), pkg);
         return versionBatchResult(successful, failed);
     }
@@ -659,7 +658,7 @@ public class CodeArtifactService {
         CodePackage pkg = requirePackage(region, domainName, domainOwner, repositoryName, format, namespace,
                 packageName);
         Repository repository = requireRepository(region, domainName, domainOwner, repositoryName);
-        packages.delete(packageKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        packages.delete(packageKey(region, repository.getDomainName(),
                 repository.getName(), pkg.getFormat(), ns(pkg), pkg.getName()));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deletedPackage", packageSummary(pkg));
@@ -716,7 +715,7 @@ public class CodeArtifactService {
             successful.put(version, successInfo(pkgVersion));
             emitPackageEvent(repository, pkg, pkgVersion, "Updated", previous);
         }
-        packages.put(packageKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        packages.put(packageKey(region, repository.getDomainName(),
                 repository.getName(), pkg.getFormat(), ns(pkg), pkg.getName()), pkg);
         return versionBatchResult(successful, failed);
     }
@@ -728,14 +727,34 @@ public class CodeArtifactService {
 
     private Optional<Domain> findDomain(String region, String domainName, String domainOwner) {
         requireDomainName(domainName);
-        String account = (domainOwner == null || domainOwner.isBlank()) ? regionResolver.getAccountId() : domainOwner;
-        return domains.get(domainKey(account, region, domainName));
+        Optional<Domain> direct = domains.get(domainKey(region, domainName));
+        if (direct.isPresent() && ownerMatches(direct.get(), domainOwner)) {
+            return direct;
+        }
+        Optional<Domain> scanned = domains.scan(key -> key.equals(domainKey(region, domainName))
+                        || key.endsWith("::" + domainName)).stream()
+                .filter(domain -> ownerMatches(domain, domainOwner))
+                .findFirst();
+        if (scanned.isPresent()) {
+            return scanned;
+        }
+        if (domains instanceof AccountAwareStorageBackend<Domain> aware) {
+            return aware.scanAllAccounts().stream()
+                    .filter(domain -> domainName.equals(domain.getName()))
+                    .filter(domain -> ownerMatches(domain, domainOwner))
+                    .findFirst();
+        }
+        return Optional.empty();
+    }
+
+    private static boolean ownerMatches(Domain domain, String domainOwner) {
+        return domainOwner == null || domainOwner.isBlank() || domainOwner.equals(domain.getOwner());
     }
 
     private Repository requireRepository(String region, String domainName, String domainOwner, String repositoryName) {
         Domain domain = requireDomain(region, domainName, domainOwner);
         requireRepositoryName(repositoryName);
-        return repositories.get(repoKey(domain.getOwner(), region, domain.getName(), repositoryName))
+        return repositories.get(repoKey(region, domain.getName(), repositoryName))
                 .orElseThrow(() -> notFound(repositoryName, "repository",
                         "Repository " + repositoryName + " was not found."));
     }
@@ -746,7 +765,7 @@ public class CodeArtifactService {
         requireText(format, "format");
         requireText(packageName, "package");
         String ns = namespace == null ? "" : namespace;
-        return packages.get(packageKey(repository.getDomainOwner(), region, repository.getDomainName(),
+        return packages.get(packageKey(region, repository.getDomainName(),
                         repository.getName(), format, ns, packageName))
                 .orElseThrow(() -> notFound(packageName, "package", "Package " + packageName + " was not found."));
     }
@@ -779,7 +798,7 @@ public class CodeArtifactService {
             Domain domain = requireDomain(region, name, arn.accountId());
             return new TaggedResource(tagsOf(domain.getTags()), tags -> {
                 domain.setTags(tags);
-                domains.put(domainKey(domain.getOwner(), region, domain.getName()), domain);
+                domains.put(domainKey(region, domain.getName()), domain);
             });
         }
         if (resource.startsWith("repository/")) {
@@ -793,7 +812,7 @@ public class CodeArtifactService {
             Repository repository = requireRepository(region, domainName, arn.accountId(), repositoryName);
             return new TaggedResource(tagsOf(repository.getTags()), tags -> {
                 repository.setTags(tags);
-                repositories.put(repoKey(repository.getDomainOwner(), region, repository.getDomainName(),
+                repositories.put(repoKey(region, repository.getDomainName(),
                         repository.getName()), repository);
             });
         }
@@ -801,7 +820,8 @@ public class CodeArtifactService {
     }
 
     private Map<String, Object> domainDescription(Domain domain) {
-        String prefix = repoPrefix(domain.getOwner(), domain.getRegion(), domain.getName());
+        String prefix = repoPrefix(domain.getRegion() != null ? domain.getRegion() : regionResolver.resolveRegion(null),
+                domain.getName());
         int repositoryCount = repositories.scan(key -> key.startsWith(prefix)).size();
         Map<String, Object> description = new LinkedHashMap<>();
         description.put("name", domain.getName());
@@ -1076,26 +1096,26 @@ public class CodeArtifactService {
                 Map.of("reason", "FIELD_VALIDATION_FAILED"));
     }
 
-    private static String domainKey(String account, String region, String domain) {
-        return account + "::" + region + "::" + domain;
+    private static String domainKey(String region, String domain) {
+        return region + "::" + domain;
     }
 
-    private static String repoKey(String account, String region, String domain, String repository) {
-        return account + "::" + region + "::" + domain + "::" + repository;
+    private static String repoKey(String region, String domain, String repository) {
+        return region + "::" + domain + "::" + repository;
     }
 
-    private static String repoPrefix(String account, String region, String domain) {
-        return account + "::" + region + "::" + domain + "::";
+    private static String repoPrefix(String region, String domain) {
+        return region + "::" + domain + "::";
     }
 
-    private static String packageKey(String account, String region, String domain, String repository,
+    private static String packageKey(String region, String domain, String repository,
                                      String format, String namespace, String name) {
-        return account + "::" + region + "::" + domain + "::" + repository + "::" + format + "::"
+        return region + "::" + domain + "::" + repository + "::" + format + "::"
                 + namespace + "::" + name;
     }
 
-    private static String packagePrefix(String account, String region, String domain, String repository) {
-        return account + "::" + region + "::" + domain + "::" + repository + "::";
+    private static String packagePrefix(String region, String domain, String repository) {
+        return region + "::" + domain + "::" + repository + "::";
     }
 
     private static String domainArn(String region, String account, String domain) {

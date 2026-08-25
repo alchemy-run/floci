@@ -27,7 +27,7 @@ import java.util.Map;
  * {@code /v1/package} paths take JAX-RS precedence over S3's {@code /{bucket}/{key}}
  * catch-all.
  */
-@Path("/")
+@Path(CodeArtifactRoutingFilter.INTERNAL_PREFIX)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class CodeArtifactController {
