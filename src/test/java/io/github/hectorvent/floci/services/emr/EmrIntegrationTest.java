@@ -152,7 +152,64 @@ class EmrIntegrationTest {
                 .then().statusCode(200)
                 .body("SecurityConfiguration", equalTo("{\"EncryptionConfiguration\":{}}"));
 
+        call("ListSecurityConfigurations", "{}")
+                .then().statusCode(200)
+                .body("SecurityConfigurations.find { it.Name == 'floci-emr-sec' }.Name",
+                        equalTo("floci-emr-sec"));
+
         call("DeleteSecurityConfiguration", "{\"Name\":\"floci-emr-sec\"}").then().statusCode(200);
+    }
+
+    @Test
+    @Order(18)
+    void describeUnknownSecurityConfigurationMatchesAwsMessage() {
+        call("DescribeSecurityConfiguration", "{\"Name\":\"alchemy-emr-nonexistent-probe\"}")
+                .then().statusCode(400)
+                .body("__type", equalTo("InvalidRequestException"))
+                .body("message", equalTo(
+                        "Security configuration with name alchemy-emr-nonexistent-probe does not exist"));
+    }
+
+    @Test
+    @Order(19)
+    void deleteUnknownSecurityConfigurationMatchesAwsMessage() {
+        call("DeleteSecurityConfiguration", "{\"Name\":\"alchemy-emr-nonexistent-probe\"}")
+                .then().statusCode(400)
+                .body("__type", equalTo("InvalidRequestException"))
+                .body("message", equalTo(
+                        "Security configuration with name alchemy-emr-nonexistent-probe does not exist"));
+    }
+
+    @Test
+    @Order(20)
+    void createDuplicateSecurityConfigurationMatchesAwsMessage() {
+        call("CreateSecurityConfiguration",
+                "{\"Name\":\"floci-emr-sec-dup\",\"SecurityConfiguration\":\"{\\\"EncryptionConfiguration\\\":{}}\"}")
+                .then().statusCode(200);
+        call("CreateSecurityConfiguration",
+                "{\"Name\":\"floci-emr-sec-dup\",\"SecurityConfiguration\":\"{\\\"EncryptionConfiguration\\\":{}}\"}")
+                .then().statusCode(400)
+                .body("__type", equalTo("InvalidRequestException"))
+                .body("message", equalTo(
+                        "SecurityConfiguration with name floci-emr-sec-dup already exists"));
+        call("DeleteSecurityConfiguration", "{\"Name\":\"floci-emr-sec-dup\"}").then().statusCode(200);
+    }
+
+    @Test
+    @Order(21)
+    void recreateSecurityConfigurationUnderSameName() {
+        // EMR documents are immutable; content changes delete+recreate under the same name.
+        call("CreateSecurityConfiguration",
+                "{\"Name\":\"floci-emr-sec-recreate\",\"SecurityConfiguration\":\"{\\\"a\\\":1}\"}")
+                .then().statusCode(200);
+        call("DeleteSecurityConfiguration", "{\"Name\":\"floci-emr-sec-recreate\"}").then().statusCode(200);
+        call("CreateSecurityConfiguration",
+                "{\"Name\":\"floci-emr-sec-recreate\",\"SecurityConfiguration\":\"{\\\"b\\\":2}\"}")
+                .then().statusCode(200);
+        call("DescribeSecurityConfiguration", "{\"Name\":\"floci-emr-sec-recreate\"}")
+                .then().statusCode(200)
+                .body("SecurityConfiguration", equalTo("{\"b\":2}"));
+        call("DeleteSecurityConfiguration", "{\"Name\":\"floci-emr-sec-recreate\"}").then().statusCode(200);
     }
 
     @Test
