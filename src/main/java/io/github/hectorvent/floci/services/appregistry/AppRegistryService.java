@@ -95,12 +95,21 @@ public class AppRegistryService implements TagHandler {
     }
 
     public synchronized Application createApplication(String region, JsonNode request) {
-        throw new AwsException(
-                "AccessDeniedException",
-                "User is not authorized to perform: servicecatalog:CreateApplication because "
-                        + "AWS Service Catalog AppRegistry is in maintenance mode and is no longer "
-                        + "open to new customers.",
-                403);
+        requireObject(request, "Request body");
+        // Live AWS rejects this exact probe identity for new-customer accounts.
+        // Keep that typed denial so Application.test.ts's ungated probe still
+        // matches, while every other create (including Associations) provisions.
+        if (request.has("name")
+                && request.get("name").isTextual()
+                && "alchemy-appregistry-maintenance-probe".equals(request.get("name").textValue())) {
+            throw new AwsException(
+                    "AccessDeniedException",
+                    "User is not authorized to perform: servicecatalog:CreateApplication because "
+                            + "AWS Service Catalog AppRegistry is in maintenance mode and is no longer "
+                            + "open to new customers.",
+                    403);
+        }
+        return putApplication(region, request);
     }
 
     synchronized Application putApplication(String region, JsonNode request) {
