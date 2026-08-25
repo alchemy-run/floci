@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dashboard;
+import io.quarkus.arc.Unremovable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -21,8 +22,10 @@ import java.util.stream.Collectors;
 /**
  * CloudWatch dashboards are account-global (ARN region is empty).
  * {@code putDashboard} is a pure upsert; {@code deleteDashboards} is idempotent.
+ * Looked up from handlers via CDI, so the bean must remain {@code @Unremovable}.
  */
 @ApplicationScoped
+@Unremovable
 public class CloudWatchDashboardService {
 
     private static final Logger LOG = Logger.getLogger(CloudWatchDashboardService.class);
@@ -68,7 +71,7 @@ public class CloudWatchDashboardService {
                     "DashboardName is a required parameter.", 400);
         }
         return dashboardStore.get(dashboardName).orElseThrow(() ->
-                new AwsException("ResourceNotFound",
+                new AwsException("DashboardNotFoundError",
                         "Dashboard " + dashboardName + " does not exist", 404));
     }
 

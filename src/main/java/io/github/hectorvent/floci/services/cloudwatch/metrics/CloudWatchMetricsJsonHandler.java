@@ -69,7 +69,9 @@ public class CloudWatchMetricsJsonHandler {
             case "DeleteMetricStream" -> handleDeleteMetricStream(request, region);
             case "StartMetricStreams" -> handleStartMetricStreams(request, region);
             case "StopMetricStreams" -> handleStopMetricStreams(request, region);
-            default -> Response.status(400)
+            default -> CloudWatchBindingsActions.handles(normalizedAction)
+                    ? CloudWatchBindingsActions.handleJson(metricsService, objectMapper, normalizedAction, request, region)
+                    : Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported by CloudWatch JSON."))
                     .build();
         };

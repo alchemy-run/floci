@@ -273,11 +273,15 @@ public class CloudWatchMetricsService {
     }
 
     public void putMetricAlarm(MetricAlarm alarm, String region) {
+        String key = region + "::" + alarm.getAlarmName();
+        boolean created = alarmStore.get(key).isEmpty();
         if (alarm.getAlarmArn() == null) {
             alarm.setAlarmArn(regionResolver.buildArn("cloudwatch", region, "alarm:" + alarm.getAlarmName()));
         }
         alarm.setAlarmConfigurationUpdatedTimestamp(Instant.now().getEpochSecond());
-        alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
+        alarmStore.put(key, alarm);
+        recordAlarmHistory(alarm.getAlarmName(), "ConfigurationUpdate",
+                created ? "Alarm created" : "Alarm updated", region);
         LOG.infov("PutMetricAlarm: {0} in {1}", alarm.getAlarmName(), region);
     }
 
@@ -342,12 +346,15 @@ public class CloudWatchMetricsService {
         MetricAlarm alarm = alarmStore.get(key)
                 .orElseThrow(() -> new AwsException("ResourceNotFound", "Alarm not found: " + alarmName, 404));
 
+        String previous = alarm.getStateValue();
         alarm.setStateValue(stateValue);
         alarm.setStateReason(stateReason);
         alarm.setStateReasonData(stateReasonData);
         alarm.setStateUpdatedTimestamp(Instant.now().getEpochSecond());
 
         alarmStore.put(key, alarm);
+        recordAlarmHistory(alarmName, "StateUpdate",
+                "State updated from " + previous + " to " + stateValue, region);
         LOG.infov("SetAlarmState: {0} -> {1}", alarmName, stateValue);
     }
 
@@ -746,6 +753,21 @@ public class CloudWatchMetricsService {
             return new ArrayList<>(items.subList(0, maxRecords));
         }
         return items;
+    }
+
+    private void recordAlarmHistory(String alarmName, String historyItemType, String summary, String region) {
+        if (alarmName == null || alarmName.isBlank()) {
+            return;
+        }
+        String key = region + "::" + alarmName;
+        AlarmHistory history = alarmHistoryStore.get(key).orElseGet(AlarmHistory::new);
+        AlarmHistoryItem item = new AlarmHistoryItem();
+        item.setAlarmName(alarmName);
+        item.setTimestamp(Instant.now().getEpochSecond());
+        item.setHistoryItemType(historyItemType);
+        item.setHistorySummary(summary);
+        history.getItems().add(item);
+        alarmHistoryStore.put(key, history);
     }
 
     // ──────────────────────────── Helpers ────────────────────────────

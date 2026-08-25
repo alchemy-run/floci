@@ -41,7 +41,7 @@ class CloudWatchDashboardServiceTest {
 
         service.deleteDashboards(List.of("ops"));
         AwsException missing = assertThrows(AwsException.class, () -> service.getDashboard("ops"));
-        assertEquals("ResourceNotFound", missing.getErrorCode());
+        assertEquals("DashboardNotFoundError", missing.getErrorCode());
         assertEquals(404, missing.getHttpStatus());
 
         service.deleteDashboards(List.of("ops"));

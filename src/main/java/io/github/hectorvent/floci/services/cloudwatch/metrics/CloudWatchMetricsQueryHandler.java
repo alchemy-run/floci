@@ -63,7 +63,9 @@ public class CloudWatchMetricsQueryHandler {
             case "DeleteMetricStream" -> handleDeleteMetricStream(params, region);
             case "StartMetricStreams" -> handleStartMetricStreams(params, region);
             case "StopMetricStreams" -> handleStopMetricStreams(params, region);
-            default -> AwsQueryResponse.error("UnsupportedOperation",
+            default -> CloudWatchBindingsActions.handles(normalizedAction)
+                    ? CloudWatchBindingsActions.handleQuery(normalizedAction, params, region)
+                    : AwsQueryResponse.error("UnsupportedOperation",
                     "Operation " + action + " is not supported by CloudWatch Query.", AwsNamespaces.CW, 400);
         };
     }
