@@ -15,13 +15,14 @@ import static org.hamcrest.Matchers.equalTo;
 class IotEndpointHostnameIntegrationTest {
 
     @Test
-    void configuredHostnameIsUsedInDescribeEndpoint() {
+    void configuredHostnameDoesNotReplaceAtsDescribeEndpoint() {
         given()
+            .queryParam("endpointType", "iot:Data-ATS")
         .when()
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo("floci:4566"));
+            .body("endpointAddress", equalTo("000000000000-ats.iot.us-east-1.amazonaws.com"));
     }
 
     public static class HostnameProfile implements QuarkusTestProfile {
