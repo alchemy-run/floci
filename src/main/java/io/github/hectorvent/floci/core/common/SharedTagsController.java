@@ -89,10 +89,17 @@ public class SharedTagsController {
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    public Response tagResourceByBody(@Context HttpHeaders headers, String body) {
-        String arn = readResourceArn(body);
-        TagHandler handler = resolveHandler(arn);
-        return doTagResource(headers, handler, arn, body, Response.ok(objectMapper.createObjectNode()).build());
+    public Response tagResourceByBody(@Context HttpHeaders headers,
+                                      @QueryParam("resourceArn") String arn,
+                                      @QueryParam("ResourceArn") String resourceArn,
+                                      String body) {
+        String resolved = (arn != null && !arn.isBlank()) ? arn : resourceArn;
+        if (resolved == null || resolved.isBlank()) {
+            resolved = readResourceArn(body);
+        }
+        TagHandler handler = resolveHandler(resolved);
+        return doTagResource(headers, handler, resolved, body,
+                Response.ok(objectMapper.createObjectNode()).build());
     }
 
     @POST
