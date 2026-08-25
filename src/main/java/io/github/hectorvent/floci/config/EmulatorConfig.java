@@ -510,6 +510,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface BedrockAgentStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface BedrockAgentCoreStorageConfig {
         Optional<String> mode();
 
@@ -539,13 +546,6 @@ public interface EmulatorConfig {
     }
 
     interface AccessAnalyzerStorageConfig {
-        Optional<String> mode();
-
-        @WithDefault("5000")
-        long flushIntervalMs();
-    }
-
-    interface BedrockAgentStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
