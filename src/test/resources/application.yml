@@ -75,6 +75,8 @@ floci:
         flush-interval-ms: 60000
       backupsearch:
         flush-interval-ms: 60000
+      databrew:
+        flush-interval-ms: 60000
       dlm:
         flush-interval-ms: 60000
       auditmanager:
@@ -317,6 +319,8 @@ floci:
       enabled: true
       job-completion-delay-seconds: 1
     backupsearch:
+      enabled: true
+    databrew:
       enabled: true
     dlm:
       enabled: true

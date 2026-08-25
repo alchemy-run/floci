@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.appconfig.AppConfigController;
 import io.github.hectorvent.floci.services.backup.BackupController;
 import io.github.hectorvent.floci.services.backupsearch.BackupSearchController;
+import io.github.hectorvent.floci.services.databrew.DataBrewController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.appconfig.AppConfigDataController;
 import io.github.hectorvent.floci.services.batch.BatchController;
@@ -444,6 +445,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().backupsearch().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("backup-search"), Set.of(), Set.of(BackupSearchController.class)),
+                descriptor("databrew", "databrew", config.services().databrew().enabled(), true,
+                        "databrew", storageMode(config.storage().services().databrew().mode(),
+                                config.storage().mode()),
+                        config.storage().services().databrew().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("databrew"), Set.of(), Set.of(DataBrewController.class)),
                 descriptor("dlm", "dlm", config.services().dlm().enabled(), true,
                         "dlm", storageMode(config.storage().services().dlm().mode(), config.storage().mode()),
                         config.storage().services().dlm().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
