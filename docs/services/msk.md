@@ -10,13 +10,18 @@ Floci emulates Amazon MSK by orchestrating **Redpanda** containers. This provide
 | Action | Description |
 |---|---|
 | `CreateCluster` | Spawns a new Redpanda container for the cluster |
-| `CreateClusterV2` | Modern serverless/provisioned creation (mapped to provisioned) |
+| `CreateClusterV2` | Provisioned or serverless cluster. Serverless becomes `ACTIVE` immediately and exposes SASL/IAM bootstrap on `:9098` |
 | `ListClusters` | List all emulated clusters |
-| `ListClustersV2` | List all emulated clusters using V2 API |
+| `ListClustersV2` | List clusters; supports `clusterNameFilter` and `clusterTypeFilter` |
 | `DescribeCluster` | Get cluster metadata and state |
-| `DescribeClusterV2` | Get cluster metadata and state using V2 API |
+| `DescribeClusterV2` | V2 cluster info (`clusterType`, `serverless`, tags). Missing ARN → `NotFoundException` |
 | `DeleteCluster` | Stops and removes the Redpanda container |
-| `GetBootstrapBrokers` | Get the connection strings for the cluster |
+| `GetBootstrapBrokers` | Connection strings (`bootstrapBrokerString` or `bootstrapBrokerStringSaslIam`) |
+| `ListTopics` | List topics on a cluster. Missing cluster → `NotFoundException` |
+| `DescribeTopic` | Topic details. Missing cluster or topic → `NotFoundException` |
+| `CreateTopic` | Create a topic. Missing cluster with a well-formed body → `BadRequestException` |
+| `DeleteTopic` | Delete a topic |
+| `TagResource` / `UntagResource` / `ListTagsForResource` | `/v1/tags/{ResourceArn}` |
 
 ## Configuration
 
