@@ -41,6 +41,16 @@ public class FmsJsonHandler {
                     service.disassociateAdminAccount(region);
                     yield ok();
                 }
+                case "ListAdminsManagingAccount" -> listAdminsManagingAccount();
+                case "ListAdminAccountsForOrganization" -> listAdminAccountsForOrganization();
+                case "ListPolicies" -> listPolicies();
+                case "ListResourceSets" -> listResourceSets();
+                case "ListMemberAccounts" -> listMemberAccounts();
+                case "GetNotificationChannel" -> getNotificationChannel();
+                case "ListAppsLists" -> listAppsLists();
+                case "ListProtocolsLists" -> listProtocolsLists();
+                case "GetThirdPartyFirewallAssociationStatus" ->
+                        getThirdPartyFirewallAssociationStatus(body);
                 default -> JsonErrorResponseUtils.createUnknownOperationErrorResponse(
                         "AWSFMS_20180101." + action);
             };
@@ -58,6 +68,73 @@ public class FmsJsonHandler {
         if (admin.getRoleStatus() != null) {
             response.put("RoleStatus", admin.getRoleStatus());
         }
+        return Response.ok(response).build();
+    }
+
+    private Response listAdminsManagingAccount() {
+        FmsAdminAccount admin = service.requireManagingAdmin();
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("AdminAccounts").add(admin.getAdminAccount());
+        return Response.ok(response).build();
+    }
+
+    private Response listAdminAccountsForOrganization() {
+        FmsAdminAccount admin = service.requireOrganizationAdmin();
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode summary = response.putArray("AdminAccounts").addObject();
+        summary.put("AdminAccount", admin.getAdminAccount());
+        summary.put("DefaultAdmin", true);
+        summary.put("Status", "ONBOARDING_COMPLETE");
+        return Response.ok(response).build();
+    }
+
+    private Response listPolicies() {
+        service.requireAdmin();
+        return emptyList("PolicyList");
+    }
+
+    private Response listResourceSets() {
+        service.requireAdmin();
+        return emptyList("ResourceSets");
+    }
+
+    private Response listMemberAccounts() {
+        FmsAdminAccount admin = service.requireAdmin();
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("MemberAccounts").add(admin.getAdminAccount());
+        return Response.ok(response).build();
+    }
+
+    private Response getNotificationChannel() {
+        service.requireAdmin();
+        throw new AwsException(
+                "ResourceNotFoundException",
+                "The referenced item does not exist.",
+                400);
+    }
+
+    private Response listAppsLists() {
+        service.requireAdmin();
+        return emptyList("AppsLists");
+    }
+
+    private Response listProtocolsLists() {
+        service.requireAdmin();
+        return emptyList("ProtocolsLists");
+    }
+
+    private Response getThirdPartyFirewallAssociationStatus(JsonNode request) {
+        service.requireThirdPartyFirewall(request);
+        service.requireAdmin();
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ThirdPartyFirewallStatus", "NOT_EXIST");
+        response.put("MarketplaceOnboardingStatus", "NO_SUBSCRIPTION");
+        return Response.ok(response).build();
+    }
+
+    private Response emptyList(String field) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray(field);
         return Response.ok(response).build();
     }
 
