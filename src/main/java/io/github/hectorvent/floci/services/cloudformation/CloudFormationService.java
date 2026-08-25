@@ -148,23 +148,39 @@ public class CloudFormationService {
                                      Map<String, String> parameters, List<String> capabilities,
                                      Map<String, String> tags, String region) {
         String resolvedTemplate = resolveTemplate(templateBody, templateUrl);
+        boolean isCreateType = changeSetType == null || "CREATE".equalsIgnoreCase(changeSetType);
+        String canonicalName = canonicalStackName(stackName);
 
-        // Detect first creation atomically: the mapping function runs at most once per key, so the
-        // flag is only set for the thread that actually creates the stack (no double-recording under
-        // concurrent CreateChangeSet calls).
+        // AWS accepts StackName or StackId (ARN) on CreateChangeSet/UpdateStack. Looking up by
+        // name-or-ARN first keeps UpdateStack(StackId=ARN) on the original stack; keyed insert of
+        // the raw ARN used to mint a nested stackId (arn:…:stack/<arn>/<uuid>).
+        Stack existing = resolveStack(stackName, region);
         boolean[] stackCreated = {false};
-        Stack stack = stacks.computeIfAbsent(key(stackName, region), k -> {
-            stackCreated[0] = true;
-            Stack s = newStack(stackName, region);
-            if (tags != null) s.getTags().putAll(tags);
-            return s;
-        });
+        Stack stack;
+        if (existing != null) {
+            stack = existing;
+            if (tags != null && !tags.isEmpty()) {
+                stack.getTags().clear();
+                stack.getTags().putAll(tags);
+            }
+        } else if (!isCreateType) {
+            throw new AwsException("ValidationError",
+                    "Stack with id " + stackName + " does not exist", 400);
+        } else {
+            stack = stacks.computeIfAbsent(key(canonicalName, region), k -> {
+                stackCreated[0] = true;
+                Stack s = newStack(canonicalName, region);
+                if (tags != null) {
+                    s.getTags().putAll(tags);
+                }
+                return s;
+            });
+        }
 
         // A CREATE change set puts a brand-new stack into REVIEW_IN_PROGRESS. Record the matching
         // stack-level event (as AWS and LocalStack do) so DescribeStackEvents is non-empty straight
         // after change-set creation — tooling such as the AWS SAM CLI reads StackEvents[0] there and
         // otherwise fails with an IndexError. (CreateChangeSet defaults a null type to CREATE.)
-        boolean isCreateType = changeSetType == null || "CREATE".equalsIgnoreCase(changeSetType);
         if (stackCreated[0] && isCreateType) {
             addEvent(stack, stack.getStackName(), stack.getStackId(),
                     "AWS::CloudFormation::Stack", "REVIEW_IN_PROGRESS", "User Initiated");
@@ -173,7 +189,7 @@ public class CloudFormationService {
         ChangeSet cs = new ChangeSet();
         cs.setChangeSetId(AwsArnUtils.Arn.of("cloudformation", region, regionResolver.getAccountId(), "changeSet/" + changeSetName + "/" + UUID.randomUUID()).toString());
         cs.setChangeSetName(changeSetName);
-        cs.setStackName(stackName);
+        cs.setStackName(stack.getStackName());
         cs.setStackId(stack.getStackId());
         cs.setChangeSetType(changeSetType != null ? changeSetType : "CREATE");
         cs.setTemplateBody(resolvedTemplate);
@@ -1079,6 +1095,20 @@ public class CloudFormationService {
             }
         }
         return null;
+    }
+
+    /**
+     * Stack name to store/key by. When {@code stackNameOrArn} is a stack ARN, this is the
+     * {@code stack/<name>/<uuid>} name segment — never the raw ARN.
+     */
+    private static String canonicalStackName(String stackNameOrArn) {
+        if (stackNameOrArn != null && stackNameOrArn.startsWith("arn:")) {
+            String extracted = extractStackNameFromArn(stackNameOrArn);
+            if (extracted != null && !extracted.isBlank()) {
+                return extracted;
+            }
+        }
+        return stackNameOrArn;
     }
 
     /**

@@ -141,21 +141,26 @@ public class CloudFormationQueryHandler {
         String templateUrl = params.getFirst("TemplateURL");
         Map<String, String> parameters = extractParameters(params);
         List<String> capabilities = extractList(params, "Capabilities.member.");
+        Map<String, String> tags = extractTags(params);
 
-        ChangeSet cs = cfnService.createChangeSet(stackName, "update-" + UUID.randomUUID().toString().substring(0, 8),
-                "UPDATE", templateBody, templateUrl, parameters, capabilities, Map.of(), region);
-        awaitExecution(cfnService.executeChangeSet(stackName, cs.getChangeSetName(), region));
+        try {
+            ChangeSet cs = cfnService.createChangeSet(stackName, "update-" + UUID.randomUUID().toString().substring(0, 8),
+                    "UPDATE", templateBody, templateUrl, parameters, capabilities, tags, region);
+            awaitExecution(cfnService.executeChangeSet(stackName, cs.getChangeSetName(), region));
 
-        Stack stack = cfnService.describeStacks(stackName, region).get(0);
-        String xml = new XmlBuilder()
-                .start("UpdateStackResponse", CF_NS)
-                .start("UpdateStackResult")
-                .elem("StackId", stack.getStackId())
-                .end("UpdateStackResult")
-                .raw(AwsQueryResponse.responseMetadata())
-                .end("UpdateStackResponse")
-                .build();
-        return Response.ok(xml).type("text/xml").build();
+            Stack stack = cfnService.describeStacks(stackName, region).get(0);
+            String xml = new XmlBuilder()
+                    .start("UpdateStackResponse", CF_NS)
+                    .start("UpdateStackResult")
+                    .elem("StackId", stack.getStackId())
+                    .end("UpdateStackResult")
+                    .raw(AwsQueryResponse.responseMetadata())
+                    .end("UpdateStackResponse")
+                    .build();
+            return Response.ok(xml).type("text/xml").build();
+        } catch (AwsException e) {
+            return xmlError(e.getErrorCode(), e.getMessage(), e.getHttpStatus());
+        }
     }
 
     // ── DeleteStack ───────────────────────────────────────────────────────────
