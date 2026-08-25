@@ -311,6 +311,7 @@ public interface EmulatorConfig {
         BedrockAgentCoreStorageConfig bedrockAgentCore();
         BedrockDataAutomationStorageConfig bedrockDataAutomation();
         DeadlineStorageConfig deadline();
+        EmrServerlessStorageConfig emrServerless();
     }
 
     interface SsmStorageConfig {
@@ -624,6 +625,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface EmrServerlessStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AmpStorageConfig {
         Optional<String> mode();
 
@@ -783,6 +791,7 @@ public interface EmulatorConfig {
         EventBridgeServiceConfig eventbridge();
         CloudMapServiceConfig cloudmap();
         EmrServiceConfig emr();
+        EmrServerlessServiceConfig emrServerless();
         WafV2ServiceConfig wafv2();
         SchedulerServiceConfig scheduler();
         CloudWatchLogsServiceConfig cloudwatchlogs();
@@ -1432,6 +1441,11 @@ public interface EmulatorConfig {
         /** Delay before a cluster reaches WAITING; 0 = advance synchronously. */
         @WithDefault("0")
         int clusterStartupDelaySeconds();
+    }
+
+    interface EmrServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface WafV2ServiceConfig {

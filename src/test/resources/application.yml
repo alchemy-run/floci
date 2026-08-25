@@ -95,6 +95,8 @@ floci:
         flush-interval-ms: 60000
       deadline:
         flush-interval-ms: 60000
+      emr-serverless:
+        flush-interval-ms: 60000
       auditmanager:
         flush-interval-ms: 60000
       amplify:
@@ -229,6 +231,8 @@ floci:
     cloudmap:
       enabled: true
     emr:
+      enabled: true
+    emr-serverless:
       enabled: true
     wafv2:
       enabled: true

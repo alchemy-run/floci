@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
+import io.github.hectorvent.floci.services.emrserverless.EmrServerlessController;
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
@@ -205,6 +206,10 @@ public class ResolvedServiceCatalog {
                         "emr", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("ElasticMapReduce."), Set.of("elasticmapreduce"), Set.of(), Set.of()),
+                descriptor("emr-serverless", "emrserverless", config.services().emrServerless().enabled(), true,
+                        "emrserverless", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("emr-serverless"), Set.of(), Set.of(EmrServerlessController.class)),
                 descriptor("wafv2", "wafv2", config.services().wafv2().enabled(), true,
                         "wafv2", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
