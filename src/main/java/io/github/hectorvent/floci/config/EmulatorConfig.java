@@ -271,6 +271,7 @@ public interface EmulatorConfig {
         BatchStorageConfig batch();
         LightsailStorageConfig lightsail();
         CodePipelineStorageConfig codepipeline();
+        CodeConnectionsStorageConfig codeconnections();
         S3VectorsStorageConfig s3vectors();
         EcsStorageConfig ecs();
         CodeBuildStorageConfig codebuild();
@@ -625,6 +626,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface CodeConnectionsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface ApplicationSignalsStorageConfig {
         Optional<String> mode();
 
@@ -710,6 +718,7 @@ public interface EmulatorConfig {
         CodeBuildServiceConfig codebuild();
         CodeDeployServiceConfig codedeploy();
         CodePipelineServiceConfig codepipeline();
+        CodeConnectionsServiceConfig codeconnections();
         AutoScalingServiceConfig autoscaling();
         ApplicationAutoScalingServiceConfig applicationautoscaling();
         ElasticBeanstalkServiceConfig elasticbeanstalk();
@@ -968,6 +977,11 @@ public interface EmulatorConfig {
     }
 
     interface CodePipelineServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface CodeConnectionsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

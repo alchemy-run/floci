@@ -42,6 +42,8 @@ floci:
         flush-interval-ms: 60000
       codepipeline:
         flush-interval-ms: 60000
+      codeconnections:
+        flush-interval-ms: 60000
       s3vectors:
         flush-interval-ms: 60000
       ecs:
@@ -290,6 +292,8 @@ floci:
     codedeploy:
       enabled: true
     codepipeline:
+      enabled: true
+    codeconnections:
       enabled: true
     autoscaling:
       enabled: true
