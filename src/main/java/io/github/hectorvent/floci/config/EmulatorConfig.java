@@ -293,6 +293,7 @@ public interface EmulatorConfig {
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
         ApplicationSignalsStorageConfig applicationSignals();
+        BedrockAgentStorageConfig bedrockAgent();
         BedrockAgentCoreStorageConfig bedrockAgentCore();
     }
 
@@ -1398,6 +1399,11 @@ public interface EmulatorConfig {
         String backend();
 
         BedrockProxyConfig proxy();
+    }
+
+    interface BedrockAgentServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface BedrockAgentCoreServiceConfig {
