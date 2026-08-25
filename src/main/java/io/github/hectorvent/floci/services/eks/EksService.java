@@ -21,15 +21,18 @@ import io.github.hectorvent.floci.services.eks.model.CreateAddonRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateClusterRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateFargateProfileRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateNodeGroupRequest;
+import io.github.hectorvent.floci.services.eks.model.CreatePodIdentityAssociationRequest;
 import io.github.hectorvent.floci.services.eks.model.FargateProfile;
 import io.github.hectorvent.floci.services.eks.model.FargateProfileStatus;
 import io.github.hectorvent.floci.services.eks.model.KubernetesNetworkConfig;
 import io.github.hectorvent.floci.services.eks.model.Nodegroup;
 import io.github.hectorvent.floci.services.eks.model.NodegroupScalingConfig;
 import io.github.hectorvent.floci.services.eks.model.NodegroupStatus;
+import io.github.hectorvent.floci.services.eks.model.PodIdentityAssociation;
 import io.github.hectorvent.floci.services.eks.model.ResourcesVpcConfig;
 import io.github.hectorvent.floci.services.eks.model.UpdateAccessEntryRequest;
 import io.github.hectorvent.floci.services.eks.model.UpdateAddonRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdatePodIdentityAssociationRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -68,6 +71,7 @@ public class EksService implements TagHandler {
     private final StorageBackend<String, FargateProfile> fargateProfileStorage;
     private final StorageBackend<String, Addon> addonStorage;
     private final StorageBackend<String, AccessEntry> accessEntryStorage;
+    private final StorageBackend<String, PodIdentityAssociation> podIdentityStorage;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final EksClusterManager clusterManager;
@@ -92,6 +96,9 @@ public class EksService implements TagHandler {
                 });
         this.addonStorage = storageFactory.create("eks", "eks-addons.json",
                 new TypeReference<Map<String, Addon>>() {
+                });
+        this.podIdentityStorage = storageFactory.create("eks", "eks-pod-identity-associations.json",
+                new TypeReference<Map<String, PodIdentityAssociation>>() {
                 });
         this.config = config;
         this.regionResolver = regionResolver;
@@ -198,6 +205,12 @@ public class EksService implements TagHandler {
         for (String key : fargateProfileStorage.keys()) {
             if (key.startsWith(fargatePrefix)) {
                 fargateProfileStorage.delete(key);
+            }
+        }
+        String podIdentityPrefix = name + "/";
+        for (String key : podIdentityStorage.keys()) {
+            if (key.startsWith(podIdentityPrefix)) {
+                podIdentityStorage.delete(key);
             }
         }
         insightsRefreshByCluster.remove(name);
@@ -668,13 +681,114 @@ public class EksService implements TagHandler {
                 "No identity provider config found: " + configName, 404);
     }
 
-    public Map<String, Object> describePodIdentityAssociation(String clusterName, String associationId) {
+    public PodIdentityAssociation createPodIdentityAssociation(String clusterName,
+            CreatePodIdentityAssociationRequest request) {
+        describeCluster(clusterName);
+        if (request == null) {
+            throw new AwsException("InvalidParameterException",
+                    "namespace, serviceAccount, and roleArn are required", 400);
+        }
+        if (request.getNamespace() == null || request.getNamespace().isBlank()) {
+            throw new AwsException("InvalidParameterException", "namespace is required", 400);
+        }
+        if (request.getServiceAccount() == null || request.getServiceAccount().isBlank()) {
+            throw new AwsException("InvalidParameterException", "serviceAccount is required", 400);
+        }
+        if (request.getRoleArn() == null || request.getRoleArn().isBlank()) {
+            throw new AwsException("InvalidParameterException", "roleArn is required", 400);
+        }
+        String namespace = request.getNamespace();
+        String serviceAccount = request.getServiceAccount();
+        if (findPodIdentity(clusterName, namespace, serviceAccount) != null) {
+            throw new AwsException("ResourceInUseException",
+                    "Pod identity association already exists for " + namespace + "/" + serviceAccount, 409);
+        }
+
+        String region = regionResolver.getRegion();
+        String accountId = regionResolver.getAccountId();
+        String associationId = "a-" + UUID.randomUUID().toString().replace("-", "").substring(0, 17);
+        Instant now = Instant.now();
+
+        PodIdentityAssociation association = new PodIdentityAssociation();
+        association.setClusterName(clusterName);
+        association.setNamespace(namespace);
+        association.setServiceAccount(serviceAccount);
+        association.setRoleArn(request.getRoleArn());
+        association.setAssociationId(associationId);
+        association.setAssociationArn(AwsArnUtils.Arn.of("eks", region, accountId,
+                "podidentityassociation/" + clusterName + "/" + associationId).toString());
+        association.setTags(request.getTags() != null ? new HashMap<>(request.getTags()) : new HashMap<>());
+        association.setCreatedAt(now);
+        association.setModifiedAt(now);
+        association.setDisableSessionTags(Boolean.TRUE.equals(request.getDisableSessionTags()));
+        association.setTargetRoleArn(blankToNull(request.getTargetRoleArn()));
+        association.setPolicy(blankToNull(request.getPolicy()));
+        association.setAccountId(accountId);
+        if (association.getTargetRoleArn() != null) {
+            association.setExternalId(UUID.randomUUID().toString());
+        }
+
+        podIdentityStorage.put(podIdentityKey(clusterName, associationId), association);
+        return association;
+    }
+
+    public Map<String, Object> listPodIdentityAssociations(String clusterName, String namespace,
+            String serviceAccount, Integer maxResults, String nextToken) {
+        describeCluster(clusterName);
+        String prefix = clusterName + "/";
+        List<Map<String, Object>> summaries = podIdentityStorage.scan(key -> key.startsWith(prefix)).stream()
+                .filter(association -> namespace == null || namespace.isBlank()
+                        || namespace.equals(association.getNamespace()))
+                .filter(association -> serviceAccount == null || serviceAccount.isBlank()
+                        || serviceAccount.equals(association.getServiceAccount()))
+                .map(this::toPodIdentitySummary)
+                .collect(Collectors.toList());
+        return pageObjects(summaries, maxResults, nextToken, "associations");
+    }
+
+    public PodIdentityAssociation describePodIdentityAssociation(String clusterName, String associationId) {
         describeCluster(clusterName);
         if (associationId == null || associationId.isBlank()) {
             throw new AwsException("InvalidParameterException", "associationId is required", 400);
         }
-        throw new AwsException("ResourceNotFoundException",
-                "No pod identity association found: " + associationId, 404);
+        return podIdentityStorage.get(podIdentityKey(clusterName, associationId))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "No pod identity association found: " + associationId, 404));
+    }
+
+    public PodIdentityAssociation updatePodIdentityAssociation(String clusterName, String associationId,
+            UpdatePodIdentityAssociationRequest request) {
+        PodIdentityAssociation association = describePodIdentityAssociation(clusterName, associationId);
+        if (request != null) {
+            if (request.getRoleArn() != null && !request.getRoleArn().isBlank()) {
+                association.setRoleArn(request.getRoleArn());
+            }
+            if (request.getDisableSessionTags() != null) {
+                association.setDisableSessionTags(request.getDisableSessionTags());
+            }
+            if (request.getTargetRoleArn() != null) {
+                String target = blankToNull(request.getTargetRoleArn());
+                association.setTargetRoleArn(target);
+                if (target != null && association.getExternalId() == null) {
+                    association.setExternalId(UUID.randomUUID().toString());
+                }
+                if (target == null) {
+                    association.setExternalId(null);
+                }
+            }
+            if (request.getPolicy() != null) {
+                association.setPolicy(blankToNull(request.getPolicy()));
+            }
+        }
+        association.setModifiedAt(Instant.now());
+        podIdentityStorage.put(podIdentityKey(clusterName, associationId), association);
+        return association;
+    }
+
+    public PodIdentityAssociation deletePodIdentityAssociation(String clusterName, String associationId) {
+        PodIdentityAssociation association = describePodIdentityAssociation(clusterName, associationId);
+        podIdentityStorage.delete(podIdentityKey(clusterName, associationId));
+        return association;
     }
 
     public Map<String, Object> startInsightsRefresh(String clusterName) {
@@ -744,6 +858,17 @@ public class EksService implements TagHandler {
                     profile.getFargateProfileName()), profile);
             return;
         }
+        if (resource.startsWith("podidentityassociation/")) {
+            PodIdentityAssociation association = requirePodIdentityByArn(resourceArn);
+            if (association.getTags() == null) {
+                association.setTags(new HashMap<>());
+            }
+            association.getTags().putAll(tags);
+            association.setModifiedAt(Instant.now());
+            podIdentityStorage.put(podIdentityKey(association.getClusterName(),
+                    association.getAssociationId()), association);
+            return;
+        }
         Cluster cluster = requireClusterByArn(resourceArn);
         if (cluster.getTags() == null) {
             cluster.setTags(new HashMap<>());
@@ -782,6 +907,16 @@ public class EksService implements TagHandler {
                     profile.getFargateProfileName()), profile);
             return;
         }
+        if (resource.startsWith("podidentityassociation/")) {
+            PodIdentityAssociation association = requirePodIdentityByArn(resourceArn);
+            if (association.getTags() != null && tagKeys != null) {
+                tagKeys.forEach(association.getTags()::remove);
+            }
+            association.setModifiedAt(Instant.now());
+            podIdentityStorage.put(podIdentityKey(association.getClusterName(),
+                    association.getAssociationId()), association);
+            return;
+        }
         Cluster cluster = requireClusterByArn(resourceArn);
         if (cluster.getTags() != null && tagKeys != null) {
             tagKeys.forEach(cluster.getTags()::remove);
@@ -803,6 +938,10 @@ public class EksService implements TagHandler {
         if (resource.startsWith("fargateprofile/")) {
             FargateProfile profile = requireFargateProfileByArn(resourceArn);
             return profile.getTags() != null ? profile.getTags() : Map.of();
+        }
+        if (resource.startsWith("podidentityassociation/")) {
+            PodIdentityAssociation association = requirePodIdentityByArn(resourceArn);
+            return association.getTags() != null ? association.getTags() : Map.of();
         }
         Cluster cluster = requireClusterByArn(resourceArn);
         return cluster.getTags() != null ? cluster.getTags() : Map.of();
@@ -855,6 +994,40 @@ public class EksService implements TagHandler {
                 .findFirst()
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Resource not found: " + resourceArn, 404));
+    }
+
+    private PodIdentityAssociation requirePodIdentityByArn(String resourceArn) {
+        return podIdentityStorage.scan(k -> true).stream()
+                .filter(association -> resourceArn.equals(association.getAssociationArn()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Resource not found: " + resourceArn, 404));
+    }
+
+    private PodIdentityAssociation findPodIdentity(String clusterName, String namespace, String serviceAccount) {
+        String prefix = clusterName + "/";
+        return podIdentityStorage.scan(key -> key.startsWith(prefix)).stream()
+                .filter(association -> namespace.equals(association.getNamespace())
+                        && serviceAccount.equals(association.getServiceAccount()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Map<String, Object> toPodIdentitySummary(PodIdentityAssociation association) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("clusterName", association.getClusterName());
+        summary.put("namespace", association.getNamespace());
+        summary.put("serviceAccount", association.getServiceAccount());
+        summary.put("associationArn", association.getAssociationArn());
+        summary.put("associationId", association.getAssociationId());
+        if (association.getOwnerArn() != null) {
+            summary.put("ownerArn", association.getOwnerArn());
+        }
+        return summary;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private String addonKey(String clusterName, String addonName) {
@@ -997,6 +1170,10 @@ public class EksService implements TagHandler {
 
     private String fargateProfileKey(String clusterName, String fargateProfileName) {
         return clusterName + "/" + fargateProfileName;
+    }
+
+    private String podIdentityKey(String clusterName, String associationId) {
+        return clusterName + "/" + associationId;
     }
 
     private NodegroupScalingConfig defaultScalingConfig() {
