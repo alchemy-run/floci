@@ -270,6 +270,7 @@ public interface EmulatorConfig {
         RdsStorageConfig rds();
         Ec2StorageConfig ec2();
         NeptuneStorageConfig neptune();
+        NeptuneGraphStorageConfig neptuneGraph();
         BackupStorageConfig backup();
         BackupSearchStorageConfig backupsearch();
         DataBrewStorageConfig databrew();
@@ -468,6 +469,13 @@ public interface EmulatorConfig {
 
     interface NeptuneStorageConfig {
         Optional<String> mode();
+    }
+
+    interface NeptuneGraphStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
     }
 
     interface BackupStorageConfig {
@@ -939,6 +947,7 @@ public interface EmulatorConfig {
         KinesisVideoServiceConfig kinesisvideo();
         FirehoseServiceConfig firehose();
         FmsServiceConfig fms();
+        NetworkFirewallServiceConfig networkFirewall();
         LicenseManagerServiceConfig licenseManager();
         FraudDetectorServiceConfig frauddetector();
         KmsServiceConfig kms();
@@ -993,6 +1002,7 @@ public interface EmulatorConfig {
         DetectiveServiceConfig detective();
         DevOpsGuruServiceConfig devopsGuru();
         NeptuneServiceConfig neptune();
+        NeptuneGraphServiceConfig neptuneGraph();
         DocDbServiceConfig docdb();
         DocDbElasticServiceConfig docdbElastic();
         Route53ServiceConfig route53();
@@ -1672,6 +1682,11 @@ public interface EmulatorConfig {
         Optional<String> dockerNetwork();
     }
 
+    interface NeptuneGraphServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface DocDbServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1818,6 +1833,11 @@ public interface EmulatorConfig {
     }
 
     interface FmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface NetworkFirewallServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

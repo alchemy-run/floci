@@ -20,6 +20,7 @@ import io.github.hectorvent.floci.services.inspector2.Inspector2Controller;
 import io.github.hectorvent.floci.services.macie2.Macie2Controller;
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
+import io.github.hectorvent.floci.services.neptunegraph.NeptuneGraphController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
 import io.github.hectorvent.floci.services.devopsguru.DevOpsGuruController;
 import io.github.hectorvent.floci.services.appconfig.AppConfigDataController;
@@ -241,6 +242,12 @@ public class ResolvedServiceCatalog {
                         5000L, AwsNamespaces.RDS, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("neptune"), Set.of(), Set.of()),
+                descriptor("neptune-graph", "neptunegraph", config.services().neptuneGraph().enabled(), true,
+                        "neptunegraph", storageMode(config.storage().services().neptuneGraph().mode(),
+                                config.storage().mode()),
+                        config.storage().services().neptuneGraph().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("neptune-graph"), Set.of(), Set.of(NeptuneGraphController.class)),
                 descriptor("docdb", "docdb", config.services().docdb().enabled(), true,
                         "docdb", config.storage().mode(),
                         5000L, AwsNamespaces.RDS, ServiceProtocol.QUERY, // Query + RDS namespace; subnet groups share this dispatcher
@@ -394,6 +401,10 @@ public class ResolvedServiceCatalog {
                         "fms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSFMS_20180101."), Set.of("fms"), Set.of(), Set.of()),
+                descriptor("network-firewall", "network-firewall", config.services().networkFirewall().enabled(), true,
+                        "network-firewall", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("NetworkFirewall_20201112."), Set.of("network-firewall"), Set.of(), Set.of()),
                 descriptor("license-manager", "license-manager", config.services().licenseManager().enabled(), true,
                         "license-manager", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

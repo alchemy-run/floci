@@ -167,6 +167,8 @@ floci:
         flush-interval-ms: 5000
       accessanalyzer:
         flush-interval-ms: 5000
+      neptune-graph:
+        flush-interval-ms: 5000
       backupsearch:
         flush-interval-ms: 5000
       databrew:
@@ -394,6 +396,8 @@ floci:
       db-type: "gremlin"
       default-image: "tinkerpop/gremlin-server:3.7.3"
       default-neo4j-image: "neo4j:5-community"
+    neptune-graph:
+      enabled: true
     eventbridge:
       enabled: true
     cloudmap:
@@ -429,6 +433,8 @@ floci:
     firehose:
       enabled: true
     fms:
+      enabled: true
+    network-firewall:
       enabled: true
     license-manager:
       enabled: true
