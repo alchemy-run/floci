@@ -121,6 +121,7 @@ nav:
     - EC2: services/ec2.md
     - Lightsail: services/lightsail.md
     - AppConfig: services/appconfig.md
+    - Service Catalog AppRegistry: services/appregistry.md
     - Bedrock Runtime: services/bedrock-runtime.md
     - ELB v2: services/elb.md
     - Auto Scaling: services/autoscaling.md
