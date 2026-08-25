@@ -849,6 +849,7 @@ public interface EmulatorConfig {
         Ec2ServiceConfig ec2();
         EcsServiceConfig ecs();
         EfsServiceConfig efs();
+        GlacierServiceConfig glacier();
         FsxServiceConfig fsx();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
@@ -1726,6 +1727,11 @@ public interface EmulatorConfig {
     }
 
     interface EfsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GlacierServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
