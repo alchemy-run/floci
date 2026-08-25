@@ -71,6 +71,8 @@ floci:
         flush-interval-ms: 60000
       rum:
         flush-interval-ms: 60000
+      internetmonitor:
+        flush-interval-ms: 60000
       fis:
         flush-interval-ms: 60000
       finspace:
@@ -456,6 +458,8 @@ floci:
     iotdata:
       enabled: true
     rum:
+      enabled: true
+    internetmonitor:
       enabled: true
     geo-maps:
       enabled: true

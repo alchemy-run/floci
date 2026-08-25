@@ -70,6 +70,7 @@ import io.github.hectorvent.floci.services.finspace.FinSpaceController;
 import io.github.hectorvent.floci.services.finspace.FinSpaceDataController;
 import io.github.hectorvent.floci.services.geomaps.GeoMapsController;
 import io.github.hectorvent.floci.services.rum.RumController;
+import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -676,6 +677,14 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
+                descriptor("internetmonitor", "internetmonitor", config.services().internetmonitor().enabled(), true,
+                        "internetmonitor", storageMode(config.storage().services().internetmonitor().mode(),
+                                config.storage().mode()),
+                        config.storage().services().internetmonitor().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("internetmonitor"), Set.of(),
+                        Set.of(InternetMonitorController.class)),
                 descriptor("geo-maps", "geomaps", config.services().geoMaps().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

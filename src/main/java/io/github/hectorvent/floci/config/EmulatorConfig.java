@@ -295,6 +295,7 @@ public interface EmulatorConfig {
         ElasticBeanstalkStorageConfig elasticbeanstalk();
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
+        InternetMonitorStorageConfig internetmonitor();
         FisStorageConfig fis();
         FinSpaceStorageConfig finspace();
         AmpStorageConfig amp();
@@ -621,6 +622,13 @@ public interface EmulatorConfig {
     }
 
     interface RumStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface InternetMonitorStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -955,6 +963,7 @@ public interface EmulatorConfig {
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
+        InternetMonitorServiceConfig internetmonitor();
         GeoMapsServiceConfig geoMaps();
         GeoRoutesServiceConfig geoRoutes();
         GeoPlacesServiceConfig geoPlaces();
@@ -1006,6 +1015,11 @@ public interface EmulatorConfig {
     }
 
     interface RumServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface InternetMonitorServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
