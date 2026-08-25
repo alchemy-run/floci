@@ -283,6 +283,7 @@ public interface EmulatorConfig {
         RumStorageConfig rum();
         AccountStorageConfig account();
         AmpStorageConfig amp();
+        AccessAnalyzerStorageConfig accessanalyzer();
     }
 
     interface SsmStorageConfig {
@@ -512,6 +513,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface AccessAnalyzerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface CodeDeployStorageConfig {
         Optional<String> mode();
 
@@ -615,6 +623,7 @@ public interface EmulatorConfig {
         RumServiceConfig rum();
         AccountServiceConfig account();
         AmpServiceConfig amp();
+        AccessAnalyzerServiceConfig accessanalyzer();
     }
 
     interface IotServiceConfig {
@@ -654,6 +663,11 @@ public interface EmulatorConfig {
     }
 
     interface AmpServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AccessAnalyzerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

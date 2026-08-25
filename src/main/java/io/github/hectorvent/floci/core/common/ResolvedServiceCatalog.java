@@ -26,6 +26,7 @@ import io.github.hectorvent.floci.services.account.AccountController;
 import io.github.hectorvent.floci.services.account.AccountRegionController;
 import io.github.hectorvent.floci.services.amp.AmpController;
 import io.github.hectorvent.floci.services.amp.AmpRuleController;
+import io.github.hectorvent.floci.services.accessanalyzer.AccessAnalyzerController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -454,7 +455,13 @@ public class ResolvedServiceCatalog {
                         config.storage().services().amp().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("aps"), Set.of(), Set.of(
-                                AmpController.class, AmpRuleController.class))
+                                AmpController.class, AmpRuleController.class)),
+                descriptor("access-analyzer", "accessanalyzer", config.services().accessanalyzer().enabled(), true,
+                        "accessanalyzer", storageMode(config.storage().services().accessanalyzer().mode(),
+                                config.storage().mode()),
+                        config.storage().services().accessanalyzer().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("access-analyzer"), Set.of(), Set.of(AccessAnalyzerController.class))
         ));
     }
 

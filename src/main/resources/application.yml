@@ -144,6 +144,8 @@ floci:
         flush-interval-ms: 5000
       amp:
         flush-interval-ms: 5000
+      accessanalyzer:
+        flush-interval-ms: 5000
 
   dns:
     # Extra hostname suffixes resolved to Floci's container IP by the embedded DNS server.
@@ -497,4 +499,6 @@ floci:
     account:
       enabled: true
     amp:
+      enabled: true
+    accessanalyzer:
       enabled: true

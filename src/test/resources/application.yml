@@ -67,6 +67,8 @@ floci:
         flush-interval-ms: 60000
       amp:
         flush-interval-ms: 60000
+      accessanalyzer:
+        flush-interval-ms: 60000
 
   auth:
     validate-signatures: false
@@ -306,4 +308,6 @@ floci:
     account:
       enabled: true
     amp:
+      enabled: true
+    accessanalyzer:
       enabled: true

@@ -108,6 +108,7 @@ nav:
     - CloudWatch RUM: services/rum.md
     - Account Management: services/account.md
     - AMP: services/amp.md
+    - IAM Access Analyzer: services/access-analyzer.md
     - ACM: services/acm.md
     - ECS: services/ecs.md
     - ECR: services/ecr.md
