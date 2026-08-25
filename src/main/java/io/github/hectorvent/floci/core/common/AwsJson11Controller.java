@@ -50,6 +50,7 @@ import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerJsonHand
 import io.github.hectorvent.floci.services.ssm.Ec2MessagesJsonHandler;
 import io.github.hectorvent.floci.services.ssm.SsmJsonHandler;
 import io.github.hectorvent.floci.services.dms.DmsJsonHandler;
+import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -119,8 +120,9 @@ public class AwsJson11Controller {
     private final LightsailJsonHandler lightsailJsonHandler;
     private final CloudControlJsonHandler cloudControlJsonHandler;
     private final ApplicationAutoScalingJsonHandler applicationAutoScalingJsonHandler;
-    private final DaxJsonHandler daxJsonHandler;
     private final DmsJsonHandler dmsJsonHandler;
+    private final DataSyncJsonHandler dataSyncJsonHandler;
+    private final DaxJsonHandler daxJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -164,8 +166,9 @@ public class AwsJson11Controller {
                                LightsailJsonHandler lightsailJsonHandler,
                                CloudControlJsonHandler cloudControlJsonHandler,
                                ApplicationAutoScalingJsonHandler applicationAutoScalingJsonHandler,
-                               DaxJsonHandler daxJsonHandler,
-                               DmsJsonHandler dmsJsonHandler) {
+                               DmsJsonHandler dmsJsonHandler,
+                               DataSyncJsonHandler dataSyncJsonHandler,
+                               DaxJsonHandler daxJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -213,8 +216,9 @@ public class AwsJson11Controller {
         this.lightsailJsonHandler = lightsailJsonHandler;
         this.cloudControlJsonHandler = cloudControlJsonHandler;
         this.applicationAutoScalingJsonHandler = applicationAutoScalingJsonHandler;
-        this.daxJsonHandler = daxJsonHandler;
         this.dmsJsonHandler = dmsJsonHandler;
+        this.dataSyncJsonHandler = dataSyncJsonHandler;
+        this.daxJsonHandler = daxJsonHandler;
     }
 
     @POST
@@ -296,6 +300,7 @@ public class AwsJson11Controller {
                 case "lightsail" -> lightsailJsonHandler.handle(action, request, region);
                 case "cloudcontrol" -> cloudControlJsonHandler.handle(action, request, region);
                 case "dms" -> dmsJsonHandler.handle(action, request, region);
+                case "datasync" -> dataSyncJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target
