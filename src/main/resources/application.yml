@@ -153,6 +153,8 @@ floci:
         flush-interval-ms: 5000
       backupsearch:
         flush-interval-ms: 5000
+      dlm:
+        flush-interval-ms: 5000
       auditmanager:
         flush-interval-ms: 5000
       amplify:
@@ -491,6 +493,8 @@ floci:
       enabled: true
       job-completion-delay-seconds: 3
     backupsearch:
+      enabled: true
+    dlm:
       enabled: true
     route53:
       enabled: true

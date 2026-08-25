@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.appconfig.AppConfigController;
 import io.github.hectorvent.floci.services.backup.BackupController;
 import io.github.hectorvent.floci.services.backupsearch.BackupSearchController;
+import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.appconfig.AppConfigDataController;
 import io.github.hectorvent.floci.services.batch.BatchController;
 import io.github.hectorvent.floci.services.bedrockruntime.BedrockRuntimeController;
@@ -439,6 +440,11 @@ public class ResolvedServiceCatalog {
                         config.storage().services().backupsearch().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("backup-search"), Set.of(), Set.of(BackupSearchController.class)),
+                descriptor("dlm", "dlm", config.services().dlm().enabled(), true,
+                        "dlm", storageMode(config.storage().services().dlm().mode(), config.storage().mode()),
+                        config.storage().services().dlm().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("dlm"), Set.of(), Set.of(DlmController.class)),
                 descriptor("ec2messages", "ec2messages", config.services().ssm().enabled(), false,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

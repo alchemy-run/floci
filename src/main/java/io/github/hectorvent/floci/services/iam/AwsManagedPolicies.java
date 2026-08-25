@@ -164,6 +164,12 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AWSBackupServiceRolePolicyForRestores", "/service-role/",
                 "Provides AWS Backup permission to restore backups of all supported resource types."),
 
+        // DLM execution roles — Alchemy LifecyclePolicy attaches these ARNs.
+        new ManagedPolicyDef("AWSDataLifecycleManagerServiceRole", "/service-role/",
+                "Provides AWS Data Lifecycle Manager permission to manage EBS snapshots."),
+        new ManagedPolicyDef("AWSDataLifecycleManagerServiceRoleForAMIManagement", "/service-role/",
+                "Provides AWS Data Lifecycle Manager permission to manage EBS-backed AMIs."),
+
         // S3 Object Lambda execution role policy
         new ManagedPolicyDef("AmazonS3ObjectLambdaExecutionRolePolicy", "/service-role/",
                 "Provides write permissions to CloudWatch Logs for S3 Object Lambda access points."),

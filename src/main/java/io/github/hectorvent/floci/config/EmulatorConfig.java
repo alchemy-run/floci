@@ -267,6 +267,7 @@ public interface EmulatorConfig {
         NeptuneStorageConfig neptune();
         BackupStorageConfig backup();
         BackupSearchStorageConfig backupsearch();
+        DlmStorageConfig dlm();
         CloudFrontStorageConfig cloudfront();
         AppSyncStorageConfig appsync();
         BatchStorageConfig batch();
@@ -422,6 +423,13 @@ public interface EmulatorConfig {
     }
 
     interface BackupSearchStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DlmStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -741,6 +749,7 @@ public interface EmulatorConfig {
         ElasticBeanstalkServiceConfig elasticbeanstalk();
         BackupServiceConfig backup();
         BackupSearchServiceConfig backupsearch();
+        DlmServiceConfig dlm();
         NeptuneServiceConfig neptune();
         DocDbServiceConfig docdb();
         Route53ServiceConfig route53();
@@ -919,6 +928,11 @@ public interface EmulatorConfig {
     }
 
     interface BackupSearchServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DlmServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
