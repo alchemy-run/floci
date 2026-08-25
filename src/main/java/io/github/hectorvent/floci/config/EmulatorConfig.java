@@ -264,7 +264,9 @@ public interface EmulatorConfig {
         ElastiCacheStorageConfig elasticache();
         MemoryDbStorageConfig memorydb();
         MediaConnectStorageConfig mediaconnect();
+        MediaLiveStorageConfig medialive();
         MediaPackageV2StorageConfig mediapackagev2();
+        MediaTailorStorageConfig mediatailor();
         RdsStorageConfig rds();
         Ec2StorageConfig ec2();
         NeptuneStorageConfig neptune();
@@ -435,7 +437,21 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface MediaLiveStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface MediaPackageV2StorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface MediaTailorStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -898,7 +914,9 @@ public interface EmulatorConfig {
         ElastiCacheServiceConfig elasticache();
         MemoryDbServiceConfig memorydb();
         MediaConnectServiceConfig mediaconnect();
+        MediaLiveServiceConfig medialive();
         MediaPackageV2ServiceConfig mediapackagev2();
+        MediaTailorServiceConfig mediatailor();
         DaxServiceConfig dax();
         DsServiceConfig ds();
         RdsServiceConfig rds();
@@ -985,6 +1003,7 @@ public interface EmulatorConfig {
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendmedical();
         HealthLakeServiceConfig healthlake();
+        MedicalImagingServiceConfig medicalImaging();
         MailManagerServiceConfig mailmanager();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -1560,7 +1579,17 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface MediaLiveServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface MediaPackageV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MediaTailorServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -2088,6 +2117,11 @@ public interface EmulatorConfig {
     }
 
     interface HealthLakeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MedicalImagingServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

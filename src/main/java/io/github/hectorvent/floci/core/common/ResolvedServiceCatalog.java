@@ -6,7 +6,11 @@ import io.github.hectorvent.floci.services.backup.BackupController;
 import io.github.hectorvent.floci.services.backupsearch.BackupSearchController;
 import io.github.hectorvent.floci.services.databrew.DataBrewController;
 import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
+import io.github.hectorvent.floci.services.mediaconnect.MediaConnectController;
+import io.github.hectorvent.floci.services.medialive.MediaLiveController;
 import io.github.hectorvent.floci.services.mediapackagev2.MediaPackageV2Controller;
+import io.github.hectorvent.floci.services.mediatailor.MediaTailorController;
+import io.github.hectorvent.floci.services.medicalimaging.MedicalImagingController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
@@ -37,6 +41,9 @@ import io.github.hectorvent.floci.services.iotwireless.IotWirelessController;
 import io.github.hectorvent.floci.services.ivs.IvsController;
 import io.github.hectorvent.floci.services.ivs.IvsRecordingConfigurationController;
 import io.github.hectorvent.floci.services.ivschat.IvsChatController;
+import io.github.hectorvent.floci.services.lexv2.LexModelsV2Controller;
+import io.github.hectorvent.floci.services.lexv2.LexRuntimeV2Controller;
+import io.github.hectorvent.floci.services.lexv2.LexV2RoutingFilter;
 import io.github.hectorvent.floci.services.ivsrealtime.IvsRealtimeController;
 import io.github.hectorvent.floci.services.kinesisvideo.KinesisVideoController;
 import io.github.hectorvent.floci.services.pipes.PipesController;
@@ -76,12 +83,14 @@ import io.github.hectorvent.floci.services.geoplaces.GeoPlacesController;
 import io.github.hectorvent.floci.services.finspace.FinSpaceController;
 import io.github.hectorvent.floci.services.finspace.FinSpaceDataController;
 import io.github.hectorvent.floci.services.geomaps.GeoMapsController;
+import io.github.hectorvent.floci.services.location.LocationController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
 import io.github.hectorvent.floci.services.imagebuilder.ImageBuilderController;
 import io.github.hectorvent.floci.services.lakeformation.LakeFormationController;
+import io.github.hectorvent.floci.services.mediaconvert.MediaConvertController;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -180,6 +189,30 @@ public class ResolvedServiceCatalog {
                         config.storage().services().elasticache().flushIntervalMs(), AwsNamespaces.EC, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("elasticache"), Set.of(), Set.of()),
+                descriptor("mediaconnect", "mediaconnect", config.services().mediaconnect().enabled(), true,
+                        "mediaconnect", storageMode(config.storage().services().mediaconnect().mode(),
+                                config.storage().mode()),
+                        config.storage().services().mediaconnect().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediaconnect"), Set.of(), Set.of(MediaConnectController.class)),
+                descriptor("medialive", "medialive", config.services().medialive().enabled(), true,
+                        "medialive", storageMode(config.storage().services().medialive().mode(),
+                                config.storage().mode()),
+                        config.storage().services().medialive().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("medialive"), Set.of(), Set.of(MediaLiveController.class)),
+                descriptor("mediapackagev2", "mediapackagev2", config.services().mediapackagev2().enabled(), true,
+                        "mediapackagev2", storageMode(config.storage().services().mediapackagev2().mode(),
+                                config.storage().mode()),
+                        config.storage().services().mediapackagev2().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediapackagev2"), Set.of(), Set.of(MediaPackageV2Controller.class)),
+                descriptor("mediatailor", "mediatailor", config.services().mediatailor().enabled(), true,
+                        "mediatailor", storageMode(config.storage().services().mediatailor().mode(),
+                                config.storage().mode()),
+                        config.storage().services().mediatailor().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediatailor"), Set.of(), Set.of(MediaTailorController.class)),
                 descriptor("memorydb", "memorydb", config.services().memorydb().enabled(), true,
                         "memorydb", storageMode(config.storage().services().memorydb().mode(), config.storage().mode()),
                         config.storage().services().memorydb().flushIntervalMs(), null, ServiceProtocol.JSON,
@@ -301,15 +334,15 @@ public class ResolvedServiceCatalog {
                         "kinesis", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON, ServiceProtocol.CBOR),
                         Set.of("Kinesis_20131202."), Set.of("kinesis"), Set.of(), Set.of()),
+                descriptor("kinesisvideo", "kinesisvideo", config.services().kinesisvideo().enabled(), true,
+                        "kinesisvideo", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("kinesisvideo"), Set.of(), Set.of(KinesisVideoController.class)),
                 descriptor("kinesisanalytics", "kinesisanalytics",
                         config.services().kinesisAnalytics().enabled(), true,
                         "kinesisanalytics", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("KinesisAnalytics_20180523."), Set.of("kinesisanalytics"), Set.of(), Set.of()),
-                descriptor("kinesisvideo", "kinesisvideo", config.services().kinesisvideo().enabled(), true,
-                        "kinesisvideo", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
-                        protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("kinesisvideo"), Set.of(), Set.of(KinesisVideoController.class)),
                 descriptor("kms", "kms", config.services().kms().enabled(), true,
                         "kms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -581,12 +614,6 @@ public class ResolvedServiceCatalog {
                         config.storage().services().dataexchange().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("dataexchange"), Set.of(), Set.of(DataExchangeController.class)),
-                descriptor("mediapackagev2", "mediapackagev2", config.services().mediapackagev2().enabled(), true,
-                        "mediapackagev2", storageMode(config.storage().services().mediapackagev2().mode(),
-                                config.storage().mode()),
-                        config.storage().services().mediapackagev2().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
-                        protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("mediapackagev2"), Set.of(), Set.of(MediaPackageV2Controller.class)),
                 descriptor("datazone", "datazone", config.services().datazone().enabled(), true,
                         "datazone", storageMode(config.storage().services().datazone().mode(),
                                 config.storage().mode()),
@@ -655,6 +682,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("HealthLake."), Set.of("healthlake"), Set.of(), Set.of()),
+                descriptor("medical-imaging", "medicalimaging", config.services().medicalImaging().enabled(), true,
+                        "medicalimaging", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("medical-imaging"), Set.of(), Set.of(MedicalImagingController.class)),
                 descriptor("mailmanager", "mailmanager", config.services().mailmanager().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -715,6 +746,13 @@ public class ResolvedServiceCatalog {
                         config.storage().services().ivschat().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("ivschat"), Set.of(), Set.of(IvsChatController.class)),
+                descriptor("lex", "lex", config.services().lex().enabled(), true,
+                        "lex", storageMode(config.storage().services().lex().mode(), config.storage().mode()),
+                        config.storage().services().lex().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("lex"), Set.of(),
+                        Set.of(LexModelsV2Controller.class, LexRuntimeV2Controller.class,
+                                LexV2RoutingFilter.class)),
                 descriptor("iot", "iot", config.services().iot().enabled(), true,
                         "iot", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
@@ -761,6 +799,10 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("internetmonitor"), Set.of(),
                         Set.of(InternetMonitorController.class)),
+                descriptor("geo", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo"), Set.of(), Set.of(LocationController.class)),
                 descriptor("geo-maps", "geomaps", config.services().geoMaps().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
@@ -922,7 +964,11 @@ public class ResolvedServiceCatalog {
                 descriptor("identitystore", "identitystore", config.services().identitystore().enabled(), true,
                         "identitystore", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
-                        Set.of("AWSIdentityStore."), Set.of("identitystore"), Set.of(), Set.of())
+                        Set.of("AWSIdentityStore."), Set.of("identitystore"), Set.of(), Set.of()),
+                descriptor("mediaconvert", "mediaconvert", config.services().mediaconvert().enabled(), true,
+                        "mediaconvert", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediaconvert"), Set.of(), Set.of(MediaConvertController.class))
         ));
     }
 

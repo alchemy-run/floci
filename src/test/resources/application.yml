@@ -97,7 +97,11 @@ floci:
         flush-interval-ms: 60000
       mediaconnect:
         flush-interval-ms: 60000
+      medialive:
+        flush-interval-ms: 60000
       mediapackagev2:
+        flush-interval-ms: 60000
+      mediatailor:
         flush-interval-ms: 60000
       datazone:
         flush-interval-ms: 60000
@@ -126,8 +130,6 @@ floci:
       amplify:
         flush-interval-ms: 60000
       appflow:
-        flush-interval-ms: 60000
-      mediaconnect:
         flush-interval-ms: 60000
       appintegrations:
         flush-interval-ms: 60000
@@ -230,7 +232,11 @@ floci:
       default-memcached-image: "memcached:1.6"
     mediaconnect:
       enabled: true
+    medialive:
+      enabled: true
     mediapackagev2:
+      enabled: true
+    mediatailor:
       enabled: true
     memorydb:
       enabled: true
@@ -443,6 +449,8 @@ floci:
     comprehendmedical:
       enabled: true
     healthlake:
+      enabled: true
+    medical-imaging:
       enabled: true
     mailmanager:
       enabled: true
