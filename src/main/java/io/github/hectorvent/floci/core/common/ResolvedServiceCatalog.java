@@ -53,6 +53,7 @@ import io.github.hectorvent.floci.services.chatbot.ChatbotController;
 import io.github.hectorvent.floci.services.controltower.ControlTowerController;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactController;
 import io.github.hectorvent.floci.services.deadline.DeadlineController;
+import io.github.hectorvent.floci.services.entityresolution.EntityResolutionController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -210,6 +211,13 @@ public class ResolvedServiceCatalog {
                         "emrserverless", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("emr-serverless"), Set.of(), Set.of(EmrServerlessController.class)),
+                descriptor("entityresolution", "entityresolution", config.services().entityresolution().enabled(), true,
+                        "entityresolution", storageMode(config.storage().services().entityresolution().mode(),
+                                config.storage().mode()),
+                        config.storage().services().entityresolution().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("entityresolution"), Set.of(), Set.of(EntityResolutionController.class)),
                 descriptor("wafv2", "wafv2", config.services().wafv2().enabled(), true,
                         "wafv2", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

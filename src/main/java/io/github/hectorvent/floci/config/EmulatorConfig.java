@@ -311,6 +311,7 @@ public interface EmulatorConfig {
         BedrockAgentCoreStorageConfig bedrockAgentCore();
         BedrockDataAutomationStorageConfig bedrockDataAutomation();
         DeadlineStorageConfig deadline();
+        EntityResolutionStorageConfig entityresolution();
         EmrServerlessStorageConfig emrServerless();
     }
 
@@ -625,6 +626,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface EntityResolutionStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface EmrServerlessStorageConfig {
         Optional<String> mode();
 
@@ -792,6 +800,7 @@ public interface EmulatorConfig {
         CloudMapServiceConfig cloudmap();
         EmrServiceConfig emr();
         EmrServerlessServiceConfig emrServerless();
+        EntityResolutionServiceConfig entityresolution();
         WafV2ServiceConfig wafv2();
         SchedulerServiceConfig scheduler();
         CloudWatchLogsServiceConfig cloudwatchlogs();
@@ -1444,6 +1453,11 @@ public interface EmulatorConfig {
     }
 
     interface EmrServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface EntityResolutionServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -173,6 +173,8 @@ floci:
         flush-interval-ms: 5000
       deadline:
         flush-interval-ms: 5000
+      entityresolution:
+        flush-interval-ms: 5000
       emr-serverless:
         flush-interval-ms: 5000
       auditmanager:
@@ -363,6 +365,8 @@ floci:
     emr:
       enabled: true
     emr-serverless:
+      enabled: true
+    entityresolution:
       enabled: true
     wafv2:
       enabled: true
