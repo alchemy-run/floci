@@ -285,11 +285,13 @@ public interface EmulatorConfig {
         AiOpsStorageConfig aiops();
         AccountStorageConfig account();
         AccessAnalyzerStorageConfig accessanalyzer();
+        AuditManagerStorageConfig auditmanager();
         AmplifyStorageConfig amplify();
         AppFlowStorageConfig appflow();
         AppIntegrationsStorageConfig appintegrations();
         AppRegistryStorageConfig appregistry();
         AppRunnerStorageConfig apprunner();
+        B2biStorageConfig b2bi();
         ApplicationSignalsStorageConfig applicationSignals();
     }
 
@@ -534,6 +536,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface AuditManagerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AmplifyStorageConfig {
         Optional<String> mode();
 
@@ -563,6 +572,13 @@ public interface EmulatorConfig {
     }
 
     interface AppRunnerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface B2biStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -682,11 +698,13 @@ public interface EmulatorConfig {
         AiOpsServiceConfig aiops();
         AccountServiceConfig account();
         AccessAnalyzerServiceConfig accessanalyzer();
+        AuditManagerServiceConfig auditmanager();
         AmplifyServiceConfig amplify();
         AppFlowServiceConfig appflow();
         AppIntegrationsServiceConfig appintegrations();
         AppRegistryServiceConfig appregistry();
         AppRunnerServiceConfig apprunner();
+        B2biServiceConfig b2bi();
         ApplicationSignalsServiceConfig applicationSignals();
     }
 
@@ -741,6 +759,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface AuditManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface AmplifyServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -762,6 +785,11 @@ public interface EmulatorConfig {
     }
 
     interface AppRunnerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface B2biServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

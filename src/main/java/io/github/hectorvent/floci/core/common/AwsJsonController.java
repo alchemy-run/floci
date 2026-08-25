@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import io.github.hectorvent.floci.services.apprunner.AppRunnerJsonHandler;
+import io.github.hectorvent.floci.services.b2bi.B2biJsonHandler;
 import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
@@ -47,6 +48,7 @@ public class AwsJsonController {
     private final CloudWatchMetricsJsonHandler cloudWatchMetricsJsonHandler;
     private final CloudControlJsonHandler cloudControlJsonHandler;
     private final AppRunnerJsonHandler appRunnerJsonHandler;
+    private final B2biJsonHandler b2biJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -57,7 +59,8 @@ public class AwsJsonController {
                              StepFunctionsJsonHandler sfnJsonHandler,
                              CloudWatchMetricsJsonHandler cloudWatchMetricsJsonHandler,
                              CloudControlJsonHandler cloudControlJsonHandler,
-                             AppRunnerJsonHandler appRunnerJsonHandler) {
+                             AppRunnerJsonHandler appRunnerJsonHandler,
+                             B2biJsonHandler b2biJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -70,6 +73,7 @@ public class AwsJsonController {
         this.cloudWatchMetricsJsonHandler = cloudWatchMetricsJsonHandler;
         this.cloudControlJsonHandler = cloudControlJsonHandler;
         this.appRunnerJsonHandler = appRunnerJsonHandler;
+        this.b2biJsonHandler = b2biJsonHandler;
     }
 
     @POST
@@ -117,6 +121,7 @@ public class AwsJsonController {
                 case "monitoring" -> cloudWatchMetricsJsonHandler.handle(action, request, region);
                 case "cloudcontrol" -> cloudControlJsonHandler.handle(action, request, region);
                 case "apprunner" -> appRunnerJsonHandler.handle(action, request, region);
+                case "b2bi" -> b2biJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

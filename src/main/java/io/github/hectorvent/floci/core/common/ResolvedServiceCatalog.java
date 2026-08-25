@@ -28,6 +28,7 @@ import io.github.hectorvent.floci.services.account.AccountController;
 import io.github.hectorvent.floci.services.account.AccountRegionController;
 import io.github.hectorvent.floci.services.aiops.AiOpsController;
 import io.github.hectorvent.floci.services.accessanalyzer.AccessAnalyzerController;
+import io.github.hectorvent.floci.services.auditmanager.AuditManagerController;
 import io.github.hectorvent.floci.services.amplify.AmplifyController;
 import io.github.hectorvent.floci.services.appflow.AppFlowController;
 import io.github.hectorvent.floci.services.appintegrations.AppIntegrationsController;
@@ -478,6 +479,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().accessanalyzer().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("access-analyzer"), Set.of(), Set.of(AccessAnalyzerController.class)),
+                descriptor("auditmanager", "auditmanager", config.services().auditmanager().enabled(), true,
+                        "auditmanager", storageMode(config.storage().services().auditmanager().mode(),
+                                config.storage().mode()),
+                        config.storage().services().auditmanager().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("auditmanager"), Set.of(), Set.of(AuditManagerController.class)),
                 descriptor("amplify", "amplify", config.services().amplify().enabled(), true,
                         "amplify", storageMode(config.storage().services().amplify().mode(), config.storage().mode()),
                         config.storage().services().amplify().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -507,6 +514,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().apprunner().flushIntervalMs(), null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AppRunner."), Set.of("apprunner"), Set.of(), Set.of(AppRunnerProxyController.class)),
+                descriptor("b2bi", "b2bi", config.services().b2bi().enabled(), true,
+                        "b2bi", storageMode(config.storage().services().b2bi().mode(),
+                                config.storage().mode()),
+                        config.storage().services().b2bi().flushIntervalMs(), null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("B2BI."), Set.of("b2bi"), Set.of(), Set.of()),
                 descriptor("application-signals", "applicationsignals",
                         config.services().applicationSignals().enabled(), true,
                         "applicationsignals", storageMode(config.storage().services().applicationSignals().mode(),

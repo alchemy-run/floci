@@ -149,6 +149,8 @@ floci:
         flush-interval-ms: 5000
       accessanalyzer:
         flush-interval-ms: 5000
+      auditmanager:
+        flush-interval-ms: 5000
       amplify:
         flush-interval-ms: 5000
       appflow:
@@ -158,6 +160,8 @@ floci:
       appregistry:
         flush-interval-ms: 5000
       apprunner:
+        flush-interval-ms: 5000
+      b2bi:
         flush-interval-ms: 5000
       application-signals:
         flush-interval-ms: 5000
@@ -521,6 +525,8 @@ floci:
       enabled: true
     accessanalyzer:
       enabled: true
+    auditmanager:
+      enabled: true
     amplify:
       enabled: true
     appflow:
@@ -530,6 +536,8 @@ floci:
     appregistry:
       enabled: true
     apprunner:
+      enabled: true
+    b2bi:
       enabled: true
     application-signals:
       enabled: true
