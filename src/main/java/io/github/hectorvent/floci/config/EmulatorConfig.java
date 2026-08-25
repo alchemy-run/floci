@@ -976,6 +976,7 @@ public interface EmulatorConfig {
         IotFleetWiseServiceConfig iotfleetwise();
         IotSiteWiseServiceConfig iotsitewise();
         IotManagedIntegrationsServiceConfig iotmanagedintegrations();
+        IotWirelessServiceConfig iotwireless();
         RumServiceConfig rum();
         InternetMonitorServiceConfig internetmonitor();
         GeoMapsServiceConfig geoMaps();
@@ -1040,6 +1041,11 @@ public interface EmulatorConfig {
     }
 
     interface IotManagedIntegrationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IotWirelessServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1699,6 +1705,7 @@ public interface EmulatorConfig {
         @WithDefault("true")
         boolean enabled();
     }
+
 
     interface KinesisServiceConfig {
         @WithDefault("true")

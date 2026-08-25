@@ -31,6 +31,7 @@ import io.github.hectorvent.floci.services.iot.IotDataController;
 import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseController;
 import io.github.hectorvent.floci.services.iotsitewise.IotSiteWiseController;
 import io.github.hectorvent.floci.services.iotmanagedintegrations.IotManagedIntegrationsController;
+import io.github.hectorvent.floci.services.iotwireless.IotWirelessController;
 import io.github.hectorvent.floci.services.ivs.IvsController;
 import io.github.hectorvent.floci.services.ivs.IvsRecordingConfigurationController;
 import io.github.hectorvent.floci.services.ivschat.IvsChatController;
@@ -699,6 +700,11 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("iotmanagedintegrations"), Set.of(),
                         Set.of(IotManagedIntegrationsController.class)),
+                descriptor("iotwireless", "iotwireless", config.services().iotwireless().enabled(), true,
+                        "iotwireless", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("iotwireless"), Set.of(),
+                        Set.of(IotWirelessController.class)),
                 descriptor("rum", "rum", config.services().rum().enabled(), true,
                         "rum", storageMode(config.storage().services().rum().mode(), config.storage().mode()),
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
