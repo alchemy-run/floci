@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.services.configservice.model.AggregationAuthorization;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRule;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRuleEvaluationStatus;
-import io.github.hectorvent.floci.services.configservice.model.ConfigRuleSource;
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorder;
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorderStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
@@ -46,6 +45,7 @@ public class ConfigServiceJsonHandler {
             case "DescribeConformancePacks" -> describeConformancePacks(request, region);
             case "DescribeConformancePackStatus" -> describeConformancePackStatus(request, region);
             case "PutConfigurationRecorder" -> putConfigurationRecorder(request, region);
+            case "DeleteConfigurationRecorder" -> deleteConfigurationRecorder(request, region);
             case "DescribeConfigurationRecorders" -> describeConfigurationRecorders(request, region);
             case "StartConfigurationRecorder" -> startConfigurationRecorder(request, region);
             case "StopConfigurationRecorder" -> stopConfigurationRecorder(request, region);
@@ -65,14 +65,13 @@ public class ConfigServiceJsonHandler {
 
     // --- Config Rules ---
 
-    private Response putConfigRule(JsonNode req, String region) {
-        JsonNode ruleNode = req.path("ConfigRule");
-        String ruleName = ruleNode.path("ConfigRuleName").asText(null);
-        JsonNode sourceNode = ruleNode.path("Source");
-        ConfigRuleSource source = new ConfigRuleSource(
-                sourceNode.path("Owner").asText(null),
-                sourceNode.path("SourceIdentifier").asText(null));
-        service.putConfigRule(region, ruleName, source);
+    private Response putConfigRule(JsonNode req, String region) throws Exception {
+        ConfigRule incoming = mapper.treeToValue(req.path("ConfigRule"), ConfigRule.class);
+        if (incoming == null) {
+            throw new io.github.hectorvent.floci.core.common.AwsException(
+                    "InvalidParameterValueException", "ConfigRule is required.", 400);
+        }
+        service.putConfigRule(region, incoming, extractTags(req));
         return Response.ok(mapper.createObjectNode()).build();
     }
 
@@ -125,6 +124,12 @@ public class ConfigServiceJsonHandler {
     private Response putConfigurationRecorder(JsonNode req, String region) throws Exception {
         ConfigurationRecorder recorder = mapper.treeToValue(req.path("ConfigurationRecorder"), ConfigurationRecorder.class);
         service.putConfigurationRecorder(region, recorder);
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response deleteConfigurationRecorder(JsonNode req, String region) {
+        String name = req.path("ConfigurationRecorderName").asText(null);
+        service.deleteConfigurationRecorder(region, name);
         return Response.ok(mapper.createObjectNode()).build();
     }
 
@@ -274,5 +279,15 @@ public class ConfigServiceJsonHandler {
             req.path(fieldName).forEach(n -> result.add(n.asText()));
         }
         return result;
+    }
+
+    private List<Map<String, String>> extractTags(JsonNode req) {
+        List<Map<String, String>> tagList = new ArrayList<>();
+        if (req.has("Tags") && req.path("Tags").isArray()) {
+            req.path("Tags").forEach(t -> tagList.add(Map.of(
+                    "Key", t.path("Key").asText(),
+                    "Value", t.path("Value").asText())));
+        }
+        return tagList;
     }
 }

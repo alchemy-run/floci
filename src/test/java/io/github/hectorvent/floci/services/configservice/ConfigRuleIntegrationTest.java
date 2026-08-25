@@ -212,4 +212,144 @@ class ConfigRuleIntegrationTest {
             .statusCode(400)
             .body("__type", equalTo("NoSuchConfigRuleException"));
     }
+
+    @Test
+    @Order(10)
+    void describeConfigRulesNonexistent() {
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DescribeConfigRules")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ConfigRuleNames": ["alchemy-nonexistent-config-rule-probe"]}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("NoSuchConfigRuleException"));
+    }
+
+    @Test
+    @Order(11)
+    void putConfigRulePersistsDescriptionScopeAndCreateTimeTags() {
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "PutConfigRule")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "ConfigRule": {
+                        "ConfigRuleName": "rule-desc-scope-tags",
+                        "Description": "buckets must have versioning enabled",
+                        "Source": {
+                            "Owner": "AWS",
+                            "SourceIdentifier": "S3_BUCKET_VERSIONING_ENABLED"
+                        },
+                        "Scope": {
+                            "ComplianceResourceTypes": ["AWS::S3::Bucket"]
+                        }
+                    },
+                    "Tags": [
+                        {"Key": "Environment", "Value": "test"},
+                        {"Key": "alchemy::id", "Value": "VersioningRule"}
+                    ]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DescribeConfigRules")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ConfigRuleNames": ["rule-desc-scope-tags"]}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ConfigRules", hasSize(1))
+            .body("ConfigRules[0].ConfigRuleName", equalTo("rule-desc-scope-tags"))
+            .body("ConfigRules[0].Description", equalTo("buckets must have versioning enabled"))
+            .body("ConfigRules[0].Scope.ComplianceResourceTypes", hasItem("AWS::S3::Bucket"))
+            .body("ConfigRules[0].ConfigRuleArn", containsString(":config-rule/"))
+            .body("ConfigRules[0].ConfigRuleId", startsWith("config-rule-"));
+
+        String arn = given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DescribeConfigRules")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ConfigRuleNames": ["rule-desc-scope-tags"]}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract()
+            .path("ConfigRules[0].ConfigRuleArn");
+
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "ListTagsForResource")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ResourceArn": "%s"}
+                """.formatted(arn))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Tags.find { it.Key == 'Environment' }.Value", equalTo("test"))
+            .body("Tags.find { it.Key == 'alchemy::id' }.Value", equalTo("VersioningRule"));
+
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "PutConfigRule")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "ConfigRule": {
+                        "ConfigRuleName": "rule-desc-scope-tags",
+                        "Description": "buckets must have versioning enabled (v2)",
+                        "Source": {
+                            "Owner": "AWS",
+                            "SourceIdentifier": "S3_BUCKET_VERSIONING_ENABLED"
+                        },
+                        "Scope": {
+                            "ComplianceResourceTypes": ["AWS::S3::Bucket"]
+                        }
+                    },
+                    "Tags": [{"Key": "Environment", "Value": "prod"}]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DescribeConfigRules")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ConfigRuleNames": ["rule-desc-scope-tags"]}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ConfigRules[0].Description", equalTo("buckets must have versioning enabled (v2)"))
+            .body("ConfigRules[0].ConfigRuleArn", equalTo(arn));
+
+        // Subsequent Put ignores Tags; create-time tags stay until TagResource.
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "ListTagsForResource")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ResourceArn": "%s"}
+                """.formatted(arn))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Tags.find { it.Key == 'Environment' }.Value", equalTo("test"));
+    }
 }

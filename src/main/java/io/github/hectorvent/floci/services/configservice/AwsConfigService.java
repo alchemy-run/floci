@@ -107,11 +107,28 @@ public class AwsConfigService {
     // --- Config Rules ---
 
     public ConfigRule putConfigRule(String region, String ruleName, ConfigRuleSource source) {
+        return putConfigRule(region, new ConfigRule(ruleName, null, null, null, source, null, null), List.of());
+    }
+
+    public ConfigRule putConfigRule(String region, ConfigRule incoming, List<Map<String, String>> tagList) {
+        String ruleName = incoming.configRuleName();
+        if (ruleName == null || ruleName.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ConfigRuleName is required.", 400);
+        }
         Map<String, ConfigRule> store = rulesFor(region);
         ConfigRule existing = store.get(ruleName);
         if (existing != null) {
-            ConfigRule updated = new ConfigRule(existing.configRuleName(), existing.configRuleArn(),
-                    existing.configRuleId(), existing.configRuleState(), source);
+            // Put is an upsert of rule config. Create-time Tags on a subsequent
+            // Put are ignored (callers use TagResource / UntagResource).
+            ConfigRule updated = new ConfigRule(
+                    existing.configRuleName(),
+                    existing.configRuleArn(),
+                    existing.configRuleId(),
+                    existing.configRuleState(),
+                    incoming.source() != null ? incoming.source() : existing.source(),
+                    incoming.description(),
+                    incoming.scope());
             store.put(ruleName, updated);
             persistRegion(configRules, region);
             return updated;
@@ -119,20 +136,28 @@ public class AwsConfigService {
         String ruleId = "config-rule-" + shortId();
         String ruleArn = AwsArnUtils.Arn.of("config", region, regionResolver.getAccountId(),
                 "config-rule/" + ruleId).toString();
-        ConfigRule rule = new ConfigRule(ruleName, ruleArn, ruleId, "ACTIVE", source);
+        ConfigRule rule = new ConfigRule(ruleName, ruleArn, ruleId, "ACTIVE",
+                incoming.source(), incoming.description(), incoming.scope());
         store.put(ruleName, rule);
         persistRegion(configRules, region);
+        if (tagList != null && !tagList.isEmpty()) {
+            tagResource(ruleArn, tagList);
+        }
         return rule;
     }
 
     public void deleteConfigRule(String region, String ruleName) {
         Map<String, ConfigRule> store = rulesFor(region);
-        if (store.remove(ruleName) == null) {
+        ConfigRule removed = store.remove(ruleName);
+        if (removed == null) {
             throw new AwsException("NoSuchConfigRuleException",
                     "The ConfigRule provided in the request is invalid. " +
                             "Please check the configRule name.", 400);
         }
         persistRegion(configRules, region);
+        if (removed.configRuleArn() != null) {
+            tags.remove(removed.configRuleArn());
+        }
     }
 
     public List<ConfigRule> describeConfigRules(String region, List<String> ruleNames) {
@@ -143,9 +168,12 @@ public class AwsConfigService {
         List<ConfigRule> result = new ArrayList<>();
         for (String name : ruleNames) {
             ConfigRule rule = store.get(name);
-            if (rule != null) {
-                result.add(rule);
+            if (rule == null) {
+                throw new AwsException("NoSuchConfigRuleException",
+                        "The ConfigRule '" + name + "' provided in the request is invalid. " +
+                                "Please check the configRule name.", 400);
             }
+            result.add(rule);
         }
         return result;
     }
@@ -180,6 +208,18 @@ public class AwsConfigService {
         String name = (recorder.name() == null || recorder.name().isEmpty()) ? "default" : recorder.name();
         ConfigurationRecorder stored = new ConfigurationRecorder(name, recorder.roleARN(), recorder.recordingGroup());
         configurationRecorders.put(region, stored);
+    }
+
+    public void deleteConfigurationRecorder(String region, String name) {
+        ConfigurationRecorder recorder = configurationRecorders.get(region);
+        if (recorder == null || (name != null && !name.isEmpty() && !name.equals(recorder.name()))) {
+            throw new AwsException("NoSuchConfigurationRecorderException",
+                    "Cannot find configuration recorder with the specified name.", 400);
+        }
+        configurationRecorders.remove(region);
+        recorderRunning.remove(region);
+        recorderLastStartTime.remove(region);
+        recorderLastStopTime.remove(region);
     }
 
     public List<ConfigurationRecorder> describeConfigurationRecorders(String region, List<String> names) {

@@ -13,5 +13,7 @@ public record ConfigRule(
         @JsonProperty("ConfigRuleArn") String configRuleArn,
         @JsonProperty("ConfigRuleId") String configRuleId,
         @JsonProperty("ConfigRuleState") String configRuleState,
-        @JsonProperty("Source") ConfigRuleSource source) {
+        @JsonProperty("Source") ConfigRuleSource source,
+        @JsonProperty("Description") String description,
+        @JsonProperty("Scope") ConfigRuleScope scope) {
 }
