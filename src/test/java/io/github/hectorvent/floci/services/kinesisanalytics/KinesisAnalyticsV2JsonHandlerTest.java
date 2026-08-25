@@ -372,6 +372,47 @@ class KinesisAnalyticsV2JsonHandlerTest {
     }
 
     @Test
+    void addThenDescribeThenDeleteCloudWatchLoggingOptionRoundTrips() {
+        createApplication("logged");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+
+        ObjectNode add = MAPPER.createObjectNode();
+        add.put("ApplicationName", "logged");
+        add.put("CurrentApplicationVersionId", 1L);
+        add.set("CloudWatchLoggingOption", MAPPER.createObjectNode().put("LogStreamARN", logStreamArn));
+        Response added = handler.handle("AddApplicationCloudWatchLoggingOption", add, REGION);
+        assertThat(added.getStatus(), is(200));
+        ObjectNode addBody = entity(added);
+        assertEquals(2L, addBody.get("ApplicationVersionId").asLong());
+        assertEquals(1, addBody.get("CloudWatchLoggingOptionDescriptions").size());
+        assertEquals(logStreamArn, addBody.get("CloudWatchLoggingOptionDescriptions")
+                .get(0).get("LogStreamARN").asText());
+        assertEquals("2.1", addBody.get("CloudWatchLoggingOptionDescriptions")
+                .get(0).get("CloudWatchLoggingOptionId").asText());
+
+        ObjectNode describe = MAPPER.createObjectNode();
+        describe.put("ApplicationName", "logged");
+        ObjectNode detail = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
+                .get("ApplicationDetail");
+        assertEquals(2L, detail.get("ApplicationVersionId").asLong());
+        assertEquals(logStreamArn, detail.get("CloudWatchLoggingOptionDescriptions")
+                .get(0).get("LogStreamARN").asText());
+
+        ObjectNode del = MAPPER.createObjectNode();
+        del.put("ApplicationName", "logged");
+        del.put("CurrentApplicationVersionId", 2L);
+        del.put("CloudWatchLoggingOptionId", "2.1");
+        Response deleted = handler.handle("DeleteApplicationCloudWatchLoggingOption", del, REGION);
+        assertThat(deleted.getStatus(), is(200));
+        assertEquals(3L, entity(deleted).get("ApplicationVersionId").asLong());
+        assertEquals(0, entity(deleted).get("CloudWatchLoggingOptionDescriptions").size());
+
+        ObjectNode after = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
+                .get("ApplicationDetail");
+        assertThat(after.has("CloudWatchLoggingOptionDescriptions"), is(false));
+    }
+
+    @Test
     void createApplicationSnapshotFailsWhenApplicationNotRunning() {
         createApplication("demo");
 

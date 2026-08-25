@@ -540,6 +540,54 @@ class KinesisAnalyticsV2ServiceTest {
     }
 
     @Test
+    void addCloudWatchLoggingOptionBumpsVersionAndAssignsId() {
+        create("demo");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+        FlinkApplication app = service.addApplicationCloudWatchLoggingOption("demo", 1L, logStreamArn);
+        assertEquals(2L, app.getApplicationVersionId());
+        assertEquals(1, app.getCloudWatchLoggingOptions().size());
+        var option = app.getCloudWatchLoggingOptions().get("2.1");
+        assertEquals("2.1", option.getCloudWatchLoggingOptionId());
+        assertEquals(logStreamArn, option.getLogStreamArn());
+    }
+
+    @Test
+    void addCloudWatchLoggingOptionRejectsDuplicateLogStream() {
+        create("demo");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+        service.addApplicationCloudWatchLoggingOption("demo", 1L, logStreamArn);
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.addApplicationCloudWatchLoggingOption("demo", 2L, logStreamArn));
+        assertEquals("InvalidArgumentException", ex.getErrorCode());
+    }
+
+    @Test
+    void addCloudWatchLoggingOptionRejectsStaleVersion() {
+        create("demo");
+        assertThrows(AwsException.class,
+                () -> service.addApplicationCloudWatchLoggingOption("demo", 5L,
+                        "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s"));
+    }
+
+    @Test
+    void deleteCloudWatchLoggingOptionRemovesItAndBumpsVersion() {
+        create("demo");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+        service.addApplicationCloudWatchLoggingOption("demo", 1L, logStreamArn);
+        FlinkApplication app = service.deleteApplicationCloudWatchLoggingOption("demo", 2L, "2.1");
+        assertEquals(3L, app.getApplicationVersionId());
+        assertTrue(app.getCloudWatchLoggingOptions().isEmpty());
+    }
+
+    @Test
+    void deleteCloudWatchLoggingOptionRejectsUnknownId() {
+        create("demo");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.deleteApplicationCloudWatchLoggingOption("demo", 1L, "missing"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
     void createApplicationPresignedUrlRejectsUnknownApplication() {
         assertThrows(AwsException.class,
                 () -> service.createApplicationPresignedUrl("nope", "FLINK_DASHBOARD_URL", null));

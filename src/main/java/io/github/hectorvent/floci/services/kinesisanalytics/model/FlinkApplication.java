@@ -100,6 +100,10 @@ public class FlinkApplication {
     // ListApplicationSnapshots, never embedded in ApplicationDetail.
     private Map<String, Snapshot> snapshots = new LinkedHashMap<>();
 
+    // CloudWatch logging options, keyed by CloudWatchLoggingOptionId. Echoed on DescribeApplication
+    // as ApplicationDetail.CloudWatchLoggingOptionDescriptions (and on the add/delete responses).
+    private Map<String, CloudWatchLoggingOption> cloudWatchLoggingOptions = new LinkedHashMap<>();
+
     public FlinkApplication() {}
 
     public FlinkApplication(String applicationName, String applicationArn,
@@ -187,6 +191,15 @@ public class FlinkApplication {
     public Map<String, Snapshot> getSnapshots() { return snapshots; }
     public void setSnapshots(Map<String, Snapshot> snapshots) {
         this.snapshots = snapshots != null ? snapshots : new LinkedHashMap<>();
+    }
+
+    public Map<String, CloudWatchLoggingOption> getCloudWatchLoggingOptions() {
+        return cloudWatchLoggingOptions;
+    }
+
+    public void setCloudWatchLoggingOptions(Map<String, CloudWatchLoggingOption> cloudWatchLoggingOptions) {
+        this.cloudWatchLoggingOptions = cloudWatchLoggingOptions != null
+                ? cloudWatchLoggingOptions : new LinkedHashMap<>();
     }
 
     /** True when the application has a code artifact to deploy (S3 JAR), i.e. a job should run. */

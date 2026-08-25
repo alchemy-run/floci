@@ -372,6 +372,71 @@ class KinesisAnalyticsV2IntegrationTest {
     }
 
     @Test
+    void cloudWatchLoggingOptionLifecycleRoundTripsThroughTheWireProtocol() {
+        createApplication("it-logging");
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.AddApplicationCloudWatchLoggingOption")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-logging", "CurrentApplicationVersionId": 1,
+                 "CloudWatchLoggingOption": {"LogStreamARN":
+                   "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s"}}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationVersionId", equalTo(2))
+            .body("CloudWatchLoggingOptionDescriptions[0].LogStreamARN",
+                    equalTo("arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s"))
+            .body("CloudWatchLoggingOptionDescriptions[0].CloudWatchLoggingOptionId", equalTo("2.1"));
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.DescribeApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-logging"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationDetail.ApplicationVersionId", equalTo(2))
+            .body("ApplicationDetail.CloudWatchLoggingOptionDescriptions[0].LogStreamARN",
+                    equalTo("arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s"))
+            .body("ApplicationDetail.CloudWatchLoggingOptionDescriptions[0].CloudWatchLoggingOptionId",
+                    equalTo("2.1"));
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.DeleteApplicationCloudWatchLoggingOption")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-logging", "CurrentApplicationVersionId": 2,
+                 "CloudWatchLoggingOptionId": "2.1"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationVersionId", equalTo(3))
+            .body("CloudWatchLoggingOptionDescriptions", equalTo(java.util.List.of()));
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.DescribeApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-logging"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationDetail.ApplicationVersionId", equalTo(3))
+            .body("ApplicationDetail.CloudWatchLoggingOptionDescriptions", equalTo(null));
+    }
+
+    @Test
     void createApplicationPresignedUrlRejectsWhenNotRunning() {
         given()
             .header("X-Amz-Target", "KinesisAnalytics_20180523.CreateApplication")

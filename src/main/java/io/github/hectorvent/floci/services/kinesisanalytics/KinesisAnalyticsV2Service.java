@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.ApplicationStatus;
+import io.github.hectorvent.floci.services.kinesisanalytics.model.CloudWatchLoggingOption;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.FlinkApplication;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus;
@@ -474,6 +475,69 @@ public class KinesisAnalyticsV2Service {
         putApplication(app);
         LOG.infov("Deleted Kinesis Analytics V2 snapshot {0} for application {1}",
                 snapshotName, applicationName);
+    }
+
+    /**
+     * Attaches a CloudWatch Logs destination to the application. AWS assigns a
+     * {@code CloudWatchLoggingOptionId} of the form {@code {version}.1} at the version this
+     * add lands on, and bumps {@code ApplicationVersionId}.
+     */
+    public FlinkApplication addApplicationCloudWatchLoggingOption(String applicationName,
+                                                                  Long currentApplicationVersionId,
+                                                                  String logStreamArn) {
+        FlinkApplication app = describeApplication(applicationName);
+        requireCurrentVersion(app, currentApplicationVersionId);
+        if (logStreamArn == null || logStreamArn.isBlank()) {
+            throw new AwsException("InvalidArgumentException",
+                    "CloudWatchLoggingOption.LogStreamARN is required", 400);
+        }
+        for (CloudWatchLoggingOption existing : app.getCloudWatchLoggingOptions().values()) {
+            if (logStreamArn.equals(existing.getLogStreamArn())) {
+                throw new AwsException("InvalidArgumentException",
+                        "A CloudWatch logging option already exists for LogStreamARN " + logStreamArn, 400);
+            }
+        }
+        app.setApplicationVersionId(app.getApplicationVersionId() + 1);
+        String optionId = app.getApplicationVersionId() + ".1";
+        app.getCloudWatchLoggingOptions().put(optionId, new CloudWatchLoggingOption(optionId, logStreamArn));
+        app.setLastUpdateTimestamp(Instant.now());
+        putApplication(app);
+        LOG.infov("Added CloudWatch logging option {0} to application {1}", optionId, applicationName);
+        return app;
+    }
+
+    public FlinkApplication deleteApplicationCloudWatchLoggingOption(String applicationName,
+                                                                     Long currentApplicationVersionId,
+                                                                     String cloudWatchLoggingOptionId) {
+        FlinkApplication app = describeApplication(applicationName);
+        requireCurrentVersion(app, currentApplicationVersionId);
+        if (cloudWatchLoggingOptionId == null || cloudWatchLoggingOptionId.isBlank()) {
+            throw new AwsException("InvalidArgumentException",
+                    "CloudWatchLoggingOptionId is required", 400);
+        }
+        CloudWatchLoggingOption removed = app.getCloudWatchLoggingOptions().remove(cloudWatchLoggingOptionId);
+        if (removed == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "CloudWatch logging option not found: " + cloudWatchLoggingOptionId, 400);
+        }
+        app.setApplicationVersionId(app.getApplicationVersionId() + 1);
+        app.setLastUpdateTimestamp(Instant.now());
+        putApplication(app);
+        LOG.infov("Deleted CloudWatch logging option {0} from application {1}",
+                cloudWatchLoggingOptionId, applicationName);
+        return app;
+    }
+
+    private static void requireCurrentVersion(FlinkApplication app, Long currentApplicationVersionId) {
+        if (currentApplicationVersionId == null) {
+            throw new AwsException("InvalidArgumentException",
+                    "CurrentApplicationVersionId is required", 400);
+        }
+        if (currentApplicationVersionId != app.getApplicationVersionId()) {
+            throw new AwsException("ConcurrentModificationException",
+                    "Provided CurrentApplicationVersionId " + currentApplicationVersionId
+                            + " does not match the current version " + app.getApplicationVersionId(), 400);
+        }
     }
 
     /**

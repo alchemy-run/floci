@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.services.kinesisanalytics.model.CloudWatchLoggingOption;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.FlinkApplication;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -51,6 +52,8 @@ public class KinesisAnalyticsV2JsonHandler {
             case "DescribeApplicationSnapshot" -> handleDescribeApplicationSnapshot(request);
             case "ListApplicationSnapshots" -> handleListApplicationSnapshots(request);
             case "DeleteApplicationSnapshot" -> handleDeleteApplicationSnapshot(request);
+            case "AddApplicationCloudWatchLoggingOption" -> handleAddApplicationCloudWatchLoggingOption(request);
+            case "DeleteApplicationCloudWatchLoggingOption" -> handleDeleteApplicationCloudWatchLoggingOption(request);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation",
                             "Operation " + action + " is not supported."))
@@ -213,6 +216,46 @@ public class KinesisAnalyticsV2JsonHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleAddApplicationCloudWatchLoggingOption(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        Long currentVersionId = request.hasNonNull("CurrentApplicationVersionId")
+                ? request.path("CurrentApplicationVersionId").asLong()
+                : null;
+        String logStreamArn = request.path("CloudWatchLoggingOption").path("LogStreamARN").asText(null);
+        FlinkApplication app = service.addApplicationCloudWatchLoggingOption(
+                applicationName, currentVersionId, logStreamArn);
+        return cloudWatchLoggingOptionResponse(app);
+    }
+
+    private Response handleDeleteApplicationCloudWatchLoggingOption(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        Long currentVersionId = request.hasNonNull("CurrentApplicationVersionId")
+                ? request.path("CurrentApplicationVersionId").asLong()
+                : null;
+        String optionId = request.path("CloudWatchLoggingOptionId").asText(null);
+        FlinkApplication app = service.deleteApplicationCloudWatchLoggingOption(
+                applicationName, currentVersionId, optionId);
+        return cloudWatchLoggingOptionResponse(app);
+    }
+
+    private Response cloudWatchLoggingOptionResponse(FlinkApplication app) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ApplicationARN", app.getApplicationArn());
+        response.put("ApplicationVersionId", app.getApplicationVersionId());
+        ArrayNode options = response.putArray("CloudWatchLoggingOptionDescriptions");
+        for (CloudWatchLoggingOption option : app.getCloudWatchLoggingOptions().values()) {
+            options.add(cloudWatchLoggingOptionNode(option));
+        }
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode cloudWatchLoggingOptionNode(CloudWatchLoggingOption option) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("CloudWatchLoggingOptionId", option.getCloudWatchLoggingOptionId());
+        node.put("LogStreamARN", option.getLogStreamArn());
+        return node;
+    }
+
     private Response handleDeleteApplicationSnapshot(JsonNode request) {
         String applicationName = request.path("ApplicationName").asText(null);
         String snapshotName = request.path("SnapshotName").asText(null);
@@ -318,6 +361,12 @@ public class KinesisAnalyticsV2JsonHandler {
         }
         if (app.hasCode()) {
             detail.set("ApplicationConfigurationDescription", applicationConfigurationNode(app));
+        }
+        if (!app.getCloudWatchLoggingOptions().isEmpty()) {
+            ArrayNode options = detail.putArray("CloudWatchLoggingOptionDescriptions");
+            for (CloudWatchLoggingOption option : app.getCloudWatchLoggingOptions().values()) {
+                options.add(cloudWatchLoggingOptionNode(option));
+            }
         }
         return detail;
     }
