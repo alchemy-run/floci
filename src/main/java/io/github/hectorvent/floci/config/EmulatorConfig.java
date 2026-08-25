@@ -282,6 +282,7 @@ public interface EmulatorConfig {
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
         AccountStorageConfig account();
+        AmpStorageConfig amp();
     }
 
     interface SsmStorageConfig {
@@ -504,6 +505,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface AmpStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface CodeDeployStorageConfig {
         Optional<String> mode();
 
@@ -606,6 +614,7 @@ public interface EmulatorConfig {
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
         AccountServiceConfig account();
+        AmpServiceConfig amp();
     }
 
     interface IotServiceConfig {
@@ -640,6 +649,11 @@ public interface EmulatorConfig {
     }
 
     interface AccountServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AmpServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
