@@ -283,6 +283,7 @@ public interface EmulatorConfig {
         RumStorageConfig rum();
         AccountStorageConfig account();
         AmpStorageConfig amp();
+        AiOpsStorageConfig aiops();
         AccessAnalyzerStorageConfig accessanalyzer();
     }
 
@@ -513,6 +514,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface AiOpsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AccessAnalyzerStorageConfig {
         Optional<String> mode();
 
@@ -624,6 +632,7 @@ public interface EmulatorConfig {
         RumServiceConfig rum();
         AccountServiceConfig account();
         AmpServiceConfig amp();
+        AiOpsServiceConfig aiops();
         AccessAnalyzerServiceConfig accessanalyzer();
     }
 
@@ -664,6 +673,11 @@ public interface EmulatorConfig {
     }
 
     interface AmpServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AiOpsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

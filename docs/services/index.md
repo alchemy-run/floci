@@ -1,6 +1,6 @@
 # Services Overview
 
-Floci emulates 72 AWS services on a single port (`4566`). All services use the real AWS wire protocol, your existing AWS CLI commands and SDK clients work without modification.
+Floci emulates 73 AWS services on a single port (`4566`). All services use the real AWS wire protocol, your existing AWS CLI commands and SDK clients work without modification.
 
 This page is the canonical reference for supported service and operation counts. Some services expose separate control-plane and data-plane rows below. Other docs (and the README) should link here rather than duplicating the table.
 
@@ -37,6 +37,7 @@ Operation counts are exact. For dispatch-table services (Query and JSON 1.1) eac
 | [CloudWatch RUM](rum.md) | `/appmonitor`, `/appmonitor/{name}`, `/appmonitors` | REST JSON | 5 |
 | [Account Management](account.md) | `/getContactInformation`, `/putContactInformation`, `/getAlternateContact`, `/putAlternateContact`, `/deleteAlternateContact`, `/listRegions` | REST JSON | 11 |
 | [AMP](amp.md) | `/scrapers`, `/scrapers/{scraperId}`, `/scraperconfiguration`, `/workspaces`, `/tags/{resourceArn}` | REST JSON | 22 |
+| [CloudWatch investigations (AIOps)](aiops.md) | `/investigationGroups`, `/investigationGroups/{identifier}`, `/tags/{resourceArn}` | REST JSON | 11 |
 | [IAM Access Analyzer](access-analyzer.md) | `/analyzer`, `/analyzer/{analyzerName}`, `/policy/*`, `/findingv2`, `/tags/{resourceArn}` | REST JSON | 26 |
 | [ElastiCache](elasticache.md) | `POST /` with `Action=` param + TCP proxy | Query + RESP | 8 |
 | [MemoryDB](memorydb.md) | `POST /` + `X-Amz-Target: AmazonMemoryDB.*` + TCP proxy | JSON 1.1 + RESP | 7 |

@@ -217,7 +217,12 @@ final class AwsManagedPolicies {
 
         // AWS Partner Central execution role policy
         new ManagedPolicyDef("AWSPartnerCentralSellingResourceSnapshotJobExecutionRolePolicy", "/",
-                "Provides permissions for AWS Partner Central resource snapshot job execution role.")
+                "Provides permissions for AWS Partner Central resource snapshot job execution role."),
+
+        // CloudWatch investigations (AIOps) assistant role — Alchemy InvestigationGroup
+        // fixtures attach this ARN at create time.
+        new ManagedPolicyDef("AIOpsAssistantPolicy", "/",
+                "Provides permissions for CloudWatch investigations to access telemetry during investigations.")
     );
 
     private AwsManagedPolicies() {}

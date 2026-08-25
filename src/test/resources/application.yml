@@ -67,6 +67,8 @@ floci:
         flush-interval-ms: 60000
       amp:
         flush-interval-ms: 60000
+      aiops:
+        flush-interval-ms: 60000
       accessanalyzer:
         flush-interval-ms: 60000
 
@@ -310,6 +312,8 @@ floci:
     account:
       enabled: true
     amp:
+      enabled: true
+    aiops:
       enabled: true
     accessanalyzer:
       enabled: true
