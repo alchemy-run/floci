@@ -48,6 +48,8 @@ floci:
         flush-interval-ms: 60000
       ecs:
         flush-interval-ms: 60000
+      efs:
+        flush-interval-ms: 60000
       codebuild:
         flush-interval-ms: 60000
       config:
@@ -84,6 +86,14 @@ floci:
       dlm:
         flush-interval-ms: 60000
       dsql:
+        flush-interval-ms: 60000
+      docdb-elastic:
+        flush-interval-ms: 60000
+      detective:
+        flush-interval-ms: 60000
+      devops-guru:
+        flush-interval-ms: 60000
+      deadline:
         flush-interval-ms: 60000
       auditmanager:
         flush-interval-ms: 60000
@@ -196,6 +206,8 @@ floci:
       default-image: "valkey/valkey:8"
     dax:
       enabled: true
+    ds:
+      enabled: true
     rds:
       enabled: true
       mock: false
@@ -274,6 +286,8 @@ floci:
     ecs:
       enabled: true
       mock: true
+    efs:
+      enabled: true
     appconfig:
       enabled: true
     appconfigdata:
@@ -340,6 +354,12 @@ floci:
       enabled: true
       mock: true
       proxy-port: 5432
+    docdb-elastic:
+      enabled: true
+    detective:
+      enabled: true
+    devops-guru:
+      enabled: true
     route53:
       enabled: true
     textract:
@@ -416,4 +436,6 @@ floci:
     codeartifact:
       enabled: true
     application-signals:
+      enabled: true
+    deadline:
       enabled: true

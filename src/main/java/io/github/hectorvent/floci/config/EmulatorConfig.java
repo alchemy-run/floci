@@ -272,6 +272,9 @@ public interface EmulatorConfig {
         DataZoneStorageConfig datazone();
         DlmStorageConfig dlm();
         DsqlStorageConfig dsql();
+        DocDbElasticStorageConfig docdbElastic();
+        DetectiveStorageConfig detective();
+        DevOpsGuruStorageConfig devopsGuru();
         CloudFrontStorageConfig cloudfront();
         AppSyncStorageConfig appsync();
         BatchStorageConfig batch();
@@ -280,6 +283,7 @@ public interface EmulatorConfig {
         CodeConnectionsStorageConfig codeconnections();
         S3VectorsStorageConfig s3vectors();
         EcsStorageConfig ecs();
+        EfsStorageConfig efs();
         CodeBuildStorageConfig codebuild();
         ConfigStorageConfig config();
         CodeDeployStorageConfig codedeploy();
@@ -306,6 +310,7 @@ public interface EmulatorConfig {
         BedrockAgentStorageConfig bedrockAgent();
         BedrockAgentCoreStorageConfig bedrockAgentCore();
         BedrockDataAutomationStorageConfig bedrockDataAutomation();
+        DeadlineStorageConfig deadline();
     }
 
     interface SsmStorageConfig {
@@ -468,6 +473,27 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface DocDbElasticStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DetectiveStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DevOpsGuruStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface CloudFrontStorageConfig {
         Optional<String> mode();
     }
@@ -508,6 +534,13 @@ public interface EmulatorConfig {
     }
 
     interface EcsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface EfsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -578,6 +611,13 @@ public interface EmulatorConfig {
     }
 
     interface BedrockDataAutomationStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DeadlineStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -737,6 +777,7 @@ public interface EmulatorConfig {
         ElastiCacheServiceConfig elasticache();
         MemoryDbServiceConfig memorydb();
         DaxServiceConfig dax();
+        DsServiceConfig ds();
         RdsServiceConfig rds();
         RdsDataServiceConfig rdsData();
         EventBridgeServiceConfig eventbridge();
@@ -762,6 +803,7 @@ public interface EmulatorConfig {
         OpenSearchServiceConfig opensearch();
         Ec2ServiceConfig ec2();
         EcsServiceConfig ecs();
+        EfsServiceConfig efs();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
         EcrServiceConfig ecr();
@@ -788,8 +830,11 @@ public interface EmulatorConfig {
         DataZoneServiceConfig datazone();
         DlmServiceConfig dlm();
         DsqlServiceConfig dsql();
+        DetectiveServiceConfig detective();
+        DevOpsGuruServiceConfig devopsGuru();
         NeptuneServiceConfig neptune();
         DocDbServiceConfig docdb();
+        DocDbElasticServiceConfig docdbElastic();
         Route53ServiceConfig route53();
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
@@ -830,6 +875,7 @@ public interface EmulatorConfig {
         ControlTowerServiceConfig controltower();
         CodeArtifactServiceConfig codeartifact();
         ApplicationSignalsServiceConfig applicationSignals();
+        DeadlineServiceConfig deadline();
     }
 
     interface IotServiceConfig {
@@ -938,6 +984,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface DeadlineServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface LightsailServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1000,6 +1051,16 @@ public interface EmulatorConfig {
 
         @WithDefault("5432")
         int proxyPort();
+    }
+
+    interface DetectiveServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DevOpsGuruServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface Route53ServiceConfig {
@@ -1255,6 +1316,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface DsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface RdsServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1334,6 +1400,11 @@ public interface EmulatorConfig {
         String defaultImage();
 
         Optional<String> dockerNetwork();
+    }
+
+    interface DocDbElasticServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface EventBridgeServiceConfig {
@@ -1562,6 +1633,11 @@ public interface EmulatorConfig {
 
         @WithDefault("256")
         int defaultCpuUnits();
+    }
+
+    interface EfsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface ResourceGroupsTaggingServiceConfig {

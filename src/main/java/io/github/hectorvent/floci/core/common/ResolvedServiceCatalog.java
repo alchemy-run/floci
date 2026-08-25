@@ -8,7 +8,11 @@ import io.github.hectorvent.floci.services.databrew.DataBrewController;
 import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
+import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
+import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
+import io.github.hectorvent.floci.services.detective.DetectiveController;
+import io.github.hectorvent.floci.services.devopsguru.DevOpsGuruController;
 import io.github.hectorvent.floci.services.appconfig.AppConfigDataController;
 import io.github.hectorvent.floci.services.batch.BatchController;
 import io.github.hectorvent.floci.services.bedrockruntime.BedrockRuntimeController;
@@ -47,6 +51,7 @@ import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignals
 import io.github.hectorvent.floci.services.chatbot.ChatbotController;
 import io.github.hectorvent.floci.services.controltower.ControlTowerController;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactController;
+import io.github.hectorvent.floci.services.deadline.DeadlineController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -149,6 +154,10 @@ public class ResolvedServiceCatalog {
                         "dax", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonDAXV3."), Set.of("dax"), Set.of(), Set.of()),
+                descriptor("ds", "ds", config.services().ds().enabled(), true,
+                        "ds", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("DirectoryService_20150416."), Set.of("ds"), Set.of(), Set.of()),
                 descriptor("rds", "rds", config.services().rds().enabled(), true,
                         "rds", storageMode(config.storage().services().rds().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.RDS, ServiceProtocol.QUERY,
@@ -165,10 +174,16 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("neptune"), Set.of(), Set.of()),
                 descriptor("docdb", "docdb", config.services().docdb().enabled(), true,
-                        "docdb", config.storage().mode(),                        
-                        5000L, AwsNamespaces.RDS, ServiceProtocol.QUERY,
+                        "docdb", config.storage().mode(),
+                        5000L, AwsNamespaces.RDS, ServiceProtocol.QUERY, // Query + RDS namespace; subnet groups share this dispatcher
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("docdb"), Set.of(), Set.of()),
+                descriptor("docdb-elastic", "docdbelastic", config.services().docdbElastic().enabled(), true,
+                        "docdbelastic", storageMode(config.storage().services().docdbElastic().mode(),
+                                config.storage().mode()),
+                        config.storage().services().docdbElastic().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("docdb-elastic"), Set.of(), Set.of(DocDbElasticController.class)),
                 descriptor("dms", "dms", config.services().dms().enabled(), true,
                         "dms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -289,6 +304,11 @@ public class ResolvedServiceCatalog {
                         config.storage().services().ecs().flushIntervalMs(), null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonEC2ContainerServiceV20141113."), Set.of("ecs"), Set.of(), Set.of()),
+                descriptor("elasticfilesystem", "efs", true, true,
+                        "efs", config.storage().mode(),
+                        5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("elasticfilesystem"), Set.of(), Set.of(EfsController.class)),
                 descriptor("appconfig", "appconfig", config.services().appconfig().enabled(), true,
                         "appconfig", storageMode(config.storage().services().appconfig().mode(), config.storage().mode()),
                         config.storage().services().appconfig().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -303,6 +323,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonEC2ContainerRegistry_V20150921."), Set.of("ecr"), Set.of(), Set.of()),
+                descriptor("ecr-public", "ecr-public", config.services().ecr().enabled(), true,
+                        "ecr-public", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("SpencerFrontendService."), Set.of("ecr-public"), Set.of(), Set.of()),
                 descriptor("tagging", "tagging", config.services().tagging().enabled(), true,
                         "tagging", storageMode(config.storage().services().tagging().mode(), config.storage().mode()),
                         config.storage().services().tagging().flushIntervalMs(), null, ServiceProtocol.JSON,
@@ -480,6 +504,19 @@ public class ResolvedServiceCatalog {
                         config.storage().services().dsql().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("dsql"), Set.of(), Set.of(DsqlController.class)),
+                descriptor("detective", "detective", config.services().detective().enabled(), true,
+                        "detective", storageMode(config.storage().services().detective().mode(),
+                                config.storage().mode()),
+                        config.storage().services().detective().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("detective"), Set.of(), Set.of(DetectiveController.class)),
+                descriptor("devops-guru", "devopsguru", config.services().devopsGuru().enabled(), true,
+                        "devopsguru", storageMode(config.storage().services().devopsGuru().mode(),
+                                config.storage().mode()),
+                        config.storage().services().devopsGuru().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("devops-guru"), Set.of(),
+                        Set.of(DevOpsGuruController.class)),
                 descriptor("ec2messages", "ec2messages", config.services().ssm().enabled(), false,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -656,6 +693,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().codeartifact().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("codeartifact"), Set.of(), Set.of(CodeArtifactController.class)),
+                descriptor("deadline", "deadline", config.services().deadline().enabled(), true,
+                        "deadline", storageMode(config.storage().services().deadline().mode(),
+                                config.storage().mode()),
+                        config.storage().services().deadline().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("deadline"), Set.of(), Set.of(DeadlineController.class)),
                 descriptor("cloudhsmv2", "cloudhsmv2", config.services().cloudhsmV2().enabled(), true,
                         "cloudhsmv2", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

@@ -120,6 +120,8 @@ floci:
         flush-interval-ms: 5000
       ecs:
         flush-interval-ms: 5000
+      efs:
+        flush-interval-ms: 5000
       codebuild:
         flush-interval-ms: 5000
       config:
@@ -162,6 +164,14 @@ floci:
       dlm:
         flush-interval-ms: 5000
       dsql:
+        flush-interval-ms: 5000
+      docdb-elastic:
+        flush-interval-ms: 5000  # elastic cluster storage
+      detective:
+        flush-interval-ms: 5000
+      devops-guru:
+        flush-interval-ms: 5000
+      deadline:
         flush-interval-ms: 5000
       auditmanager:
         flush-interval-ms: 5000
@@ -324,6 +334,8 @@ floci:
       default-image: "valkey/valkey:8"
     dax:
       enabled: true
+    ds:
+      enabled: true
     rds:
       enabled: true
       mock: false                                 # FLOCI_SERVICES_RDS_MOCK — true = metadata only, no Docker (useful for CI)
@@ -417,6 +429,8 @@ floci:
     ecs:
       enabled: true
       mock: false
+    efs:
+      enabled: true
     appconfig:
       enabled: true
     appconfigdata:
@@ -518,6 +532,12 @@ floci:
       enabled: true
       mock: false
       proxy-port: 5432
+    docdb-elastic:
+      enabled: true
+    detective:
+      enabled: true
+    devops-guru:
+      enabled: true
     route53:
       enabled: true
     transfer:
@@ -609,3 +629,6 @@ floci:
       enabled: true
     application-signals:
       enabled: true
+    deadline:
+      enabled: true
+
