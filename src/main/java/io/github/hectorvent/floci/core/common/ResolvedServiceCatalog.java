@@ -575,7 +575,11 @@ public class ResolvedServiceCatalog {
                                 config.storage().mode()),
                         config.storage().services().chatbot().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class))
+                        Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class)),
+                descriptor("cloudhsmv2", "cloudhsmv2", config.services().cloudhsmV2().enabled(), true,
+                        "cloudhsmv2", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("BaldrApiService."), Set.of("cloudhsm", "cloudhsmv2"), Set.of(), Set.of())
         ));
     }
 

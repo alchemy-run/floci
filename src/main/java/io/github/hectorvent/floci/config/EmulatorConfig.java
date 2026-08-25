@@ -720,6 +720,7 @@ public interface EmulatorConfig {
         BudgetsServiceConfig budgets();
         ConfigServiceConfig configservice();
         CloudTrailServiceConfig cloudtrail();
+        CloudHsmV2ServiceConfig cloudhsmV2();
         CloudControlServiceConfig cloudcontrol();
         CloudFrontServiceConfig cloudfront();
         AppSyncServiceConfig appsync();
@@ -899,6 +900,11 @@ public interface EmulatorConfig {
          *  default here is 60s so dev/CI feedback loops stay fast. */
         @WithDefault("60")
         int flushIntervalSeconds();
+    }
+
+    interface CloudHsmV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface AutoScalingServiceConfig {

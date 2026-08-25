@@ -318,6 +318,8 @@ floci:
       enabled: true
     cloudtrail:
       enabled: true
+    cloudhsm-v2:
+      enabled: true
     lightsail:
     cloudcontrol:
       enabled: true
