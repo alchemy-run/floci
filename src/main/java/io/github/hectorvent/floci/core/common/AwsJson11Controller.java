@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.transfer.TransferHandler;
 import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
 import io.github.hectorvent.floci.services.firehose.FirehoseJsonHandler;
 import io.github.hectorvent.floci.services.fms.FmsJsonHandler;
+import io.github.hectorvent.floci.services.frauddetector.FraudDetectorJsonHandler;
 import io.github.hectorvent.floci.services.glue.GlueJsonHandler;
 import io.github.hectorvent.floci.services.lightsail.LightsailJsonHandler;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingJsonHandler;
@@ -54,6 +55,8 @@ import io.github.hectorvent.floci.services.ssm.SsmJsonHandler;
 import io.github.hectorvent.floci.services.dms.DmsJsonHandler;
 import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
 import io.github.hectorvent.floci.services.fsx.FsxJsonHandler;
+import io.github.hectorvent.floci.services.directoryservice.DirectoryServiceJsonHandler;
+import io.github.hectorvent.floci.services.forecast.ForecastJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -103,6 +106,7 @@ public class AwsJson11Controller {
     private final AthenaJsonHandler athenaJsonHandler;
     private final FirehoseJsonHandler firehoseJsonHandler;
     private final FmsJsonHandler fmsJsonHandler;
+    private final FraudDetectorJsonHandler fraudDetectorJsonHandler;
     private final ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler;
     private final CodeBuildJsonHandler codeBuildJsonHandler;
     private final CodeDeployJsonHandler codeDeployJsonHandler;
@@ -128,7 +132,9 @@ public class AwsJson11Controller {
     private final DmsJsonHandler dmsJsonHandler;
     private final DataSyncJsonHandler dataSyncJsonHandler;
     private final FsxJsonHandler fsxJsonHandler;
+    private final DirectoryServiceJsonHandler directoryServiceJsonHandler;
     private final DaxJsonHandler daxJsonHandler;
+    private final ForecastJsonHandler forecastJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -152,6 +158,7 @@ public class AwsJson11Controller {
                                AthenaJsonHandler athenaJsonHandler,
                                FirehoseJsonHandler firehoseJsonHandler,
                                FmsJsonHandler fmsJsonHandler,
+                               FraudDetectorJsonHandler fraudDetectorJsonHandler,
                                ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler,
                                CodeBuildJsonHandler codeBuildJsonHandler,
                                CodeDeployJsonHandler codeDeployJsonHandler,
@@ -177,7 +184,9 @@ public class AwsJson11Controller {
                                DmsJsonHandler dmsJsonHandler,
                                DataSyncJsonHandler dataSyncJsonHandler,
                                FsxJsonHandler fsxJsonHandler,
-                               DaxJsonHandler daxJsonHandler) {
+                               DirectoryServiceJsonHandler directoryServiceJsonHandler,
+                               DaxJsonHandler daxJsonHandler,
+                               ForecastJsonHandler forecastJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -205,6 +214,7 @@ public class AwsJson11Controller {
         this.athenaJsonHandler = athenaJsonHandler;
         this.firehoseJsonHandler = firehoseJsonHandler;
         this.fmsJsonHandler = fmsJsonHandler;
+        this.fraudDetectorJsonHandler = fraudDetectorJsonHandler;
         this.resourceGroupsTaggingJsonHandler = resourceGroupsTaggingJsonHandler;
         this.codeBuildJsonHandler = codeBuildJsonHandler;
         this.codeDeployJsonHandler = codeDeployJsonHandler;
@@ -230,7 +240,9 @@ public class AwsJson11Controller {
         this.dmsJsonHandler = dmsJsonHandler;
         this.dataSyncJsonHandler = dataSyncJsonHandler;
         this.fsxJsonHandler = fsxJsonHandler;
+        this.directoryServiceJsonHandler = directoryServiceJsonHandler;
         this.daxJsonHandler = daxJsonHandler;
+        this.forecastJsonHandler = forecastJsonHandler;
     }
 
     @POST
@@ -289,6 +301,7 @@ public class AwsJson11Controller {
                 case "athena" -> athenaJsonHandler.handle(action, request, region);
                 case "firehose" -> firehoseJsonHandler.handle(action, request, region);
                 case "fms" -> fmsJsonHandler.handle(action, request, region);
+                case "frauddetector" -> fraudDetectorJsonHandler.handle(action, request, region);
                 case "tagging" -> resourceGroupsTaggingJsonHandler.handle(action, request, region);
                 case "codebuild" -> codeBuildJsonHandler.handle(action, request, region, regionResolver.getAccountId());
                 case "codedeploy" -> codeDeployJsonHandler.handle(action, request, region);
@@ -316,6 +329,8 @@ public class AwsJson11Controller {
                 case "dms" -> dmsJsonHandler.handle(action, request, region);
                 case "datasync" -> dataSyncJsonHandler.handle(action, request, region);
                 case "fsx" -> fsxJsonHandler.handle(action, request, region);
+                case "ds" -> directoryServiceJsonHandler.handle(action, request, region);
+                case "forecast" -> forecastJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target

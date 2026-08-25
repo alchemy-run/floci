@@ -74,6 +74,14 @@ services:
     doc: docs/services/memorydb.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/memorydb/MemoryDbHandler.java, mode: switch }
+  - service: dax
+    doc: docs/services/dax.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/dax/DaxJsonHandler.java, mode: switch }
+  - service: ds
+    doc: docs/services/ds.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/directoryservice/DirectoryServiceJsonHandler.java, mode: switch }
   - service: neptune
     doc: docs/services/neptune.md
     sources:
@@ -141,9 +149,14 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/ssm/Ec2MessagesJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/ssm/SsmJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/textract/TextractJsonHandler.java }  # no standalone action table yet
+  - { path: src/main/java/io/github/hectorvent/floci/services/forecast/ForecastJsonHandler.java }  # alchemy dataset/group coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/comprehend/ComprehendJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/comprehendmedical/ComprehendMedicalJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/transcribe/TranscribeJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/transfer/TransferHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/dax/DaxJsonHandler.java }  # alchemy cluster coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/dms/DmsJsonHandler.java }  # alchemy bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/directoryservice/DirectoryServiceJsonHandler.java }  # alchemy directory coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/fms/FmsJsonHandler.java }  # alchemy admin-account coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/frauddetector/FraudDetectorJsonHandler.java }  # alchemy detector/list/event coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/fsx/FsxJsonHandler.java }  # alchemy fsx bindings coverage; docs table later
