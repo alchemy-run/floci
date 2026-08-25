@@ -53,6 +53,7 @@ import io.github.hectorvent.floci.services.ssm.Ec2MessagesJsonHandler;
 import io.github.hectorvent.floci.services.ssm.SsmJsonHandler;
 import io.github.hectorvent.floci.services.dms.DmsJsonHandler;
 import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
+import io.github.hectorvent.floci.services.fsx.FsxJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -126,6 +127,7 @@ public class AwsJson11Controller {
     private final ApplicationAutoScalingJsonHandler applicationAutoScalingJsonHandler;
     private final DmsJsonHandler dmsJsonHandler;
     private final DataSyncJsonHandler dataSyncJsonHandler;
+    private final FsxJsonHandler fsxJsonHandler;
     private final DaxJsonHandler daxJsonHandler;
 
     @Inject
@@ -174,6 +176,7 @@ public class AwsJson11Controller {
                                ApplicationAutoScalingJsonHandler applicationAutoScalingJsonHandler,
                                DmsJsonHandler dmsJsonHandler,
                                DataSyncJsonHandler dataSyncJsonHandler,
+                               FsxJsonHandler fsxJsonHandler,
                                DaxJsonHandler daxJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -226,6 +229,7 @@ public class AwsJson11Controller {
         this.applicationAutoScalingJsonHandler = applicationAutoScalingJsonHandler;
         this.dmsJsonHandler = dmsJsonHandler;
         this.dataSyncJsonHandler = dataSyncJsonHandler;
+        this.fsxJsonHandler = fsxJsonHandler;
         this.daxJsonHandler = daxJsonHandler;
     }
 
@@ -311,6 +315,7 @@ public class AwsJson11Controller {
                 case "cloudcontrol" -> cloudControlJsonHandler.handle(action, request, region);
                 case "dms" -> dmsJsonHandler.handle(action, request, region);
                 case "datasync" -> dataSyncJsonHandler.handle(action, request, region);
+                case "fsx" -> fsxJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target

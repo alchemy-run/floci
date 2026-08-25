@@ -840,6 +840,7 @@ public interface EmulatorConfig {
         Ec2ServiceConfig ec2();
         EcsServiceConfig ecs();
         EfsServiceConfig efs();
+        FsxServiceConfig fsx();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
         EcrServiceConfig ecr();
@@ -1698,6 +1699,11 @@ public interface EmulatorConfig {
     }
 
     interface EfsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FsxServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

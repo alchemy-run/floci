@@ -304,6 +304,8 @@ floci:
       mock: true
     efs:
       enabled: true
+    fsx:
+      enabled: true
     appconfig:
       enabled: true
     appconfigdata:
