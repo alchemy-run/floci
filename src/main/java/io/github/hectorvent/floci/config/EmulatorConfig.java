@@ -289,6 +289,7 @@ public interface EmulatorConfig {
         AppFlowStorageConfig appflow();
         AppIntegrationsStorageConfig appintegrations();
         AppRegistryStorageConfig appregistry();
+        ApplicationSignalsStorageConfig applicationSignals();
     }
 
     interface SsmStorageConfig {
@@ -560,6 +561,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface ApplicationSignalsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface CodeDeployStorageConfig {
         Optional<String> mode();
 
@@ -670,6 +678,7 @@ public interface EmulatorConfig {
         AppFlowServiceConfig appflow();
         AppIntegrationsServiceConfig appintegrations();
         AppRegistryServiceConfig appregistry();
+        ApplicationSignalsServiceConfig applicationSignals();
     }
 
     interface IotServiceConfig {
@@ -739,6 +748,11 @@ public interface EmulatorConfig {
     }
 
     interface AppRegistryServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ApplicationSignalsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

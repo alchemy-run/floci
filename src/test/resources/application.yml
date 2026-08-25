@@ -79,6 +79,8 @@ floci:
         flush-interval-ms: 60000
       appregistry:
         flush-interval-ms: 60000
+      application-signals:
+        flush-interval-ms: 60000
 
   auth:
     validate-signatures: false
@@ -332,4 +334,6 @@ floci:
     appintegrations:
       enabled: true
     appregistry:
+      enabled: true
+    application-signals:
       enabled: true
