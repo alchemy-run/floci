@@ -147,6 +147,8 @@ floci:
         flush-interval-ms: 5000
       fis:
         flush-interval-ms: 5000
+      finspace:
+        flush-interval-ms: 5000
       amp:
         flush-interval-ms: 5000
       aiops:
@@ -392,6 +394,8 @@ floci:
       enabled: true
     fms:
       enabled: true
+    frauddetector:
+      enabled: true
     kms:
       enabled: true
     cognito:
@@ -446,6 +450,8 @@ floci:
       enabled: true
       mock: false
     efs:
+      enabled: true
+    glacier:
       enabled: true
     fsx:
       enabled: true
@@ -562,6 +568,8 @@ floci:
       enabled: true
     textract:
       enabled: true
+    forecast:
+      enabled: true
     comprehend:
       enabled: true
     comprehendmedical:
@@ -618,6 +626,8 @@ floci:
     rum:
       enabled: true
     fis:
+      enabled: true
+    finspace:
       enabled: true
     amp:
       enabled: true

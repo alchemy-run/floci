@@ -293,6 +293,7 @@ public interface EmulatorConfig {
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
         FisStorageConfig fis();
+        FinSpaceStorageConfig finspace();
         AmpStorageConfig amp();
         AiOpsStorageConfig aiops();
         AccountStorageConfig account();
@@ -607,6 +608,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface FinSpaceStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface BedrockAgentStorageConfig {
         Optional<String> mode();
 
@@ -827,6 +835,7 @@ public interface EmulatorConfig {
         KinesisServiceConfig kinesis();
         FirehoseServiceConfig firehose();
         FmsServiceConfig fms();
+        FraudDetectorServiceConfig frauddetector();
         KmsServiceConfig kms();
         CognitoServiceConfig cognito();
         StepFunctionsServiceConfig stepfunctions();
@@ -875,6 +884,7 @@ public interface EmulatorConfig {
         Route53ServiceConfig route53();
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
+        ForecastServiceConfig forecast();
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendmedical();
         PricingServiceConfig pricing();
@@ -898,6 +908,7 @@ public interface EmulatorConfig {
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
         FisServiceConfig fis();
+        FinSpaceServiceConfig finspace();
         AmpServiceConfig amp();
         AiOpsServiceConfig aiops();
         AccountServiceConfig account();
@@ -948,6 +959,11 @@ public interface EmulatorConfig {
     }
 
     interface FisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FinSpaceServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1567,6 +1583,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface FraudDetectorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface KmsServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1786,6 +1807,11 @@ public interface EmulatorConfig {
     }
 
     interface TextractServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ForecastServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
+import io.github.hectorvent.floci.services.glacier.GlacierController; // glacier restJson1
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
@@ -56,6 +57,8 @@ import io.github.hectorvent.floci.services.emrcontainers.EmrContainersController
 import io.github.hectorvent.floci.services.emrserverless.EmrServerlessController;
 import io.github.hectorvent.floci.services.entityresolution.EntityResolutionController;
 import io.github.hectorvent.floci.services.fis.FisController;
+import io.github.hectorvent.floci.services.finspace.FinSpaceController;
+import io.github.hectorvent.floci.services.finspace.FinSpaceDataController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -310,6 +313,10 @@ public class ResolvedServiceCatalog {
                         "fms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSFMS_20180101."), Set.of("fms"), Set.of(), Set.of()),
+                descriptor("frauddetector", "frauddetector", config.services().frauddetector().enabled(), true,
+                        "frauddetector", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSHawksNestServiceFacade."), Set.of("frauddetector"), Set.of(), Set.of()),
                 descriptor("email", "ses", config.services().ses().enabled(), true,
                         "ses", config.storage().mode(), 5000L, AwsNamespaces.SES, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON, ServiceProtocol.QUERY),
@@ -562,6 +569,11 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("Textract."), Set.of("textract"), Set.of(), Set.of()),
+                descriptor("forecast", "forecast", config.services().forecast().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonForecast.", "AmazonForecastRuntime."),
+                        Set.of("forecast", "forecastquery"), Set.of(), Set.of()),
                 descriptor("comprehend", "comprehend", config.services().comprehend().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -636,6 +648,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().fis().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("fis"), Set.of(), Set.of(FisController.class)),
+                descriptor("finspace", "finspace", config.services().finspace().enabled(), true,
+                        "finspace", storageMode(config.storage().services().finspace().mode(), config.storage().mode()),
+                        config.storage().services().finspace().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("finspace", "finspace-api"), Set.of(),
+                        Set.of(FinSpaceController.class, FinSpaceDataController.class)),
                 descriptor("aps", "amp", config.services().amp().enabled(), true,
                         "amp", storageMode(config.storage().services().amp().mode(), config.storage().mode()),
                         config.storage().services().amp().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -736,7 +754,12 @@ public class ResolvedServiceCatalog {
                 descriptor("cloudhsmv2", "cloudhsmv2", config.services().cloudhsmV2().enabled(), true,
                         "cloudhsmv2", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
-                        Set.of("BaldrApiService."), Set.of("cloudhsm", "cloudhsmv2"), Set.of(), Set.of())
+                        Set.of("BaldrApiService."), Set.of("cloudhsm", "cloudhsmv2"), Set.of(), Set.of()),
+                descriptor("glacier", "glacier", true, true,
+                        "glacier", config.storage().mode(),
+                        5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("glacier"), Set.of(), Set.of(GlacierController.class))
         ));
     }
 
