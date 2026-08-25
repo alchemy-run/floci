@@ -608,7 +608,9 @@ class ContainerLauncherTest {
                 "IPv6 addresses (containing colons) must survive the hostname/ip split");
         assertTrue(extraHosts.contains("v6end.internal:fd00::"),
                 "IPv6 addresses ending in :: must not be classified as missing an ip");
-        assertEquals(4, extraHosts.size(),
+        assertTrue(extraHosts.contains("aps-workspaces.us-east-1.amazonaws.com:host-gateway"));
+        assertTrue(extraHosts.contains("aps-workspaces-fips.us-east-1.amazonaws.com:host-gateway"));
+        assertEquals(6, extraHosts.size(),
                 "entries without a hostname and an ip must be skipped, not passed to Docker");
     }
 
@@ -624,8 +626,12 @@ class ContainerLauncherTest {
 
         launcher.launch(fn);
 
-        assertTrue(captureRealContainerSpec().extraHosts().isEmpty(),
-                "no extra hosts when the config is unset (non-Linux host in this test)");
+        List<String> extraHosts = captureRealContainerSpec().extraHosts();
+        assertTrue(extraHosts.contains("aps-workspaces.us-east-1.amazonaws.com:host-gateway"),
+                "AMP data-plane host must resolve to the Docker host when embedded DNS is off");
+        assertTrue(extraHosts.contains("aps-workspaces-fips.us-east-1.amazonaws.com:host-gateway"));
+        assertEquals(2, extraHosts.size(),
+                "only AMP data-plane extra hosts when the config is unset (non-Linux host in this test)");
     }
 
     @Test

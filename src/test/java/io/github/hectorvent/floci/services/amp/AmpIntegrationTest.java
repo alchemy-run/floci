@@ -258,7 +258,9 @@ class AmpIntegrationTest {
                 .statusCode(200)
                 .body("workspace.workspaceId", equalTo(workspaceId))
                 .body("workspace.status.statusCode", equalTo("ACTIVE"))
-                .body("workspace.prometheusEndpoint", containsString("/workspaces/" + workspaceId + "/"));
+                .body("workspace.prometheusEndpoint", containsString("/workspaces/" + workspaceId + "/"))
+                .body("workspace.prometheusEndpoint", containsString("aps-workspaces"))
+                .body("workspace.prometheusEndpoint", containsString("http://"));
 
         given()
                 .header("Authorization", authorization)
@@ -284,6 +286,17 @@ class AmpIntegrationTest {
                         List.of(new AmpRemoteWriteCodec.Sample(2.0, System.currentTimeMillis()))))));
         given()
                 .header("Authorization", authorization)
+                .header("Content-Encoding", "snappy")
+                .contentType("application/x-protobuf")
+                .body(payload)
+                .when()
+                .post("/workspaces/" + workspaceId + "/api/v1/remote_write")
+                .then()
+                .statusCode(200);
+
+        given()
+                .header("Authorization", authorization)
+                .header("Host", "aps-workspaces.us-east-1.amazonaws.com:4566")
                 .header("Content-Encoding", "snappy")
                 .contentType("application/x-protobuf")
                 .body(payload)

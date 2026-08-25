@@ -850,8 +850,42 @@ public class AmpService {
         String region = workspace.getRegion() == null || workspace.getRegion().isBlank()
                 ? "us-east-1"
                 : workspace.getRegion();
-        return "https://aps-workspaces." + region + ".amazonaws.com/workspaces/"
+        String host = "aps-workspaces." + region + ".amazonaws.com";
+        // Host-mode quarkus:dev does not bind :443 or run embedded DNS. Alchemy's
+        // RemoteWrite/QueryMetrics bindings fetch() this advertised URL from inside
+        // Lambda, so pin HTTP to the emulator port. TLS-on (Docker image) keeps the
+        // AWS-shaped https:// host on 443 — extra-hosts/DNS map it to Floci.
+        if (tlsEnabled()) {
+            return "https://" + host + "/workspaces/" + workspace.getWorkspaceId() + "/";
+        }
+        return "http://" + host + ":" + emulatorPort() + "/workspaces/"
                 + workspace.getWorkspaceId() + "/";
+    }
+
+    private static boolean tlsEnabled() {
+        String enabled = System.getProperty("floci.tls.enabled");
+        if (enabled == null || enabled.isBlank()) {
+            enabled = System.getenv("FLOCI_TLS_ENABLED");
+        }
+        return enabled != null && "true".equalsIgnoreCase(enabled.trim());
+    }
+
+    private static int emulatorPort() {
+        String port = System.getProperty("floci.port");
+        if (port == null || port.isBlank()) {
+            port = System.getenv("FLOCI_PORT");
+        }
+        if (port != null && !port.isBlank()) {
+            try {
+                int parsed = Integer.parseInt(port.trim());
+                if (parsed > 0) {
+                    return parsed;
+                }
+            } catch (NumberFormatException e) {
+                // fall through to the emulator default
+            }
+        }
+        return 4566;
     }
 
     public ObjectNode workspaceSummary(AmpWorkspace workspace) {
@@ -1067,17 +1101,24 @@ public class AmpService {
             return;
         }
         byte[] protobuf = body;
-        if (contentEncoding != null && contentEncoding.toLowerCase().contains("snappy")) {
-            protobuf = AmpRemoteWriteCodec.snappyDecompress(body);
-        } else {
-            try {
+        try {
+            if (contentEncoding != null && contentEncoding.toLowerCase().contains("snappy")) {
                 protobuf = AmpRemoteWriteCodec.snappyDecompress(body);
-            } catch (IllegalArgumentException e) {
-                protobuf = body;
+            } else {
+                try {
+                    protobuf = AmpRemoteWriteCodec.snappyDecompress(body);
+                } catch (IllegalArgumentException e) {
+                    protobuf = body;
+                }
             }
+            List<Series> incoming = AmpRemoteWriteCodec.decodeWriteRequest(protobuf);
+            seriesByWorkspace.compute(workspaceId, (id, existing) -> mergeSeries(existing, incoming));
+        } catch (IllegalArgumentException e) {
+            throw new AwsException(
+                    "ValidationException",
+                    "Unable to decode remote-write payload: " + e.getMessage(),
+                    400);
         }
-        List<Series> incoming = AmpRemoteWriteCodec.decodeWriteRequest(protobuf);
-        seriesByWorkspace.compute(workspaceId, (id, existing) -> mergeSeries(existing, incoming));
     }
 
     public ObjectNode instantQuery(String region, String workspaceId, String query, String time) {
