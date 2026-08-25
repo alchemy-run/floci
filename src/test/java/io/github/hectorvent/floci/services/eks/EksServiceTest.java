@@ -12,10 +12,18 @@ import io.github.hectorvent.floci.services.ec2.Ec2ImageCatalog;
 import io.github.hectorvent.floci.services.ec2.Ec2InstanceTypeCatalog;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.portforward.Ec2PortForwardManager;
+import io.github.hectorvent.floci.services.eks.model.AccessEntry;
+import io.github.hectorvent.floci.services.eks.model.Addon;
+import io.github.hectorvent.floci.services.eks.model.AddonStatus;
+import io.github.hectorvent.floci.services.eks.model.AssociateAccessPolicyRequest;
 import io.github.hectorvent.floci.services.eks.model.ClusterStatus;
+import io.github.hectorvent.floci.services.eks.model.CreateAccessEntryRequest;
+import io.github.hectorvent.floci.services.eks.model.CreateAddonRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateClusterRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateFargateProfileRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateNodeGroupRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateAccessEntryRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateAddonRequest;
 import io.github.hectorvent.floci.services.eks.model.FargateProfile;
 import io.github.hectorvent.floci.services.eks.model.FargateProfileStatus;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
@@ -655,5 +663,166 @@ class EksServiceTest {
         AwsException delete = assertThrows(AwsException.class,
                 () -> eksService.deleteFargateProfile("my-eks-cluster", "missing-profile"));
         assertEquals(404, delete.getHttpStatus());
+    }
+
+    @Test
+    void accessEntryLifecycle() {
+        createTestCluster("access-cluster");
+        String principal = "arn:aws:iam::000000000000:role/viewer";
+        CreateAccessEntryRequest request = new CreateAccessEntryRequest();
+        request.setPrincipalArn(principal);
+        request.setKubernetesGroups(List.of("viewers"));
+        request.setTags(Map.of("env", "test"));
+
+        AccessEntry created = eksService.createAccessEntry("access-cluster", request);
+        assertEquals("access-cluster", created.getClusterName());
+        assertEquals(principal, created.getPrincipalArn());
+        assertEquals(principal, created.getUsername());
+        assertEquals("STANDARD", created.getType());
+        assertEquals(List.of("viewers"), created.getKubernetesGroups());
+        assertTrue(created.getAccessEntryArn().contains("access-entry/access-cluster/role/"));
+        assertEquals("test", created.getTags().get("env"));
+
+        assertEquals(List.of(principal), eksService.listAccessEntries("access-cluster", null));
+        AccessEntry described = eksService.describeAccessEntry("access-cluster", principal);
+        assertEquals(created.getAccessEntryArn(), described.getAccessEntryArn());
+
+        UpdateAccessEntryRequest update = new UpdateAccessEntryRequest();
+        update.setKubernetesGroups(List.of("admins"));
+        update.setUsername("cluster-admin");
+        AccessEntry updated = eksService.updateAccessEntry("access-cluster", principal, update);
+        assertEquals(List.of("admins"), updated.getKubernetesGroups());
+        assertEquals("cluster-admin", updated.getUsername());
+
+        AssociateAccessPolicyRequest associate = new AssociateAccessPolicyRequest();
+        associate.setPolicyArn("arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy");
+        AccessEntry.AccessScope scope = new AccessEntry.AccessScope();
+        scope.setType("cluster");
+        associate.setAccessScope(scope);
+        AccessEntry.AssociatedAccessPolicy policy =
+                eksService.associateAccessPolicy("access-cluster", principal, associate);
+        assertEquals("arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy", policy.getPolicyArn());
+        assertEquals(1, eksService.listAssociatedAccessPolicies("access-cluster", principal).size());
+
+        eksService.tagResource(created.getAccessEntryArn(), Map.of("team", "platform"));
+        assertEquals("platform", eksService.listTagsForResource(created.getAccessEntryArn()).get("team"));
+        assertEquals("test", eksService.listTagsForResource(created.getAccessEntryArn()).get("env"));
+
+        eksService.disassociateAccessPolicy("access-cluster", principal,
+                "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy");
+        assertTrue(eksService.listAssociatedAccessPolicies("access-cluster", principal).isEmpty());
+
+        eksService.deleteAccessEntry("access-cluster", principal);
+        AwsException missing = assertThrows(AwsException.class,
+                () -> eksService.describeAccessEntry("access-cluster", principal));
+        assertEquals(404, missing.getHttpStatus());
+        assertEquals("ResourceNotFoundException", missing.getErrorCode());
+        assertTrue(eksService.listAccessEntries("access-cluster", null).isEmpty());
+    }
+
+    @Test
+    void createAccessEntryDuplicateFails() {
+        createTestCluster("access-cluster");
+        CreateAccessEntryRequest request = new CreateAccessEntryRequest();
+        request.setPrincipalArn("arn:aws:iam::000000000000:role/viewer");
+        eksService.createAccessEntry("access-cluster", request);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> eksService.createAccessEntry("access-cluster", request));
+        assertEquals(409, ex.getHttpStatus());
+        assertEquals("ResourceInUseException", ex.getErrorCode());
+    }
+
+    @Test
+    void accessEntryRequiresCluster() {
+        CreateAccessEntryRequest request = new CreateAccessEntryRequest();
+        request.setPrincipalArn("arn:aws:iam::000000000000:role/viewer");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> eksService.createAccessEntry("missing-cluster", request));
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void addonLifecycleDescribeListDelete() {
+        createTestCluster("addon-cluster");
+        CreateAddonRequest request = new CreateAddonRequest();
+        request.setAddonName("metrics-server");
+        request.setTags(Map.of("env", "test"));
+
+        Addon created = eksService.createAddon("addon-cluster", request);
+        assertEquals("metrics-server", created.getAddonName());
+        assertEquals("addon-cluster", created.getClusterName());
+        assertEquals(AddonStatus.ACTIVE, created.getStatus());
+        assertEquals("v1.0.0-eksbuild.1", created.getAddonVersion());
+        assertTrue(created.getAddonArn().contains("addon/addon-cluster/metrics-server/"));
+        assertEquals("kube-system", created.getNamespaceConfig().getNamespace());
+        assertEquals(List.of(), created.getPodIdentityAssociations());
+        assertEquals("test", created.getTags().get("env"));
+        assertEquals("eks", created.getPublisher());
+        assertEquals("amazon", created.getOwner());
+
+        assertEquals(List.of("metrics-server"), eksService.listAddons("addon-cluster"));
+        Addon described = eksService.describeAddon("addon-cluster", "metrics-server");
+        assertEquals(created.getAddonArn(), described.getAddonArn());
+
+        UpdateAddonRequest update = new UpdateAddonRequest();
+        update.setAddonVersion("v1.2.3-eksbuild.1");
+        Map<String, Object> updateResult = eksService.updateAddon("addon-cluster", "metrics-server", update);
+        assertEquals("Successful", updateResult.get("status"));
+        assertEquals("AddonUpdate", updateResult.get("type"));
+        assertEquals("v1.2.3-eksbuild.1",
+                eksService.describeAddon("addon-cluster", "metrics-server").getAddonVersion());
+
+        eksService.tagResource(created.getAddonArn(), Map.of("team", "platform"));
+        assertEquals("platform", eksService.listTagsForResource(created.getAddonArn()).get("team"));
+        assertEquals("test", eksService.listTagsForResource(created.getAddonArn()).get("env"));
+
+        Addon deleted = eksService.deleteAddon("addon-cluster", "metrics-server");
+        assertEquals(AddonStatus.DELETING, deleted.getStatus());
+        AwsException missing = assertThrows(AwsException.class,
+                () -> eksService.describeAddon("addon-cluster", "metrics-server"));
+        assertEquals(404, missing.getHttpStatus());
+        assertTrue(eksService.listAddons("addon-cluster").isEmpty());
+    }
+
+    @Test
+    void createAddonDuplicateFails() {
+        createTestCluster("addon-cluster");
+        CreateAddonRequest request = new CreateAddonRequest();
+        request.setAddonName("vpc-cni");
+        eksService.createAddon("addon-cluster", request);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> eksService.createAddon("addon-cluster", request));
+        assertEquals(409, ex.getHttpStatus());
+        assertEquals("ResourceInUseException", ex.getErrorCode());
+    }
+
+    @Test
+    void createAddonWithoutClusterFails() {
+        CreateAddonRequest request = new CreateAddonRequest();
+        request.setAddonName("vpc-cni");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> eksService.createAddon("missing-cluster", request));
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void listPaginationOmitsTerminalNextToken() {
+        Map<String, Object> empty = eksService.page(List.of(), null, null, "addons");
+        assertEquals(List.of(), empty.get("addons"));
+        assertFalse(empty.containsKey("nextToken"));
+
+        Map<String, Object> all = eksService.page(List.of("a", "b"), null, null, "addons");
+        assertEquals(List.of("a", "b"), all.get("addons"));
+        assertFalse(all.containsKey("nextToken"));
+
+        Map<String, Object> first = eksService.page(List.of("a", "b", "c"), 2, null, "addons");
+        assertEquals(List.of("a", "b"), first.get("addons"));
+        assertEquals("2", first.get("nextToken"));
+
+        Map<String, Object> last = eksService.page(List.of("a", "b", "c"), 2, "2", "addons");
+        assertEquals(List.of("c"), last.get("addons"));
+        assertFalse(last.containsKey("nextToken"));
     }
 }
