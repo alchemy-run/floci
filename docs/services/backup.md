@@ -14,6 +14,9 @@
 | `DescribeBackupVault` | `GET` | `/backup-vaults/{backupVaultName}` | Describe a backup vault |
 | `DeleteBackupVault` | `DELETE` | `/backup-vaults/{backupVaultName}` | Delete an empty backup vault |
 | `ListBackupVaults` | `GET` | `/backup-vaults/` | List all backup vaults |
+| `GetBackupVaultAccessPolicy` | `GET` | `/backup-vaults/{backupVaultName}/access-policy` | Get the vault resource policy; `ResourceNotFoundException` (400) if none |
+| `PutBackupVaultAccessPolicy` | `PUT` | `/backup-vaults/{backupVaultName}/access-policy` | Set the vault resource policy |
+| `DeleteBackupVaultAccessPolicy` | `DELETE` | `/backup-vaults/{backupVaultName}/access-policy` | Remove the vault resource policy |
 
 ### Backup Plans
 
@@ -41,15 +44,42 @@
 | `StartBackupJob` | `PUT` | `/backup-jobs` | Start an on-demand backup job |
 | `DescribeBackupJob` | `GET` | `/backup-jobs/{backupJobId}` | Get backup job status |
 | `StopBackupJob` | `POST` | `/backup-jobs/{backupJobId}` | Stop a running backup job |
-| `ListBackupJobs` | `GET` | `/backup-jobs/` | List backup jobs with optional filters |
+| `ListBackupJobs` | `GET` | `/backup-jobs` | List backup jobs with optional filters |
+
+### Restore Jobs
+
+| Action | Method | Path | Description |
+|---|---|---|---|
+| `StartRestoreJob` | `PUT` | `/restore-jobs` | Start a restore from a recovery point |
+| `DescribeRestoreJob` | `GET` | `/restore-jobs/{restoreJobId}` | Get restore job status |
+| `ListRestoreJobs` | `GET` | `/restore-jobs` | List restore jobs |
+| `GetRestoreJobMetadata` | `GET` | `/restore-jobs/{restoreJobId}/metadata` | Get restore job metadata |
+| `PutRestoreValidationResult` | `PUT` | `/restore-jobs/{restoreJobId}/validations` | Report restore-test validation |
+
+### Copy Jobs
+
+| Action | Method | Path | Description |
+|---|---|---|---|
+| `StartCopyJob` | `PUT` | `/copy-jobs` | Copy a recovery point to another vault |
+| `DescribeCopyJob` | `GET` | `/copy-jobs/{copyJobId}` | Get copy job status |
+| `ListCopyJobs` | `GET` | `/copy-jobs` | List copy jobs |
 
 ### Recovery Points
 
 | Action | Method | Path | Description |
 |---|---|---|---|
 | `DescribeRecoveryPoint` | `GET` | `/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}` | Describe a recovery point |
-| `ListRecoveryPointsByBackupVault` | `GET` | `/backup-vaults/{backupVaultName}/recovery-points/` | List recovery points in a vault |
+| `ListRecoveryPointsByBackupVault` | `GET` | `/backup-vaults/{backupVaultName}/recovery-points` | List recovery points in a vault |
 | `DeleteRecoveryPoint` | `DELETE` | `/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}` | Delete a recovery point |
+| `GetRecoveryPointRestoreMetadata` | `GET` | `/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}/restore-metadata` | Restore metadata for a recovery point |
+| `ListRecoveryPointsByResource` | `GET` | `/resources/{resourceArn}/recovery-points` | List recovery points for a resource |
+
+### Protected Resources
+
+| Action | Method | Path | Description |
+|---|---|---|---|
+| `ListProtectedResources` | `GET` | `/resources` | List resources with recovery points |
+| `DescribeProtectedResource` | `GET` | `/resources/{resourceArn}` | Describe a protected resource |
 
 ### Tagging
 

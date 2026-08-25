@@ -14,6 +14,9 @@ public class Lifecycle {
     @JsonProperty("DeleteAfterDays")
     private Long deleteAfterDays;
 
+    @JsonProperty("OptInToArchiveForSupportedResources")
+    private Boolean optInToArchiveForSupportedResources;
+
     public Lifecycle() {}
 
     public Long getMoveToColdStorageAfterDays() { return moveToColdStorageAfterDays; }
@@ -21,4 +24,9 @@ public class Lifecycle {
 
     public Long getDeleteAfterDays() { return deleteAfterDays; }
     public void setDeleteAfterDays(Long deleteAfterDays) { this.deleteAfterDays = deleteAfterDays; }
+
+    public Boolean getOptInToArchiveForSupportedResources() { return optInToArchiveForSupportedResources; }
+    public void setOptInToArchiveForSupportedResources(Boolean optInToArchiveForSupportedResources) {
+        this.optInToArchiveForSupportedResources = optInToArchiveForSupportedResources;
+    }
 }

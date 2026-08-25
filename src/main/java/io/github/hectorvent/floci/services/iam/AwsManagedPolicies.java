@@ -158,6 +158,12 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AWSBatchServiceRole", "/service-role/",
                 "Provides access to AWS Batch resources to create and manage compute environments and job queues."),
 
+        // AWS Backup service roles — Alchemy Backup Bindings attach these ARNs.
+        new ManagedPolicyDef("AWSBackupServiceRolePolicyForBackup", "/service-role/",
+                "Provides AWS Backup permission to create backups of all supported resource types."),
+        new ManagedPolicyDef("AWSBackupServiceRolePolicyForRestores", "/service-role/",
+                "Provides AWS Backup permission to restore backups of all supported resource types."),
+
         // S3 Object Lambda execution role policy
         new ManagedPolicyDef("AmazonS3ObjectLambdaExecutionRolePolicy", "/service-role/",
                 "Provides write permissions to CloudWatch Logs for S3 Object Lambda access points."),
