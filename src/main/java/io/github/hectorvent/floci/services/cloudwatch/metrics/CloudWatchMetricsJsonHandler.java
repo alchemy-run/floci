@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.InsightRule;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -52,9 +53,15 @@ public class CloudWatchMetricsJsonHandler {
             case "TagResource" -> handleTagResource(request, region);
             case "UntagResource" -> handleUntagResource(request, region);
             case "GetMetricData" -> handleGetMetricData(request, region);
-            case "DescribeInsightRules" -> handleDescribeInsightRules();
+            case "DescribeInsightRules" -> handleDescribeInsightRules(request, region);
+            case "PutInsightRule" -> handlePutInsightRule(request, region);
+            case "DeleteInsightRules" -> handleDeleteInsightRules(request, region);
             case "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector" ->
                     CloudWatchAnomalyDetectorActions.handleJson(objectMapper, normalizedAction, request, region);
+            case "PutDashboard", "GetDashboard", "ListDashboards", "DeleteDashboards" ->
+                    CloudWatchDashboardActions.handleJson(objectMapper, normalizedAction, request);
+            case "PutAlarmMuteRule", "GetAlarmMuteRule", "ListAlarmMuteRules", "DeleteAlarmMuteRule" ->
+                    CloudWatchAlarmMuteRuleActions.handleJson(metricsService, objectMapper, normalizedAction, request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported by CloudWatch JSON."))
                     .build();
@@ -452,9 +459,71 @@ public class CloudWatchMetricsJsonHandler {
         return parseInstant(node.asText(null));
     }
 
-    private Response handleDescribeInsightRules() {
+    private Response handleDescribeInsightRules(JsonNode request, String region) {
+        Integer maxResults = request.has("MaxResults") ? request.path("MaxResults").asInt() : null;
+        String nextToken = request.has("NextToken") ? request.path("NextToken").asText(null) : null;
+        CloudWatchMetricsService.InsightRulesPage page =
+                metricsService.describeInsightRules(maxResults, nextToken, region);
+
         ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("InsightRules");
+        ArrayNode rules = response.putArray("InsightRules");
+        for (InsightRule rule : page.rules()) {
+            ObjectNode node = rules.addObject();
+            node.put("Name", rule.getName());
+            node.put("State", rule.getState());
+            node.put("Schema", rule.getSchema());
+            if (rule.getDefinition() != null) {
+                node.put("Definition", rule.getDefinition());
+            }
+            node.put("ManagedRule", rule.isManagedRule());
+            node.put("ApplyOnTransformedLogs", rule.isApplyOnTransformedLogs());
+        }
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handlePutInsightRule(JsonNode request, String region) {
+        InsightRule rule = new InsightRule();
+        String name = request.path("RuleName").asText(null);
+        if (name == null || name.isBlank()) {
+            name = request.path("Name").asText(null);
+        }
+        rule.setName(name);
+        rule.setState(request.path("RuleState").asText(null));
+        JsonNode definitionNode = request.path("RuleDefinition");
+        if (definitionNode.isTextual()) {
+            rule.setDefinition(definitionNode.asText());
+        } else if (definitionNode.isObject() || definitionNode.isArray()) {
+            rule.setDefinition(definitionNode.toString());
+        }
+        if (request.has("ApplyOnTransformedLogs")) {
+            rule.setApplyOnTransformedLogs(request.path("ApplyOnTransformedLogs").asBoolean(false));
+        }
+        JsonNode tagsNode = request.has("Tags") ? request.path("Tags") : request.path("tags");
+        if (tagsNode.isArray()) {
+            Map<String, String> tags = new LinkedHashMap<>();
+            tagsNode.forEach(t -> tags.put(t.path("Key").asText(), t.path("Value").asText()));
+            rule.setTags(tags);
+        }
+        metricsService.putInsightRule(rule, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleDeleteInsightRules(JsonNode request, String region) {
+        List<String> names = new ArrayList<>();
+        JsonNode namesNode = request.path("RuleNames");
+        if (namesNode.isArray()) {
+            namesNode.forEach(n -> names.add(n.asText()));
+        }
+        List<Map<String, String>> failures = metricsService.deleteInsightRules(names, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode failuresArray = response.putArray("Failures");
+        for (Map<String, String> failure : failures) {
+            ObjectNode node = failuresArray.addObject();
+            failure.forEach(node::put);
+        }
         return Response.ok(response).build();
     }
 

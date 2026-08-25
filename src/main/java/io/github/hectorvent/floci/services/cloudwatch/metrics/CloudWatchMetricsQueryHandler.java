@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.AwsQueryResponse;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.InsightRule;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -46,9 +47,15 @@ public class CloudWatchMetricsQueryHandler {
             case "ListTagsForResource" -> handleListTagsForResource(params, region);
             case "TagResource" -> handleTagResource(params, region);
             case "UntagResource" -> handleUntagResource(params, region);
-            case "DescribeInsightRules" -> handleDescribeInsightRules();
+            case "DescribeInsightRules" -> handleDescribeInsightRules(params, region);
+            case "PutInsightRule" -> handlePutInsightRule(params, region);
+            case "DeleteInsightRules" -> handleDeleteInsightRules(params, region);
             case "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector" ->
                     CloudWatchAnomalyDetectorActions.handleQuery(normalizedAction, params, region);
+            case "PutDashboard", "GetDashboard", "ListDashboards", "DeleteDashboards" ->
+                    CloudWatchDashboardActions.handleQuery(normalizedAction, params);
+            case "PutAlarmMuteRule", "GetAlarmMuteRule", "ListAlarmMuteRules", "DeleteAlarmMuteRule" ->
+                    CloudWatchAlarmMuteRuleActions.handleQuery(metricsService, normalizedAction, params, region);
             default -> AwsQueryResponse.error("UnsupportedOperation",
                     "Operation " + action + " is not supported by CloudWatch Query.", AwsNamespaces.CW, 400);
         };
@@ -562,9 +569,76 @@ public class CloudWatchMetricsQueryHandler {
         }
     }
 
-    private Response handleDescribeInsightRules() {
-        String result = new XmlBuilder().start("InsightRules").end("InsightRules").build();
-        return Response.ok(AwsQueryResponse.envelope("DescribeInsightRules", AwsNamespaces.CW, result)).build();
+    private Response handleDescribeInsightRules(MultivaluedMap<String, String> params, String region) {
+        Integer maxResults = params.getFirst("MaxResults") != null
+                ? parseIntParam(params, "MaxResults", 100)
+                : null;
+        CloudWatchMetricsService.InsightRulesPage page =
+                metricsService.describeInsightRules(maxResults, params.getFirst("NextToken"), region);
+        XmlBuilder xml = new XmlBuilder().start("InsightRules");
+        for (InsightRule rule : page.rules()) {
+            xml.start("member")
+                    .elem("Name", rule.getName())
+                    .elem("State", rule.getState())
+                    .elem("Schema", rule.getSchema())
+                    .elem("Definition", rule.getDefinition())
+                    .elem("ManagedRule", String.valueOf(rule.isManagedRule()))
+                    .elem("ApplyOnTransformedLogs", String.valueOf(rule.isApplyOnTransformedLogs()))
+                    .end("member");
+        }
+        xml.end("InsightRules");
+        if (page.nextToken() != null) {
+            xml.elem("NextToken", page.nextToken());
+        }
+        return Response.ok(AwsQueryResponse.envelope("DescribeInsightRules", AwsNamespaces.CW, xml.build())).build();
+    }
+
+    private Response handlePutInsightRule(MultivaluedMap<String, String> params, String region) {
+        InsightRule rule = new InsightRule();
+        String name = params.getFirst("RuleName");
+        if (name == null) {
+            name = params.getFirst("Name");
+        }
+        rule.setName(name);
+        rule.setState(params.getFirst("RuleState"));
+        rule.setDefinition(params.getFirst("RuleDefinition"));
+        String apply = params.getFirst("ApplyOnTransformedLogs");
+        if (apply != null) {
+            rule.setApplyOnTransformedLogs(Boolean.parseBoolean(apply));
+        }
+        Map<String, String> tags = new LinkedHashMap<>();
+        for (int i = 1; ; i++) {
+            String key = params.getFirst("Tags.member." + i + ".Key");
+            if (key == null) {
+                break;
+            }
+            tags.put(key, params.getFirst("Tags.member." + i + ".Value"));
+        }
+        if (!tags.isEmpty()) {
+            rule.setTags(tags);
+        }
+        metricsService.putInsightRule(rule, region);
+        return Response.ok(AwsQueryResponse.envelopeNoResult("PutInsightRule", AwsNamespaces.CW)).build();
+    }
+
+    private Response handleDeleteInsightRules(MultivaluedMap<String, String> params, String region) {
+        List<String> names = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            String name = params.getFirst("RuleNames.member." + i);
+            if (name == null) {
+                break;
+            }
+            names.add(name);
+        }
+        List<Map<String, String>> failures = metricsService.deleteInsightRules(names, region);
+        XmlBuilder xml = new XmlBuilder().start("Failures");
+        for (Map<String, String> failure : failures) {
+            xml.start("member");
+            failure.forEach(xml::elem);
+            xml.end("member");
+        }
+        xml.end("Failures");
+        return Response.ok(AwsQueryResponse.envelope("DeleteInsightRules", AwsNamespaces.CW, xml.build())).build();
     }
 
     private int parseIntParam(MultivaluedMap<String, String> params, String name, int defaultValue) {

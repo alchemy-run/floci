@@ -5,10 +5,12 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.AlarmMuteRule;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricStream;
 import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,6 +33,8 @@ public class CloudWatchMetricsService {
     private final StorageBackend<String, MetricDatum> metricStore;
     private final StorageBackend<String, MetricAlarm> alarmStore;
     private final StorageBackend<String, CompositeAlarm> compositeAlarmStore;
+    private final StorageBackend<String, AlarmMuteRule> muteRuleStore;
+    private final StorageBackend<String, MetricStream> metricStreamStore;
     private final RegionResolver regionResolver;
 
     @Inject
@@ -41,6 +45,10 @@ public class CloudWatchMetricsService {
                 new TypeReference<Map<String, MetricAlarm>>() {});
         this.compositeAlarmStore = storageFactory.create("cloudwatchmetrics", "cwcompositealarms.json",
                 new TypeReference<Map<String, CompositeAlarm>>() {});
+        this.muteRuleStore = storageFactory.create("cloudwatchmetrics", "cwmuterules.json",
+                new TypeReference<Map<String, AlarmMuteRule>>() {});
+        this.metricStreamStore = storageFactory.create("cloudwatchmetrics", "cwmetricstreams.json",
+                new TypeReference<Map<String, MetricStream>>() {});
         this.regionResolver = regionResolver;
     }
 
@@ -57,6 +65,8 @@ public class CloudWatchMetricsService {
         this.metricStore = metricStore;
         this.alarmStore = alarmStore;
         this.compositeAlarmStore = compositeAlarmStore;
+        this.muteRuleStore = new InMemoryStorage<>();
+        this.metricStreamStore = new InMemoryStorage<>();
         this.regionResolver = regionResolver;
     }
 
@@ -336,11 +346,19 @@ public class CloudWatchMetricsService {
         if (metricTags.isPresent()) {
             return metricTags.get();
         }
-        return compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
+        var compositeTags = compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(a -> resourceArn.equals(a.getAlarmArn()))
                 .findFirst()
-                .map(CompositeAlarm::getTags)
+                .map(CompositeAlarm::getTags);
+        if (compositeTags.isPresent()) {
+            return compositeTags.get();
+        }
+        return metricStreamStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(s -> resourceArn.equals(s.getArn()))
+                .findFirst()
+                .map(MetricStream::getTags)
                 .orElse(Map.of());
     }
 
@@ -354,13 +372,22 @@ public class CloudWatchMetricsService {
             alarmStore.put(region + "::" + metric.get().getAlarmName(), metric.get());
             return;
         }
-        compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
+        var composite = compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(a -> resourceArn.equals(a.getAlarmArn()))
+                .findFirst();
+        if (composite.isPresent()) {
+            composite.get().getTags().putAll(tags);
+            compositeAlarmStore.put(region + "::" + composite.get().getAlarmName(), composite.get());
+            return;
+        }
+        metricStreamStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(s -> resourceArn.equals(s.getArn()))
                 .findFirst()
-                .ifPresent(alarm -> {
-                    alarm.getTags().putAll(tags);
-                    compositeAlarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
+                .ifPresent(stream -> {
+                    stream.getTags().putAll(tags);
+                    metricStreamStore.put(region + "::" + stream.getName(), stream);
                 });
     }
 
@@ -374,14 +401,169 @@ public class CloudWatchMetricsService {
             alarmStore.put(region + "::" + metric.get().getAlarmName(), metric.get());
             return;
         }
-        compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
+        var composite = compositeAlarmStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(a -> resourceArn.equals(a.getAlarmArn()))
+                .findFirst();
+        if (composite.isPresent()) {
+            tagKeys.forEach(composite.get().getTags()::remove);
+            compositeAlarmStore.put(region + "::" + composite.get().getAlarmName(), composite.get());
+            return;
+        }
+        metricStreamStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(s -> resourceArn.equals(s.getArn()))
                 .findFirst()
-                .ifPresent(alarm -> {
-                    tagKeys.forEach(alarm.getTags()::remove);
-                    compositeAlarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
+                .ifPresent(stream -> {
+                    tagKeys.forEach(stream.getTags()::remove);
+                    metricStreamStore.put(region + "::" + stream.getName(), stream);
                 });
+    }
+
+    public AlarmMuteRule putAlarmMuteRule(AlarmMuteRule rule, String region) {
+        if (rule.getName() == null || rule.getName().isBlank()) {
+            throw new AwsException("MissingRequiredParameterException", "Name is a required parameter.", 400);
+        }
+        rule.setAlarmMuteRuleArn(
+                regionResolver.buildArn("cloudwatch", region, "alarm-mute-rule:" + rule.getName()));
+        rule.setLastUpdatedTimestamp(Instant.now().getEpochSecond());
+        if (rule.getMuteType() == null || rule.getMuteType().isBlank()) {
+            rule.setMuteType(inferMuteType(rule.getScheduleExpression()));
+        }
+        muteRuleStore.put(region + "::" + rule.getName(), rule);
+        LOG.infov("PutAlarmMuteRule: {0} in {1}", rule.getName(), region);
+        return rule;
+    }
+
+    public AlarmMuteRule getAlarmMuteRule(String name, String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "AlarmMuteRuleName is a required parameter.", 400);
+        }
+        return muteRuleStore.get(region + "::" + name)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Alarm mute rule not found: " + name, 404));
+    }
+
+    public List<AlarmMuteRule> listAlarmMuteRules(String alarmName, List<String> statuses, String region) {
+        String prefix = region + "::";
+        List<AlarmMuteRule> all = new ArrayList<>(muteRuleStore.scan(k -> k.startsWith(prefix)));
+        all.sort(Comparator.comparing(AlarmMuteRule::getName, Comparator.nullsLast(String::compareTo)));
+        long now = Instant.now().getEpochSecond();
+        return all.stream()
+                .filter(rule -> alarmName == null || alarmName.isBlank()
+                        || rule.getAlarmNames().contains(alarmName))
+                .filter(rule -> statuses == null || statuses.isEmpty()
+                        || statuses.contains(rule.status(now)))
+                .collect(Collectors.toList());
+    }
+
+    public void deleteAlarmMuteRule(String name, String region) {
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        muteRuleStore.delete(region + "::" + name);
+        LOG.infov("DeleteAlarmMuteRule: {0} in {1}", name, region);
+    }
+
+    static String inferMuteType(String expression) {
+        if (expression != null && expression.startsWith("at(")) {
+            return "ONE_TIME";
+        }
+        return "RECURRING";
+    }
+
+    public MetricStream putMetricStream(MetricStream incoming, String region) {
+        if (incoming.getName() == null || incoming.getName().isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "Name is a required parameter.", 400);
+        }
+        if (incoming.getFirehoseArn() == null || incoming.getFirehoseArn().isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "FirehoseArn is a required parameter.", 400);
+        }
+        if (incoming.getRoleArn() == null || incoming.getRoleArn().isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "RoleArn is a required parameter.", 400);
+        }
+        if (incoming.getOutputFormat() == null || incoming.getOutputFormat().isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "OutputFormat is a required parameter.", 400);
+        }
+        String key = region + "::" + incoming.getName();
+        MetricStream existing = metricStreamStore.get(key).orElse(null);
+        long now = Instant.now().getEpochSecond();
+        if (existing == null) {
+            incoming.setArn(regionResolver.buildArn("cloudwatch", region, "metric-stream/" + incoming.getName()));
+            incoming.setCreationDate(now);
+            incoming.setState("running");
+            if (incoming.getTags() == null) {
+                incoming.setTags(new LinkedHashMap<>());
+            }
+        } else {
+            incoming.setArn(existing.getArn());
+            incoming.setCreationDate(existing.getCreationDate());
+            incoming.setState(existing.getState() != null ? existing.getState() : "running");
+            if (incoming.getTags() == null || incoming.getTags().isEmpty()) {
+                incoming.setTags(existing.getTags());
+            } else {
+                Map<String, String> merged = new LinkedHashMap<>(existing.getTags());
+                merged.putAll(incoming.getTags());
+                incoming.setTags(merged);
+            }
+        }
+        incoming.setLastUpdateDate(now);
+        metricStreamStore.put(key, incoming);
+        LOG.infov("PutMetricStream: {0} in {1}", incoming.getName(), region);
+        return incoming;
+    }
+
+    public MetricStream getMetricStream(String name, String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "Name is a required parameter.", 400);
+        }
+        return metricStreamStore.get(region + "::" + name)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Metric stream not found: " + name, 404));
+    }
+
+    public List<MetricStream> listMetricStreams(String region) {
+        List<MetricStream> all = new ArrayList<>(metricStreamStore.scan(k -> k.startsWith(region + "::")));
+        all.sort(Comparator.comparing(MetricStream::getName, Comparator.nullsLast(String::compareTo)));
+        return all;
+    }
+
+    public void deleteMetricStream(String name, String region) {
+        getMetricStream(name, region);
+        metricStreamStore.delete(region + "::" + name);
+        LOG.infov("DeleteMetricStream: {0} in {1}", name, region);
+    }
+
+    public void startMetricStreams(List<String> names, String region) {
+        setMetricStreamState(names, "running", region);
+    }
+
+    public void stopMetricStreams(List<String> names, String region) {
+        setMetricStreamState(names, "stopped", region);
+    }
+
+    private void setMetricStreamState(List<String> names, String state, String region) {
+        if (names == null || names.isEmpty()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "Names is a required parameter.", 400);
+        }
+        for (String name : names) {
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            metricStreamStore.get(region + "::" + name).ifPresent(stream -> {
+                stream.setState(state);
+                stream.setLastUpdateDate(Instant.now().getEpochSecond());
+                metricStreamStore.put(region + "::" + name, stream);
+            });
+        }
+        LOG.infov("SetMetricStreamState: {0} -> {1} in {2}", names, state, region);
     }
 
     // ──────────────────────────── Helpers ────────────────────────────
