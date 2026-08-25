@@ -20,6 +20,11 @@ management surfaces over one underlying export pipeline.
 | `DeleteExport` | Idempotent; deletes orphan executions too |
 | `ListExecutions` | Returns all execution records for an export |
 | `GetExecution` | Returns one execution record |
+| `GetTable` | Returns schema + resolved properties for one dictionary table |
+| `ListTables` | Returns the CUR 2.0 / FOCUS table dictionary |
+| `ListTagsForResource` | Returns `ResourceTags` stored on the export |
+| `TagResource` | Upserts tags on an existing export |
+| `UntagResource` | Removes tag keys from an existing export |
 
 ## Validation rules
 
@@ -29,8 +34,8 @@ management surfaces over one underlying export pipeline.
   schema)
 - `Export.DestinationConfigurations.S3Destination`: required;
   `S3Bucket` + `S3Region` mandatory
-- `S3OutputConfigurations.Format`: `PARQUET` (CSV emission not yet implemented; `TEXT_OR_CSV` returns `ValidationException`)
-- `S3OutputConfigurations.Compression`: `PARQUET` (`GZIP` not yet implemented)
+- `S3OutputConfigurations.Format`: `TEXT_OR_CSV` or `PARQUET`
+- `S3OutputConfigurations.Compression`: `GZIP` with `TEXT_OR_CSV`, `PARQUET` with `PARQUET`
 - `S3OutputConfigurations.Overwrite`: `CREATE_NEW_REPORT` / `OVERWRITE_REPORT`
 - `S3OutputConfigurations.OutputType`: `CUSTOM`
 - `RefreshCadence.Frequency`: `SYNCHRONOUS` (the only AWS-supported

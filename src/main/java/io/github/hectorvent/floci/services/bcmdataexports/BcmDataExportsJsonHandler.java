@@ -56,6 +56,11 @@ public class BcmDataExportsJsonHandler {
             case "DeleteExport" -> handleDelete(request);
             case "ListExecutions" -> handleListExecutions(request);
             case "GetExecution" -> handleGetExecution(request);
+            case "GetTable" -> handleGetTable(request);
+            case "ListTables" -> handleListTables(request);
+            case "ListTagsForResource" -> handleListTags(request);
+            case "TagResource" -> handleTag(request);
+            case "UntagResource" -> handleUntag(request);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: AWSBillingAndCostManagementDataExports." + action))
@@ -82,6 +87,9 @@ public class BcmDataExportsJsonHandler {
         Export export = service.getExport(arn);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("Export", serializeExport(export));
+        if (export.getExportStatus() != null) {
+            response.set("ExportStatus", serializeExportStatus(export));
+        }
         return Response.ok(response).build();
     }
 
@@ -136,6 +144,94 @@ public class BcmDataExportsJsonHandler {
         response.put("ExportArn", arn);
         response.set("Execution", serializeExecution(exec));
         return Response.ok(response).build();
+    }
+
+    private Response handleGetTable(JsonNode request) {
+        String tableName = stringOrNull(request, "TableName");
+        BcmDataExportsTables.TableSnapshot snapshot =
+                service.getTable(tableName, parseStringMap(request.path("TableProperties")));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("TableName", snapshot.tableName());
+        if (snapshot.description() != null) {
+            response.put("Description", snapshot.description());
+        }
+        ObjectNode props = response.putObject("TableProperties");
+        for (Map.Entry<String, String> entry : snapshot.tableProperties().entrySet()) {
+            props.put(entry.getKey(), entry.getValue());
+        }
+        ArrayNode schema = response.putArray("Schema");
+        for (BcmDataExportsTables.Column column : snapshot.schema()) {
+            ObjectNode col = schema.addObject();
+            col.put("Name", column.name());
+            col.put("Type", column.type());
+            if (column.description() != null) {
+                col.put("Description", column.description());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListTables(JsonNode request) {
+        List<BcmDataExportsTables.TableDefinition> tables = service.listTables();
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("Tables");
+        for (BcmDataExportsTables.TableDefinition table : tables) {
+            ObjectNode node = arr.addObject();
+            node.put("TableName", table.name());
+            if (table.description() != null) {
+                node.put("Description", table.description());
+            }
+            ArrayNode props = node.putArray("TableProperties");
+            for (BcmDataExportsTables.TableProperty property : table.properties()) {
+                ObjectNode prop = props.addObject();
+                prop.put("Name", property.name());
+                if (property.defaultValue() != null) {
+                    prop.put("DefaultValue", property.defaultValue());
+                }
+                if (property.description() != null) {
+                    prop.put("Description", property.description());
+                }
+                ArrayNode values = prop.putArray("ValidValues");
+                if (property.validValues() != null) {
+                    for (String value : property.validValues()) {
+                        values.add(value);
+                    }
+                }
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListTags(JsonNode request) {
+        String arn = stringOrNull(request, "ResourceArn");
+        Map<String, String> tags = service.listTags(arn);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("ResourceTags");
+        for (Map.Entry<String, String> entry : tags.entrySet()) {
+            ObjectNode tag = arr.addObject();
+            tag.put("Key", entry.getKey());
+            tag.put("Value", entry.getValue() == null ? "" : entry.getValue());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleTag(JsonNode request) {
+        String arn = stringOrNull(request, "ResourceArn");
+        service.tagResource(arn, parseResourceTags(request.path("ResourceTags")));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleUntag(JsonNode request) {
+        String arn = stringOrNull(request, "ResourceArn");
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        JsonNode keysNode = request.path("ResourceTagKeys");
+        if (keysNode.isArray()) {
+            for (JsonNode key : keysNode) {
+                keys.add(key.asText());
+            }
+        }
+        service.untagResource(arn, keys);
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Export parseExport(JsonNode node) {
@@ -266,17 +362,21 @@ public class BcmDataExportsJsonHandler {
             ObjectNode cadence = out.putObject("RefreshCadence");
             cadence.put("Frequency", e.getRefreshCadence().getFrequency());
         }
-        if (e.getExportStatus() != null) {
-            ObjectNode status = out.putObject("ExportStatus");
-            status.put("StatusCode", e.getExportStatus());
-            if (e.getCreatedAt() > 0) {
-                status.put("CreatedAt", Instant.ofEpochMilli(e.getCreatedAt()).toString());
-            }
-            if (e.getLastUpdatedAt() > 0) {
-                status.put("LastUpdatedAt", Instant.ofEpochMilli(e.getLastUpdatedAt()).toString());
-            }
-        }
         return out;
+    }
+
+    private ObjectNode serializeExportStatus(Export e) {
+        ObjectNode status = objectMapper.createObjectNode();
+        if (e.getExportStatus() != null) {
+            status.put("StatusCode", e.getExportStatus());
+        }
+        if (e.getCreatedAt() > 0) {
+            status.put("CreatedAt", Instant.ofEpochMilli(e.getCreatedAt()).toString());
+        }
+        if (e.getLastUpdatedAt() > 0) {
+            status.put("LastUpdatedAt", Instant.ofEpochMilli(e.getLastUpdatedAt()).toString());
+        }
+        return status;
     }
 
     private ObjectNode serializeExportReference(Export e) {
@@ -310,5 +410,19 @@ public class BcmDataExportsJsonHandler {
     private static String stringOrNull(JsonNode node, String field) {
         JsonNode value = node == null ? null : node.get(field);
         return (value != null && !value.isNull()) ? value.asText() : null;
+    }
+
+    private static Map<String, String> parseStringMap(JsonNode node) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (node != null && node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                if (field.getValue() != null && !field.getValue().isNull()) {
+                    out.put(field.getKey(), field.getValue().asText());
+                }
+            }
+        }
+        return out;
     }
 }
