@@ -286,6 +286,9 @@ public interface EmulatorConfig {
         AccountStorageConfig account();
         AccessAnalyzerStorageConfig accessanalyzer();
         AmplifyStorageConfig amplify();
+        AppFlowStorageConfig appflow();
+        AppIntegrationsStorageConfig appintegrations();
+        AppRegistryStorageConfig appregistry();
     }
 
     interface SsmStorageConfig {
@@ -536,6 +539,27 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface AppFlowStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AppIntegrationsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AppRegistryStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface CodeDeployStorageConfig {
         Optional<String> mode();
 
@@ -643,6 +667,9 @@ public interface EmulatorConfig {
         AccountServiceConfig account();
         AccessAnalyzerServiceConfig accessanalyzer();
         AmplifyServiceConfig amplify();
+        AppFlowServiceConfig appflow();
+        AppIntegrationsServiceConfig appintegrations();
+        AppRegistryServiceConfig appregistry();
     }
 
     interface IotServiceConfig {
@@ -697,6 +724,21 @@ public interface EmulatorConfig {
     }
 
     interface AmplifyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppFlowServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppIntegrationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppRegistryServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

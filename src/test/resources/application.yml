@@ -73,6 +73,12 @@ floci:
         flush-interval-ms: 60000
       amplify:
         flush-interval-ms: 60000
+      appflow:
+        flush-interval-ms: 60000
+      appintegrations:
+        flush-interval-ms: 60000
+      appregistry:
+        flush-interval-ms: 60000
 
   auth:
     validate-signatures: false
@@ -320,4 +326,10 @@ floci:
     accessanalyzer:
       enabled: true
     amplify:
+      enabled: true
+    appflow:
+      enabled: true
+    appintegrations:
+      enabled: true
+    appregistry:
       enabled: true

@@ -151,6 +151,12 @@ floci:
         flush-interval-ms: 5000
       amplify:
         flush-interval-ms: 5000
+      appflow:
+        flush-interval-ms: 5000
+      appintegrations:
+        flush-interval-ms: 5000
+      appregistry:
+        flush-interval-ms: 5000
 
   dns:
     # Extra hostname suffixes resolved to Floci's container IP by the embedded DNS server.
@@ -512,4 +518,10 @@ floci:
     accessanalyzer:
       enabled: true
     amplify:
+      enabled: true
+    appflow:
+      enabled: true
+    appintegrations:
+      enabled: true
+    appregistry:
       enabled: true

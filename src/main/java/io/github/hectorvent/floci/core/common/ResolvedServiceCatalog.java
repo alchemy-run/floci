@@ -29,6 +29,9 @@ import io.github.hectorvent.floci.services.account.AccountRegionController;
 import io.github.hectorvent.floci.services.aiops.AiOpsController;
 import io.github.hectorvent.floci.services.accessanalyzer.AccessAnalyzerController;
 import io.github.hectorvent.floci.services.amplify.AmplifyController;
+import io.github.hectorvent.floci.services.appflow.AppFlowController;
+import io.github.hectorvent.floci.services.appintegrations.AppIntegrationsController;
+import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -477,7 +480,25 @@ public class ResolvedServiceCatalog {
                         "amplify", storageMode(config.storage().services().amplify().mode(), config.storage().mode()),
                         config.storage().services().amplify().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("amplify"), Set.of(), Set.of(AmplifyController.class))
+                        Set.of(), Set.of("amplify"), Set.of(), Set.of(AmplifyController.class)),
+                descriptor("appflow", "appflow", config.services().appflow().enabled(), true,
+                        "appflow", storageMode(config.storage().services().appflow().mode(), config.storage().mode()),
+                        config.storage().services().appflow().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("appflow"), Set.of(), Set.of(AppFlowController.class)),
+                descriptor("app-integrations", "appintegrations", config.services().appintegrations().enabled(), true,
+                        "appintegrations", storageMode(config.storage().services().appintegrations().mode(),
+                                config.storage().mode()),
+                        config.storage().services().appintegrations().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("app-integrations"), Set.of(), Set.of(AppIntegrationsController.class)),
+                descriptor("servicecatalog-appregistry", "appregistry", config.services().appregistry().enabled(), true,
+                        "appregistry", storageMode(config.storage().services().appregistry().mode(),
+                                config.storage().mode()),
+                        config.storage().services().appregistry().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("servicecatalog", "servicecatalog-appregistry"), Set.of(),
+                        Set.of(AppRegistryController.class))
         ));
     }
 
