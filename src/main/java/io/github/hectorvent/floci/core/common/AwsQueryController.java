@@ -308,7 +308,12 @@ public class AwsQueryController {
                         || neptuneService.handlesClusterParameterGroupRequest(
                                 formParams.getFirst("DBParameterGroupFamily"),
                                 formParams.getFirst("DBClusterParameterGroupName"),
-                                formParams.getFirst("ResourceName"))) {
+                                formParams.getFirst("ResourceName"))
+                        || neptuneService.handlesParameterGroupRequest(
+                                formParams.getFirst("DBParameterGroupFamily"),
+                                formParams.getFirst("DBParameterGroupName"),
+                                formParams.getFirst("ResourceName"))
+                        || neptuneService.hasSubnetGroup(formParams.getFirst("DBSubnetGroupName"))) {
                     yield neptuneQueryHandler.handle(action, formParams);
                 }
 
@@ -383,7 +388,8 @@ public class AwsQueryController {
             "AddTagsToResource", "ListTagsForResource", "RemoveTagsFromResource",
             "CreateDBCluster", "DescribeDBClusters", "DeleteDBCluster", "ModifyDBCluster",
             "CreateDBParameterGroup", "DescribeDBParameterGroups",
-            "DeleteDBParameterGroup", "ModifyDBParameterGroup", "DescribeDBParameters"
+            "DeleteDBParameterGroup", "ModifyDBParameterGroup", "DescribeDBParameters",
+            "ResetDBParameterGroup"
     );
 
     private static final Set<String> CLOUDFORMATION_ACTIONS = Set.of(
