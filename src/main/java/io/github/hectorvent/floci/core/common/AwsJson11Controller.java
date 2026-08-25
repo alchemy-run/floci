@@ -16,6 +16,7 @@ import io.github.hectorvent.floci.services.ecrpublic.EcrPublicJsonHandler;
 import io.github.hectorvent.floci.services.transfer.TransferHandler;
 import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
 import io.github.hectorvent.floci.services.firehose.FirehoseJsonHandler;
+import io.github.hectorvent.floci.services.fms.FmsJsonHandler;
 import io.github.hectorvent.floci.services.glue.GlueJsonHandler;
 import io.github.hectorvent.floci.services.lightsail.LightsailJsonHandler;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingJsonHandler;
@@ -100,6 +101,7 @@ public class AwsJson11Controller {
     private final GlueJsonHandler glueJsonHandler;
     private final AthenaJsonHandler athenaJsonHandler;
     private final FirehoseJsonHandler firehoseJsonHandler;
+    private final FmsJsonHandler fmsJsonHandler;
     private final ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler;
     private final CodeBuildJsonHandler codeBuildJsonHandler;
     private final CodeDeployJsonHandler codeDeployJsonHandler;
@@ -147,6 +149,7 @@ public class AwsJson11Controller {
                                GlueJsonHandler glueJsonHandler,
                                AthenaJsonHandler athenaJsonHandler,
                                FirehoseJsonHandler firehoseJsonHandler,
+                               FmsJsonHandler fmsJsonHandler,
                                ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler,
                                CodeBuildJsonHandler codeBuildJsonHandler,
                                CodeDeployJsonHandler codeDeployJsonHandler,
@@ -198,6 +201,7 @@ public class AwsJson11Controller {
         this.glueJsonHandler = glueJsonHandler;
         this.athenaJsonHandler = athenaJsonHandler;
         this.firehoseJsonHandler = firehoseJsonHandler;
+        this.fmsJsonHandler = fmsJsonHandler;
         this.resourceGroupsTaggingJsonHandler = resourceGroupsTaggingJsonHandler;
         this.codeBuildJsonHandler = codeBuildJsonHandler;
         this.codeDeployJsonHandler = codeDeployJsonHandler;
@@ -280,6 +284,7 @@ public class AwsJson11Controller {
                 case "glue" -> glueJsonHandler.handle(action, request, region);
                 case "athena" -> athenaJsonHandler.handle(action, request, region);
                 case "firehose" -> firehoseJsonHandler.handle(action, request, region);
+                case "fms" -> fmsJsonHandler.handle(action, request, region);
                 case "tagging" -> resourceGroupsTaggingJsonHandler.handle(action, request, region);
                 case "codebuild" -> codeBuildJsonHandler.handle(action, request, region, regionResolver.getAccountId());
                 case "codedeploy" -> codeDeployJsonHandler.handle(action, request, region);
