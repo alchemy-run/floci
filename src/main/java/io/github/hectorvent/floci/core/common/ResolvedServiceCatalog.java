@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
+import io.github.hectorvent.floci.services.glacier.GlacierController; // glacier restJson1
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
@@ -339,6 +340,11 @@ public class ResolvedServiceCatalog {
                         "fsx", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSSimbaAPIService_v20180301."), Set.of("fsx"), Set.of(), Set.of()),
+                descriptor("glacier", "glacier", true, true,
+                        "glacier", config.storage().mode(),
+                        5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("glacier"), Set.of(), Set.of(GlacierController.class)),
                 descriptor("appconfig", "appconfig", config.services().appconfig().enabled(), true,
                         "appconfig", storageMode(config.storage().services().appconfig().mode(), config.storage().mode()),
                         config.storage().services().appconfig().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -641,12 +647,6 @@ public class ResolvedServiceCatalog {
                         config.storage().services().fis().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("fis"), Set.of(), Set.of(FisController.class)),
-                descriptor("finspace", "finspace", config.services().finspace().enabled(), true,
-                        "finspace", storageMode(config.storage().services().finspace().mode(), config.storage().mode()),
-                        config.storage().services().finspace().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
-                        protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("finspace", "finspace-api"), Set.of(),
-                        Set.of(FinSpaceController.class, FinSpaceDataController.class)),
                 descriptor("aps", "amp", config.services().amp().enabled(), true,
                         "amp", storageMode(config.storage().services().amp().mode(), config.storage().mode()),
                         config.storage().services().amp().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
