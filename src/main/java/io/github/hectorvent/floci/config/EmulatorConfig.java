@@ -888,6 +888,7 @@ public interface EmulatorConfig {
         ForecastServiceConfig forecast();
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendmedical();
+        HealthLakeServiceConfig healthlake();
         PricingServiceConfig pricing();
         DuckConfig duck();
         TranscribeServiceConfig transcribe();
@@ -1834,6 +1835,11 @@ public interface EmulatorConfig {
     }
 
     interface ComprehendMedicalServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface HealthLakeServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

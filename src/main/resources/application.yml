@@ -574,6 +574,8 @@ floci:
       enabled: true
     comprehendmedical:
       enabled: true
+    healthlake:
+      enabled: true
     pricing:
       enabled: true
     transcribe:
