@@ -35,7 +35,7 @@ Operation counts are exact. For dispatch-table services (Query and JSON 1.1) eac
 | [CloudWatch Logs](cloudwatch.md) | `POST /` + `X-Amz-Target: Logs.*` | JSON 1.1 | 17 |
 | [CloudWatch Metrics](cloudwatch.md#metrics) | `POST /` with `Action=` or JSON 1.1 | Query / JSON | 12 |
 | [CloudWatch RUM](rum.md) | `/appmonitor`, `/appmonitor/{name}`, `/appmonitors` | REST JSON | 5 |
-| [Account Management](account.md) | `/getAlternateContact`, `/putAlternateContact`, `/deleteAlternateContact` | REST JSON | 3 |
+| [Account Management](account.md) | `/getContactInformation`, `/putContactInformation`, `/getAlternateContact`, `/putAlternateContact`, `/deleteAlternateContact`, `/listRegions` | REST JSON | 11 |
 | [AMP](amp.md) | `/scrapers`, `/scrapers/{scraperId}`, `/scraperconfiguration`, `/workspaces`, `/tags/{resourceArn}` | REST JSON | 22 |
 | [IAM Access Analyzer](access-analyzer.md) | `/analyzer`, `/analyzer/{analyzerName}`, `/policy/*`, `/findingv2`, `/tags/{resourceArn}` | REST JSON | 26 |
 | [ElastiCache](elasticache.md) | `POST /` with `Action=` param + TCP proxy | Query + RESP | 8 |
