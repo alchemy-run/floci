@@ -53,6 +53,26 @@ public class AppRegistryController {
     }
 
     @POST
+    @Path("/sync/{resourceType}/{resource: .+}")
+    @Consumes(MediaType.WILDCARD)
+    public Response syncResource(
+            @Context HttpHeaders headers,
+            @PathParam("resourceType") String resourceType,
+            @PathParam("resource") String resource) {
+        AppRegistryService.SyncResourceResult result = service.syncResource(
+                regionResolver.resolveRegion(headers), resourceType, resource);
+        ObjectNode response = objectMapper.createObjectNode();
+        if (result.applicationArn() != null) {
+            response.put("applicationArn", result.applicationArn());
+        }
+        if (result.resourceArn() != null) {
+            response.put("resourceArn", result.resourceArn());
+        }
+        response.put("actionTaken", result.actionTaken());
+        return Response.ok(response).build();
+    }
+
+    @POST
     @Path("/applications")
     public Response createApplication(@Context HttpHeaders headers, String body) {
         Application application = service.createApplication(regionResolver.resolveRegion(headers), parse(body));

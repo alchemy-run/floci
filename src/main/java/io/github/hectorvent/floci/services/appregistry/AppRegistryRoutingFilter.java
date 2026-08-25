@@ -40,7 +40,8 @@ public class AppRegistryRoutingFilter implements ContainerRequestFilter {
         }
         boolean applications = "/applications".equals(path) || path.startsWith("/applications/");
         boolean attributeGroups = "/attribute-groups".equals(path) || path.startsWith("/attribute-groups/");
-        if (!applications && !attributeGroups) {
+        boolean sync = "/sync".equals(path) || path.startsWith("/sync/");
+        if (!applications && !attributeGroups && !sync) {
             return;
         }
         URI rewritten = UriBuilder.fromUri(original)

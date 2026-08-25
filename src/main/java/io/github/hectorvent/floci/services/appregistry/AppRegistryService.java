@@ -379,6 +379,38 @@ public class AppRegistryService implements TagHandler {
         return page(items, parseMaxResults(maxResultsValue), nextToken);
     }
 
+    public SyncResourceResult syncResource(String region, String resourceType, String resource) {
+        String type = requireResourceType(resourceType);
+        String specifier = decode(resource);
+        if (specifier == null || specifier.isBlank()) {
+            throw validation("resource is required.");
+        }
+        if ("CFN_STACK".equals(type)) {
+            Stack stack = requireCloudFormationStack(region, specifier);
+            for (Application application : applications.scan(key -> key.startsWith(regionPrefix(region)))) {
+                AssociatedResource byName = findAssociatedResource(application, type, stack.getStackName());
+                AssociatedResource link = byName != null
+                        ? byName
+                        : findAssociatedResource(application, type, stack.getStackId());
+                if (link != null) {
+                    return new SyncResourceResult(application.getArn(), link.getArn(), "START_SYNC");
+                }
+            }
+            return new SyncResourceResult(null, stack.getStackId(), "NO_ACTION");
+        }
+        for (Application application : applications.scan(key -> key.startsWith(regionPrefix(region)))) {
+            AssociatedResource link = findAssociatedResource(application, type, specifier);
+            if (link != null) {
+                return new SyncResourceResult(application.getArn(), link.getArn(), "START_SYNC");
+            }
+        }
+        return new SyncResourceResult(
+                null,
+                "arn:aws:resource-groups:" + region + ":" + regionResolver.getAccountId()
+                        + ":tagValue/" + specifier,
+                "NO_ACTION");
+    }
+
     @Override
     public String serviceKey() {
         return ARN_SERVICE;
@@ -802,5 +834,8 @@ public class AppRegistryService implements TagHandler {
         public AssociateResourceResult {
             options = options == null ? List.of() : List.copyOf(options);
         }
+    }
+
+    public record SyncResourceResult(String applicationArn, String resourceArn, String actionTaken) {
     }
 }
