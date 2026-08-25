@@ -28,6 +28,7 @@ import io.github.hectorvent.floci.services.eks.EksController;
 import io.github.hectorvent.floci.services.mwaa.MwaaController;
 import io.github.hectorvent.floci.services.iot.IotController;
 import io.github.hectorvent.floci.services.iot.IotDataController;
+import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseController;
 import io.github.hectorvent.floci.services.ivs.IvsController;
 import io.github.hectorvent.floci.services.ivs.IvsRecordingConfigurationController;
 import io.github.hectorvent.floci.services.ivschat.IvsChatController;
@@ -672,6 +673,11 @@ public class ResolvedServiceCatalog {
                         "iot", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("iotdata"), Set.of(), Set.of(IotDataController.class)),
+                descriptor("iotfleetwise", "iotfleetwise", config.services().iotfleetwise().enabled(), true,
+                        "iotfleetwise", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
+                        Set.of("IoTAutobahnControlPlane."), Set.of("iotfleetwise"), Set.of(),
+                        Set.of(IotFleetWiseController.class)),
                 descriptor("rum", "rum", config.services().rum().enabled(), true,
                         "rum", storageMode(config.storage().services().rum().mode(), config.storage().mode()),
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

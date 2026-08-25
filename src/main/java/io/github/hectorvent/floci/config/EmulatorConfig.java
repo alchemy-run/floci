@@ -962,6 +962,7 @@ public interface EmulatorConfig {
         IvsChatServiceConfig ivschat();
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
+        IotFleetWiseServiceConfig iotfleetwise();
         RumServiceConfig rum();
         InternetMonitorServiceConfig internetmonitor();
         GeoMapsServiceConfig geoMaps();
@@ -1010,6 +1011,11 @@ public interface EmulatorConfig {
     }
 
     interface IotDataServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IotFleetWiseServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

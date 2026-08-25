@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.apprunner.AppRunnerJsonHandler;
 import io.github.hectorvent.floci.services.b2bi.B2biJsonHandler;
 import io.github.hectorvent.floci.services.codeconnections.CodeConnectionsJsonHandler;
 import io.github.hectorvent.floci.services.healthlake.HealthLakeJsonHandler;
+import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseJsonHandler;
 import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
@@ -53,6 +54,7 @@ public class AwsJsonController {
     private final B2biJsonHandler b2biJsonHandler;
     private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
     private final HealthLakeJsonHandler healthLakeJsonHandler;
+    private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -66,7 +68,8 @@ public class AwsJsonController {
                              AppRunnerJsonHandler appRunnerJsonHandler,
                              B2biJsonHandler b2biJsonHandler,
                              CodeConnectionsJsonHandler codeConnectionsJsonHandler,
-                             HealthLakeJsonHandler healthLakeJsonHandler) {
+                             HealthLakeJsonHandler healthLakeJsonHandler,
+                             IotFleetWiseJsonHandler iotFleetWiseJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -82,6 +85,7 @@ public class AwsJsonController {
         this.b2biJsonHandler = b2biJsonHandler;
         this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
         this.healthLakeJsonHandler = healthLakeJsonHandler;
+        this.iotFleetWiseJsonHandler = iotFleetWiseJsonHandler;
     }
 
     @POST
@@ -132,6 +136,7 @@ public class AwsJsonController {
                 case "b2bi" -> b2biJsonHandler.handle(action, request, region);
                 case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
                 case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
+                case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

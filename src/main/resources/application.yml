@@ -649,6 +649,8 @@ floci:
         port: 1883
     iotdata:
       enabled: true
+    iotfleetwise:
+      enabled: true
     rum:
       enabled: true
     internetmonitor:
