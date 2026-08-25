@@ -115,6 +115,17 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
     }
 
+    /**
+     * AWS curated CodeBuild images are not public Docker Hub images. Map them
+     * to a locally available busybox so NO_SOURCE builds can run.
+     */
+    static String resolveRuntimeImage(String image) {
+        if (image == null || image.isBlank() || image.startsWith("aws/codebuild/")) {
+            return "busybox:stable";
+        }
+        return image;
+    }
+
     public void startBuild(String region, Build build, Project project, String buildspecOverride) {
         AtomicBoolean stopFlag = new AtomicBoolean(false);
         stopFlags.put(build.getId(), stopFlag);
@@ -193,9 +204,10 @@ public class CodeBuildRunner implements ContainerTeardown {
             String logGroup = "/aws/codebuild/" + project.getName();
             String logStream = logStreamer.generateLogStreamName(buildId.replace(":", "/"));
 
-            String image = build.getEnvironment() != null && build.getEnvironment().getImage() != null
-                    ? build.getEnvironment().getImage()
-                    : project.getEnvironment().getImage();
+            String image = resolveRuntimeImage(
+                    build.getEnvironment() != null && build.getEnvironment().getImage() != null
+                            ? build.getEnvironment().getImage()
+                            : project.getEnvironment().getImage());
 
             boolean privileged = (project.getEnvironment() != null
                     && Boolean.TRUE.equals(project.getEnvironment().getPrivilegedMode()))
@@ -337,12 +349,18 @@ public class CodeBuildRunner implements ContainerTeardown {
             build.setCurrentPhase("COMPLETED");
             completePhase(build, "COMPLETED", buildFailed ? "FAILED" : "SUCCEEDED");
 
+            if ("STOPPED".equals(build.getBuildStatus()) || "STOPPING".equals(build.getBuildStatus())) {
+                return;
+            }
             build.setEndTime(System.currentTimeMillis() / 1000.0);
             build.setBuildComplete(true);
             build.setBuildStatus(buildFailed ? "FAILED" : "SUCCEEDED");
 
         } catch (Exception e) {
             LOG.error("Unexpected error in build " + build.getId(), e);
+            if ("STOPPED".equals(build.getBuildStatus()) || "STOPPING".equals(build.getBuildStatus())) {
+                return;
+            }
             build.setEndTime(System.currentTimeMillis() / 1000.0);
             build.setBuildComplete(true);
             build.setBuildStatus("FAULT");

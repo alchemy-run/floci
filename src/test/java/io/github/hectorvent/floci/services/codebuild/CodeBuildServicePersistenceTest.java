@@ -86,6 +86,21 @@ class CodeBuildServicePersistenceTest {
     }
 
     @Test
+    void resourcePolicySurvivesRestart() {
+        SharedStorageFactory storage = new SharedStorageFactory();
+        CodeBuildService first = serviceWithStorage(storage);
+        Project project = first.createProject(REGION, ACCOUNT, "policy-proj", null,
+                source("NO_SOURCE"), null, null, artifacts("NO_ARTIFACTS"), null,
+                new ProjectEnvironment(), "arn:aws:iam::" + ACCOUNT + ":role/cb",
+                null, null, null, null, null, null, null);
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
+        first.putResourcePolicy(REGION, project.getArn(), policy);
+
+        CodeBuildService reloaded = serviceWithStorage(storage);
+        assertEquals(policy, reloaded.getResourcePolicy(REGION, project.getArn()));
+    }
+
+    @Test
     void startAndRetryBuildResponsesUseAcceptedBuildSnapshot() {
         CodeBuildRunner runner = mock(CodeBuildRunner.class);
         doAnswer(invocation -> {

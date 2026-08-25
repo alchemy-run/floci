@@ -4,11 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.codebuild.model.Build;
+import io.github.hectorvent.floci.services.codebuild.model.BuildBatch;
+import io.github.hectorvent.floci.services.codebuild.model.CommandExecution;
 import io.github.hectorvent.floci.services.codebuild.model.Project;
 import io.github.hectorvent.floci.services.codebuild.model.ProjectArtifacts;
 import io.github.hectorvent.floci.services.codebuild.model.ProjectEnvironment;
 import io.github.hectorvent.floci.services.codebuild.model.ProjectSource;
+import io.github.hectorvent.floci.services.codebuild.model.Report;
 import io.github.hectorvent.floci.services.codebuild.model.ReportGroup;
+import io.github.hectorvent.floci.services.codebuild.model.Sandbox;
 import io.github.hectorvent.floci.services.codebuild.model.SourceCredential;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -53,6 +57,32 @@ public class CodeBuildJsonHandler {
             case "ListBuildsForProject" -> listBuildsForProject(request, region);
             case "StopBuild" -> stopBuild(request, region);
             case "RetryBuild" -> retryBuild(request, region, account);
+            case "BatchDeleteBuilds" -> batchDeleteBuilds(request, region);
+            case "InvalidateProjectCache" -> invalidateProjectCache(request, region);
+            case "StartBuildBatch" -> startBuildBatch(request, region, account);
+            case "StopBuildBatch" -> stopBuildBatch(request, region);
+            case "RetryBuildBatch" -> retryBuildBatch(request, region, account);
+            case "BatchGetBuildBatches" -> batchGetBuildBatches(request, region);
+            case "ListBuildBatches" -> listBuildBatches(region);
+            case "ListBuildBatchesForProject" -> listBuildBatchesForProject(request, region);
+            case "DeleteBuildBatch" -> deleteBuildBatch(request, region);
+            case "StartSandbox" -> startSandbox(request, region, account);
+            case "StopSandbox" -> stopSandbox(request, region);
+            case "BatchGetSandboxes" -> batchGetSandboxes(request, region);
+            case "ListSandboxes" -> listSandboxes(region);
+            case "ListSandboxesForProject" -> listSandboxesForProject(request, region);
+            case "StartCommandExecution" -> startCommandExecution(request, region);
+            case "BatchGetCommandExecutions" -> batchGetCommandExecutions(request, region);
+            case "ListCommandExecutionsForSandbox" -> listCommandExecutionsForSandbox(request, region);
+            case "ListReportsForReportGroup" -> listReportsForReportGroup(request, region);
+            case "BatchGetReports" -> batchGetReports(request, region);
+            case "DescribeTestCases" -> describeTestCases(request, region);
+            case "DescribeCodeCoverages" -> describeCodeCoverages(request, region);
+            case "GetReportGroupTrend" -> getReportGroupTrend(request, region);
+            case "DeleteReport" -> deleteReport(request, region);
+            case "GetResourcePolicy" -> getResourcePolicy(request, region);
+            case "PutResourcePolicy" -> putResourcePolicy(request, region);
+            case "DeleteResourcePolicy" -> deleteResourcePolicy(request, region);
             default -> throw new AwsException("InvalidAction", "Action " + action + " is not supported", 400);
         };
     }
@@ -80,6 +110,7 @@ public class CodeBuildJsonHandler {
                 artifacts, secondaryArtifacts, environment,
                 serviceRole, timeout, queuedTimeout, encryptionKey,
                 tags, logsConfig, vpcConfig, concurrentBuildLimit);
+        applyOptionalProjectFields(req, region, name);
 
         return Response.ok(Map.of("project", project)).build();
     }
@@ -107,6 +138,7 @@ public class CodeBuildJsonHandler {
                 artifacts, secondaryArtifacts, environment,
                 serviceRole, timeout, queuedTimeout, encryptionKey,
                 tags, logsConfig, vpcConfig, concurrentBuildLimit);
+        applyOptionalProjectFields(req, region, name);
 
         return Response.ok(Map.of("project", project)).build();
     }
@@ -256,15 +288,197 @@ public class CodeBuildJsonHandler {
 
     private Response stopBuild(JsonNode req, String region) {
         String id = req.path("id").asText(null);
-        service.stopBuild(region, id);
-        Build build = service.getBuild(region, id);
+        Build build = service.stopBuild(region, id);
         return Response.ok(Map.of("build", build)).build();
+    }
+
+    private Response batchDeleteBuilds(JsonNode req, String region) {
+        List<String> ids = stringList(req, "ids");
+        return Response.ok(service.batchDeleteBuilds(region, ids)).build();
+    }
+
+    private Response invalidateProjectCache(JsonNode req, String region) {
+        service.invalidateProjectCache(region, req.path("projectName").asText(null));
+        return Response.ok(Map.of()).build();
+    }
+
+    private Response startBuildBatch(JsonNode req, String region, String account) {
+        BuildBatch batch = service.startBuildBatch(region, account, req.path("projectName").asText(null));
+        return Response.ok(Map.of("buildBatch", batch)).build();
+    }
+
+    private Response stopBuildBatch(JsonNode req, String region) {
+        BuildBatch batch = service.stopBuildBatch(region, req.path("id").asText(null));
+        return Response.ok(Map.of("buildBatch", batch)).build();
+    }
+
+    private Response retryBuildBatch(JsonNode req, String region, String account) {
+        BuildBatch batch = service.retryBuildBatch(region, account, req.path("id").asText(null));
+        return Response.ok(Map.of("buildBatch", batch)).build();
+    }
+
+    private Response batchGetBuildBatches(JsonNode req, String region) {
+        List<String> ids = stringList(req, "ids");
+        List<BuildBatch> found = service.batchGetBuildBatches(region, ids);
+        List<String> foundIds = found.stream().map(BuildBatch::getId).toList();
+        List<String> notFound = ids.stream().filter(id -> !foundIds.contains(id)).toList();
+        Map<String, Object> body = new HashMap<>();
+        body.put("buildBatches", found);
+        body.put("buildBatchesNotFound", notFound);
+        return Response.ok(body).build();
+    }
+
+    private Response listBuildBatches(String region) {
+        return Response.ok(Map.of("ids", service.listBuildBatches(region))).build();
+    }
+
+    private Response listBuildBatchesForProject(JsonNode req, String region) {
+        String projectName = req.path("projectName").asText(null);
+        return Response.ok(Map.of("ids", service.listBuildBatchesForProject(region, projectName))).build();
+    }
+
+    private Response deleteBuildBatch(JsonNode req, String region) {
+        return Response.ok(service.deleteBuildBatch(region, req.path("id").asText(null))).build();
+    }
+
+    private Response startSandbox(JsonNode req, String region, String account) {
+        Sandbox sandbox = service.startSandbox(region, account, req.path("projectName").asText(null));
+        return Response.ok(Map.of("sandbox", sandbox)).build();
+    }
+
+    private Response stopSandbox(JsonNode req, String region) {
+        Sandbox sandbox = service.stopSandbox(region, req.path("id").asText(null));
+        return Response.ok(Map.of("sandbox", sandbox)).build();
+    }
+
+    private Response batchGetSandboxes(JsonNode req, String region) {
+        List<String> ids = stringList(req, "ids");
+        List<Sandbox> found = service.batchGetSandboxes(region, ids);
+        List<String> foundIds = found.stream().map(Sandbox::getId).toList();
+        List<String> notFound = ids.stream().filter(id -> !foundIds.contains(id)).toList();
+        Map<String, Object> body = new HashMap<>();
+        body.put("sandboxes", found);
+        body.put("sandboxesNotFound", notFound);
+        return Response.ok(body).build();
+    }
+
+    private Response listSandboxes(String region) {
+        return Response.ok(Map.of("ids", service.listSandboxes(region))).build();
+    }
+
+    private Response listSandboxesForProject(JsonNode req, String region) {
+        String projectName = req.path("projectName").asText(null);
+        return Response.ok(Map.of("ids", service.listSandboxesForProject(region, projectName))).build();
+    }
+
+    private Response startCommandExecution(JsonNode req, String region) {
+        CommandExecution execution = service.startCommandExecution(
+                region,
+                req.path("sandboxId").asText(null),
+                req.path("command").asText(null),
+                req.has("type") ? req.path("type").asText(null) : null);
+        return Response.ok(Map.of("commandExecution", execution)).build();
+    }
+
+    private Response batchGetCommandExecutions(JsonNode req, String region) {
+        String sandboxId = req.path("sandboxId").asText(null);
+        List<String> ids = stringList(req, "commandExecutionIds");
+        List<CommandExecution> found = service.batchGetCommandExecutions(region, sandboxId, ids);
+        List<String> foundIds = found.stream().map(CommandExecution::getId).toList();
+        List<String> notFound = ids.stream().filter(id -> !foundIds.contains(id)).toList();
+        Map<String, Object> body = new HashMap<>();
+        body.put("commandExecutions", found);
+        body.put("commandExecutionsNotFound", notFound);
+        return Response.ok(body).build();
+    }
+
+    private Response listCommandExecutionsForSandbox(JsonNode req, String region) {
+        String sandboxId = req.path("sandboxId").asText(null);
+        return Response.ok(Map.of(
+                "commandExecutions", service.listCommandExecutionsForSandbox(region, sandboxId))).build();
+    }
+
+    private Response listReportsForReportGroup(JsonNode req, String region) {
+        String arn = req.path("reportGroupArn").asText(null);
+        return Response.ok(Map.of("reports", service.listReportsForReportGroup(region, arn))).build();
+    }
+
+    private Response batchGetReports(JsonNode req, String region) {
+        List<String> arns = stringList(req, "reportArns");
+        List<Report> found = service.batchGetReports(region, arns);
+        List<String> foundArns = found.stream().map(Report::getArn).toList();
+        List<String> notFound = arns.stream().filter(a -> !foundArns.contains(a)).toList();
+        Map<String, Object> body = new HashMap<>();
+        body.put("reports", found);
+        body.put("reportsNotFound", notFound);
+        return Response.ok(body).build();
+    }
+
+    private Response describeTestCases(JsonNode req, String region) {
+        service.describeTestCases(region, req.path("reportArn").asText(null));
+        return Response.ok(Map.of("testCases", List.of())).build();
+    }
+
+    private Response describeCodeCoverages(JsonNode req, String region) {
+        service.describeCodeCoverages(region, req.path("reportArn").asText(null));
+        return Response.ok(Map.of("codeCoverages", List.of())).build();
+    }
+
+    private Response getReportGroupTrend(JsonNode req, String region) {
+        return Response.ok(service.getReportGroupTrend(region,
+                req.path("reportGroupArn").asText(null),
+                req.path("trendField").asText(null))).build();
+    }
+
+    private Response deleteReport(JsonNode req, String region) {
+        service.deleteReport(region, req.path("arn").asText(null));
+        return Response.ok(Map.of()).build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyOptionalProjectFields(JsonNode req, String region, String name) throws Exception {
+        Map<String, Object> cache = req.has("cache") && !req.get("cache").isNull()
+                ? mapper.treeToValue(req.get("cache"), Map.class) : null;
+        Map<String, Object> buildBatchConfig = req.has("buildBatchConfig") && !req.get("buildBatchConfig").isNull()
+                ? mapper.treeToValue(req.get("buildBatchConfig"), Map.class) : null;
+        if (cache != null || buildBatchConfig != null) {
+            service.applyProjectOptionalFields(region, name, cache, buildBatchConfig);
+        }
+    }
+
+    private List<String> stringList(JsonNode req, String field) {
+        List<String> values = new ArrayList<>();
+        if (req.has(field) && req.get(field).isArray()) {
+            req.get(field).forEach(n -> values.add(n.asText()));
+        }
+        return values;
     }
 
     private Response retryBuild(JsonNode req, String region, String account) {
         String id = req.path("id").asText(null);
         Build build = service.retryBuild(region, account, id);
         return Response.ok(Map.of("build", build)).build();
+    }
+
+    private Response getResourcePolicy(JsonNode req, String region) {
+        String policy = service.getResourcePolicy(region, req.path("resourceArn").asText(null));
+        return Response.ok(Map.of("policy", policy)).build();
+    }
+
+    private Response putResourcePolicy(JsonNode req, String region) {
+        String resourceArn = req.path("resourceArn").asText(null);
+        JsonNode policyNode = req.get("policy");
+        if (policyNode == null || policyNode.isNull() || policyNode.isMissingNode()) {
+            throw new AwsException("InvalidInputException", "policy is required", 400);
+        }
+        String policy = policyNode.isTextual() ? policyNode.asText() : policyNode.toString();
+        String arn = service.putResourcePolicy(region, resourceArn, policy);
+        return Response.ok(Map.of("resourceArn", arn)).build();
+    }
+
+    private Response deleteResourcePolicy(JsonNode req, String region) {
+        service.deleteResourcePolicy(region, req.path("resourceArn").asText(null));
+        return Response.ok(Map.of()).build();
     }
 
     private <T> List<T> parseList(JsonNode req, String field, Class<T> type) throws Exception {
