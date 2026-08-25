@@ -364,7 +364,11 @@ public class GlacierService implements Resettable {
         for (String event : vault.getNotificationEvents()) {
             events.add(event);
         }
-        return config;
+        // Distilled restJson1 Object.assigns the body onto the output struct, so
+        // keep AWS's payload fields and also fill the HttpPayload member name.
+        ObjectNode response = config.deepCopy();
+        response.set("vaultNotificationConfig", config);
+        return response;
     }
 
     public synchronized void setVaultNotifications(String region, String vaultName, JsonNode body) {
@@ -401,7 +405,9 @@ public class GlacierService implements Resettable {
         }
         ObjectNode policy = objectMapper.createObjectNode();
         policy.put("Policy", vault.getAccessPolicy());
-        return policy;
+        ObjectNode response = policy.deepCopy();
+        response.set("policy", policy);
+        return response;
     }
 
     public synchronized void setVaultAccessPolicy(String region, String vaultName, JsonNode body) {
