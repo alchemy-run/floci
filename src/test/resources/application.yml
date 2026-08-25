@@ -63,6 +63,8 @@ floci:
         flush-interval-ms: 60000
       rum:
         flush-interval-ms: 60000
+      account:
+        flush-interval-ms: 60000
 
   auth:
     validate-signatures: false
@@ -298,4 +300,6 @@ floci:
     iotdata:
       enabled: true
     rum:
+      enabled: true
+    account:
       enabled: true
