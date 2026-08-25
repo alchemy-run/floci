@@ -30,6 +30,7 @@ import io.github.hectorvent.floci.services.iot.IotDataController;
 import io.github.hectorvent.floci.services.ivs.IvsController;
 import io.github.hectorvent.floci.services.ivs.IvsRecordingConfigurationController;
 import io.github.hectorvent.floci.services.ivschat.IvsChatController;
+import io.github.hectorvent.floci.services.ivsrealtime.IvsRealtimeController;
 import io.github.hectorvent.floci.services.pipes.PipesController;
 import io.github.hectorvent.floci.services.lambda.LambdaController;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
@@ -649,8 +650,9 @@ public class ResolvedServiceCatalog {
                         "ivs", storageMode(config.storage().services().ivs().mode(), config.storage().mode()),
                         config.storage().services().ivs().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("ivs"), Set.of(), Set.of(IvsController.class,
-                                IvsRecordingConfigurationController.class)),
+                        Set.of(), Set.of("ivs", "ivsrealtime"), Set.of(), Set.of(IvsController.class,
+                                IvsRecordingConfigurationController.class,
+                                IvsRealtimeController.class)),
                 descriptor("ivschat", "ivschat", config.services().ivschat().enabled(), true,
                         "ivschat", storageMode(config.storage().services().ivschat().mode(), config.storage().mode()),
                         config.storage().services().ivschat().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

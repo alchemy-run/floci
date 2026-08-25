@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.ivs.model.Channel;
 import io.github.hectorvent.floci.services.ivs.model.PlaybackKeyPair;
 import io.github.hectorvent.floci.services.ivs.model.PlaybackRestrictionPolicy;
 import io.github.hectorvent.floci.services.ivs.model.StreamKey;
+import io.github.hectorvent.floci.services.ivsrealtime.IvsRealtimeService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -61,6 +62,9 @@ public class IvsService implements TagHandler {
 
     @Inject
     IvsRecordingConfigurationService recordingConfigurations;
+
+    @Inject
+    IvsRealtimeService stages;
 
     @Inject
     public IvsService(StorageFactory storageFactory, RegionResolver regionResolver) {
@@ -509,6 +513,9 @@ public class IvsService implements TagHandler {
             PlaybackRestrictionPolicy policy = requirePolicy(region, arn);
             return policy.getTags() == null ? Map.of() : Map.copyOf(policy.getTags());
         }
+        if (isStageArn(arn)) {
+            return stages.listTags(region, arn);
+        }
         Channel channel = requireChannel(region, arn);
         return channel.getTags() == null ? Map.of() : Map.copyOf(channel.getTags());
     }
@@ -555,6 +562,10 @@ public class IvsService implements TagHandler {
             policyStore.put(storageKey(resourceRegion(policy.getArn(), region), policy.getId()), policy);
             return;
         }
+        if (isStageArn(arn)) {
+            stages.tagResource(region, arn, tags);
+            return;
+        }
         Channel channel = requireChannel(region, arn);
         Map<String, String> current = channel.getTags() == null
                 ? new LinkedHashMap<>()
@@ -594,6 +605,10 @@ public class IvsService implements TagHandler {
                 tagKeys.forEach(policy.getTags()::remove);
             }
             policyStore.put(storageKey(resourceRegion(policy.getArn(), region), policy.getId()), policy);
+            return;
+        }
+        if (isStageArn(arn)) {
+            stages.untagResource(region, arn, tagKeys);
             return;
         }
         Channel channel = requireChannel(region, arn);
@@ -659,6 +674,10 @@ public class IvsService implements TagHandler {
 
     private boolean isRecordingArn(String arn) {
         return recordingConfigurations != null && recordingConfigurations.ownsArn(arn);
+    }
+
+    private boolean isStageArn(String arn) {
+        return stages != null && stages.ownsArn(arn);
     }
 
     private static boolean isStreamKeyArn(String arn) {
