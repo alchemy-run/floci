@@ -21,10 +21,15 @@ Set `FLOCI_SERVICES_MEMORYDB_MOCK=true` to manage clusters as control-plane-only
 | `DeleteCluster` | Stop and remove a cluster |
 | `CreateUser` | - |
 | `DescribeUsers` | - |
+| `UpdateUser` | Update a user's access string and/or authentication mode |
 | `DeleteUser` | - |
 | `CreateACL` | - |
 | `DescribeACLs` | - |
 | `DeleteACL` | - |
+| `CreateSubnetGroup` | Create a VPC subnet group for cluster nodes |
+| `DescribeSubnetGroups` | List subnet groups or describe one by name |
+| `UpdateSubnetGroup` | Update subnet group description or subnet IDs |
+| `DeleteSubnetGroup` | Delete a subnet group that is not in use |
 | `ListTags` | List tags for a cluster |
 | `TagResource` | Add tags to a cluster |
 | `UntagResource` | Remove tags from a cluster |

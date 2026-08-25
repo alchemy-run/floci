@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
@@ -19,6 +21,10 @@ public class Cluster {
     private String engine;
     private String engineVersion;
     private String aclName;
+    private String subnetGroupName;
+    private List<String> securityGroupIds;
+    private int numReplicasPerShard;
+    private String parameterGroupName;
     private boolean tlsEnabled;
     private Endpoint clusterEndpoint;
     private String arn;
@@ -56,6 +62,31 @@ public class Cluster {
 
     public String getAclName() { return aclName; }
     public void setAclName(String aclName) { this.aclName = aclName; }
+
+    public String getSubnetGroupName() { return subnetGroupName; }
+    public void setSubnetGroupName(String subnetGroupName) { this.subnetGroupName = subnetGroupName; }
+
+    public List<String> getSecurityGroupIds() {
+        return securityGroupIds != null ? securityGroupIds : List.of();
+    }
+
+    public boolean hasSecurityGroupIds() {
+        return securityGroupIds != null;
+    }
+
+    public void setSecurityGroupIds(List<String> securityGroupIds) {
+        this.securityGroupIds = securityGroupIds != null ? new ArrayList<>(securityGroupIds) : null;
+    }
+
+    public int getNumReplicasPerShard() { return numReplicasPerShard; }
+    public void setNumReplicasPerShard(int numReplicasPerShard) {
+        this.numReplicasPerShard = numReplicasPerShard;
+    }
+
+    public String getParameterGroupName() { return parameterGroupName; }
+    public void setParameterGroupName(String parameterGroupName) {
+        this.parameterGroupName = parameterGroupName;
+    }
 
     public boolean isTlsEnabled() { return tlsEnabled; }
     public void setTlsEnabled(boolean tlsEnabled) { this.tlsEnabled = tlsEnabled; }

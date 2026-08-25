@@ -5,7 +5,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A MemoryDB user. Users authenticate either with one or more passwords or with IAM,
@@ -24,6 +26,7 @@ public class User {
     private String minimumEngineVersion;
     private String arn;
     private Instant createdAt;
+    private Map<String, String> tags = new LinkedHashMap<>();
 
     public User() {}
 
@@ -54,4 +57,9 @@ public class User {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Map<String, String> getTags() { return tags; }
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>();
+    }
 }
