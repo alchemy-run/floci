@@ -266,6 +266,7 @@ public interface EmulatorConfig {
         Ec2StorageConfig ec2();
         NeptuneStorageConfig neptune();
         BackupStorageConfig backup();
+        BackupSearchStorageConfig backupsearch();
         CloudFrontStorageConfig cloudfront();
         AppSyncStorageConfig appsync();
         BatchStorageConfig batch();
@@ -414,6 +415,13 @@ public interface EmulatorConfig {
     }
 
     interface BackupStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface BackupSearchStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -731,6 +739,7 @@ public interface EmulatorConfig {
         ApplicationAutoScalingServiceConfig applicationautoscaling();
         ElasticBeanstalkServiceConfig elasticbeanstalk();
         BackupServiceConfig backup();
+        BackupSearchServiceConfig backupsearch();
         NeptuneServiceConfig neptune();
         DocDbServiceConfig docdb();
         Route53ServiceConfig route53();
@@ -906,6 +915,11 @@ public interface EmulatorConfig {
 
         @WithDefault("3")
         int jobCompletionDelaySeconds();
+    }
+
+    interface BackupSearchServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface Route53ServiceConfig {

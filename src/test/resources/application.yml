@@ -73,6 +73,8 @@ floci:
         flush-interval-ms: 60000
       accessanalyzer:
         flush-interval-ms: 60000
+      backupsearch:
+        flush-interval-ms: 60000
       auditmanager:
         flush-interval-ms: 60000
       amplify:
@@ -308,6 +310,8 @@ floci:
     backup:
       enabled: true
       job-completion-delay-seconds: 1
+    backupsearch:
+      enabled: true
     route53:
       enabled: true
     textract:

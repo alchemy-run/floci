@@ -151,6 +151,8 @@ floci:
         flush-interval-ms: 5000
       accessanalyzer:
         flush-interval-ms: 5000
+      backupsearch:
+        flush-interval-ms: 5000
       auditmanager:
         flush-interval-ms: 5000
       amplify:
@@ -486,6 +488,8 @@ floci:
     backup:
       enabled: true
       job-completion-delay-seconds: 3
+    backupsearch:
+      enabled: true
     route53:
       enabled: true
     transfer:
