@@ -617,8 +617,6 @@ floci:
       enabled: true
     rum:
       enabled: true
-    geo-routes:
-      enabled: true
     fis:
       enabled: true
     amp:

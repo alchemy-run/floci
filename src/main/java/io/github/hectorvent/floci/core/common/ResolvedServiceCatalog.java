@@ -9,7 +9,6 @@ import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
-import io.github.hectorvent.floci.services.glacier.GlacierController; // glacier restJson1
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
@@ -57,7 +56,6 @@ import io.github.hectorvent.floci.services.emrcontainers.EmrContainersController
 import io.github.hectorvent.floci.services.emrserverless.EmrServerlessController;
 import io.github.hectorvent.floci.services.entityresolution.EntityResolutionController;
 import io.github.hectorvent.floci.services.fis.FisController;
-import io.github.hectorvent.floci.services.georoutes.GeoRoutesController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -340,11 +338,6 @@ public class ResolvedServiceCatalog {
                         "fsx", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSSimbaAPIService_v20180301."), Set.of("fsx"), Set.of(), Set.of()),
-                descriptor("glacier", "glacier", true, true,
-                        "glacier", config.storage().mode(),
-                        5000L, null, ServiceProtocol.REST_JSON,
-                        protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("glacier"), Set.of(), Set.of(GlacierController.class)),
                 descriptor("appconfig", "appconfig", config.services().appconfig().enabled(), true,
                         "appconfig", storageMode(config.storage().services().appconfig().mode(), config.storage().mode()),
                         config.storage().services().appconfig().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -638,10 +631,6 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
-                descriptor("geo-routes", "georoutes", config.services().geoRoutes().enabled(), true,
-                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
-                        protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("geo-routes"), Set.of(), Set.of(GeoRoutesController.class)),
                 descriptor("fis", "fis", config.services().fis().enabled(), true,
                         "fis", storageMode(config.storage().services().fis().mode(), config.storage().mode()),
                         config.storage().services().fis().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

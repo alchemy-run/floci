@@ -897,7 +897,6 @@ public interface EmulatorConfig {
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
-        GeoRoutesServiceConfig geoRoutes();
         FisServiceConfig fis();
         AmpServiceConfig amp();
         AiOpsServiceConfig aiops();
@@ -944,11 +943,6 @@ public interface EmulatorConfig {
     }
 
     interface RumServiceConfig {
-        @WithDefault("true")
-        boolean enabled();
-    }
-
-    interface GeoRoutesServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
