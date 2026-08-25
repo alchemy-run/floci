@@ -268,7 +268,9 @@ public interface EmulatorConfig {
         BackupStorageConfig backup();
         BackupSearchStorageConfig backupsearch();
         DataBrewStorageConfig databrew();
+        DataExchangeStorageConfig dataexchange();
         DlmStorageConfig dlm();
+        DsqlStorageConfig dsql();
         CloudFrontStorageConfig cloudfront();
         AppSyncStorageConfig appsync();
         BatchStorageConfig batch();
@@ -437,7 +439,21 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface DataExchangeStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface DlmStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DsqlStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -702,6 +718,7 @@ public interface EmulatorConfig {
         S3ServiceConfig s3();
         DynamoDbServiceConfig dynamodb();
         DmsServiceConfig dms();
+        DataSyncServiceConfig datasync();
         SnsServiceConfig sns();
         LambdaServiceConfig lambda();
         ApiGatewayServiceConfig apigateway();
@@ -759,7 +776,9 @@ public interface EmulatorConfig {
         BackupServiceConfig backup();
         BackupSearchServiceConfig backupsearch();
         DataBrewServiceConfig databrew();
+        DataExchangeServiceConfig dataexchange();
         DlmServiceConfig dlm();
+        DsqlServiceConfig dsql();
         NeptuneServiceConfig neptune();
         DocDbServiceConfig docdb();
         Route53ServiceConfig route53();
@@ -947,9 +966,26 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface DataExchangeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface DlmServiceConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface DsqlServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, clusters are control-plane only — no Postgres container or IAM proxy. */
+        @WithDefault("false")
+        boolean mock();
+
+        @WithDefault("5432")
+        int proxyPort();
     }
 
     interface Route53ServiceConfig {
@@ -1085,6 +1121,11 @@ public interface EmulatorConfig {
     }
 
     interface DmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DataSyncServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -5,7 +5,9 @@ import io.github.hectorvent.floci.services.appconfig.AppConfigController;
 import io.github.hectorvent.floci.services.backup.BackupController;
 import io.github.hectorvent.floci.services.backupsearch.BackupSearchController;
 import io.github.hectorvent.floci.services.databrew.DataBrewController;
+import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
+import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.appconfig.AppConfigDataController;
 import io.github.hectorvent.floci.services.batch.BatchController;
 import io.github.hectorvent.floci.services.bedrockruntime.BedrockRuntimeController;
@@ -170,6 +172,10 @@ public class ResolvedServiceCatalog {
                         "dms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonDMSv20160101."), Set.of("dms"), Set.of(), Set.of()),
+                descriptor("datasync", "datasync", config.services().datasync().enabled(), true,
+                        "datasync", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("FmrsService."), Set.of("datasync"), Set.of(), Set.of()),
                 
                 descriptor("events", "eventbridge", config.services().eventbridge().enabled(), true,
                         "eventbridge", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
@@ -451,11 +457,22 @@ public class ResolvedServiceCatalog {
                         config.storage().services().databrew().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("databrew"), Set.of(), Set.of(DataBrewController.class)),
+                descriptor("dataexchange", "dataexchange", config.services().dataexchange().enabled(), true,
+                        "dataexchange", storageMode(config.storage().services().dataexchange().mode(),
+                                config.storage().mode()),
+                        config.storage().services().dataexchange().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("dataexchange"), Set.of(), Set.of(DataExchangeController.class)),
                 descriptor("dlm", "dlm", config.services().dlm().enabled(), true,
                         "dlm", storageMode(config.storage().services().dlm().mode(), config.storage().mode()),
                         config.storage().services().dlm().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("dlm"), Set.of(), Set.of(DlmController.class)),
+                descriptor("dsql", "dsql", config.services().dsql().enabled(), true,
+                        "dsql", storageMode(config.storage().services().dsql().mode(), config.storage().mode()),
+                        config.storage().services().dsql().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("dsql"), Set.of(), Set.of(DsqlController.class)),
                 descriptor("ec2messages", "ec2messages", config.services().ssm().enabled(), false,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

@@ -155,7 +155,11 @@ floci:
         flush-interval-ms: 5000
       databrew:
         flush-interval-ms: 5000
+      dataexchange:
+        flush-interval-ms: 5000
       dlm:
+        flush-interval-ms: 5000
+      dsql:
         flush-interval-ms: 5000
       auditmanager:
         flush-interval-ms: 5000
@@ -253,6 +257,8 @@ floci:
     dynamodb:
       enabled: true
     dms:
+      enabled: true
+    datasync:
       enabled: true
     sns:
       enabled: true
@@ -500,8 +506,14 @@ floci:
       enabled: true
     databrew:
       enabled: true
+    dataexchange:
+      enabled: true
     dlm:
       enabled: true
+    dsql:
+      enabled: true
+      mock: false
+      proxy-port: 5432
     route53:
       enabled: true
     transfer:
