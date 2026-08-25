@@ -150,6 +150,10 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AmazonRDSEnhancedMonitoringRole", "/service-role/",
                 "Provides permissions required for Amazon RDS Enhanced Monitoring."),
 
+        // DMS VPC management role — Alchemy ReplicationSubnetGroup attaches this ARN.
+        new ManagedPolicyDef("AmazonDMSVPCManagementRole", "/service-role/",
+                "Provides access to manage VPC, subnet, and security group settings for AWS DMS."),
+
         // Glue job/crawler execution role — Alchemy Job/Crawler/Bindings attach this ARN.
         new ManagedPolicyDef("AWSGlueServiceRole", "/service-role/",
                 "Policy for AWS Glue service role."),
