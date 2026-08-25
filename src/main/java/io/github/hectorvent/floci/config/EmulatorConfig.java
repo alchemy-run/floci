@@ -894,6 +894,7 @@ public interface EmulatorConfig {
         KinesisServiceConfig kinesis();
         FirehoseServiceConfig firehose();
         FmsServiceConfig fms();
+        LicenseManagerServiceConfig licenseManager();
         FraudDetectorServiceConfig frauddetector();
         KmsServiceConfig kms();
         CognitoServiceConfig cognito();
@@ -1729,6 +1730,11 @@ public interface EmulatorConfig {
     }
 
     interface FmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LicenseManagerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

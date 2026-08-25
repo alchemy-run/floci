@@ -410,6 +410,8 @@ floci:
       enabled: true
     fms:
       enabled: true
+    license-manager:
+      enabled: true
     frauddetector:
       enabled: true
     kms:
