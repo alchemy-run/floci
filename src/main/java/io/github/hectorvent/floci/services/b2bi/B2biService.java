@@ -604,11 +604,17 @@ public class B2biService {
                         out.getObjectSizeBytes() != null ? out.getObjectSizeBytes()
                                 : output == null ? 0 : output.getSize());
             }
+            // EventBridgeService.buildEventEnvelope casts Resources to ArrayNode;
+            // a List ClassCastException is swallowed and the envelope becomes "{}".
+            ArrayNode resources = mapper.createArrayNode();
+            if (transformer.getTransformerArn() != null) {
+                resources.add(transformer.getTransformerArn());
+            }
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("Source", "aws.b2bi");
             entry.put("DetailType", "Transformation Completed");
             entry.put("Detail", mapper.writeValueAsString(detail));
-            entry.put("Resources", List.of(transformer.getTransformerArn()));
+            entry.put("Resources", resources);
             eventBridgeService.putEvents(List.of(entry), region);
         } catch (Exception e) {
             LOG.warnv("Failed to publish B2BI Transformation Completed for {0}: {1}",
