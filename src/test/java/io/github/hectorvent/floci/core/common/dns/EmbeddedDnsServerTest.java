@@ -153,6 +153,20 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_openSearchHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("search-mydomain-a1b2c3.us-east-1.es.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("search-dp-songs-ffffff.us-west-2.aos.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertTrue(dns.resolveARecord("es.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("search-mydomain.es.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
     void resolveARecord_prefersEc2PrivateDnsAddressOverFlociWildcard() {
         assertEquals(
                 "172.16.128.9",

@@ -41,24 +41,34 @@ public class OpenSearchService {
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final OpenSearchDomainManager domainManager;
+    private final OpenSearchDataPlane dataPlane;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
 
     @Inject
     public OpenSearchService(StorageFactory storageFactory, EmulatorConfig config,
-                             RegionResolver regionResolver, OpenSearchDomainManager domainManager) {
+                             RegionResolver regionResolver, OpenSearchDomainManager domainManager,
+                             OpenSearchDataPlane dataPlane) {
         this.domainStore = storageFactory.create("opensearch", "opensearch-domains.json",
                 new TypeReference<Map<String, Domain>>() {});
         this.config = config;
         this.regionResolver = regionResolver;
         this.domainManager = domainManager;
+        this.dataPlane = dataPlane;
     }
 
     OpenSearchService(StorageBackend<String, Domain> domainStore, EmulatorConfig config,
                       RegionResolver regionResolver, OpenSearchDomainManager domainManager) {
+        this(domainStore, config, regionResolver, domainManager, new OpenSearchDataPlane());
+    }
+
+    OpenSearchService(StorageBackend<String, Domain> domainStore, EmulatorConfig config,
+                      RegionResolver regionResolver, OpenSearchDomainManager domainManager,
+                      OpenSearchDataPlane dataPlane) {
         this.domainStore = domainStore;
         this.config = config;
         this.regionResolver = regionResolver;
         this.domainManager = domainManager;
+        this.dataPlane = dataPlane;
     }
 
     @PostConstruct
@@ -121,9 +131,9 @@ public class OpenSearchService {
         domain.setEngineVersion(engineVersion != null ? engineVersion : DEFAULT_ENGINE_VERSION);
         domain.setProcessing(false);
         domain.setDeleted(false);
-        domain.setEndpoint("");
         domain.setCreatedAt(Instant.now());
         domain.setVolumeId(String.format("%06x", new SecureRandom().nextInt(0xFFFFFF)));
+        domain.setEndpoint(dataPlaneHost(domainName, domain.getVolumeId(), region));
 
         if (clusterConfig != null) {
             domain.setClusterConfig(clusterConfig);
@@ -149,16 +159,37 @@ public class OpenSearchService {
     }
 
     public Domain describeDomain(String domainName) {
+        if (domainName == null || domainName.isBlank()) {
+            throw new AwsException("ValidationException", "DomainName is required.", 400);
+        }
         return domainStore.get(domainName)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Domain not found: " + domainName, 409));
     }
 
+    /**
+     * Some OpenSearch operations report a missing domain as the generic
+     * {@code BaseException} ("Domain not found" / "No progress information found")
+     * rather than {@code ResourceNotFoundException}. Live AWS does the same.
+     */
+    public Domain requireDomainOrBase(String domainName, String message) {
+        if (domainName == null || domainName.isBlank()) {
+            throw new AwsException("ValidationException", "DomainName is required.", 400);
+        }
+        return domainStore.get(domainName)
+                .orElseThrow(() -> new AwsException("BaseException", message, 400));
+    }
+
+    /**
+     * AWS {@code DescribeDomains} is a batch lookup: unknown names are omitted
+     * from {@code DomainStatusList} rather than raising not-found.
+     */
     public List<Domain> describeDomains(List<String> domainNames) {
+        if (domainNames == null || domainNames.isEmpty()) {
+            return List.of();
+        }
         return domainNames.stream()
-                .map(name -> domainStore.get(name)
-                        .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                                "Domain not found: " + name, 409)))
+                .flatMap(name -> domainStore.get(name).stream())
                 .toList();
     }
 
@@ -221,9 +252,54 @@ public class OpenSearchService {
             domainManager.stopDomain(domain);
             domainManager.removeDomainStorage(domain);
         }
+        dataPlane.drop(domainName);
         domainStore.delete(domainName);
         LOG.infov("Deleted OpenSearch domain: {0}", domainName);
         return domain;
+    }
+
+    /**
+     * AWS-shaped public endpoint hostname Alchemy's data-plane bindings
+     * {@code fetch()} — no scheme, matching {@code DomainStatus.Endpoint}.
+     */
+    public static String dataPlaneHost(String domainName, String volumeId, String region) {
+        String resolvedRegion = region == null || region.isBlank() ? "us-east-1" : region;
+        String suffix = volumeId == null || volumeId.isBlank() ? "000000" : volumeId;
+        return "search-" + domainName + "-" + suffix + "." + resolvedRegion + ".es.amazonaws.com";
+    }
+
+    public Domain findByEndpointHost(String host) {
+        if (host == null || host.isBlank()) {
+            return null;
+        }
+        String hostname = stripEndpointHost(host);
+        for (Domain domain : allDomains()) {
+            if (hostname.equalsIgnoreCase(stripEndpointHost(domain.getEndpoint()))) {
+                return domain;
+            }
+        }
+        return null;
+    }
+
+    static String stripEndpointHost(String endpoint) {
+        if (endpoint == null) {
+            return "";
+        }
+        String value = endpoint.trim();
+        if (value.startsWith("https://")) {
+            value = value.substring("https://".length());
+        } else if (value.startsWith("http://")) {
+            value = value.substring("http://".length());
+        }
+        int slash = value.indexOf('/');
+        if (slash >= 0) {
+            value = value.substring(0, slash);
+        }
+        int colon = value.indexOf(':');
+        if (colon >= 0) {
+            value = value.substring(0, colon);
+        }
+        return value;
     }
 
     public void addTags(String arn, Map<String, String> tags) {

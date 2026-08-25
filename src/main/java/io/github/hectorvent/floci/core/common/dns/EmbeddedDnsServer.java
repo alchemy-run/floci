@@ -180,7 +180,7 @@ public class EmbeddedDnsServer {
      */
     static boolean isAwsDataPlaneHost(String name) {
         return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name)
-                || isAmpWorkspacesHost(name);
+                || isAmpWorkspacesHost(name) || isOpenSearchHost(name);
     }
 
     /**
@@ -235,6 +235,21 @@ public class EmbeddedDnsServer {
             return false;
         }
         return name.toLowerCase().matches("aps-workspaces(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * OpenSearch domain data-plane ({@code search-{name}-{id}.{region}.es.amazonaws.com}
+     * and the {@code .aos.} dualstack variant). Alchemy's DomainRead/Write
+     * bindings {@code fetch()} the advertised {@code Endpoint}; {@code AWS_ENDPOINT_URL}
+     * is not applied because the client overrides the host with that hostname.
+     */
+    static boolean isOpenSearchHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        String lower = name.toLowerCase();
+        return lower.matches("[a-z0-9-]+\\.[a-z0-9-]+\\.es\\.amazonaws\\.com")
+                || lower.matches("[a-z0-9-]+\\.[a-z0-9-]+\\.aos\\.amazonaws\\.com");
     }
 
     Optional<String> resolveEc2PrivateDnsName(String name) {

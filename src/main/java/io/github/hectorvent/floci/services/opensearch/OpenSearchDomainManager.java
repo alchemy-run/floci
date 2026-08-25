@@ -88,12 +88,10 @@ public class OpenSearchDomainManager {
 
         ContainerInfo info = lifecycleManager.createAndStart(spec);
         domain.setContainerId(info.containerId());
-
-        if (containerDetector.isRunningInContainer()) {
-            domain.setEndpoint("http://" + containerName + ":" + OPENSEARCH_PORT);
-        } else {
-            domain.setEndpoint("http://localhost:" + hostPort);
-        }
+        // Keep the AWS-shaped Endpoint hostname assigned at create so SigV4
+        // data-plane clients (Alchemy DomainRead/Write) hit the in-process
+        // REST API via OpenSearchRoutingFilter. The container remains
+        // reachable on the allocated host port for operators who want it.
 
         LOG.infov("OpenSearch container {0} started for domain {1} on port {2}",
                 info.containerId(), domain.getDomainName(), String.valueOf(hostPort));
