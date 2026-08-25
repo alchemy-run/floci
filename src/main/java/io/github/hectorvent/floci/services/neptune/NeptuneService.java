@@ -7,6 +7,8 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerHandle;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerManager;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneCluster;
@@ -15,6 +17,7 @@ import io.github.hectorvent.floci.services.neptune.model.NeptuneClusterSnapshot;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneDbType;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneInstance;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneParameterGroup;
+import io.github.hectorvent.floci.services.neptune.model.NeptuneSubnetGroup;
 import io.github.hectorvent.floci.services.neptune.proxy.NeptuneProxyManager;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -28,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,23 +47,35 @@ public class NeptuneService {
     private final StorageBackend<String, NeptuneClusterSnapshot> clusterSnapshots;
     private final StorageBackend<String, NeptuneClusterParameterGroup> clusterParameterGroups;
     private final StorageBackend<String, NeptuneParameterGroup> parameterGroups;
+    private final StorageBackend<String, NeptuneSubnetGroup> subnetGroups;
     private final Set<String> deletedParameterGroups = ConcurrentHashMap.newKeySet();
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final NeptuneContainerManager containerManager;
     private final NeptuneProxyManager proxyManager;
+    private final Ec2Service ec2Service;
     private final Set<Integer> usedPorts = ConcurrentHashMap.newKeySet();
+
+    public NeptuneService(EmulatorConfig config,
+                          RegionResolver regionResolver,
+                          NeptuneContainerManager containerManager,
+                          NeptuneProxyManager proxyManager,
+                          StorageFactory storageFactory) {
+        this(config, regionResolver, containerManager, proxyManager, storageFactory, null);
+    }
 
     @Inject
     public NeptuneService(EmulatorConfig config,
                           RegionResolver regionResolver,
                           NeptuneContainerManager containerManager,
                           NeptuneProxyManager proxyManager,
-                          StorageFactory storageFactory) {
+                          StorageFactory storageFactory,
+                          Ec2Service ec2Service) {
         this.config = config;
         this.regionResolver = regionResolver;
         this.containerManager = containerManager;
         this.proxyManager = proxyManager;
+        this.ec2Service = ec2Service;
         this.clusters = storageFactory.create("neptune", "neptune-clusters.json",
                 new TypeReference<Map<String, NeptuneCluster>>() {});
         this.instances = storageFactory.create("neptune", "neptune-instances.json",
@@ -70,6 +86,8 @@ public class NeptuneService {
                 new TypeReference<Map<String, NeptuneClusterParameterGroup>>() {});
         this.parameterGroups = storageFactory.create("neptune", "neptune-parameter-groups.json",
                 new TypeReference<Map<String, NeptuneParameterGroup>>() {});
+        this.subnetGroups = storageFactory.create("neptune", "neptune-subnet-groups.json",
+                new TypeReference<Map<String, NeptuneSubnetGroup>>() {});
     }
 
     // ── Clusters ──────────────────────────────────────────────────────────────
@@ -210,6 +228,13 @@ public class NeptuneService {
         return parameterGroups.get(name).isPresent() || deletedParameterGroups.contains(name);
     }
 
+    public boolean hasSubnetGroup(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        return subnetGroups.get(name).isPresent();
+    }
+
     /**
      * True when a Query-protocol request should be handled by Neptune rather than RDS:
      * a {@code neptune*} family, an existing cluster parameter group, or a tag ARN
@@ -248,7 +273,8 @@ public class NeptuneService {
             String type = resource.substring(0, sep);
             String id = resource.substring(sep + 1);
             return ("cluster-pg".equals(type) && hasClusterParameterGroup(id))
-                    || ("pg".equals(type) && hasParameterGroup(id));
+                    || ("pg".equals(type) && hasParameterGroup(id))
+                    || ("subgrp".equals(type) && hasSubnetGroup(id));
         } catch (IllegalArgumentException e) {
             return false;
         }
@@ -539,7 +565,78 @@ public class NeptuneService {
         return group;
     }
 
+    public NeptuneSubnetGroup createDbSubnetGroup(String name, String description, List<String> subnetIds,
+                                                  Map<String, String> tags) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("MissingParameter",
+                    "The request must contain the parameter DBSubnetGroupName.", 400);
+        }
+        if (subnetGroups.get(name).isPresent() || "default".equalsIgnoreCase(name)) {
+            throw new AwsException("DBSubnetGroupAlreadyExists",
+                    "DB subnet group " + name + " already exists.", 400);
+        }
+        if (subnetIds == null || subnetIds.isEmpty()) {
+            throw new AwsException("MissingParameter",
+                    "The request must contain the parameter SubnetIds.", 400);
+        }
+        NeptuneSubnetGroup group = buildSubnetGroup(name, description, subnetIds);
+        if (tags != null && !tags.isEmpty()) {
+            group.setTags(new LinkedHashMap<>(tags));
+        }
+        subnetGroups.put(name, group);
+        LOG.infov("Neptune DB subnet group {0} created", name);
+        return group;
+    }
+
+    public Collection<NeptuneSubnetGroup> listDbSubnetGroups(String filterName) {
+        if (filterName != null && !filterName.isBlank()) {
+            return List.of(getDbSubnetGroup(filterName));
+        }
+        return subnetGroups.scan(k -> true);
+    }
+
+    public NeptuneSubnetGroup getDbSubnetGroup(String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("MissingParameter",
+                    "The request must contain the parameter DBSubnetGroupName.", 400);
+        }
+        return subnetGroups.get(name).orElseThrow(() ->
+                new AwsException("DBSubnetGroupNotFoundFault",
+                        "DB subnet group " + name + " not found.", 404));
+    }
+
+    public NeptuneSubnetGroup modifyDbSubnetGroup(String name, String description, List<String> subnetIds) {
+        NeptuneSubnetGroup existing = getDbSubnetGroup(name);
+        if (subnetIds == null || subnetIds.isEmpty()) {
+            throw new AwsException("InvalidParameterValue",
+                    "SubnetIds must contain at least one subnet.", 400);
+        }
+        String resolvedDescription = (description != null && !description.isBlank())
+                ? description
+                : existing.getDescription();
+        NeptuneSubnetGroup group = buildSubnetGroup(name, resolvedDescription, subnetIds);
+        group.setTags(existing.getTags());
+        subnetGroups.put(name, group);
+        return group;
+    }
+
+    public void deleteDbSubnetGroup(String name) {
+        getDbSubnetGroup(name);
+        subnetGroups.delete(name);
+        LOG.infov("Neptune DB subnet group {0} deleted", name);
+    }
+
     public void addTagsToResource(String resourceName, Map<String, String> tags) {
+        NeptuneSubnetGroup subnetGroup = subnetGroupFromArn(resourceName);
+        if (subnetGroup != null) {
+            Map<String, String> updated = new LinkedHashMap<>(subnetGroup.getTags());
+            if (tags != null) {
+                updated.putAll(tags);
+            }
+            subnetGroup.setTags(updated);
+            subnetGroups.put(subnetGroup.getDbSubnetGroupName(), subnetGroup);
+            return;
+        }
         ArnTarget target = requireTagTarget(resourceName);
         if (target.instanceGroup() != null) {
             NeptuneParameterGroup group = target.instanceGroup();
@@ -561,6 +658,10 @@ public class NeptuneService {
     }
 
     public Map<String, String> listTagsForResource(String resourceName) {
+        NeptuneSubnetGroup subnetGroup = subnetGroupFromArn(resourceName);
+        if (subnetGroup != null) {
+            return new LinkedHashMap<>(subnetGroup.getTags());
+        }
         ArnTarget target = requireTagTarget(resourceName);
         if (target.instanceGroup() != null) {
             return new LinkedHashMap<>(target.instanceGroup().getTags());
@@ -569,6 +670,16 @@ public class NeptuneService {
     }
 
     public void removeTagsFromResource(String resourceName, Collection<String> tagKeys) {
+        NeptuneSubnetGroup subnetGroup = subnetGroupFromArn(resourceName);
+        if (subnetGroup != null) {
+            Map<String, String> updated = new LinkedHashMap<>(subnetGroup.getTags());
+            if (tagKeys != null) {
+                tagKeys.forEach(updated::remove);
+            }
+            subnetGroup.setTags(updated);
+            subnetGroups.put(subnetGroup.getDbSubnetGroupName(), subnetGroup);
+            return;
+        }
         ArnTarget target = requireTagTarget(resourceName);
         if (target.instanceGroup() != null) {
             NeptuneParameterGroup group = target.instanceGroup();
@@ -617,6 +728,78 @@ public class NeptuneService {
             default -> throw new AwsException("InvalidParameterValue",
                     "Invalid resource name: " + resourceName, 400);
         };
+    }
+
+    private NeptuneSubnetGroup subnetGroupFromArn(String resourceName) {
+        if (resourceName == null || !resourceName.startsWith("arn:")) {
+            return null;
+        }
+        try {
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(resourceName);
+            String resource = arn.resource();
+            int sep = resource.indexOf(':');
+            if (sep < 0) {
+                return null;
+            }
+            if (!"subgrp".equals(resource.substring(0, sep))) {
+                return null;
+            }
+            return getDbSubnetGroup(resource.substring(sep + 1));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private NeptuneSubnetGroup buildSubnetGroup(String name, String description, List<String> subnetIds) {
+        String region = regionResolver.getDefaultRegion();
+        Map<String, String> subnetAvailabilityZones = new LinkedHashMap<>();
+        String vpcId = "vpc-00000000";
+        if (ec2Service != null) {
+            List<Subnet> resolved;
+            try {
+                resolved = ec2Service.describeSubnets(region, subnetIds, Map.of());
+            } catch (AwsException e) {
+                if (e.getErrorCode() != null && e.getErrorCode().contains("NotFound")) {
+                    throw new AwsException("InvalidSubnet",
+                            "One or more subnets for DB subnet group " + name + " do not exist.", 400);
+                }
+                throw e;
+            }
+            if (resolved.size() != subnetIds.size()) {
+                throw new AwsException("InvalidSubnet",
+                        "One or more subnets for DB subnet group " + name + " do not exist.", 400);
+            }
+            vpcId = resolved.getFirst().getVpcId();
+            boolean sameVpc = resolved.stream()
+                    .map(Subnet::getVpcId)
+                    .filter(Objects::nonNull)
+                    .allMatch(vpcId::equals);
+            if (!sameVpc) {
+                throw new AwsException("InvalidVPCNetworkStateFault",
+                        "DB subnet group " + name + " contains subnets in multiple VPCs.", 400);
+            }
+            long distinctZones = resolved.stream()
+                    .map(Subnet::getAvailabilityZone)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .count();
+            if (distinctZones < 2) {
+                throw new AwsException("DBSubnetGroupDoesNotCoverEnoughAZs",
+                        "DB subnet group " + name + " does not cover multiple Availability Zones.", 400);
+            }
+            for (Subnet subnet : resolved) {
+                subnetAvailabilityZones.put(subnet.getSubnetId(), subnet.getAvailabilityZone());
+            }
+        } else {
+            for (int i = 0; i < subnetIds.size(); i++) {
+                subnetAvailabilityZones.put(subnetIds.get(i), "us-east-1" + (char) ('a' + i));
+            }
+        }
+        NeptuneSubnetGroup group = new NeptuneSubnetGroup(
+                name, description, vpcId, subnetIds, subnetAvailabilityZones);
+        group.setDbSubnetGroupArn(regionResolver.buildArn("rds", region, "subgrp:" + name));
+        group.setSubnetGroupStatus("Complete");
+        return group;
     }
 
     // ── Cluster snapshots ─────────────────────────────────────────────────────
@@ -721,6 +904,7 @@ public class NeptuneService {
             case "cluster-snapshot" -> clusterSnapshots.get(id).isPresent();
             case "cluster-pg" -> clusterParameterGroups.get(id).isPresent();
             case "pg" -> parameterGroups.get(id).isPresent();
+            case "subgrp" -> subnetGroups.get(id).isPresent();
             default -> false;
         };
     }

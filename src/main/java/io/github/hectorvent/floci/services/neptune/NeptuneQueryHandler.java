@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.neptune.model.NeptuneCluster;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneClusterParameterGroup;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneClusterSnapshot;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneInstance;
+import io.github.hectorvent.floci.services.neptune.model.NeptuneSubnetGroup;
 import io.github.hectorvent.floci.services.neptune.model.NeptuneParameterGroup;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -67,6 +68,10 @@ public class NeptuneQueryHandler {
                 case "ModifyDBParameterGroup" -> handleModifyDbParameterGroup(params);
                 case "DescribeDBParameters" -> handleDescribeDbParameters(params);
                 case "ResetDBParameterGroup" -> handleResetDbParameterGroup(params);
+                case "CreateDBSubnetGroup" -> handleCreateDbSubnetGroup(params);
+                case "DescribeDBSubnetGroups" -> handleDescribeDbSubnetGroups(params);
+                case "ModifyDBSubnetGroup" -> handleModifyDbSubnetGroup(params);
+                case "DeleteDBSubnetGroup" -> handleDeleteDbSubnetGroup(params);
                 case "AddTagsToResource" -> handleAddTagsToResource(params);
                 case "ListTagsForResource" -> handleListTagsForResource(params);
                 case "RemoveTagsFromResource" -> handleRemoveTagsFromResource(params);
@@ -377,6 +382,104 @@ public class NeptuneQueryHandler {
                 result)).build();
     }
 
+    // ── Instance parameter groups ─────────────────────────────────────────────
+
+    private Response handleCreateDbParameterGroup(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBParameterGroupName");
+        String family = params.getFirst("DBParameterGroupFamily");
+        String description = params.getFirst("Description");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "DBParameterGroupName is required.", AwsNamespaces.RDS, 400);
+        }
+        NeptuneParameterGroup group = service.createDbParameterGroup(
+                name, family, description, parseTags(params));
+        return Response.ok(AwsQueryResponse.envelope("CreateDBParameterGroup", AwsNamespaces.RDS,
+                paramGroupXml(group))).build();
+    }
+
+    private Response handleDescribeDbParameterGroups(MultivaluedMap<String, String> params) {
+        String filterName = params.getFirst("DBParameterGroupName");
+        Collection<NeptuneParameterGroup> result = service.listDbParameterGroups(filterName);
+        XmlBuilder xml = new XmlBuilder().start("DBParameterGroups");
+        for (NeptuneParameterGroup group : result) {
+            xml.start("DBParameterGroup").raw(paramGroupInnerXml(group)).end("DBParameterGroup");
+        }
+        xml.end("DBParameterGroups").start("Marker").end("Marker");
+        return Response.ok(AwsQueryResponse.envelope("DescribeDBParameterGroups", AwsNamespaces.RDS,
+                xml.build())).build();
+    }
+
+    private Response handleDeleteDbParameterGroup(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBParameterGroupName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "DBParameterGroupName is required.", AwsNamespaces.RDS, 400);
+        }
+        service.deleteDbParameterGroup(name);
+        return Response.ok(AwsQueryResponse.envelopeNoResult("DeleteDBParameterGroup",
+                AwsNamespaces.RDS)).build();
+    }
+
+    private Response handleModifyDbParameterGroup(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBParameterGroupName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "DBParameterGroupName is required.", AwsNamespaces.RDS, 400);
+        }
+        NeptuneParameterGroup group = service.modifyDbParameterGroup(name, parseParameters(params));
+        String result = new XmlBuilder()
+                .elem("DBParameterGroupName", group.getDbParameterGroupName())
+                .build();
+        return Response.ok(AwsQueryResponse.envelope("ModifyDBParameterGroup", AwsNamespaces.RDS,
+                result)).build();
+    }
+
+    private Response handleDescribeDbParameters(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBParameterGroupName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "DBParameterGroupName is required.", AwsNamespaces.RDS, 400);
+        }
+        NeptuneParameterGroup group = service.getDbParameterGroup(name);
+        String source = params.getFirst("Source");
+        XmlBuilder xml = new XmlBuilder().start("Parameters");
+        for (Map.Entry<String, String> entry : group.getParameters().entrySet()) {
+            if (source != null && !source.isBlank() && !"user".equalsIgnoreCase(source)
+                    && !"all".equalsIgnoreCase(source)) {
+                continue;
+            }
+            xml.start("Parameter")
+               .elem("ParameterName", entry.getKey())
+               .elem("ParameterValue", entry.getValue())
+               .elem("Source", "user")
+               .elem("ApplyType", "dynamic")
+               .elem("ApplyMethod", "immediate")
+               .elem("IsModifiable", true)
+               .end("Parameter");
+        }
+        xml.end("Parameters").start("Marker").end("Marker");
+        return Response.ok(AwsQueryResponse.envelope("DescribeDBParameters", AwsNamespaces.RDS,
+                xml.build())).build();
+    }
+
+    private Response handleResetDbParameterGroup(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBParameterGroupName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "DBParameterGroupName is required.", AwsNamespaces.RDS, 400);
+        }
+        NeptuneParameterGroup group = service.resetDbParameterGroup(
+                name,
+                "true".equalsIgnoreCase(params.getFirst("ResetAllParameters")),
+                parameterNames(params));
+        String result = new XmlBuilder()
+                .elem("DBParameterGroupName", group.getDbParameterGroupName())
+                .build();
+        return Response.ok(AwsQueryResponse.envelope("ResetDBParameterGroup", AwsNamespaces.RDS,
+                result)).build();
+    }
+
     private Response handleAddTagsToResource(MultivaluedMap<String, String> params) {
         service.addTagsToResource(params.getFirst("ResourceName"), parseTags(params));
         return Response.ok(AwsQueryResponse.envelope("AddTagsToResource", AwsNamespaces.RDS, "")).build();
@@ -392,6 +495,54 @@ public class NeptuneQueryHandler {
     private Response handleRemoveTagsFromResource(MultivaluedMap<String, String> params) {
         service.removeTagsFromResource(params.getFirst("ResourceName"), memberList(params, "TagKeys"));
         return Response.ok(AwsQueryResponse.envelope("RemoveTagsFromResource", AwsNamespaces.RDS, "")).build();
+    }
+
+    // ── DB subnet groups ──────────────────────────────────────────────────────
+
+    private Response handleCreateDbSubnetGroup(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBSubnetGroupName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("MissingParameter",
+                    "The request must contain the parameter DBSubnetGroupName.", AwsNamespaces.RDS, 400);
+        }
+        String description = params.getFirst("DBSubnetGroupDescription");
+        List<String> subnetIds = memberList(params, "SubnetIds");
+        NeptuneSubnetGroup group = service.createDbSubnetGroup(name, description, subnetIds, parseTags(params));
+        return Response.ok(AwsQueryResponse.envelope("CreateDBSubnetGroup", AwsNamespaces.RDS,
+                dbSubnetGroupXml(group))).build();
+    }
+
+    private Response handleDescribeDbSubnetGroups(MultivaluedMap<String, String> params) {
+        String filterName = params.getFirst("DBSubnetGroupName");
+        Collection<NeptuneSubnetGroup> result = service.listDbSubnetGroups(filterName);
+        XmlBuilder xml = new XmlBuilder().start("DBSubnetGroups");
+        for (NeptuneSubnetGroup group : result) {
+            xml.start("DBSubnetGroup").raw(dbSubnetGroupInnerXml(group)).end("DBSubnetGroup");
+        }
+        xml.end("DBSubnetGroups").start("Marker").end("Marker");
+        return Response.ok(AwsQueryResponse.envelope("DescribeDBSubnetGroups", AwsNamespaces.RDS, xml.build())).build();
+    }
+
+    private Response handleModifyDbSubnetGroup(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBSubnetGroupName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "DBSubnetGroupName is required.", AwsNamespaces.RDS, 400);
+        }
+        NeptuneSubnetGroup group = service.modifyDbSubnetGroup(
+                name, params.getFirst("DBSubnetGroupDescription"), memberList(params, "SubnetIds"));
+        return Response.ok(AwsQueryResponse.envelope("ModifyDBSubnetGroup", AwsNamespaces.RDS,
+                dbSubnetGroupXml(group))).build();
+    }
+
+    private Response handleDeleteDbSubnetGroup(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("DBSubnetGroupName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "DBSubnetGroupName is required.", AwsNamespaces.RDS, 400);
+        }
+        service.deleteDbSubnetGroup(name);
+        return Response.ok(AwsQueryResponse.envelope("DeleteDBSubnetGroup", AwsNamespaces.RDS, "")).build();
     }
 
     // ── XML builders ──────────────────────────────────────────────────────────
@@ -468,6 +619,24 @@ public class NeptuneQueryHandler {
                 .build();
     }
 
+    private String paramGroupXml(NeptuneParameterGroup group) {
+        return new XmlBuilder().start("DBParameterGroup")
+                .raw(paramGroupInnerXml(group))
+                .end("DBParameterGroup")
+                .build();
+    }
+
+    private String paramGroupInnerXml(NeptuneParameterGroup group) {
+        XmlBuilder xml = new XmlBuilder()
+                .elem("DBParameterGroupName", group.getDbParameterGroupName())
+                .elem("DBParameterGroupFamily", group.getDbParameterGroupFamily())
+                .elem("Description", group.getDescription());
+        if (group.getDbParameterGroupArn() != null) {
+            xml.elem("DBParameterGroupArn", group.getDbParameterGroupArn());
+        }
+        return xml.build();
+    }
+
     private String clusterParamGroupXml(NeptuneClusterParameterGroup group) {
         return new XmlBuilder().start("DBClusterParameterGroup")
                 .raw(clusterParamGroupInnerXml(group))
@@ -484,6 +653,31 @@ public class NeptuneQueryHandler {
             xml.elem("DBClusterParameterGroupArn", group.getDbClusterParameterGroupArn());
         }
         return xml.build();
+    }
+
+    private String dbSubnetGroupXml(NeptuneSubnetGroup group) {
+        return new XmlBuilder().start("DBSubnetGroup").raw(dbSubnetGroupInnerXml(group)).end("DBSubnetGroup").build();
+    }
+
+    private String dbSubnetGroupInnerXml(NeptuneSubnetGroup group) {
+        XmlBuilder xml = new XmlBuilder()
+                .elem("DBSubnetGroupName", group.getDbSubnetGroupName())
+                .elem("DBSubnetGroupDescription", group.getDescription())
+                .elem("VpcId", group.getVpcId() != null ? group.getVpcId() : "vpc-00000000")
+                .elem("SubnetGroupStatus", group.getSubnetGroupStatus() != null ? group.getSubnetGroupStatus() : "Complete")
+                .elem("DBSubnetGroupArn", group.getDbSubnetGroupArn())
+                .start("Subnets");
+        for (String subnetId : group.getSubnetIds()) {
+            String az = group.getSubnetAvailabilityZones().get(subnetId);
+            xml.start("Subnet")
+               .elem("SubnetIdentifier", subnetId)
+               .start("SubnetAvailabilityZone")
+                 .elem("Name", az != null ? az : config.defaultAvailabilityZone())
+               .end("SubnetAvailabilityZone")
+               .elem("SubnetStatus", "Active")
+               .end("Subnet");
+        }
+        return xml.end("Subnets").build();
     }
 
     private static void writeTags(XmlBuilder xml, Map<String, String> tags) {
@@ -563,6 +757,9 @@ public class NeptuneQueryHandler {
         List<String> values = new ArrayList<>();
         for (int i = 1; ; i++) {
             String value = params.getFirst(baseName + ".member." + i);
+            if (value == null) {
+                value = params.getFirst(baseName + ".SubnetIdentifier." + i);
+            }
             if (value == null) {
                 value = params.getFirst(baseName + "." + i);
             }
