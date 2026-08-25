@@ -36,6 +36,7 @@ import io.github.hectorvent.floci.services.ivs.IvsController;
 import io.github.hectorvent.floci.services.ivs.IvsRecordingConfigurationController;
 import io.github.hectorvent.floci.services.ivschat.IvsChatController;
 import io.github.hectorvent.floci.services.ivsrealtime.IvsRealtimeController;
+import io.github.hectorvent.floci.services.kinesisvideo.KinesisVideoController;
 import io.github.hectorvent.floci.services.pipes.PipesController;
 import io.github.hectorvent.floci.services.lambda.LambdaController;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
@@ -302,6 +303,10 @@ public class ResolvedServiceCatalog {
                         "kinesisanalytics", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("KinesisAnalytics_20180523."), Set.of("kinesisanalytics"), Set.of(), Set.of()),
+                descriptor("kinesisvideo", "kinesisvideo", config.services().kinesisvideo().enabled(), true,
+                        "kinesisvideo", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("kinesisvideo"), Set.of(), Set.of(KinesisVideoController.class)),
                 descriptor("kms", "kms", config.services().kms().enabled(), true,
                         "kms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

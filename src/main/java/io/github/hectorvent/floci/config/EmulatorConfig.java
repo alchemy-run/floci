@@ -892,6 +892,7 @@ public interface EmulatorConfig {
         KendraServiceConfig kendra();
         KeyspacesServiceConfig keyspaces();
         KinesisServiceConfig kinesis();
+        KinesisVideoServiceConfig kinesisvideo();
         FirehoseServiceConfig firehose();
         FmsServiceConfig fms();
         LicenseManagerServiceConfig licenseManager();
@@ -1720,6 +1721,11 @@ public interface EmulatorConfig {
     }
 
     interface KinesisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface KinesisVideoServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -406,6 +406,8 @@ floci:
       enabled: true
     kinesis:
       enabled: true
+    kinesisvideo:
+      enabled: true
     firehose:
       enabled: true
     fms:
