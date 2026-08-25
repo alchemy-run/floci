@@ -73,6 +73,8 @@ floci:
         flush-interval-ms: 60000
       rum:
         flush-interval-ms: 60000
+      oam:
+        flush-interval-ms: 60000
       internetmonitor:
         flush-interval-ms: 60000
       fis:
@@ -142,6 +144,8 @@ floci:
       b2bi:
         flush-interval-ms: 60000
       chatbot:
+        flush-interval-ms: 60000
+      notifications-contacts:
         flush-interval-ms: 60000
       controltower:
         flush-interval-ms: 60000
@@ -513,6 +517,8 @@ floci:
       enabled: true
     rum:
       enabled: true
+    oam:
+      enabled: true
     internetmonitor:
       enabled: true
     location:
@@ -552,6 +558,8 @@ floci:
     b2bi:
       enabled: true
     chatbot:
+      enabled: true
+    notifications-contacts:
       enabled: true
     controltower:
       enabled: true

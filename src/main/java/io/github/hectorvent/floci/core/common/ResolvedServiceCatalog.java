@@ -72,6 +72,7 @@ import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
 import io.github.hectorvent.floci.services.apprunner.AppRunnerProxyController;
 import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignalsController;
 import io.github.hectorvent.floci.services.chatbot.ChatbotController;
+import io.github.hectorvent.floci.services.notificationscontacts.NotificationsContactsController;
 import io.github.hectorvent.floci.services.controltower.ControlTowerController;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactController;
 import io.github.hectorvent.floci.services.deadline.DeadlineController;
@@ -86,6 +87,7 @@ import io.github.hectorvent.floci.services.finspace.FinSpaceDataController;
 import io.github.hectorvent.floci.services.geomaps.GeoMapsController;
 import io.github.hectorvent.floci.services.location.LocationController;
 import io.github.hectorvent.floci.services.rum.RumController;
+import io.github.hectorvent.floci.services.oam.OamController;
 import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
@@ -802,6 +804,11 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
+                descriptor("oam", "oam", config.services().oam().enabled(), true,
+                        "oam", storageMode(config.storage().services().oam().mode(), config.storage().mode()),
+                        config.storage().services().oam().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("oam"), Set.of(), Set.of(OamController.class)),
                 descriptor("internetmonitor", "internetmonitor", config.services().internetmonitor().enabled(), true,
                         "internetmonitor", storageMode(config.storage().services().internetmonitor().mode(),
                                 config.storage().mode()),
@@ -921,6 +928,16 @@ public class ResolvedServiceCatalog {
                         config.storage().services().chatbot().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class)),
+                descriptor("notifications-contacts", "notificationscontacts",
+                        config.services().notificationsContacts().enabled(), true,
+                        "notificationscontacts", storageMode(
+                                config.storage().services().notificationsContacts().mode(),
+                                config.storage().mode()),
+                        config.storage().services().notificationsContacts().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("notifications-contacts"), Set.of(),
+                        Set.of(NotificationsContactsController.class)),
                 descriptor("controltower", "controltower", config.services().controltower().enabled(), true,
                         "controltower", storageMode(config.storage().services().controltower().mode(),
                                 config.storage().mode()),

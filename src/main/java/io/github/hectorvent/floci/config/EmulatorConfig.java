@@ -302,6 +302,7 @@ public interface EmulatorConfig {
         ElasticBeanstalkStorageConfig elasticbeanstalk();
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
+        OamStorageConfig oam();
         InternetMonitorStorageConfig internetmonitor();
         FisStorageConfig fis();
         FinSpaceStorageConfig finspace();
@@ -318,6 +319,7 @@ public interface EmulatorConfig {
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
         ChatbotStorageConfig chatbot();
+        NotificationsContactsStorageConfig notificationsContacts();
         ControlTowerStorageConfig controltower();
         CodeArtifactStorageConfig codeartifact();
         ApplicationSignalsStorageConfig applicationSignals();
@@ -678,6 +680,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface OamStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface InternetMonitorStorageConfig {
         Optional<String> mode();
 
@@ -847,6 +856,13 @@ public interface EmulatorConfig {
     }
 
     interface ChatbotStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface NotificationsContactsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -1043,6 +1059,7 @@ public interface EmulatorConfig {
         IotManagedIntegrationsServiceConfig iotmanagedintegrations();
         IotWirelessServiceConfig iotwireless();
         RumServiceConfig rum();
+        OamServiceConfig oam();
         InternetMonitorServiceConfig internetmonitor();
         LocationServiceConfig location();
         GeoMapsServiceConfig geoMaps();
@@ -1063,6 +1080,7 @@ public interface EmulatorConfig {
         AppRunnerServiceConfig apprunner();
         B2biServiceConfig b2bi();
         ChatbotServiceConfig chatbot();
+        NotificationsContactsServiceConfig notificationsContacts();
         ControlTowerServiceConfig controltower();
         CodeArtifactServiceConfig codeartifact();
         ApplicationSignalsServiceConfig applicationSignals();
@@ -1117,6 +1135,11 @@ public interface EmulatorConfig {
     }
 
     interface RumServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface OamServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1217,6 +1240,11 @@ public interface EmulatorConfig {
     }
 
     interface ChatbotServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface NotificationsContactsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
