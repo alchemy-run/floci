@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.amplify.model.AmplifyApp;
 import io.github.hectorvent.floci.services.amplify.model.AmplifyBranch;
+import io.github.hectorvent.floci.services.amplify.model.AmplifyJob;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -25,7 +26,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.Map;
 
 /**
- * Amplify Hosting restJson1 — app and branch lifecycle.
+ * Amplify Hosting restJson1 — app, branch, and manual-deploy job lifecycle.
  *
  * <p>Literal {@code /apps} paths take JAX-RS precedence over S3's {@code /{bucket}}
  * catch-all. Tag APIs share {@code /tags/{arn}} and are dispatched by {@code SharedTagsController}.
@@ -197,6 +198,174 @@ public class AmplifyController {
         return Response.ok(response).build();
     }
 
+    @POST
+    @Path("/apps/{appId}/branches/{branchName}/deployments")
+    public Response createDeployment(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            String body) {
+        AmplifyService.CreateDeploymentOutcome outcome = service.createDeployment(
+                regionResolver.resolveRegion(headers), appId, branchName, parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("jobId", outcome.job().getJobId());
+        response.put("zipUploadUrl", outcome.zipUploadUrl());
+        if (outcome.fileUploadUrls() != null && !outcome.fileUploadUrls().isEmpty()) {
+            ObjectNode urls = response.putObject("fileUploadUrls");
+            outcome.fileUploadUrls().forEach(urls::put);
+        }
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/apps/{appId}/branches/{branchName}/deployments/start")
+    public Response startDeployment(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            String body) {
+        AmplifyJob job = service.startDeployment(
+                regionResolver.resolveRegion(headers), appId, branchName, parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("jobSummary", toJobSummaryNode(job));
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/apps/{appId}/branches/{branchName}/jobs")
+    public Response startJob(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            String body) {
+        AmplifyJob job = service.startJob(
+                regionResolver.resolveRegion(headers), appId, branchName, parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("jobSummary", toJobSummaryNode(job));
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/apps/{appId}/branches/{branchName}/jobs")
+    @Consumes(MediaType.WILDCARD)
+    public Response listJobs(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            @QueryParam("maxResults") String maxResults,
+            @QueryParam("nextToken") String nextToken) {
+        AmplifyService.Page<AmplifyJob> page = service.listJobs(
+                regionResolver.resolveRegion(headers), appId, branchName, maxResults, nextToken);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode jobs = response.putArray("jobSummaries");
+        for (AmplifyJob job : page.items()) {
+            jobs.add(toJobSummaryNode(job));
+        }
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/apps/{appId}/branches/{branchName}/jobs/{jobId}")
+    @Consumes(MediaType.WILDCARD)
+    public Response getJob(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            @PathParam("jobId") String jobId) {
+        AmplifyJob job = service.getJob(
+                regionResolver.resolveRegion(headers), appId, branchName, jobId);
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode jobNode = response.putObject("job");
+        jobNode.set("summary", toJobSummaryNode(job));
+        ArrayNode steps = jobNode.putArray("steps");
+        for (AmplifyJob.AmplifyStep step : job.getSteps()) {
+            steps.add(toStepNode(step));
+        }
+        return Response.ok(response).build();
+    }
+
+    @DELETE
+    @Path("/apps/{appId}/branches/{branchName}/jobs/{jobId}")
+    @Consumes(MediaType.WILDCARD)
+    public Response deleteJob(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            @PathParam("jobId") String jobId) {
+        AmplifyJob job = service.deleteJob(
+                regionResolver.resolveRegion(headers), appId, branchName, jobId);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("jobSummary", toJobSummaryNode(job));
+        return Response.ok(response).build();
+    }
+
+    @DELETE
+    @Path("/apps/{appId}/branches/{branchName}/jobs/{jobId}/stop")
+    @Consumes(MediaType.WILDCARD)
+    public Response stopJob(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            @PathParam("jobId") String jobId) {
+        AmplifyJob job = service.stopJob(
+                regionResolver.resolveRegion(headers), appId, branchName, jobId);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("jobSummary", toJobSummaryNode(job));
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/apps/{appId}/branches/{branchName}/jobs/{jobId}/artifacts")
+    @Consumes(MediaType.WILDCARD)
+    public Response listArtifacts(
+            @Context HttpHeaders headers,
+            @PathParam("appId") String appId,
+            @PathParam("branchName") String branchName,
+            @PathParam("jobId") String jobId,
+            @QueryParam("maxResults") String maxResults,
+            @QueryParam("nextToken") String nextToken) {
+        AmplifyService.Page<AmplifyJob.AmplifyArtifact> page = service.listArtifacts(
+                regionResolver.resolveRegion(headers), appId, branchName, jobId, maxResults, nextToken);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode artifacts = response.putArray("artifacts");
+        for (AmplifyJob.AmplifyArtifact artifact : page.items()) {
+            ObjectNode node = artifacts.addObject();
+            node.put("artifactFileName", artifact.getArtifactFileName());
+            node.put("artifactId", artifact.getArtifactId());
+        }
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/artifacts/{artifactId}")
+    @Consumes(MediaType.WILDCARD)
+    public Response getArtifactUrl(
+            @Context HttpHeaders headers, @PathParam("artifactId") String artifactId) {
+        AmplifyJob.AmplifyArtifact artifact = service.getArtifact(
+                regionResolver.resolveRegion(headers), artifactId);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("artifactId", artifact.getArtifactId());
+        response.put("artifactUrl", artifact.getArtifactUrl());
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/apps/{appId}/accesslogs")
+    public Response generateAccessLogs(
+            @Context HttpHeaders headers, @PathParam("appId") String appId, String body) {
+        String logUrl = service.generateAccessLogs(
+                regionResolver.resolveRegion(headers), appId, parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("logUrl", logUrl);
+        return Response.ok(response).build();
+    }
+
     private ObjectNode toAppNode(AmplifyApp app) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("appId", app.getAppId());
@@ -293,6 +462,53 @@ public class AmplifyController {
         putBoolean(node, "enablePullRequestPreview", branch.getEnablePullRequestPreview());
         putStringMap(node, "tags", branch.getTags());
         putStringMap(node, "environmentVariables", branch.getEnvironmentVariables());
+        return node;
+    }
+
+    private ObjectNode toJobSummaryNode(AmplifyJob job) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("jobArn", job.getJobArn());
+        node.put("jobId", job.getJobId());
+        if (job.getCommitId() != null) {
+            node.put("commitId", job.getCommitId());
+        }
+        if (job.getCommitMessage() != null) {
+            node.put("commitMessage", job.getCommitMessage());
+        }
+        if (job.getCommitTime() != null) {
+            node.put("commitTime", job.getCommitTime());
+        }
+        node.put("startTime", job.getStartTime());
+        node.put("status", job.getStatus());
+        if (job.getEndTime() != null) {
+            node.put("endTime", job.getEndTime());
+        }
+        if (job.getJobType() != null) {
+            node.put("jobType", job.getJobType());
+        }
+        if (job.getSourceUrl() != null) {
+            node.put("sourceUrl", job.getSourceUrl());
+        }
+        if (job.getSourceUrlType() != null) {
+            node.put("sourceUrlType", job.getSourceUrlType());
+        }
+        return node;
+    }
+
+    private ObjectNode toStepNode(AmplifyJob.AmplifyStep step) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("stepName", step.getStepName());
+        node.put("startTime", step.getStartTime());
+        node.put("status", step.getStatus());
+        if (step.getEndTime() != null) {
+            node.put("endTime", step.getEndTime());
+        }
+        if (step.getLogUrl() != null) {
+            node.put("logUrl", step.getLogUrl());
+        }
+        if (step.getStatusReason() != null) {
+            node.put("statusReason", step.getStatusReason());
+        }
         return node;
     }
 

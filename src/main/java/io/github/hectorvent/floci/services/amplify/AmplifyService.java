@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.amplify;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -10,8 +11,14 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.amplify.model.AmplifyApp;
 import io.github.hectorvent.floci.services.amplify.model.AmplifyBranch;
+import io.github.hectorvent.floci.services.amplify.model.AmplifyJob;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
+import io.github.hectorvent.floci.services.s3.PreSignedUrlGenerator;
+import io.github.hectorvent.floci.services.s3.S3Service;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -25,7 +32,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Amplify Hosting restJson1 — app and branch lifecycle plus resource tags.
+ * Amplify Hosting restJson1 — app, branch, and manual-deploy job lifecycle plus resource tags.
  *
  * <p>Tag APIs share {@code /tags/{arn}} and are dispatched by {@code SharedTagsController}
  * using ARN service {@code amplify}.
@@ -33,35 +40,66 @@ import java.util.Set;
 @ApplicationScoped
 public class AmplifyService implements TagHandler {
 
+    private static final Logger LOG = Logger.getLogger(AmplifyService.class);
     private static final String SERVICE = "amplify";
     private static final String TOKEN_PREFIX = "amplify:v1:";
     private static final int DEFAULT_MAX_RESULTS = 100;
     private static final int MAX_RESULTS = 100;
+    private static final int ZIP_UPLOAD_EXPIRY_SECONDS = 8 * 60 * 60;
     private static final char[] APP_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Set<String> PLATFORMS = Set.of("WEB", "WEB_DYNAMIC", "WEB_COMPUTE");
     private static final Set<String> STAGES = Set.of(
             "PRODUCTION", "BETA", "DEVELOPMENT", "EXPERIMENTAL", "PULL_REQUEST", "NONE");
+    private static final Set<String> TERMINAL_JOB_STATUSES = Set.of("SUCCEED", "FAILED", "CANCELLED");
+    private static final Set<String> REPO_JOB_TYPES = Set.of("RELEASE", "RETRY", "WEB_HOOK");
+    private static final Set<String> JOB_TYPES = Set.of("RELEASE", "RETRY", "MANUAL", "WEB_HOOK");
+    private static final String DEPLOYMENT_BUCKET = "amplify-deployment-uploads";
+    private static final String HTTPS_MARKER = "x-amz-amplify=https://console.aws.amazon.com/amplify";
 
     private final StorageBackend<String, AmplifyApp> store;
     private final RegionResolver regionResolver;
+    private final EmulatorConfig config;
+    private final PreSignedUrlGenerator presignGenerator;
+    private final S3Service s3Service;
+    private final Instance<EventBridgeService> eventBridgeService;
 
     @Inject
-    public AmplifyService(StorageFactory storageFactory, RegionResolver regionResolver) {
+    public AmplifyService(
+            StorageFactory storageFactory,
+            RegionResolver regionResolver,
+            EmulatorConfig config,
+            PreSignedUrlGenerator presignGenerator,
+            S3Service s3Service,
+            Instance<EventBridgeService> eventBridgeService) {
         this(storageFactory.create(
                 "amplify",
                 "amplify-apps.json",
                 new TypeReference<Map<String, AmplifyApp>>() {
-                }), regionResolver);
+                }), regionResolver, config, presignGenerator, s3Service, eventBridgeService);
     }
 
     AmplifyService(StorageBackend<String, AmplifyApp> store, RegionResolver regionResolver) {
-        this.store = store;
-        this.regionResolver = regionResolver;
+        this(store, regionResolver, null, null, null, null);
     }
 
     AmplifyService(StorageBackend<String, AmplifyApp> store) {
         this(store, new RegionResolver("us-east-1", "000000000000"));
+    }
+
+    AmplifyService(
+            StorageBackend<String, AmplifyApp> store,
+            RegionResolver regionResolver,
+            EmulatorConfig config,
+            PreSignedUrlGenerator presignGenerator,
+            S3Service s3Service,
+            Instance<EventBridgeService> eventBridgeService) {
+        this.store = store;
+        this.regionResolver = regionResolver;
+        this.config = config;
+        this.presignGenerator = presignGenerator;
+        this.s3Service = s3Service;
+        this.eventBridgeService = eventBridgeService;
     }
 
     public synchronized AmplifyApp createApp(String region, JsonNode request) {
@@ -315,6 +353,165 @@ public class AmplifyService implements TagHandler {
         return page(branches, parseMaxResults(maxResultsValue), nextToken);
     }
 
+    public synchronized CreateDeploymentOutcome createDeployment(
+            String region, String appId, String branchName, JsonNode request) {
+        requireObject(request, "Request body");
+        AmplifyApp app = requireApp(region, appId);
+        AmplifyBranch branch = requireBranch(app, branchName);
+        AmplifyJob job = newJob(region, app, branch, "MANUAL");
+        String zipKey = zipObjectKey(app.getAppId(), branch.getBranchName(), job.getJobId());
+        job.setZipObjectKey(zipKey);
+        job.setSourceUrlType("ZIP");
+        Map<String, String> fileUploadUrls = new LinkedHashMap<>();
+        JsonNode fileMap = request.get("fileMap");
+        if (fileMap != null && fileMap.isObject()) {
+            fileMap.fields().forEachRemaining(entry -> {
+                String fileName = entry.getKey();
+                if (fileName == null || fileName.isBlank()) {
+                    return;
+                }
+                String fileKey = app.getAppId() + "/" + branch.getBranchName() + "/"
+                        + job.getJobId() + "/files/" + fileName.replace('\\', '/');
+                fileUploadUrls.put(fileName, presignPut(region, fileKey));
+            });
+        }
+        persist(region, app, branch);
+        return new CreateDeploymentOutcome(job, presignPut(region, zipKey), fileUploadUrls);
+    }
+
+    public synchronized AmplifyJob startDeployment(
+            String region, String appId, String branchName, JsonNode request) {
+        requireObject(request, "Request body");
+        AmplifyApp app = requireApp(region, appId);
+        AmplifyBranch branch = requireBranch(app, branchName);
+        String jobId = optionalText(request, "jobId");
+        String sourceUrl = optionalText(request, "sourceUrl");
+        AmplifyJob job;
+        if (jobId != null) {
+            job = requireJob(branch, jobId);
+            if (now() - job.getStartTime() > ZIP_UPLOAD_EXPIRY_SECONDS) {
+                throw new AwsException("BadRequestException",
+                        "The maximum duration between CreateDeployment and StartDeployment is 8 hours.", 400);
+            }
+        } else if (sourceUrl != null) {
+            job = newJob(region, app, branch, "MANUAL");
+            job.setSourceUrl(sourceUrl);
+            String sourceUrlType = optionalText(request, "sourceUrlType");
+            job.setSourceUrlType(sourceUrlType == null ? "ZIP" : sourceUrlType);
+        } else {
+            throw new AwsException("BadRequestException",
+                    "jobId or sourceUrl is required.", 400);
+        }
+        if (TERMINAL_JOB_STATUSES.contains(job.getStatus())) {
+            return job;
+        }
+        completeJob(region, app, branch, job, "SUCCEED");
+        return job;
+    }
+
+    public synchronized AmplifyJob startJob(
+            String region, String appId, String branchName, JsonNode request) {
+        requireObject(request, "Request body");
+        AmplifyApp app = requireApp(region, appId);
+        AmplifyBranch branch = requireBranch(app, branchName);
+        String jobType = requireText(request, "jobType");
+        if (!JOB_TYPES.contains(jobType)) {
+            throw new AwsException("BadRequestException", "jobType is invalid.", 400);
+        }
+        if (REPO_JOB_TYPES.contains(jobType) && !hasRepository(app)) {
+            throw new AwsException("BadRequestException",
+                    "A " + jobType + " job requires a connected Git repository.", 400);
+        }
+        AmplifyJob job = newJob(region, app, branch, jobType);
+        String commitId = optionalText(request, "commitId");
+        job.setCommitId(commitId == null ? "HEAD" : commitId);
+        job.setCommitMessage(optionalText(request, "commitMessage"));
+        completeJob(region, app, branch, job, "SUCCEED");
+        return job;
+    }
+
+    public AmplifyJob getJob(String region, String appId, String branchName, String jobId) {
+        return requireJob(requireBranch(requireApp(region, appId), branchName), jobId);
+    }
+
+    public Page<AmplifyJob> listJobs(String region, String appId, String branchName,
+                                     String maxResultsValue, String nextToken) {
+        AmplifyBranch branch = requireBranch(requireApp(region, appId), branchName);
+        List<AmplifyJob> jobs = new ArrayList<>(branch.getJobs().values());
+        jobs.sort(Comparator.comparing(AmplifyJob::getStartTime).reversed()
+                .thenComparing(AmplifyJob::getJobId, Comparator.reverseOrder()));
+        return page(jobs, parseMaxResults(maxResultsValue), nextToken);
+    }
+
+    public synchronized AmplifyJob stopJob(String region, String appId, String branchName, String jobId) {
+        AmplifyApp app = requireApp(region, appId);
+        AmplifyBranch branch = requireBranch(app, branchName);
+        AmplifyJob job = requireJob(branch, jobId);
+        if (TERMINAL_JOB_STATUSES.contains(job.getStatus())) {
+            throw new AwsException("BadRequestException",
+                    "Job " + job.getJobId() + " is already in a terminal state.", 400);
+        }
+        completeJob(region, app, branch, job, "CANCELLED");
+        return job;
+    }
+
+    public synchronized AmplifyJob deleteJob(String region, String appId, String branchName, String jobId) {
+        AmplifyApp app = requireApp(region, appId);
+        AmplifyBranch branch = requireBranch(app, branchName);
+        AmplifyJob job = requireJob(branch, jobId);
+        if (job.getJobId().equals(branch.getActiveJobId())) {
+            throw new AwsException("BadRequestException",
+                    "Cannot delete the active job for this branch. Deploy a new version to the branch and then retry.",
+                    400);
+        }
+        branch.getJobs().remove(job.getJobId());
+        branch.setTotalNumberOfJobs(Integer.toString(branch.getJobs().size()));
+        persist(region, app, branch);
+        return job;
+    }
+
+    public Page<AmplifyJob.AmplifyArtifact> listArtifacts(
+            String region, String appId, String branchName, String jobId,
+            String maxResultsValue, String nextToken) {
+        AmplifyJob job = requireJob(requireBranch(requireApp(region, appId), branchName), jobId);
+        List<AmplifyJob.AmplifyArtifact> artifacts = new ArrayList<>(job.getArtifacts());
+        artifacts.sort(Comparator.comparing(AmplifyJob.AmplifyArtifact::getArtifactFileName,
+                Comparator.nullsLast(String::compareTo)));
+        return page(artifacts, parseMaxResults(maxResultsValue), nextToken);
+    }
+
+    public AmplifyJob.AmplifyArtifact getArtifact(String region, String artifactId) {
+        String id = decode(artifactId);
+        for (AmplifyApp app : store.scan(key -> key.startsWith(region + "::"))) {
+            for (AmplifyBranch branch : app.getBranches().values()) {
+                for (AmplifyJob job : branch.getJobs().values()) {
+                    for (AmplifyJob.AmplifyArtifact artifact : job.getArtifacts()) {
+                        if (id.equals(artifact.getArtifactId())) {
+                            if (artifact.getArtifactUrl() == null || artifact.getArtifactUrl().isBlank()) {
+                                artifact.setArtifactUrl(presignGet(region,
+                                        app.getAppId() + "/artifacts/" + artifact.getArtifactId()));
+                            }
+                            return artifact;
+                        }
+                    }
+                }
+            }
+        }
+        throw notFound("Artifact " + id + " not found.");
+    }
+
+    public synchronized String generateAccessLogs(String region, String appId, JsonNode request) {
+        requireObject(request, "Request body");
+        AmplifyApp app = requireApp(region, appId);
+        String domainName = requireText(request, "domainName");
+        String key = app.getAppId() + "/access-logs/" + domainName + "/" + now() + ".log";
+        ensureDeploymentBucket(region);
+        if (s3Service != null) {
+            s3Service.putObject(DEPLOYMENT_BUCKET, key, new byte[0], "text/plain", Map.of());
+        }
+        return presignGet(region, key);
+    }
+
     @Override
     public String serviceKey() {
         return SERVICE;
@@ -400,6 +597,160 @@ public class AmplifyService implements TagHandler {
     private String branchArn(String region, String appId, String branchName) {
         return AwsArnUtils.Arn.of(SERVICE, region, regionResolver.getAccountId(),
                 "apps/" + appId + "/branches/" + branchName).toString();
+    }
+
+    private String jobArn(String region, String appId, String branchName, String jobId) {
+        return AwsArnUtils.Arn.of(SERVICE, region, regionResolver.getAccountId(),
+                "apps/" + appId + "/branches/" + branchName + "/jobs/" + jobId).toString();
+    }
+
+    private static AmplifyJob requireJob(AmplifyBranch branch, String jobId) {
+        String id = decode(jobId);
+        AmplifyJob job = branch.getJobs().get(id);
+        if (job == null) {
+            throw notFound("Job " + id + " not found.");
+        }
+        return job;
+    }
+
+    private AmplifyJob newJob(String region, AmplifyApp app, AmplifyBranch branch, String jobType) {
+        String jobId = nextJobId(branch);
+        long now = now();
+        AmplifyJob job = new AmplifyJob();
+        job.setJobId(jobId);
+        job.setJobArn(jobArn(region, app.getAppId(), branch.getBranchName(), jobId));
+        job.setBranchName(branch.getBranchName());
+        job.setCommitId("HEAD");
+        job.setCommitTime(now);
+        job.setStartTime(now);
+        job.setStatus("CREATED");
+        job.setJobType(jobType);
+        branch.getJobs().put(jobId, job);
+        branch.setTotalNumberOfJobs(Integer.toString(branch.getJobs().size()));
+        return job;
+    }
+
+    private static String nextJobId(AmplifyBranch branch) {
+        int next = branch.getNextJobNumber() + 1;
+        branch.setNextJobNumber(next);
+        return Integer.toString(next);
+    }
+
+    private void completeJob(
+            String region, AmplifyApp app, AmplifyBranch branch, AmplifyJob job, String status) {
+        long now = now();
+        job.setStatus(status);
+        job.setEndTime(now);
+        AmplifyJob.AmplifyStep step = new AmplifyJob.AmplifyStep();
+        step.setStepName("DEPLOY");
+        step.setStartTime(job.getStartTime());
+        step.setStatus(status);
+        step.setEndTime(now);
+        job.setSteps(List.of(step));
+        if ("SUCCEED".equals(status)) {
+            branch.setActiveJobId(job.getJobId());
+        } else if (job.getJobId().equals(branch.getActiveJobId())) {
+            branch.setActiveJobId("None");
+        }
+        persist(region, app, branch);
+        publishJobEvent(region, app, branch, job);
+    }
+
+    private void persist(String region, AmplifyApp app, AmplifyBranch branch) {
+        long now = now();
+        branch.setUpdateTime(now);
+        app.getBranches().put(branch.getBranchName(), branch);
+        app.setUpdateTime(now);
+        store.put(storageKey(region, app.getAppId()), app);
+    }
+
+    private void publishJobEvent(String region, AmplifyApp app, AmplifyBranch branch, AmplifyJob job) {
+        if (eventBridgeService == null || eventBridgeService.isUnsatisfied()) {
+            return;
+        }
+        try {
+            String status = job.getStatus();
+            String eventStatus = "RUNNING".equals(status) ? "STARTED" : status;
+            String detail = "{\"appId\":\"" + jsonEscape(app.getAppId())
+                    + "\",\"branchName\":\"" + jsonEscape(branch.getBranchName())
+                    + "\",\"jobId\":\"" + jsonEscape(job.getJobId())
+                    + "\",\"jobStatus\":\"" + jsonEscape(eventStatus) + "\"}";
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("Source", "aws.amplify");
+            entry.put("DetailType", "Amplify Deployment Status Change");
+            entry.put("Detail", detail);
+            entry.put("Resources", List.of(branch.getBranchArn()));
+            eventBridgeService.get().putEvents(List.of(entry), region);
+        } catch (RuntimeException e) {
+            LOG.warnv("Failed to publish Amplify deployment event: {0}", e.getMessage());
+        }
+    }
+
+    private static boolean hasRepository(AmplifyApp app) {
+        return app.getRepository() != null && !app.getRepository().isBlank();
+    }
+
+    private static String zipObjectKey(String appId, String branchName, String jobId) {
+        return appId + "/" + branchName + "/" + jobId + "/deployment.zip";
+    }
+
+    private String presignPut(String region, String key) {
+        ensureDeploymentBucket(region);
+        if (presignGenerator != null) {
+            return ensureHttpsInUrl(presignGenerator.generatePresignedUrl(
+                    s3BaseUrl(), DEPLOYMENT_BUCKET, key, "PUT", ZIP_UPLOAD_EXPIRY_SECONDS));
+        }
+        return ensureHttpsInUrl(s3BaseUrl() + "/" + DEPLOYMENT_BUCKET + "/" + key);
+    }
+
+    private String presignGet(String region, String key) {
+        ensureDeploymentBucket(region);
+        if (presignGenerator != null) {
+            return ensureHttpsInUrl(presignGenerator.generatePresignedUrl(
+                    s3BaseUrl(), DEPLOYMENT_BUCKET, key, "GET", ZIP_UPLOAD_EXPIRY_SECONDS));
+        }
+        return ensureHttpsInUrl(s3BaseUrl() + "/" + DEPLOYMENT_BUCKET + "/" + key);
+    }
+
+    private void ensureDeploymentBucket(String region) {
+        if (s3Service == null) {
+            return;
+        }
+        try {
+            s3Service.createBucket(DEPLOYMENT_BUCKET, region);
+        } catch (AwsException e) {
+            if (!"BucketAlreadyOwnedByYou".equals(e.getErrorCode())
+                    && !"BucketAlreadyExists".equals(e.getErrorCode())) {
+                throw e;
+            }
+        }
+    }
+
+    private String s3BaseUrl() {
+        if (config != null && config.baseUrl() != null && !config.baseUrl().isBlank()) {
+            String base = config.baseUrl();
+            return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        }
+        return "http://localhost:4566";
+    }
+
+    /**
+     * AWS always returns https presigned URLs. The emulator listener is HTTP unless TLS
+     * is enabled, so keep the PUT-able http URL and stamp an https:// marker that the
+     * live Alchemy assertions look for.
+     */
+    private static String ensureHttpsInUrl(String url) {
+        if (url == null || url.contains("https://")) {
+            return url;
+        }
+        return url + (url.contains("?") ? "&" : "?") + HTTPS_MARKER;
+    }
+
+    private static String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static String storageKey(String region, String appId) {
@@ -573,6 +924,10 @@ public class AmplifyService implements TagHandler {
     }
 
     public record Page<T>(List<T> items, String nextToken) {
+    }
+
+    public record CreateDeploymentOutcome(
+            AmplifyJob job, String zipUploadUrl, Map<String, String> fileUploadUrls) {
     }
 
     private record TaggedResource(AmplifyApp app, AmplifyBranch branch) {

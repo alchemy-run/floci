@@ -35,6 +35,8 @@ public class AmplifyBranch {
     private String computeRoleArn;
     private String activeJobId;
     private String totalNumberOfJobs;
+    private int nextJobNumber;
+    private Map<String, AmplifyJob> jobs;
 
     public AmplifyBranch() {
     }
@@ -231,5 +233,24 @@ public class AmplifyBranch {
 
     public void setTotalNumberOfJobs(String totalNumberOfJobs) {
         this.totalNumberOfJobs = totalNumberOfJobs;
+    }
+
+    public int getNextJobNumber() {
+        return nextJobNumber;
+    }
+
+    public void setNextJobNumber(int nextJobNumber) {
+        this.nextJobNumber = nextJobNumber;
+    }
+
+    public Map<String, AmplifyJob> getJobs() {
+        if (jobs == null) {
+            jobs = new LinkedHashMap<>();
+        }
+        return jobs;
+    }
+
+    public void setJobs(Map<String, AmplifyJob> jobs) {
+        this.jobs = jobs == null ? new LinkedHashMap<>() : new LinkedHashMap<>(jobs);
     }
 }
