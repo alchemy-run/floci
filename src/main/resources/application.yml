@@ -250,6 +250,8 @@ floci:
       default-presign-expiry-seconds: 3600
     dynamodb:
       enabled: true
+    dms:
+      enabled: true
     sns:
       enabled: true
     lambda:

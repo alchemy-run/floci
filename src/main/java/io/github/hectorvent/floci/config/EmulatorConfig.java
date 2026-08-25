@@ -693,6 +693,7 @@ public interface EmulatorConfig {
         SqsServiceConfig sqs();
         S3ServiceConfig s3();
         DynamoDbServiceConfig dynamodb();
+        DmsServiceConfig dms();
         SnsServiceConfig sns();
         LambdaServiceConfig lambda();
         ApiGatewayServiceConfig apigateway();
@@ -1065,6 +1066,11 @@ public interface EmulatorConfig {
     }
 
     interface DynamoDbServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DmsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
