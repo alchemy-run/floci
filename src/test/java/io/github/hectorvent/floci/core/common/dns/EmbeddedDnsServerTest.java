@@ -139,6 +139,20 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_ampWorkspacesHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("aps-workspaces.us-east-1.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("aps-workspaces-fips.us-west-2.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertTrue(dns.resolveARecord("aps.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("aps-workspaces.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
     void resolveARecord_prefersEc2PrivateDnsAddressOverFlociWildcard() {
         assertEquals(
                 "172.16.128.9",

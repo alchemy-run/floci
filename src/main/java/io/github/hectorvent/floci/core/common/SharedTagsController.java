@@ -21,6 +21,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +78,7 @@ public class SharedTagsController {
     }
 
     private Response listTagsForArn(HttpHeaders headers, String arn) {
+        arn = decodeArn(arn);
         TagHandler handler = resolveHandler(arn);
         String region = regionResolver.resolveRegion(headers);
         Map<String, String> tags = handler.listTags(region, arn);
@@ -119,6 +122,7 @@ public class SharedTagsController {
     }
 
     private Response doTagResource(HttpHeaders headers, TagHandler handler, String arn, String body, Response successResponse) {
+        arn = decodeArn(arn);
         String region = regionResolver.resolveRegion(headers);
         String effectiveBody = (body == null || body.isBlank()) ? "{}" : body;
         try {
@@ -150,6 +154,7 @@ public class SharedTagsController {
     }
 
     private Response untagResourceForArn(HttpHeaders headers, UriInfo uriInfo, String arn, Response successResponse) {
+        arn = decodeArn(arn);
         TagHandler handler = resolveHandler(arn);
         String region = regionResolver.resolveRegion(headers);
         List<String> tagKeys = readTagKeys(handler, uriInfo);
@@ -241,7 +246,32 @@ public class SharedTagsController {
         }
     }
 
+    /**
+     * Distilled restJson1 percent-encodes ARN labels. Some clients (and RestAssured
+     * when a test pre-encodes the path) leave {@code %3A}/{@code %2F} in the path
+     * parameter. Decode until stable so {@link AwsArnUtils#parse} sees a real ARN.
+     */
+    private static String decodeArn(String arn) {
+        if (arn == null || arn.isEmpty()) {
+            return arn;
+        }
+        try {
+            String decoded = arn;
+            for (int i = 0; i < 2; i++) {
+                String next = URLDecoder.decode(decoded, StandardCharsets.UTF_8);
+                if (next.equals(decoded)) {
+                    break;
+                }
+                decoded = next;
+            }
+            return decoded;
+        } catch (IllegalArgumentException e) {
+            return arn;
+        }
+    }
+
     private TagHandler resolveHandler(String arn) {
+        arn = decodeArn(arn);
         String serviceKey;
         try {
             serviceKey = AwsArnUtils.parse(arn).service();

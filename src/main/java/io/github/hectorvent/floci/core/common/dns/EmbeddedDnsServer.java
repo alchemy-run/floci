@@ -179,7 +179,8 @@ public class EmbeddedDnsServer {
      * through {@code AWS_ENDPOINT_URL}).
      */
     static boolean isAwsDataPlaneHost(String name) {
-        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name);
+        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name)
+                || isAmpWorkspacesHost(name);
     }
 
     /**
@@ -222,6 +223,18 @@ public class EmbeddedDnsServer {
             return false;
         }
         return name.toLowerCase().matches("[a-z0-9-]+\\.execute-api\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * AMP Prometheus data-plane ({@code aps-workspaces.{region}.amazonaws.com}).
+     * Alchemy's RemoteWrite / QueryMetrics bindings {@code fetch()} the advertised
+     * {@code prometheusEndpoint}; {@code AWS_ENDPOINT_URL} is not applied.
+     */
+    static boolean isAmpWorkspacesHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches("aps-workspaces(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
     }
 
     Optional<String> resolveEc2PrivateDnsName(String name) {
