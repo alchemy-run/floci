@@ -274,6 +274,7 @@ public interface EmulatorConfig {
         DsqlStorageConfig dsql();
         DocDbElasticStorageConfig docdbElastic();
         DetectiveStorageConfig detective();
+        GuardDutyStorageConfig guardduty();
         DevOpsGuruStorageConfig devopsGuru();
         CloudFrontStorageConfig cloudfront();
         AppSyncStorageConfig appsync();
@@ -486,6 +487,13 @@ public interface EmulatorConfig {
     }
 
     interface DetectiveStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface GuardDutyStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -850,6 +858,7 @@ public interface EmulatorConfig {
         EcsServiceConfig ecs();
         EfsServiceConfig efs();
         GlacierServiceConfig glacier();
+        GuardDutyServiceConfig guardduty();
         FsxServiceConfig fsx();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
@@ -1733,6 +1742,11 @@ public interface EmulatorConfig {
     }
 
     interface GlacierServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GuardDutyServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

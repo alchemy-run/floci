@@ -95,6 +95,8 @@ floci:
         flush-interval-ms: 60000
       detective:
         flush-interval-ms: 60000
+      guardduty:
+        flush-interval-ms: 60000
       devops-guru:
         flush-interval-ms: 60000
       deadline:
@@ -309,6 +311,8 @@ floci:
     efs:
       enabled: true
     glacier:
+      enabled: true
+    guardduty:
       enabled: true
     fsx:
       enabled: true

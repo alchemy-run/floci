@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
 import io.github.hectorvent.floci.services.glacier.GlacierController; // glacier restJson1
+import io.github.hectorvent.floci.services.guardduty.GuardDutyController;
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
@@ -768,7 +769,13 @@ public class ResolvedServiceCatalog {
                         "glacier", config.storage().mode(),
                         5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("glacier"), Set.of(), Set.of(GlacierController.class))
+                        Set.of(), Set.of("glacier"), Set.of(), Set.of(GlacierController.class)),
+                descriptor("guardduty", "guardduty", config.services().guardduty().enabled(), true,
+                        "guardduty", storageMode(config.storage().services().guardduty().mode(),
+                                config.storage().mode()),
+                        config.storage().services().guardduty().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("guardduty"), Set.of(), Set.of(GuardDutyController.class))
         ));
     }
 

@@ -173,6 +173,8 @@ floci:
         flush-interval-ms: 5000  # elastic cluster storage
       detective:
         flush-interval-ms: 5000
+      guardduty:
+        flush-interval-ms: 5000
       devops-guru:
         flush-interval-ms: 5000
       deadline:
@@ -452,6 +454,8 @@ floci:
     efs:
       enabled: true
     glacier:
+      enabled: true
+    guardduty:
       enabled: true
     fsx:
       enabled: true
