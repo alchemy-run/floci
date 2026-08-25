@@ -100,6 +100,7 @@ nav:
     - Glue: services/glue.md
     - Neptune: services/neptune.md
     - DocumentDB: services/docdb.md
+    - Aurora DSQL: services/dsql.md
     - Athena: services/athena.md
     - Data Firehose: services/firehose.md
     - EventBridge: services/eventbridge.md

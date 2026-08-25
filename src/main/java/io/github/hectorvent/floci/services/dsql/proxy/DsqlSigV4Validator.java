@@ -1,0 +1,172 @@
+package io.github.hectorvent.floci.services.dsql.proxy;
+
+import io.github.hectorvent.floci.services.iam.IamService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * Validates Aurora DSQL IAM auth tokens (SigV4 presigned URLs).
+ * DSQL tokens are host-only (no port in the signed host header) and use
+ * {@code Action=DbConnect} or {@code Action=DbConnectAdmin}.
+ */
+@ApplicationScoped
+public class DsqlSigV4Validator {
+
+    private static final Logger LOG = Logger.getLogger(DsqlSigV4Validator.class);
+    private static final DateTimeFormatter DATETIME_FMT =
+            DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
+    private static final Set<String> ACTIONS = Set.of("DbConnect", "DbConnectAdmin");
+
+    private final IamService iamService;
+
+    @Inject
+    public DsqlSigV4Validator(IamService iamService) {
+        this.iamService = iamService;
+    }
+
+    /**
+     * @param token the presigned URL without the scheme
+     * @param clientUsername Postgres startup user (typically {@code admin})
+     */
+    public boolean validate(String token, String clientUsername) {
+        try {
+            URI uri = URI.create("http://" + token);
+            String host = uri.getHost();
+            String rawQuery = uri.getRawQuery();
+            if (host == null || rawQuery == null) {
+                LOG.debugv("DSQL IAM token missing host or query string");
+                return false;
+            }
+
+            String[] rawPairs = rawQuery.split("&");
+            String action = findRawParam(rawPairs, "Action");
+            String dateTime = findRawParam(rawPairs, "X-Amz-Date");
+            String expires = findRawParam(rawPairs, "X-Amz-Expires");
+            String credential = findRawParam(rawPairs, "X-Amz-Credential");
+            String signedHeaders = findRawParam(rawPairs, "X-Amz-SignedHeaders");
+            String signature = findRawParam(rawPairs, "X-Amz-Signature");
+
+            if (action == null || !ACTIONS.contains(action) || dateTime == null || expires == null
+                    || credential == null || signedHeaders == null || signature == null) {
+                LOG.debugv("DSQL IAM token missing required SigV4 parameters");
+                return false;
+            }
+
+            Instant tokenTime = Instant.from(DATETIME_FMT.parse(dateTime));
+            int expirySeconds = Integer.parseInt(expires);
+            if (Instant.now().isAfter(tokenTime.plusSeconds(expirySeconds))) {
+                LOG.debugv("DSQL IAM token expired");
+                return false;
+            }
+
+            String decodedCredential = urlDecode(credential);
+            String[] credParts = decodedCredential.split("/");
+            if (credParts.length < 5) {
+                return false;
+            }
+            String accessKeyId = credParts[0];
+            String date = credParts[1];
+            String region = credParts[2];
+            String service = credParts[3];
+            if (!"dsql".equals(service)) {
+                LOG.debugv("DSQL IAM token signed for service {0}", service);
+                return false;
+            }
+            String credentialScope = date + "/" + region + "/" + service + "/aws4_request";
+
+            String secretKey = iamService.findSecretKey(accessKeyId).orElse(accessKeyId);
+
+            String canonicalQueryString = Arrays.stream(rawPairs)
+                    .filter(p -> !rawParamName(p).equals("X-Amz-Signature"))
+                    .sorted((a, b) -> rawParamName(a).compareTo(rawParamName(b)))
+                    .collect(Collectors.joining("&"));
+
+            String canonicalRequest = "GET\n/\n"
+                    + canonicalQueryString + "\n"
+                    + "host:" + host + "\n\n"
+                    + "host\n"
+                    + "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+            String stringToSign = "AWS4-HMAC-SHA256\n"
+                    + dateTime + "\n"
+                    + credentialScope + "\n"
+                    + sha256Hex(canonicalRequest);
+
+            byte[] signingKey = deriveSigningKey(secretKey, date, region, service);
+            String expectedSignature = hexEncode(hmacSha256(signingKey, stringToSign));
+
+            boolean valid = MessageDigest.isEqual(
+                    expectedSignature.getBytes(StandardCharsets.UTF_8),
+                    signature.getBytes(StandardCharsets.UTF_8));
+            if (!valid) {
+                LOG.debugv("DSQL IAM token signature mismatch for accessKey={0} user={1}",
+                        accessKeyId, clientUsername);
+            }
+            return valid;
+        } catch (Exception e) {
+            LOG.debugv("DSQL IAM token validation error: {0}", e.getMessage());
+            return false;
+        }
+    }
+
+    private static String rawParamName(String rawPair) {
+        int eq = rawPair.indexOf('=');
+        return eq >= 0 ? rawPair.substring(0, eq) : rawPair;
+    }
+
+    private static String findRawParam(String[] rawPairs, String name) {
+        for (String pair : rawPairs) {
+            int eq = pair.indexOf('=');
+            if (eq >= 0 && name.equals(pair.substring(0, eq))) {
+                return urlDecode(pair.substring(eq + 1));
+            }
+        }
+        return null;
+    }
+
+    private static String urlDecode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    private static byte[] deriveSigningKey(String secretKey, String date, String region,
+                                           String service) throws Exception {
+        byte[] kSecret = ("AWS4" + secretKey).getBytes(StandardCharsets.UTF_8);
+        byte[] kDate = hmacSha256(kSecret, date);
+        byte[] kRegion = hmacSha256(kDate, region);
+        byte[] kService = hmacSha256(kRegion, service);
+        return hmacSha256(kService, "aws4_request");
+    }
+
+    private static byte[] hmacSha256(byte[] key, String data) throws Exception {
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(key, "HmacSHA256"));
+        return mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String sha256Hex(String input) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return hexEncode(digest.digest(input.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String hexEncode(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+}
