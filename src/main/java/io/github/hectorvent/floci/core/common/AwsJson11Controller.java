@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.codebuild.CodeBuildJsonHandler;
 import io.github.hectorvent.floci.services.codedeploy.CodeDeployJsonHandler;
 import io.github.hectorvent.floci.services.codepipeline.CodePipelineJsonHandler;
 import io.github.hectorvent.floci.services.ecr.EcrJsonHandler;
+import io.github.hectorvent.floci.services.ecrpublic.EcrPublicJsonHandler;
 import io.github.hectorvent.floci.services.transfer.TransferHandler;
 import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
 import io.github.hectorvent.floci.services.firehose.FirehoseJsonHandler;
@@ -95,6 +96,7 @@ public class AwsJson11Controller {
     private final AcmPcaJsonHandler acmPcaJsonHandler;
     private final EcsJsonHandler ecsJsonHandler;
     private final EcrJsonHandler ecrJsonHandler;
+    private final EcrPublicJsonHandler ecrPublicJsonHandler;
     private final GlueJsonHandler glueJsonHandler;
     private final AthenaJsonHandler athenaJsonHandler;
     private final FirehoseJsonHandler firehoseJsonHandler;
@@ -141,7 +143,8 @@ public class AwsJson11Controller {
                                CognitoIdentityJsonHandler cognitoIdentityJsonHandler,
                                AcmJsonHandler acmJsonHandler, AcmPcaJsonHandler acmPcaJsonHandler,
                                EcsJsonHandler ecsJsonHandler,
-                               EcrJsonHandler ecrJsonHandler, GlueJsonHandler glueJsonHandler,
+                               EcrJsonHandler ecrJsonHandler, EcrPublicJsonHandler ecrPublicJsonHandler,
+                               GlueJsonHandler glueJsonHandler,
                                AthenaJsonHandler athenaJsonHandler,
                                FirehoseJsonHandler firehoseJsonHandler,
                                ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler,
@@ -191,6 +194,7 @@ public class AwsJson11Controller {
         this.acmPcaJsonHandler = acmPcaJsonHandler;
         this.ecsJsonHandler = ecsJsonHandler;
         this.ecrJsonHandler = ecrJsonHandler;
+        this.ecrPublicJsonHandler = ecrPublicJsonHandler;
         this.glueJsonHandler = glueJsonHandler;
         this.athenaJsonHandler = athenaJsonHandler;
         this.firehoseJsonHandler = firehoseJsonHandler;
@@ -272,6 +276,7 @@ public class AwsJson11Controller {
                 case "acm-pca" -> acmPcaJsonHandler.handle(action, request, region);
                 case "ecs" -> ecsJsonHandler.handle(action, request, region);
                 case "ecr" -> ecrJsonHandler.handle(action, request, region);
+                case "ecr-public" -> ecrPublicJsonHandler.handle(action, request, region);
                 case "glue" -> glueJsonHandler.handle(action, request, region);
                 case "athena" -> athenaJsonHandler.handle(action, request, region);
                 case "firehose" -> firehoseJsonHandler.handle(action, request, region);

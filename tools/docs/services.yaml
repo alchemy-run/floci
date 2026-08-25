@@ -124,6 +124,7 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/dynamodb/DynamoDbStreamsJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/ec2/Ec2QueryHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/ecr/EcrJsonHandler.java }  # doc packs multiple actions per row (`A` / `B`) + REST endpoints; needs de-grouping
+  - { path: src/main/java/io/github/hectorvent/floci/services/ecrpublic/EcrPublicJsonHandler.java }
   - { path: src/main/java/io/github/hectorvent/floci/services/ecs/EcsJsonHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/elasticbeanstalk/ElasticBeanstalkQueryHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/elbv2/ElbV2QueryHandler.java }  # non-tabular doc (grouped/inline)
