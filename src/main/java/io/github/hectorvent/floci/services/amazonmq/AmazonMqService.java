@@ -228,22 +228,37 @@ public class AmazonMqService {
     // Amazon MQ's standalone User API (CreateUser/DescribeUser/ListUsers/UpdateUser/
     // DeleteUser) applies only to ActiveMQ brokers. For RabbitMQ, AWS rejects these
     // operations and directs callers to the RabbitMQ web console. Every broker we host
-    // is RabbitMQ, so they always reject. The broker's admin user is seeded once at
-    // CreateBroker time; additional users are managed through the RabbitMQ console.
+    // is RabbitMQ, so they always reject *after* the broker is shown to exist —
+    // a missing broker is NotFoundException, matching live AWS. The broker's admin
+    // user is seeded once at CreateBroker time; additional users are managed through
+    // the RabbitMQ console.
 
     public MqUser createUser(String brokerId, MqUser user) {
-        throw userApiNotSupported();
+        rejectUserApi(brokerId);
+        return user;
     }
 
     public MqUser describeUser(String brokerId, String username) {
-        throw userApiNotSupported();
+        rejectUserApi(brokerId);
+        return null;
     }
 
     public List<MqUser> listUsers(String brokerId) {
-        throw userApiNotSupported();
+        rejectUserApi(brokerId);
+        return List.of();
     }
 
     public void deleteUser(String brokerId, String username) {
+        rejectUserApi(brokerId);
+    }
+
+    /**
+     * AWS looks the broker up first: a missing id is {@code NotFoundException}
+     * (HTTP 404). Only an existing RabbitMQ broker is then rejected with
+     * {@code BadRequestException}.
+     */
+    private void rejectUserApi(String brokerId) {
+        describeBroker(brokerId);
         throw userApiNotSupported();
     }
 

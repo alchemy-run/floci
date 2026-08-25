@@ -83,6 +83,30 @@ class AmazonMqControllerIntegrationTest {
     }
 
     @Test
+    void listUsersOnMissingBrokerIsNotFound() {
+        given()
+        .when()
+            .get("/v1/brokers/{id}/users", "b-00000000-0000-0000-0000-000000000000")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    void createUserOnMissingBrokerIsNotFound() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {"password": "SuperSecretPassw0rd!"}
+                """)
+        .when()
+            .post("/v1/brokers/{id}/users/alchemyprobe", "b-00000000-0000-0000-0000-000000000000")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
     void rejectsBrokerWithoutUser() {
         given()
             .contentType("application/json")

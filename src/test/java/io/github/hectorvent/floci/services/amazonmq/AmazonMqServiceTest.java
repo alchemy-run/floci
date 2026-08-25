@@ -106,11 +106,29 @@ class AmazonMqServiceTest {
         Broker broker = service.createBroker(rabbitParams("orders"));
         String id = broker.getBrokerId();
 
-        assertThrows(AwsException.class,
+        AwsException create = assertThrows(AwsException.class,
                 () -> service.createUser(id, new MqUser("alice", "AnotherPass99", false, null)));
+        assertEquals("BadRequestException", create.getErrorCode());
         assertThrows(AwsException.class, () -> service.listUsers(id));
         assertThrows(AwsException.class, () -> service.describeUser(id, "alice"));
         assertThrows(AwsException.class, () -> service.deleteUser(id, "alice"));
+    }
+
+    @Test
+    void userApiThrowsNotFoundWhenBrokerMissing() {
+        // Live AWS ListUsers/CreateUser on a well-formed but missing broker id
+        // is NotFoundException, not the RabbitMQ BadRequest that applies only
+        // after the broker is shown to exist.
+        String missing = "b-00000000-0000-0000-0000-000000000000";
+
+        AwsException list = assertThrows(AwsException.class, () -> service.listUsers(missing));
+        assertEquals("NotFoundException", list.getErrorCode());
+        assertEquals(404, list.getHttpStatus());
+
+        AwsException create = assertThrows(AwsException.class,
+                () -> service.createUser(missing, new MqUser("alchemyprobe", "SuperSecretPassw0rd!", false, null)));
+        assertEquals("NotFoundException", create.getErrorCode());
+        assertEquals(404, create.getHttpStatus());
     }
 
     @Test
