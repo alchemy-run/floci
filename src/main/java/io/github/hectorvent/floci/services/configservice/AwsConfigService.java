@@ -15,6 +15,7 @@ import io.github.hectorvent.floci.services.configservice.model.ConfigurationReco
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePackStatusDetail;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
+import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -40,9 +41,10 @@ public class AwsConfigService {
     // region -> authorizedAccountId/authorizedAwsRegion -> authorization (nested)
     private Map<String, Map<String, AggregationAuthorization>> aggregationAuthorizations = new ConcurrentHashMap<>();
 
-    // region -> recorder / channel (flat)
+    // region -> recorder / channel / retention (flat singletons)
     private Map<String, ConfigurationRecorder> configurationRecorders = new ConcurrentHashMap<>();
     private Map<String, DeliveryChannel> deliveryChannels = new ConcurrentHashMap<>();
+    private Map<String, RetentionConfiguration> retentionConfigurations = new ConcurrentHashMap<>();
 
     // recorder run-state is transient runtime state (not persisted)
     private final ConcurrentHashMap<String, Boolean> recorderRunning = new ConcurrentHashMap<>();
@@ -73,6 +75,8 @@ public class AwsConfigService {
                 new TypeReference<Map<String, ConfigurationRecorder>>() {});
         this.deliveryChannels = storageBacked("config-delivery-channels.json",
                 new TypeReference<Map<String, DeliveryChannel>>() {});
+        this.retentionConfigurations = storageBacked("config-retention-configurations.json",
+                new TypeReference<Map<String, RetentionConfiguration>>() {});
         this.tags = storageBacked("config-tags.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
         normalizeRegionMaps(configRules);
@@ -319,6 +323,61 @@ public class AwsConfigService {
             }
         }
         return List.of(channel);
+    }
+
+    // --- Retention Configuration (account-region singleton named "default") ---
+
+    public static final String DEFAULT_RETENTION_NAME = "default";
+    public static final int MIN_RETENTION_DAYS = 30;
+    public static final int MAX_RETENTION_DAYS = 2557;
+
+    public RetentionConfiguration putRetentionConfiguration(String region, int retentionPeriodInDays) {
+        validateRetentionPeriod(retentionPeriodInDays);
+        RetentionConfiguration stored = new RetentionConfiguration(DEFAULT_RETENTION_NAME, retentionPeriodInDays);
+        retentionConfigurations.put(region, stored);
+        return stored;
+    }
+
+    public List<RetentionConfiguration> describeRetentionConfigurations(String region, List<String> names) {
+        RetentionConfiguration retention = retentionConfigurations.get(region);
+        if (names != null && !names.isEmpty()) {
+            if (names.size() > 1) {
+                throw new AwsException("InvalidParameterValueException",
+                        "RetentionConfigurationNames must contain at most one name.", 400);
+            }
+            String name = names.getFirst();
+            validateRetentionName(name);
+            if (retention == null || !name.equals(retention.name())) {
+                throw new AwsException("NoSuchRetentionConfigurationException",
+                        "You have specified a retention configuration that does not exist.", 400);
+            }
+            return List.of(retention);
+        }
+        return retention == null ? Collections.emptyList() : List.of(retention);
+    }
+
+    public void deleteRetentionConfiguration(String region, String name) {
+        validateRetentionName(name);
+        RetentionConfiguration retention = retentionConfigurations.get(region);
+        if (retention == null || !name.equals(retention.name())) {
+            throw new AwsException("NoSuchRetentionConfigurationException",
+                    "You have specified a retention configuration that does not exist.", 400);
+        }
+        retentionConfigurations.remove(region);
+    }
+
+    private static void validateRetentionPeriod(int days) {
+        if (days < MIN_RETENTION_DAYS || days > MAX_RETENTION_DAYS) {
+            throw new AwsException("InvalidParameterValueException",
+                    "RetentionPeriodInDays must be between 30 and 2557.", 400);
+        }
+    }
+
+    private static void validateRetentionName(String name) {
+        if (name == null || name.isBlank() || name.length() > 256 || !name.matches("[\\w\\-]+")) {
+            throw new AwsException("InvalidParameterValueException",
+                    "RetentionConfigurationName is invalid.", 400);
+        }
     }
 
     // --- Conformance Packs ---

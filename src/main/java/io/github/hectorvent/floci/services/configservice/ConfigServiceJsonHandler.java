@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.configservice.model.ConfigurationReco
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePackStatusDetail;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
+import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -52,6 +53,9 @@ public class ConfigServiceJsonHandler {
             case "DescribeConfigurationRecorderStatus" -> describeConfigurationRecorderStatus(request, region);
             case "PutDeliveryChannel" -> putDeliveryChannel(request, region);
             case "DescribeDeliveryChannels" -> describeDeliveryChannels(request, region);
+            case "PutRetentionConfiguration" -> putRetentionConfiguration(request, region);
+            case "DescribeRetentionConfigurations" -> describeRetentionConfigurations(request, region);
+            case "DeleteRetentionConfiguration" -> deleteRetentionConfiguration(request, region);
             case "PutAggregationAuthorization" -> putAggregationAuthorization(request, region);
             case "DescribeAggregationAuthorizations" -> describeAggregationAuthorizations(region);
             case "DeleteAggregationAuthorization" -> deleteAggregationAuthorization(request, region);
@@ -175,6 +179,42 @@ public class ConfigServiceJsonHandler {
         ObjectNode resp = mapper.createObjectNode();
         resp.set("DeliveryChannels", mapper.valueToTree(channels));
         return Response.ok(resp).build();
+    }
+
+    // --- Retention Configuration ---
+
+    private Response putRetentionConfiguration(JsonNode req, String region) {
+        JsonNode daysNode = req.has("RetentionPeriodInDays")
+                ? req.path("RetentionPeriodInDays")
+                : req.path("retentionPeriodInDays");
+        if (daysNode.isMissingNode() || daysNode.isNull() || !daysNode.isNumber()) {
+            throw new io.github.hectorvent.floci.core.common.AwsException(
+                    "InvalidParameterValueException", "RetentionPeriodInDays is required.", 400);
+        }
+        RetentionConfiguration retention = service.putRetentionConfiguration(region, daysNode.asInt());
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("RetentionConfiguration", mapper.valueToTree(retention));
+        return Response.ok(resp).build();
+    }
+
+    private Response describeRetentionConfigurations(JsonNode req, String region) {
+        List<String> names = extractStringList(req, "RetentionConfigurationNames");
+        if (names.isEmpty()) {
+            names = extractStringList(req, "retentionConfigurationNames");
+        }
+        List<RetentionConfiguration> retentions = service.describeRetentionConfigurations(region, names);
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("RetentionConfigurations", mapper.valueToTree(retentions));
+        return Response.ok(resp).build();
+    }
+
+    private Response deleteRetentionConfiguration(JsonNode req, String region) {
+        String name = req.path("RetentionConfigurationName").asText(null);
+        if (name == null || name.isBlank()) {
+            name = req.path("retentionConfigurationName").asText(null);
+        }
+        service.deleteRetentionConfiguration(region, name);
+        return Response.ok(mapper.createObjectNode()).build();
     }
 
     // --- Conformance Packs ---

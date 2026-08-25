@@ -33,6 +33,14 @@
 | `PutDeliveryChannel` | Create or update a delivery channel |
 | `DescribeDeliveryChannels` | List delivery channels |
 
+### Retention Configuration
+
+| Action | Description |
+|---|---|
+| `PutRetentionConfiguration` | Upsert the account-region singleton (always named `default`; 30–2557 days) |
+| `DescribeRetentionConfigurations` | List retention configurations; a missing name is `NoSuchRetentionConfigurationException` |
+| `DeleteRetentionConfiguration` | Delete the retention configuration (idempotent not-found is `NoSuchRetentionConfigurationException`) |
+
 ### Conformance Packs
 
 | Action | Description |
