@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesyst
 import io.github.hectorvent.floci.services.glacier.GlacierController; // glacier restJson1
 import io.github.hectorvent.floci.services.guardduty.GuardDutyController;
 import io.github.hectorvent.floci.services.inspector2.Inspector2Controller;
+import io.github.hectorvent.floci.services.macie2.Macie2Controller;
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
@@ -903,6 +904,10 @@ public class ResolvedServiceCatalog {
                         "inspector2", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("inspector2"), Set.of(), Set.of(Inspector2Controller.class)),
+                descriptor("macie2", "macie2", config.services().macie2().enabled(), true,
+                        "macie2", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("macie2"), Set.of(), Set.of(Macie2Controller.class)),
                 descriptor("sso-admin", "ssoadmin", config.services().ssoAdmin().enabled(), true,
                         "ssoadmin", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
