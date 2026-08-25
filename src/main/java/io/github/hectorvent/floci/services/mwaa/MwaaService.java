@@ -12,23 +12,35 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.mwaa.model.CreateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.model.Environment;
 import io.github.hectorvent.floci.services.mwaa.model.EnvironmentStatus;
+import io.github.hectorvent.floci.services.mwaa.model.InvokeRestApiRequest;
 import io.github.hectorvent.floci.services.mwaa.model.UpdateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.proxy.MwaaProxyManager;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -61,6 +73,13 @@ public class MwaaService implements TagHandler {
 
     /** Last-installed requirements.txt ETag, per environment. */
     private final Map<String, String> requirementsEtagByEnvironment = new ConcurrentHashMap<>();
+
+    private static final Set<String> REST_API_METHODS = Set.of("GET", "PUT", "POST", "PATCH", "DELETE");
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
 
     @Inject
     public MwaaService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
@@ -323,6 +342,180 @@ public class MwaaService implements TagHandler {
     boolean isValidCliToken(String environmentName, String token) {
         Set<String> tokens = cliTokensByEnvironment.get(environmentName);
         return tokens != null && tokens.contains(token);
+    }
+
+    /**
+     * InvokeRestApi — POST /restapi/{Name}. Proxies Method/Path onto the environment's
+     * Apache Airflow REST API ({@code /api/v1/...}). Missing environments raise
+     * {@code ResourceNotFoundException} (HTTP 404), matching real MWAA.
+     */
+    public Map<String, Object> invokeRestApi(String name, InvokeRestApiRequest request) {
+        if (request == null || request.getMethod() == null || request.getMethod().isBlank()
+                || request.getPath() == null || request.getPath().isBlank()) {
+            throw new AwsException("ValidationException", "Method and Path are required", 400);
+        }
+        String method = request.getMethod().trim().toUpperCase(Locale.ROOT);
+        if (!REST_API_METHODS.contains(method)) {
+            throw new AwsException("ValidationException",
+                    "Method must be one of GET, PUT, POST, PATCH, DELETE", 400);
+        }
+        String path = request.getPath().trim();
+        if (path.length() > 64) {
+            throw new AwsException("ValidationException",
+                    "Path must be between 1 and 64 characters", 400);
+        }
+        if (!path.startsWith("/")) {
+            path = "/" + path;
+        }
+
+        Environment environment = getEnvironment(name);
+        if (config.services().mwaa().mock()) {
+            return mockInvokeRestApi(method, path);
+        }
+        return proxyInvokeRestApi(environment, method, path, request);
+    }
+
+    private Map<String, Object> mockInvokeRestApi(String method, String path) {
+        String restPath = stripAirflowApiPrefix(path);
+        if ("GET".equals(method) && ("/dags".equals(restPath) || "/dags/".equals(restPath))) {
+            Map<String, Object> airflow = new LinkedHashMap<>();
+            airflow.put("dags", List.of());
+            airflow.put("total_entries", 0);
+            return invokeRestApiSuccess(200, airflow);
+        }
+        Map<String, Object> notFound = new LinkedHashMap<>();
+        notFound.put("status", 404);
+        notFound.put("title", "Not Found");
+        notFound.put("detail", "The requested Airflow REST path was not found: " + restPath);
+        throw restApiException("RestApiClientException", 404, notFound);
+    }
+
+    private Map<String, Object> proxyInvokeRestApi(Environment environment, String method, String path,
+                                                    InvokeRestApiRequest request) {
+        String host = environment.getAirflowInternalHost();
+        int port = environment.getAirflowInternalPort();
+        if (host == null || host.isBlank() || port <= 0) {
+            throw new AwsException("InternalServerException",
+                    "Environment webserver is not reachable: " + environment.getName(), 500);
+        }
+
+        String uri = "http://" + host + ":" + port + airflowApiPath(path)
+                + encodeQuery(request.getQueryParameters());
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(uri))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Accept", "application/json");
+            String username = environment.getWebserverUsername();
+            String password = environment.getWebserverPassword();
+            if (username != null && password != null) {
+                String token = Base64.getEncoder().encodeToString(
+                        (username + ":" + password).getBytes(StandardCharsets.UTF_8));
+                builder.header("Authorization", "Basic " + token);
+            }
+
+            boolean sendJsonBody = request.getBody() != null
+                    && !"GET".equals(method)
+                    && !"DELETE".equals(method);
+            if (sendJsonBody) {
+                builder.header("Content-Type", "application/json");
+            }
+            builder.method(method, restApiBodyPublisher(method, request.getBody()));
+
+            HttpResponse<String> response = HTTP_CLIENT.send(builder.build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            int status = response.statusCode();
+            Object parsed = parseJsonOrRaw(response.body());
+            if (status >= 200 && status < 300) {
+                return invokeRestApiSuccess(status, parsed);
+            }
+            String code = status >= 500 ? "RestApiServerException" : "RestApiClientException";
+            throw restApiException(code, status, parsed);
+        } catch (AwsException e) {
+            throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AwsException("InternalServerException",
+                    "Interrupted invoking Airflow REST API", 500);
+        } catch (IOException | IllegalArgumentException e) {
+            throw new AwsException("InternalServerException",
+                    "Failed to invoke Airflow REST API: " + e.getMessage(), 500);
+        }
+    }
+
+    private static HttpRequest.BodyPublisher restApiBodyPublisher(String method, Object body)
+            throws IOException {
+        if ("GET".equals(method) || "DELETE".equals(method) || body == null) {
+            return HttpRequest.BodyPublishers.noBody();
+        }
+        return HttpRequest.BodyPublishers.ofString(OBJECT_MAPPER.writeValueAsString(body));
+    }
+
+    static String airflowApiPath(String path) {
+        if (path.startsWith("/api/v1/") || "/api/v1".equals(path)) {
+            return path;
+        }
+        return "/api/v1" + path;
+    }
+
+    static String stripAirflowApiPrefix(String path) {
+        if (path.startsWith("/api/v1/")) {
+            return path.substring("/api/v1".length());
+        }
+        if ("/api/v1".equals(path)) {
+            return "/";
+        }
+        return path;
+    }
+
+    private static String encodeQuery(Object queryParameters) {
+        if (!(queryParameters instanceof Map<?, ?> params) || params.isEmpty()) {
+            return "";
+        }
+        StringBuilder query = new StringBuilder("?");
+        boolean first = true;
+        for (Map.Entry<?, ?> entry : params.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            if (!first) {
+                query.append('&');
+            }
+            first = false;
+            query.append(URLEncoder.encode(String.valueOf(entry.getKey()), StandardCharsets.UTF_8))
+                    .append('=')
+                    .append(URLEncoder.encode(String.valueOf(entry.getValue()), StandardCharsets.UTF_8));
+        }
+        return query.length() == 1 ? "" : query.toString();
+    }
+
+    private static Map<String, Object> invokeRestApiSuccess(int status, Object body) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("RestApiStatusCode", status);
+        if (body != null) {
+            result.put("RestApiResponse", body);
+        }
+        return result;
+    }
+
+    private static AwsException restApiException(String code, int airflowStatus, Object body) {
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("RestApiStatusCode", airflowStatus);
+        if (body != null) {
+            extra.put("RestApiResponse", body);
+        }
+        return new AwsException(code,
+                "Apache Airflow REST API returned status " + airflowStatus, 400, extra);
+    }
+
+    private static Object parseJsonOrRaw(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.readValue(body, Object.class);
+        } catch (IOException e) {
+            return body;
+        }
     }
 
     private String resolveAirflowVersion(String requested) {

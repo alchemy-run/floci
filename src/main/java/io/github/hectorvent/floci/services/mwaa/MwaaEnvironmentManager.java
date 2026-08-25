@@ -140,6 +140,8 @@ public class MwaaEnvironmentManager {
         String image = "apache/airflow:%s-python3.12".formatted(airflowVersion);
         String adminUser = "admin";
         String adminPassword = generateSecret(24);
+        environment.setWebserverUsername(adminUser);
+        environment.setWebserverPassword(adminPassword);
         String sqlAlchemyConn = "postgresql+psycopg2://airflow:" + dbPassword + "@" + dbIp + ":" + POSTGRES_PORT + "/airflow";
 
         // Points DAG code's own AWS SDK calls (boto3, botocore) at Floci itself, the same way

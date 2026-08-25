@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.mwaa.model.CreateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.model.Environment;
 import io.github.hectorvent.floci.services.mwaa.model.EnvironmentStatus;
+import io.github.hectorvent.floci.services.mwaa.model.InvokeRestApiRequest;
 import io.github.hectorvent.floci.services.mwaa.model.NetworkConfiguration;
 import io.github.hectorvent.floci.services.mwaa.model.UpdateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.proxy.MwaaProxyManager;
@@ -301,6 +302,64 @@ class MwaaServiceTest {
         Map<String, Object> response = mwaaService.createWebLoginToken("web-token-env");
         assertNotNull(response.get("WebToken"));
         assertNotNull(response.get("WebServerHostname"));
+    }
+
+    @Test
+    void invokeRestApiOnMissingEnvironmentIsResourceNotFound() {
+        InvokeRestApiRequest request = new InvokeRestApiRequest();
+        request.setMethod("GET");
+        request.setPath("/dags");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> mwaaService.invokeRestApi("alchemy-mwaa-nonexistent-probe", request));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void invokeRestApiGetDagsReturnsEmptyAirflowList() {
+        mwaaService.createEnvironment("rest-api-env", createRequest("arn:aws:s3:::my-bucket", "dags"));
+
+        InvokeRestApiRequest request = new InvokeRestApiRequest();
+        request.setMethod("GET");
+        request.setPath("/dags");
+
+        Map<String, Object> response = mwaaService.invokeRestApi("rest-api-env", request);
+        assertEquals(200, response.get("RestApiStatusCode"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> airflow = (Map<String, Object>) response.get("RestApiResponse");
+        assertEquals(0, airflow.get("total_entries"));
+        assertTrue(airflow.get("dags") instanceof List);
+    }
+
+    @Test
+    void invokeRestApiMissingMethodIsValidationException() {
+        mwaaService.createEnvironment("rest-api-validation-env",
+                createRequest("arn:aws:s3:::my-bucket", "dags"));
+
+        InvokeRestApiRequest request = new InvokeRestApiRequest();
+        request.setPath("/dags");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> mwaaService.invokeRestApi("rest-api-validation-env", request));
+        assertEquals("ValidationException", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+    }
+
+    @Test
+    void invokeRestApiUnknownPathIsRestApiClientException() {
+        mwaaService.createEnvironment("rest-api-unknown-env",
+                createRequest("arn:aws:s3:::my-bucket", "dags"));
+
+        InvokeRestApiRequest request = new InvokeRestApiRequest();
+        request.setMethod("GET");
+        request.setPath("/not-a-real-airflow-path");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> mwaaService.invokeRestApi("rest-api-unknown-env", request));
+        assertEquals("RestApiClientException", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+        assertEquals(404, ex.getExtendedData().get("RestApiStatusCode"));
     }
 
     @Test
