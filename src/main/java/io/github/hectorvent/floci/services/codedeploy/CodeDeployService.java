@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.codedeploy.model.Application;
+import io.github.hectorvent.floci.services.codedeploy.model.ApplicationRevision;
 import io.github.hectorvent.floci.services.codedeploy.model.Deployment;
 import io.github.hectorvent.floci.services.codedeploy.model.DeploymentConfig;
 import io.github.hectorvent.floci.services.codedeploy.model.DeploymentGroup;
@@ -30,6 +31,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -82,6 +84,9 @@ public class CodeDeployService {
     private Map<String, Map<String, String>> tags = new ConcurrentHashMap<>();
     // key: region -> instanceName -> OnPremisesInstance
     private Map<String, Map<String, OnPremisesInstance>> onPremisesInstances = new ConcurrentHashMap<>();
+    // key: region -> (appName + "\0" + revisionKey) -> ApplicationRevision
+    private Map<String, Map<String, ApplicationRevision>> applicationRevisions =
+            new ConcurrentHashMap<String, Map<String, ApplicationRevision>>();
 
     // ---- Transient runtime state (in memory only) ----
     // key: region -> deploymentId -> Deployment
@@ -108,11 +113,14 @@ public class CodeDeployService {
                 new TypeReference<Map<String, Map<String, String>>>() {});
         this.onPremisesInstances = storageBacked("codedeploy-on-premises-instances.json",
                 new TypeReference<Map<String, Map<String, OnPremisesInstance>>>() {});
+        this.applicationRevisions = storageBacked("codedeploy-application-revisions.json",
+                new TypeReference<Map<String, Map<String, ApplicationRevision>>>() {});
         normalizeRegionMaps(applications);
         normalizeDeploymentGroups();
         normalizeRegionMaps(deploymentConfigs);
         normalizeRegionMaps(tags);
         normalizeRegionMaps(onPremisesInstances);
+        normalizeRegionMaps(applicationRevisions);
         reconcileBuiltInConfigs();
     }
 
@@ -544,10 +552,23 @@ public class CodeDeployService {
         return onPremisesInstances.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
     }
 
+    private Map<String, ApplicationRevision> revisionsFor(String region) {
+        return applicationRevisions.computeIfAbsent(region,
+                r -> new ConcurrentHashMap<String, ApplicationRevision>());
+    }
+
+    private static String revisionStoreKey(String appName, Map<String, Object> revision) {
+        return appName + "\0" + revisionKey(revision);
+    }
+
     public String createDeployment(String region, String appName, String groupName,
                                    String configName, Map<String, Object> revision, String description) {
         Application app = getApplication(region, appName);
         DeploymentGroup group = getDeploymentGroup(region, appName, groupName);
+        if (revision == null || revision.isEmpty()) {
+            throw new AwsException("RevisionRequiredException",
+                    "A revision must be specified.", 400);
+        }
         // Compute platform is authoritative on the Application; the deployment group may also carry it
         String computePlatform = group.getComputePlatform();
         if (computePlatform == null) {
@@ -640,6 +661,19 @@ public class CodeDeployService {
         return Map.of("status", "Pending", "statusMessage", "Stop request submitted.");
     }
 
+    public void continueDeployment(String region, String deploymentId) {
+        if (deploymentId == null || deploymentId.isBlank()) {
+            throw new AwsException("DeploymentIdRequiredException",
+                    "Deployment ID is required.", 400);
+        }
+        Deployment d = getDeployment(region, deploymentId);
+        String status = d.getStatus();
+        if ("Succeeded".equals(status) || "Failed".equals(status) || "Stopped".equals(status)) {
+            throw new AwsException("DeploymentAlreadyCompletedException",
+                    "Deployment is already completed: " + deploymentId, 400);
+        }
+    }
+
     public List<Deployment> batchGetDeployments(String region, List<String> ids) {
         Map<String, Deployment> store = deploymentsFor(region);
         return ids.stream()
@@ -678,12 +712,202 @@ public class CodeDeployService {
                 .collect(Collectors.toList());
     }
 
-    public String putLifecycleEventHookExecutionStatus(String deploymentId, String executionId, String status) {
+    public Map<String, Object> getDeploymentTarget(String region, String deploymentId, String targetId) {
+        if (deploymentId == null || deploymentId.isBlank()) {
+            throw new AwsException("DeploymentIdRequiredException",
+                    "Deployment ID is required.", 400);
+        }
+        if (targetId == null || targetId.isBlank()) {
+            throw new AwsException("DeploymentTargetIdRequiredException",
+                    "Target ID is required.", 400);
+        }
+        getDeployment(region, deploymentId);
+        Map<String, Map<String, Object>> targets = deploymentTargetsFor(region).get(deploymentId);
+        Map<String, Object> target = targets != null ? targets.get(targetId) : null;
+        if (target == null) {
+            throw new AwsException("DeploymentTargetDoesNotExistException",
+                    "No deployment target found for deployment " + deploymentId
+                            + " and target " + targetId, 400);
+        }
+        return target;
+    }
+
+    public String putLifecycleEventHookExecutionStatus(String region, String deploymentId,
+                                                       String executionId, String status) {
+        if (deploymentId == null || deploymentId.isBlank()) {
+            throw new AwsException("DeploymentIdRequiredException",
+                    "Deployment ID is required.", 400);
+        }
+        if (executionId == null || executionId.isBlank()) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionIdException",
+                    "Lifecycle event hook execution ID is required.", 400);
+        }
+        getDeployment(region, deploymentId);
         CompletableFuture<String> future = hookFutures.get(executionId);
-        if (future != null && !future.isDone()) {
+        if (future == null) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionIdException",
+                    "Invalid lifecycle event hook execution ID: " + executionId, 400);
+        }
+        if (!future.isDone()) {
             future.complete(status);
         }
         return executionId;
+    }
+
+    public void registerApplicationRevision(String region, String appName,
+                                            Map<String, Object> revision, String description) {
+        getApplication(region, appName);
+        if (revision == null || revision.isEmpty()) {
+            throw new AwsException("RevisionRequiredException",
+                    "A revision must be specified.", 400);
+        }
+        String key = revisionStoreKey(appName, revision);
+        Map<String, ApplicationRevision> store = revisionsFor(region);
+        ApplicationRevision existing = store.get(key);
+        double now = Instant.now().toEpochMilli() / 1000.0;
+        if (existing == null) {
+            ApplicationRevision rev = new ApplicationRevision();
+            rev.setRevision(revision);
+            rev.setDescription(description);
+            rev.setRegisterTime(now);
+            store.put(key, rev);
+        } else {
+            if (description != null) {
+                existing.setDescription(description);
+            }
+            existing.setRevision(revision);
+        }
+        persistRegion(applicationRevisions, region);
+    }
+
+    public Map<String, Object> getApplicationRevision(String region, String appName,
+                                                      Map<String, Object> revision) {
+        getApplication(region, appName);
+        if (revision == null || revision.isEmpty()) {
+            throw new AwsException("RevisionRequiredException",
+                    "A revision must be specified.", 400);
+        }
+        ApplicationRevision rev = revisionsFor(region).get(revisionStoreKey(appName, revision));
+        if (rev == null) {
+            throw new AwsException("RevisionDoesNotExistException",
+                    "The specified revision does not exist.", 400);
+        }
+        Map<String, Object> out = new HashMap<>();
+        out.put("applicationName", appName);
+        out.put("revision", rev.getRevision());
+        out.put("revisionInfo", genericRevisionInfo(rev));
+        return out;
+    }
+
+    public List<Map<String, Object>> listApplicationRevisions(String region, String appName,
+                                                              String s3Bucket, String s3KeyPrefix) {
+        getApplication(region, appName);
+        String prefix = appName + "\0";
+        return revisionsFor(region).entrySet().stream()
+                .filter(e -> e.getKey().startsWith(prefix))
+                .map(e -> e.getValue().getRevision())
+                .filter(loc -> matchesS3Filter(loc, s3Bucket, s3KeyPrefix))
+                .collect(Collectors.toList());
+    }
+
+    public Map<String, Object> batchGetApplicationRevisions(String region, String appName,
+                                                            List<Map<String, Object>> revisions) {
+        getApplication(region, appName);
+        Map<String, ApplicationRevision> store = revisionsFor(region);
+        List<Map<String, Object>> found = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        if (revisions != null) {
+            for (Map<String, Object> loc : revisions) {
+                ApplicationRevision rev = store.get(revisionStoreKey(appName, loc));
+                if (rev == null) {
+                    missing.add(revisionKey(loc));
+                    continue;
+                }
+                Map<String, Object> info = new HashMap<>();
+                info.put("revisionLocation", rev.getRevision());
+                info.put("genericRevisionInfo", genericRevisionInfo(rev));
+                found.add(info);
+            }
+        }
+        Map<String, Object> out = new HashMap<>();
+        out.put("applicationName", appName);
+        out.put("revisions", found);
+        if (!missing.isEmpty()) {
+            out.put("errorMessage", "Could not find revisions: " + String.join(", ", missing));
+        }
+        return out;
+    }
+
+    private Map<String, Object> genericRevisionInfo(ApplicationRevision rev) {
+        Map<String, Object> info = new HashMap<>();
+        if (rev.getDescription() != null) {
+            info.put("description", rev.getDescription());
+        }
+        info.put("deploymentGroups",
+                rev.getDeploymentGroups() != null ? rev.getDeploymentGroups() : List.of());
+        if (rev.getRegisterTime() != null) {
+            info.put("registerTime", rev.getRegisterTime());
+        }
+        if (rev.getFirstUsedTime() != null) {
+            info.put("firstUsedTime", rev.getFirstUsedTime());
+        }
+        if (rev.getLastUsedTime() != null) {
+            info.put("lastUsedTime", rev.getLastUsedTime());
+        }
+        return info;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        return value instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
+    }
+
+    private static String asString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    static String revisionKey(Map<String, Object> revision) {
+        if (revision == null) {
+            return "";
+        }
+        Map<String, Object> s3 = asMap(revision.get("s3Location"));
+        if (s3 != null) {
+            return "S3|" + asString(s3.get("bucket")) + "|" + asString(s3.get("key"))
+                    + "|" + asString(s3.get("version")) + "|" + asString(s3.get("eTag"));
+        }
+        Map<String, Object> gh = asMap(revision.get("gitHubLocation"));
+        if (gh != null) {
+            return "GitHub|" + asString(gh.get("repository")) + "|" + asString(gh.get("commitId"));
+        }
+        Map<String, Object> appSpec = asMap(revision.get("appSpecContent"));
+        if (appSpec != null) {
+            return "AppSpecContent|" + asString(appSpec.get("sha256")) + "|"
+                    + asString(appSpec.get("content"));
+        }
+        Map<String, Object> raw = asMap(revision.get("string"));
+        if (raw != null) {
+            return "String|" + asString(raw.get("sha256")) + "|" + asString(raw.get("content"));
+        }
+        return asString(revision.get("revisionType")) + "|" + revision;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean matchesS3Filter(Map<String, Object> location, String s3Bucket, String s3KeyPrefix) {
+        if (s3Bucket == null && s3KeyPrefix == null) {
+            return true;
+        }
+        Map<String, Object> s3 = asMap(location != null ? location.get("s3Location") : null);
+        if (s3 == null) {
+            return false;
+        }
+        if (s3Bucket != null && !s3Bucket.equals(asString(s3.get("bucket")))) {
+            return false;
+        }
+        if (s3KeyPrefix != null) {
+            String key = asString(s3.get("key"));
+            return key.startsWith(s3KeyPrefix);
+        }
+        return true;
     }
 
     // ---- Deployment state machine ----
