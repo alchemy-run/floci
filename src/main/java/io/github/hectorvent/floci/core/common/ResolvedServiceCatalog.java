@@ -29,6 +29,7 @@ import io.github.hectorvent.floci.services.mwaa.MwaaController;
 import io.github.hectorvent.floci.services.iot.IotController;
 import io.github.hectorvent.floci.services.iot.IotDataController;
 import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseController;
+import io.github.hectorvent.floci.services.iotsitewise.IotSiteWiseController;
 import io.github.hectorvent.floci.services.iotmanagedintegrations.IotManagedIntegrationsController;
 import io.github.hectorvent.floci.services.ivs.IvsController;
 import io.github.hectorvent.floci.services.ivs.IvsRecordingConfigurationController;
@@ -75,6 +76,7 @@ import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
+import io.github.hectorvent.floci.services.imagebuilder.ImageBuilderController;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -86,6 +88,7 @@ import java.util.Set;
 
 @ApplicationScoped
 public class ResolvedServiceCatalog {
+    // identity-center SWBExternalService + AWSIdentityStore
 
     /**
      * Signing scopes that share another service's IAM namespace. S3 Express One Zone clients sign
@@ -149,6 +152,12 @@ public class ResolvedServiceCatalog {
                         "iam", config.storage().mode(), 5000L, AwsNamespaces.IAM, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("iam"), Set.of(), Set.of()),
+                descriptor("imagebuilder", "imagebuilder", config.services().imagebuilder().enabled(), true,
+                        "imagebuilder", storageMode(config.storage().services().imagebuilder().mode(),
+                                config.storage().mode()),
+                        config.storage().services().imagebuilder().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("imagebuilder"), Set.of(), Set.of(ImageBuilderController.class)), // restJson1 /GetComponent
                 descriptor("kafka", "msk", config.services().msk().enabled(), true,
                         "msk", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
@@ -679,6 +688,11 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
                         Set.of("IoTAutobahnControlPlane."), Set.of("iotfleetwise"), Set.of(),
                         Set.of(IotFleetWiseController.class)),
+                descriptor("iotsitewise", "iotsitewise", config.services().iotsitewise().enabled(), true,
+                        "iotsitewise", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("iotsitewise"), Set.of(),
+                        Set.of(IotSiteWiseController.class)),
                 descriptor("iotmanagedintegrations", "iotmanagedintegrations",
                         config.services().iotmanagedintegrations().enabled(), true,
                         "iotmanagedintegrations", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
@@ -847,7 +861,15 @@ public class ResolvedServiceCatalog {
                 descriptor("inspector2", "inspector2", config.services().inspector2().enabled(), true,
                         "inspector2", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("inspector2"), Set.of(), Set.of(Inspector2Controller.class))
+                        Set.of(), Set.of("inspector2"), Set.of(), Set.of(Inspector2Controller.class)),
+                descriptor("sso-admin", "ssoadmin", config.services().ssoAdmin().enabled(), true,
+                        "ssoadmin", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("SWBExternalService."), Set.of("sso", "sso-admin"), Set.of(), Set.of()),
+                descriptor("identitystore", "identitystore", config.services().identitystore().enabled(), true,
+                        "identitystore", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSIdentityStore."), Set.of("identitystore"), Set.of(), Set.of())
         ));
     }
 

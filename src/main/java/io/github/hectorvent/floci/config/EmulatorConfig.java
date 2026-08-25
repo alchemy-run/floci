@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.config;
 
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
+import io.smallrye.config.WithName;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -322,6 +323,7 @@ public interface EmulatorConfig {
         EmrContainersStorageConfig emrContainers();
         EmrServerlessStorageConfig emrServerless();
         EntityResolutionStorageConfig entityresolution();
+        ImageBuilderStorageConfig imagebuilder();
     }
 
     interface SsmStorageConfig {
@@ -705,6 +707,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface ImageBuilderStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AmpStorageConfig {
         Optional<String> mode();
 
@@ -902,6 +911,8 @@ public interface EmulatorConfig {
         GuardDutyServiceConfig guardduty();
         Inspector2ServiceConfig inspector2();
         FsxServiceConfig fsx();
+        SsoAdminServiceConfig ssoAdmin();
+        IdentityStoreServiceConfig identitystore();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
         EcrServiceConfig ecr();
@@ -963,6 +974,7 @@ public interface EmulatorConfig {
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         IotFleetWiseServiceConfig iotfleetwise();
+        IotSiteWiseServiceConfig iotsitewise();
         IotManagedIntegrationsServiceConfig iotmanagedintegrations();
         RumServiceConfig rum();
         InternetMonitorServiceConfig internetmonitor();
@@ -988,6 +1000,7 @@ public interface EmulatorConfig {
         CodeArtifactServiceConfig codeartifact();
         ApplicationSignalsServiceConfig applicationSignals();
         DeadlineServiceConfig deadline();
+        ImageBuilderServiceConfig imagebuilder();
     }
 
     interface IotServiceConfig {
@@ -1017,6 +1030,11 @@ public interface EmulatorConfig {
     }
 
     interface IotFleetWiseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IotSiteWiseServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1142,6 +1160,12 @@ public interface EmulatorConfig {
     }
 
     interface DeadlineServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ImageBuilderServiceConfig {
+        /** EC2 Image Builder restJson1. */
         @WithDefault("true")
         boolean enabled();
     }
@@ -1853,6 +1877,16 @@ public interface EmulatorConfig {
     }
 
     interface FsxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SsoAdminServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IdentityStoreServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

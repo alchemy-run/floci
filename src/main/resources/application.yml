@@ -651,6 +651,8 @@ floci:
       enabled: true
     iotfleetwise:
       enabled: true
+    iotsitewise:
+      enabled: true
     iotmanagedintegrations:
       enabled: true
     rum:
