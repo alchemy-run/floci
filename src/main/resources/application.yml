@@ -402,6 +402,8 @@ floci:
       default-recovery-window-days: 30
     kendra:
       enabled: true
+    keyspaces:
+      enabled: true
     kinesis:
       enabled: true
     firehose:

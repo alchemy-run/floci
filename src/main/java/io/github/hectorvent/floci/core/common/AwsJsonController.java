@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.services.b2bi.B2biJsonHandler;
 import io.github.hectorvent.floci.services.codeconnections.CodeConnectionsJsonHandler;
 import io.github.hectorvent.floci.services.healthlake.HealthLakeJsonHandler;
 import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseJsonHandler;
+import io.github.hectorvent.floci.services.keyspaces.KeyspacesJsonHandler;
 import io.github.hectorvent.floci.services.keyspacesstreams.KeyspacesStreamsJsonHandler;
 import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
@@ -56,6 +57,7 @@ public class AwsJsonController {
     private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
     private final HealthLakeJsonHandler healthLakeJsonHandler;
     private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
+    private final KeyspacesJsonHandler keyspacesJsonHandler;
     private final KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler;
 
     @Inject
@@ -72,6 +74,7 @@ public class AwsJsonController {
                              CodeConnectionsJsonHandler codeConnectionsJsonHandler,
                              HealthLakeJsonHandler healthLakeJsonHandler,
                              IotFleetWiseJsonHandler iotFleetWiseJsonHandler,
+                             KeyspacesJsonHandler keyspacesJsonHandler,
                              KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -89,6 +92,7 @@ public class AwsJsonController {
         this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
         this.healthLakeJsonHandler = healthLakeJsonHandler;
         this.iotFleetWiseJsonHandler = iotFleetWiseJsonHandler;
+        this.keyspacesJsonHandler = keyspacesJsonHandler;
         this.keyspacesStreamsJsonHandler = keyspacesStreamsJsonHandler;
     }
 
@@ -141,6 +145,7 @@ public class AwsJsonController {
                 case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
                 case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
                 case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
+                case "cassandra" -> keyspacesJsonHandler.handle(action, request, region);
                 case "keyspacesstreams" -> keyspacesStreamsJsonHandler.handle(action, request, region);
                 default -> null;
             };

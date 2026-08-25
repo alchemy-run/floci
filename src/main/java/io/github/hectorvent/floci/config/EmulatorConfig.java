@@ -890,6 +890,7 @@ public interface EmulatorConfig {
         SecretsManagerServiceConfig secretsmanager();
         ApiGatewayV2ServiceConfig apigatewayv2();
         KendraServiceConfig kendra();
+        KeyspacesServiceConfig keyspaces();
         KinesisServiceConfig kinesis();
         FirehoseServiceConfig firehose();
         FmsServiceConfig fms();
@@ -1707,8 +1708,12 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
-
     interface KendraServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface KeyspacesServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
