@@ -5,7 +5,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * AWS CUR (Cost and Usage Report) {@code ReportDefinition} record.
@@ -38,6 +40,11 @@ public class ReportDefinition {
      * (default) request scope. Not part of the AWS wire response.
      */
     private String ownerAccountId;
+    /**
+     * Tags attached via {@code PutReportDefinition.Tags} / {@code TagResource}.
+     * Not part of the {@code DescribeReportDefinitions} wire shape.
+     */
+    private Map<String, String> tags = new LinkedHashMap<>();
 
     public ReportDefinition() {
     }
@@ -89,4 +96,15 @@ public class ReportDefinition {
 
     public String getOwnerAccountId() { return ownerAccountId; }
     public void setOwnerAccountId(String v) { this.ownerAccountId = v; }
+
+    public Map<String, String> getTags() {
+        if (tags == null) {
+            tags = new LinkedHashMap<>();
+        }
+        return tags;
+    }
+
+    public void setTags(Map<String, String> v) {
+        this.tags = v == null ? new LinkedHashMap<>() : new LinkedHashMap<>(v);
+    }
 }
