@@ -38,6 +38,33 @@ public class CostExplorerJsonHandler {
             case "GetSavingsPlansCoverage" -> Response.ok(service.getSavingsPlansCoverage()).build();
             case "GetSavingsPlansUtilization" -> Response.ok(service.getSavingsPlansUtilization()).build();
             case "GetCostCategories" -> Response.ok(service.getCostCategories(request)).build();
+            case "CreateCostCategoryDefinition" -> Response.ok(service.createCostCategoryDefinition(request)).build();
+            case "DescribeCostCategoryDefinition" -> Response.ok(service.describeCostCategoryDefinition(request)).build();
+            case "ListCostCategoryDefinitions" -> Response.ok(service.listCostCategoryDefinitions(request)).build();
+            case "UpdateCostCategoryDefinition" -> Response.ok(service.updateCostCategoryDefinition(request)).build();
+            case "DeleteCostCategoryDefinition" -> Response.ok(service.deleteCostCategoryDefinition(request)).build();
+            case "ListCostCategoryResourceAssociations" -> Response.ok(service.listCostCategoryResourceAssociations(request)).build();
+            case "GetCostForecast" -> Response.ok(service.getCostForecast(request, region)).build();
+            case "GetApproximateUsageRecords" -> Response.ok(service.getApproximateUsageRecords(request, region)).build();
+            case "GetRightsizingRecommendation" -> Response.ok(service.getRightsizingRecommendation(request)).build();
+            case "GetReservationPurchaseRecommendation" -> Response.ok(service.getReservationPurchaseRecommendation(request)).build();
+            case "ListSavingsPlansPurchaseRecommendationGeneration" -> Response.ok(service.listSavingsPlansPurchaseRecommendationGeneration()).build();
+            case "ListCommitmentPurchaseAnalyses" -> Response.ok(service.listCommitmentPurchaseAnalyses()).build();
+            case "ListCostAllocationTags" -> Response.ok(service.listCostAllocationTags()).build();
+            case "ListCostAllocationTagBackfillHistory" -> Response.ok(service.listCostAllocationTagBackfillHistory()).build();
+            case "GetAnomalies" -> Response.ok(service.getAnomalies(request)).build();
+            case "ProvideAnomalyFeedback" -> Response.ok(service.provideAnomalyFeedback(request)).build();
+            case "CreateAnomalyMonitor" -> Response.ok(service.createAnomalyMonitor(request)).build();
+            case "GetAnomalyMonitors" -> Response.ok(service.getAnomalyMonitors(request)).build();
+            case "UpdateAnomalyMonitor" -> Response.ok(service.updateAnomalyMonitor(request)).build();
+            case "DeleteAnomalyMonitor" -> Response.ok(service.deleteAnomalyMonitor(request)).build();
+            case "CreateAnomalySubscription" -> Response.ok(service.createAnomalySubscription(request)).build();
+            case "GetAnomalySubscriptions" -> Response.ok(service.getAnomalySubscriptions(request)).build();
+            case "UpdateAnomalySubscription" -> Response.ok(service.updateAnomalySubscription(request)).build();
+            case "DeleteAnomalySubscription" -> Response.ok(service.deleteAnomalySubscription(request)).build();
+            case "ListTagsForResource" -> Response.ok(service.listTagsForResource(request)).build();
+            case "TagResource" -> Response.ok(service.tagResource(request)).build();
+            case "UntagResource" -> Response.ok(service.untagResource(request)).build();
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: AWSInsightsIndexService." + action))
