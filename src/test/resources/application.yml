@@ -344,6 +344,8 @@ floci:
       mock: true
       proxy-base-port: 9400
       proxy-max-port: 9499
+    osis:
+      enabled: true
     ec2:
       enabled: true
       imds-port: 9169

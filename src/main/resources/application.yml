@@ -487,6 +487,8 @@ floci:
       proxy-base-port: 9400
       proxy-max-port: 9499
       keep-running-on-shutdown: false
+    osis:
+      enabled: true
     ec2:
       enabled: true
       imds-port: 9169

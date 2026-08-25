@@ -986,6 +986,7 @@ public interface EmulatorConfig {
         LakeFormationServiceConfig lakeformation();
         SesServiceConfig ses();
         OpenSearchServiceConfig opensearch();
+        OsisServiceConfig osis();
         Ec2ServiceConfig ec2();
         EcsServiceConfig ecs();
         EfsServiceConfig efs();
@@ -2015,6 +2016,11 @@ public interface EmulatorConfig {
 
         @WithDefault("false")
         boolean keepRunningOnShutdown();
+    }
+
+    interface OsisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface EcsServiceConfig {
