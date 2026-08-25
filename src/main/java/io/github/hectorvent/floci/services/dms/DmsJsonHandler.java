@@ -48,6 +48,17 @@ public class DmsJsonHandler {
             case "DescribeEndpointSettings" -> ok(dmsService.describeEndpointSettings(body));
             case "DescribeOrderableReplicationInstances" ->
                     ok(dmsService.describeOrderableReplicationInstances(body));
+            case "CreateReplicationInstance" -> ok(dmsService.createReplicationInstance(body, region));
+            case "ModifyReplicationInstance" -> ok(dmsService.modifyReplicationInstance(body));
+            case "DeleteReplicationInstance" -> ok(dmsService.deleteReplicationInstance(body));
+            case "DescribeReplicationInstances" -> ok(dmsService.describeReplicationInstances(body));
+            case "CreateReplicationSubnetGroup" ->
+                    ok(dmsService.createReplicationSubnetGroup(body, region));
+            case "ModifyReplicationSubnetGroup" ->
+                    ok(dmsService.modifyReplicationSubnetGroup(body, region));
+            case "DeleteReplicationSubnetGroup" -> ok(dmsService.deleteReplicationSubnetGroup(body));
+            case "DescribeReplicationSubnetGroups" ->
+                    ok(dmsService.describeReplicationSubnetGroups(body));
             case "DescribeReplicationTasks" -> ok(dmsService.describeReplicationTasks(body));
             case "DescribeReplications" -> ok(dmsService.describeReplications(body));
             case "StartReplicationTask" -> ok(dmsService.startReplicationTask(body));
