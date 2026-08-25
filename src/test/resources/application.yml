@@ -459,6 +459,8 @@ floci:
       enabled: true
     iotfleetwise:
       enabled: true
+    iotmanagedintegrations:
+      enabled: true
     rum:
       enabled: true
     internetmonitor:
