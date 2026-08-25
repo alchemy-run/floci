@@ -294,6 +294,7 @@ public interface EmulatorConfig {
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
         ChatbotStorageConfig chatbot();
+        ControlTowerStorageConfig controltower();
         CodeArtifactStorageConfig codeartifact();
         ApplicationSignalsStorageConfig applicationSignals();
         BedrockAgentStorageConfig bedrockAgent();
@@ -619,6 +620,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface ControlTowerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface CodeArtifactStorageConfig {
         Optional<String> mode();
 
@@ -728,6 +736,8 @@ public interface EmulatorConfig {
         Route53ServiceConfig route53();
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
+        ComprehendServiceConfig comprehend();
+        ComprehendMedicalServiceConfig comprehendmedical();
         PricingServiceConfig pricing();
         DuckConfig duck();
         TranscribeServiceConfig transcribe();
@@ -760,6 +770,7 @@ public interface EmulatorConfig {
         AppRunnerServiceConfig apprunner();
         B2biServiceConfig b2bi();
         ChatbotServiceConfig chatbot();
+        ControlTowerServiceConfig controltower();
         CodeArtifactServiceConfig codeartifact();
         ApplicationSignalsServiceConfig applicationSignals();
     }
@@ -851,6 +862,11 @@ public interface EmulatorConfig {
     }
 
     interface ChatbotServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ControlTowerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1517,6 +1533,16 @@ public interface EmulatorConfig {
     }
 
     interface TextractServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ComprehendServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ComprehendMedicalServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

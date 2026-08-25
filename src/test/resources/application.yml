@@ -89,6 +89,8 @@ floci:
         flush-interval-ms: 60000
       chatbot:
         flush-interval-ms: 60000
+      controltower:
+        flush-interval-ms: 60000
       codeartifact:
         flush-interval-ms: 60000
       application-signals:
@@ -310,6 +312,10 @@ floci:
       enabled: true
     textract:
       enabled: true
+    comprehend:
+      enabled: true
+    comprehendmedical:
+      enabled: true
     pricing:
       enabled: true
     ce:
@@ -372,6 +378,8 @@ floci:
     b2bi:
       enabled: true
     chatbot:
+      enabled: true
+    controltower:
       enabled: true
     codeartifact:
       enabled: true

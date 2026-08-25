@@ -39,6 +39,7 @@ import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
 import io.github.hectorvent.floci.services.apprunner.AppRunnerProxyController;
 import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignalsController;
 import io.github.hectorvent.floci.services.chatbot.ChatbotController;
+import io.github.hectorvent.floci.services.controltower.ControlTowerController;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
@@ -443,6 +444,14 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("Textract."), Set.of("textract"), Set.of(), Set.of()),
+                descriptor("comprehend", "comprehend", config.services().comprehend().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("Comprehend_20171127."), Set.of("comprehend"), Set.of(), Set.of()),
+                descriptor("comprehendmedical", "comprehendmedical", config.services().comprehendmedical().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("ComprehendMedical_20181030."), Set.of("comprehendmedical"), Set.of(), Set.of()),
                 descriptor("pricing", "pricing", config.services().pricing().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -583,6 +592,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().chatbot().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class)),
+                descriptor("controltower", "controltower", config.services().controltower().enabled(), true,
+                        "controltower", storageMode(config.storage().services().controltower().mode(),
+                                config.storage().mode()),
+                        config.storage().services().controltower().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("controltower"), Set.of(), Set.of(ControlTowerController.class)),
                 descriptor("codeartifact", "codeartifact", config.services().codeartifact().enabled(), true,
                         "codeartifact", storageMode(config.storage().services().codeartifact().mode(),
                                 config.storage().mode()),
