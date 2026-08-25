@@ -57,6 +57,7 @@ import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
 import io.github.hectorvent.floci.services.fsx.FsxJsonHandler;
 import io.github.hectorvent.floci.services.directoryservice.DirectoryServiceJsonHandler;
 import io.github.hectorvent.floci.services.forecast.ForecastJsonHandler;
+import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -135,6 +136,7 @@ public class AwsJson11Controller {
     private final DirectoryServiceJsonHandler directoryServiceJsonHandler;
     private final DaxJsonHandler daxJsonHandler;
     private final ForecastJsonHandler forecastJsonHandler;
+    private final GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -186,7 +188,8 @@ public class AwsJson11Controller {
                                FsxJsonHandler fsxJsonHandler,
                                DirectoryServiceJsonHandler directoryServiceJsonHandler,
                                DaxJsonHandler daxJsonHandler,
-                               ForecastJsonHandler forecastJsonHandler) {
+                               ForecastJsonHandler forecastJsonHandler,
+                               GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -332,6 +335,7 @@ public class AwsJson11Controller {
                 case "fsx" -> fsxJsonHandler.handle(action, request, region);
                 case "ds" -> directoryServiceJsonHandler.handle(action, request, region);
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
+                case "globalaccelerator" -> globalAcceleratorJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target
