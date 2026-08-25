@@ -123,6 +123,7 @@ nav:
     - AppConfig: services/appconfig.md
     - Service Catalog AppRegistry: services/appregistry.md
     - Bedrock Runtime: services/bedrock-runtime.md
+    - Bedrock Agents: services/bedrock-agent.md
     - ELB v2: services/elb.md
     - Auto Scaling: services/autoscaling.md
     - Elastic Beanstalk: services/elastic-beanstalk.md

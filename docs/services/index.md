@@ -66,6 +66,7 @@ Operation counts are exact. For dispatch-table services (Query and JSON 1.1) eac
 | [App Runner](apprunner.md) | `POST /` + `X-Amz-Target: AppRunner.*` | JSON 1.0 | 7 |
 | [AppSync](appsync.md) | `/v1/apis/...` | REST JSON | 33 |
 | [Bedrock Runtime](bedrock-runtime.md) | `/model/{modelId}/converse`, `/model/{modelId}/invoke` | REST JSON | 2 (stub; streaming returns 501) |
+| [Bedrock Agents](bedrock-agent.md) | `/agents/`, `/agents/{agentId}/`, `/agents/{agentId}/agentaliases/`, `/tags/{resourceArn}` | REST JSON | 14 |
 | [EKS](eks.md) | `/clusters`, `/clusters/{name}`, `/tags/{resourceArn}` | REST JSON | 7 |
 | [ELB v2](elb.md) | `POST /` with `Action=` param | Query | 34 |
 | [WAF v2](wafv2.md) | `POST /` + `X-Amz-Target: AWSWAF_20190729.*` | JSON 1.1 | 35 |
