@@ -165,6 +165,8 @@ floci:
         flush-interval-ms: 5000
       chatbot:
         flush-interval-ms: 5000
+      codeartifact:
+        flush-interval-ms: 5000
       application-signals:
         flush-interval-ms: 5000
       bedrock-agent:
@@ -558,6 +560,8 @@ floci:
     b2bi:
       enabled: true
     chatbot:
+      enabled: true
+    codeartifact:
       enabled: true
     application-signals:
       enabled: true

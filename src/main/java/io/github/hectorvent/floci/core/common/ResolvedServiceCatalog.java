@@ -39,6 +39,7 @@ import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
 import io.github.hectorvent.floci.services.apprunner.AppRunnerProxyController;
 import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignalsController;
 import io.github.hectorvent.floci.services.chatbot.ChatbotController;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -576,6 +577,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().chatbot().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class)),
+                descriptor("codeartifact", "codeartifact", config.services().codeartifact().enabled(), true,
+                        "codeartifact", storageMode(config.storage().services().codeartifact().mode(),
+                                config.storage().mode()),
+                        config.storage().services().codeartifact().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("codeartifact"), Set.of(), Set.of(CodeArtifactController.class)),
                 descriptor("cloudhsmv2", "cloudhsmv2", config.services().cloudhsmV2().enabled(), true,
                         "cloudhsmv2", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

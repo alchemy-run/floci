@@ -293,6 +293,7 @@ public interface EmulatorConfig {
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
         ChatbotStorageConfig chatbot();
+        CodeArtifactStorageConfig codeartifact();
         ApplicationSignalsStorageConfig applicationSignals();
         BedrockAgentStorageConfig bedrockAgent();
         BedrockAgentCoreStorageConfig bedrockAgentCore();
@@ -617,6 +618,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface CodeArtifactStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface ApplicationSignalsStorageConfig {
         Optional<String> mode();
 
@@ -743,6 +751,7 @@ public interface EmulatorConfig {
         AppRunnerServiceConfig apprunner();
         B2biServiceConfig b2bi();
         ChatbotServiceConfig chatbot();
+        CodeArtifactServiceConfig codeartifact();
         ApplicationSignalsServiceConfig applicationSignals();
     }
 
@@ -833,6 +842,11 @@ public interface EmulatorConfig {
     }
 
     interface ChatbotServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface CodeArtifactServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
