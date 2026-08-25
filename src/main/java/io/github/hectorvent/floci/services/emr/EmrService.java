@@ -108,6 +108,14 @@ public class EmrService {
     }
 
     public void terminateJobFlows(List<String> ids) {
+        // AWS rejects the request with ValidationException when any job-flow id is unknown
+        // (distilled maps this to JobFlowNotFound). Missing ids fail before mutation.
+        for (String id : ids) {
+            if (clusterStore.get(id).isEmpty()) {
+                throw new AwsException("ValidationException",
+                        "Specified job flow ID not valid.", 400);
+            }
+        }
         // AWS terminates the unprotected clusters in the request and then fails it with a
         // ValidationException if any were termination protected.
         boolean anyProtected = false;
@@ -275,8 +283,10 @@ public class EmrService {
             throw new AwsException("InvalidRequestException", "Name is required.", 400);
         }
         if (secConfigStore.get(name).isPresent()) {
+            // Live EMR overloads InvalidRequestException; distilled remaps this message to
+            // SecurityConfigurationAlreadyExists.
             throw new AwsException("InvalidRequestException",
-                    "Security configuration already exists: " + name, 400);
+                    "SecurityConfiguration with name " + name + " already exists", 400);
         }
         SecurityConfiguration sc = new SecurityConfiguration();
         sc.setName(name);
@@ -288,13 +298,14 @@ public class EmrService {
 
     public SecurityConfiguration describeSecurityConfiguration(String name) {
         return secConfigStore.get(name).orElseThrow(() -> new AwsException(
-                "InvalidRequestException", "Security configuration does not exist: " + name, 400));
+                "InvalidRequestException",
+                "Security configuration with name " + name + " does not exist", 400));
     }
 
     public void deleteSecurityConfiguration(String name) {
-        if (secConfigStore.get(name).isEmpty()) {
+        if (name == null || secConfigStore.get(name).isEmpty()) {
             throw new AwsException("InvalidRequestException",
-                    "Security configuration does not exist: " + name, 400);
+                    "Security configuration with name " + name + " does not exist", 400);
         }
         secConfigStore.delete(name);
     }
