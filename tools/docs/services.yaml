@@ -140,5 +140,6 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/ssm/Ec2MessagesJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/ssm/SsmJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/textract/TextractJsonHandler.java }  # no standalone action table yet
+  - { path: src/main/java/io/github/hectorvent/floci/services/comprehendmedical/ComprehendMedicalJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/transcribe/TranscribeJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/transfer/TransferHandler.java }  # multi-table doc
