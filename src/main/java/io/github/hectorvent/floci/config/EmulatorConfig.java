@@ -319,6 +319,8 @@ public interface EmulatorConfig {
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
         ChatbotStorageConfig chatbot();
+        @WithName("aws-notifications")
+        NotificationsStorageConfig awsNotifications();
         NotificationsContactsStorageConfig notificationsContacts();
         ControlTowerStorageConfig controltower();
         CodeArtifactStorageConfig codeartifact();
@@ -862,6 +864,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface NotificationsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface NotificationsContactsStorageConfig {
         Optional<String> mode();
 
@@ -1080,6 +1089,8 @@ public interface EmulatorConfig {
         AppRunnerServiceConfig apprunner();
         B2biServiceConfig b2bi();
         ChatbotServiceConfig chatbot();
+        @WithName("aws-notifications")
+        NotificationsServiceConfig awsNotifications();
         NotificationsContactsServiceConfig notificationsContacts();
         ControlTowerServiceConfig controltower();
         CodeArtifactServiceConfig codeartifact();
@@ -1240,6 +1251,11 @@ public interface EmulatorConfig {
     }
 
     interface ChatbotServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface NotificationsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

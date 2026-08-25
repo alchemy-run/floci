@@ -72,6 +72,7 @@ import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
 import io.github.hectorvent.floci.services.apprunner.AppRunnerProxyController;
 import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignalsController;
 import io.github.hectorvent.floci.services.chatbot.ChatbotController;
+import io.github.hectorvent.floci.services.notifications.NotificationsController;
 import io.github.hectorvent.floci.services.notificationscontacts.NotificationsContactsController;
 import io.github.hectorvent.floci.services.controltower.ControlTowerController;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactController;
@@ -928,6 +929,14 @@ public class ResolvedServiceCatalog {
                         config.storage().services().chatbot().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class)),
+                descriptor("notifications", "notifications", config.services().awsNotifications().enabled(), true,
+                        "notifications", storageMode(config.storage().services().awsNotifications().mode(),
+                                config.storage().mode()),
+                        config.storage().services().awsNotifications().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("notifications"), Set.of(),
+                        Set.of(NotificationsController.class)),
                 descriptor("notifications-contacts", "notificationscontacts",
                         config.services().notificationsContacts().enabled(), true,
                         "notificationscontacts", storageMode(

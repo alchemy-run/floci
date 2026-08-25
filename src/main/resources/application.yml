@@ -223,6 +223,8 @@ floci:
         flush-interval-ms: 5000
       chatbot:
         flush-interval-ms: 5000
+      aws-notifications:
+        flush-interval-ms: 5000
       notifications-contacts:
         flush-interval-ms: 5000
       controltower:
@@ -750,6 +752,8 @@ floci:
     b2bi:
       enabled: true
     chatbot:
+      enabled: true
+    aws-notifications:
       enabled: true
     notifications-contacts:
       enabled: true
