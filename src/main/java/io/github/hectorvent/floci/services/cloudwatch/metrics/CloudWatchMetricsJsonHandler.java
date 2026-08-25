@@ -53,6 +53,8 @@ public class CloudWatchMetricsJsonHandler {
             case "UntagResource" -> handleUntagResource(request, region);
             case "GetMetricData" -> handleGetMetricData(request, region);
             case "DescribeInsightRules" -> handleDescribeInsightRules();
+            case "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector" ->
+                    CloudWatchAnomalyDetectorActions.handleJson(objectMapper, normalizedAction, request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported by CloudWatch JSON."))
                     .build();

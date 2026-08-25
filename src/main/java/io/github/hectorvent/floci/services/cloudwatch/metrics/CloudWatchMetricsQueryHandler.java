@@ -47,6 +47,8 @@ public class CloudWatchMetricsQueryHandler {
             case "TagResource" -> handleTagResource(params, region);
             case "UntagResource" -> handleUntagResource(params, region);
             case "DescribeInsightRules" -> handleDescribeInsightRules();
+            case "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector" ->
+                    CloudWatchAnomalyDetectorActions.handleQuery(normalizedAction, params, region);
             default -> AwsQueryResponse.error("UnsupportedOperation",
                     "Operation " + action + " is not supported by CloudWatch Query.", AwsNamespaces.CW, 400);
         };
