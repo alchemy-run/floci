@@ -5,9 +5,12 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.AlarmHistory;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.AlarmHistoryItem;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.AlarmMuteRule;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.InsightRule;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricStream;
@@ -35,6 +38,8 @@ public class CloudWatchMetricsService {
     private final StorageBackend<String, CompositeAlarm> compositeAlarmStore;
     private final StorageBackend<String, AlarmMuteRule> muteRuleStore;
     private final StorageBackend<String, MetricStream> metricStreamStore;
+    private final StorageBackend<String, InsightRule> insightRuleStore;
+    private final StorageBackend<String, AlarmHistory> alarmHistoryStore;
     private final RegionResolver regionResolver;
 
     @Inject
@@ -49,6 +54,10 @@ public class CloudWatchMetricsService {
                 new TypeReference<Map<String, AlarmMuteRule>>() {});
         this.metricStreamStore = storageFactory.create("cloudwatchmetrics", "cwmetricstreams.json",
                 new TypeReference<Map<String, MetricStream>>() {});
+        this.insightRuleStore = storageFactory.create("cloudwatchmetrics", "cwinsightrules.json",
+                new TypeReference<Map<String, InsightRule>>() {});
+        this.alarmHistoryStore = storageFactory.create("cloudwatchmetrics", "cwalarmhistory.json",
+                new TypeReference<Map<String, AlarmHistory>>() {});
         this.regionResolver = regionResolver;
     }
 
@@ -67,6 +76,8 @@ public class CloudWatchMetricsService {
         this.compositeAlarmStore = compositeAlarmStore;
         this.muteRuleStore = new InMemoryStorage<>();
         this.metricStreamStore = new InMemoryStorage<>();
+        this.insightRuleStore = new InMemoryStorage<>();
+        this.alarmHistoryStore = new InMemoryStorage<>();
         this.regionResolver = regionResolver;
     }
 
@@ -155,6 +166,9 @@ public class CloudWatchMetricsService {
                                                 int periodSeconds,
                                                 List<String> statistics,
                                                 String unit, String region) {
+        if (periodSeconds <= 0) {
+            periodSeconds = 60;
+        }
         String dimKey = dimensions != null ? buildDimKey(dimensions) : "";
         String prefix = region + "::" + namespace + "::" + metricName + "::" + dimKey + "::";
 
@@ -354,11 +368,19 @@ public class CloudWatchMetricsService {
         if (compositeTags.isPresent()) {
             return compositeTags.get();
         }
-        return metricStreamStore.scan(k -> k.startsWith(region + "::"))
+        var streamTags = metricStreamStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(s -> resourceArn.equals(s.getArn()))
                 .findFirst()
-                .map(MetricStream::getTags)
+                .map(MetricStream::getTags);
+        if (streamTags.isPresent()) {
+            return streamTags.get();
+        }
+        return insightRuleStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(r -> resourceArn.equals(r.getArn()))
+                .findFirst()
+                .map(InsightRule::getTags)
                 .orElse(Map.of());
     }
 
@@ -381,13 +403,22 @@ public class CloudWatchMetricsService {
             compositeAlarmStore.put(region + "::" + composite.get().getAlarmName(), composite.get());
             return;
         }
-        metricStreamStore.scan(k -> k.startsWith(region + "::"))
+        var stream = metricStreamStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(s -> resourceArn.equals(s.getArn()))
+                .findFirst();
+        if (stream.isPresent()) {
+            stream.get().getTags().putAll(tags);
+            metricStreamStore.put(region + "::" + stream.get().getName(), stream.get());
+            return;
+        }
+        insightRuleStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(r -> resourceArn.equals(r.getArn()))
                 .findFirst()
-                .ifPresent(stream -> {
-                    stream.getTags().putAll(tags);
-                    metricStreamStore.put(region + "::" + stream.getName(), stream);
+                .ifPresent(rule -> {
+                    rule.getTags().putAll(tags);
+                    insightRuleStore.put(region + "::" + rule.getName(), rule);
                 });
     }
 
@@ -410,13 +441,22 @@ public class CloudWatchMetricsService {
             compositeAlarmStore.put(region + "::" + composite.get().getAlarmName(), composite.get());
             return;
         }
-        metricStreamStore.scan(k -> k.startsWith(region + "::"))
+        var stream = metricStreamStore.scan(k -> k.startsWith(region + "::"))
                 .stream()
                 .filter(s -> resourceArn.equals(s.getArn()))
+                .findFirst();
+        if (stream.isPresent()) {
+            tagKeys.forEach(stream.get().getTags()::remove);
+            metricStreamStore.put(region + "::" + stream.get().getName(), stream.get());
+            return;
+        }
+        insightRuleStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(r -> resourceArn.equals(r.getArn()))
                 .findFirst()
-                .ifPresent(stream -> {
-                    tagKeys.forEach(stream.getTags()::remove);
-                    metricStreamStore.put(region + "::" + stream.getName(), stream);
+                .ifPresent(rule -> {
+                    tagKeys.forEach(rule.getTags()::remove);
+                    insightRuleStore.put(region + "::" + rule.getName(), rule);
                 });
     }
 
@@ -564,6 +604,148 @@ public class CloudWatchMetricsService {
             });
         }
         LOG.infov("SetMetricStreamState: {0} -> {1} in {2}", names, state, region);
+    }
+
+    public record InsightRulesPage(List<InsightRule> rules, String nextToken) {}
+
+    public InsightRule putInsightRule(InsightRule rule, String region) {
+        if (rule.getName() == null || rule.getName().isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "RuleName is a required parameter.", 400);
+        }
+        String key = region + "::" + rule.getName();
+        InsightRule existing = insightRuleStore.get(key).orElse(null);
+        if (rule.getArn() == null || rule.getArn().isBlank()) {
+            if (existing != null && existing.getArn() != null) {
+                rule.setArn(existing.getArn());
+            } else {
+                rule.setArn(regionResolver.buildArn("cloudwatch", region, "insight-rule/" + rule.getName()));
+            }
+        }
+        if (existing != null) {
+            if (rule.getTags() == null || rule.getTags().isEmpty()) {
+                rule.setTags(existing.getTags());
+            }
+            rule.setManagedRule(existing.isManagedRule());
+        } else if (rule.getTags() == null) {
+            rule.setTags(new LinkedHashMap<>());
+        }
+        if (rule.getState() == null || rule.getState().isBlank()) {
+            rule.setState("ENABLED");
+        }
+        if (rule.getSchema() == null || rule.getSchema().isBlank()) {
+            rule.setSchema(InsightRule.DEFAULT_SCHEMA);
+        }
+        insightRuleStore.put(key, rule);
+        return rule;
+    }
+
+    public InsightRulesPage describeInsightRules(Integer maxResults, String nextToken, String region) {
+        List<InsightRule> all = new ArrayList<>(insightRuleStore.scan(k -> k.startsWith(region + "::")));
+        all.sort(Comparator.comparing(InsightRule::getName, Comparator.nullsLast(String::compareTo)));
+        int start = 0;
+        if (nextToken != null && !nextToken.isBlank()) {
+            try {
+                start = Math.max(0, Integer.parseInt(nextToken));
+            } catch (NumberFormatException e) {
+                start = 0;
+            }
+        }
+        if (start > all.size()) {
+            start = all.size();
+        }
+        int limit = maxResults != null && maxResults > 0 ? maxResults : 100;
+        int end = Math.min(start + limit, all.size());
+        String next = end < all.size() ? String.valueOf(end) : null;
+        return new InsightRulesPage(new ArrayList<>(all.subList(start, end)), next);
+    }
+
+    public List<Map<String, String>> deleteInsightRules(List<String> names, String region) {
+        List<Map<String, String>> failures = new ArrayList<>();
+        if (names == null) {
+            return failures;
+        }
+        for (String name : names) {
+            if (name != null && !name.isBlank()) {
+                insightRuleStore.delete(region + "::" + name);
+            }
+        }
+        return failures;
+    }
+
+    public List<Map<String, String>> setInsightRulesState(List<String> names, String state, String region) {
+        List<Map<String, String>> failures = new ArrayList<>();
+        if (names == null) {
+            return failures;
+        }
+        for (String name : names) {
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            InsightRule rule = insightRuleStore.get(region + "::" + name).orElse(null);
+            if (rule == null) {
+                Map<String, String> failure = new LinkedHashMap<>();
+                failure.put("FailureResource", name);
+                failure.put("ExceptionType", "ResourceNotFoundException");
+                failure.put("FailureCode", "ResourceNotFound");
+                failure.put("FailureDescription", "Insight rule not found: " + name);
+                failures.add(failure);
+                continue;
+            }
+            rule.setState(state);
+            insightRuleStore.put(region + "::" + name, rule);
+        }
+        return failures;
+    }
+
+    public InsightRule requireInsightRule(String name, String region) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "RuleName is a required parameter.", 400);
+        }
+        return insightRuleStore.get(region + "::" + name)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Insight rule not found: " + name, 404));
+    }
+
+    public List<MetricAlarm> describeAlarmsForMetric(String namespace, String metricName,
+                                                     String statistic, Integer period,
+                                                     List<Dimension> dimensions, String region) {
+        return alarmStore.scan(k -> k.startsWith(region + "::")).stream()
+                .filter(a -> namespace == null || namespace.equals(a.getNamespace()))
+                .filter(a -> metricName == null || metricName.equals(a.getMetricName()))
+                .filter(a -> statistic == null || statistic.isBlank() || statistic.equals(a.getStatistic()))
+                .filter(a -> period == null || period <= 0 || period == a.getPeriod())
+                .filter(a -> dimensions == null || dimensions.isEmpty()
+                        || buildDimKey(a.getDimensions()).equals(buildDimKey(dimensions)))
+                .collect(Collectors.toList());
+    }
+
+    public void setAlarmActionsEnabled(List<String> names, boolean enabled, String region) {
+        if (names == null) {
+            return;
+        }
+        for (String name : names) {
+            alarmStore.get(region + "::" + name).ifPresent(alarm -> {
+                alarm.setActionsEnabled(enabled);
+                alarmStore.put(region + "::" + name, alarm);
+            });
+            compositeAlarmStore.get(region + "::" + name).ifPresent(alarm -> {
+                alarm.setActionsEnabled(enabled);
+                compositeAlarmStore.put(region + "::" + name, alarm);
+            });
+        }
+    }
+
+    public List<AlarmHistoryItem> describeAlarmHistory(String alarmName, Integer maxRecords, String region) {
+        AlarmHistory history = alarmHistoryStore.get(region + "::" + (alarmName == null ? "" : alarmName))
+                .orElseGet(AlarmHistory::new);
+        List<AlarmHistoryItem> items = new ArrayList<>(history.getItems());
+        items.sort(Comparator.comparingLong(AlarmHistoryItem::getTimestamp).reversed());
+        if (maxRecords != null && maxRecords > 0 && items.size() > maxRecords) {
+            return new ArrayList<>(items.subList(0, maxRecords));
+        }
+        return items;
     }
 
     // ──────────────────────────── Helpers ────────────────────────────
