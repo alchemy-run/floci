@@ -283,6 +283,7 @@ public interface EmulatorConfig {
         CodePipelineStorageConfig codepipeline();
         CodeConnectionsStorageConfig codeconnections();
         S3VectorsStorageConfig s3vectors();
+        IvsStorageConfig ivs();
         EcsStorageConfig ecs();
         EfsStorageConfig efs();
         CodeBuildStorageConfig codebuild();
@@ -540,6 +541,13 @@ public interface EmulatorConfig {
     }
 
     interface S3VectorsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface IvsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -895,6 +903,7 @@ public interface EmulatorConfig {
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
         ForecastServiceConfig forecast();
+        GlobalAcceleratorServiceConfig globalaccelerator();
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendmedical();
         HealthLakeServiceConfig healthlake();
@@ -915,6 +924,7 @@ public interface EmulatorConfig {
         LightsailServiceConfig lightsail();
         UiServiceConfig ui();
         S3VectorsServiceConfig s3vectors();
+        IvsServiceConfig ivs();
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
@@ -1075,6 +1085,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
     interface S3VectorsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IvsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1839,6 +1854,11 @@ public interface EmulatorConfig {
     }
 
     interface ForecastServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GlobalAcceleratorServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -118,6 +118,8 @@ floci:
         flush-interval-ms: 5000
       s3vectors:
         flush-interval-ms: 5000
+      ivs:
+        flush-interval-ms: 5000
       ecs:
         flush-interval-ms: 5000
       efs:
@@ -574,6 +576,8 @@ floci:
       enabled: true
     forecast:
       enabled: true
+    globalaccelerator:
+      enabled: true
     comprehend:
       enabled: true
     comprehendmedical:
@@ -619,6 +623,8 @@ floci:
       schema-worker-threads: 4
       schema-worker-shutdown-timeout-seconds: 30
     s3vectors:
+      enabled: true
+    ivs:
       enabled: true
     iot:
       enabled: true

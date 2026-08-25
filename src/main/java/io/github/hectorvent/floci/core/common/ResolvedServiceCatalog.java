@@ -27,6 +27,7 @@ import io.github.hectorvent.floci.services.eks.EksController;
 import io.github.hectorvent.floci.services.mwaa.MwaaController;
 import io.github.hectorvent.floci.services.iot.IotController;
 import io.github.hectorvent.floci.services.iot.IotDataController;
+import io.github.hectorvent.floci.services.ivs.IvsController;
 import io.github.hectorvent.floci.services.pipes.PipesController;
 import io.github.hectorvent.floci.services.lambda.LambdaController;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
@@ -576,6 +577,12 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonForecast.", "AmazonForecastRuntime."),
                         Set.of("forecast", "forecastquery"), Set.of(), Set.of()),
+                descriptor("globalaccelerator", "globalaccelerator",
+                        config.services().globalaccelerator().enabled(), true,
+                        "globalaccelerator", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("GlobalAccelerator_V20180706."),
+                        Set.of("globalaccelerator"), Set.of(), Set.of()),
                 descriptor("comprehend", "comprehend", config.services().comprehend().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -632,6 +639,11 @@ public class ResolvedServiceCatalog {
                         config.storage().services().s3vectors().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("s3vectors"), Set.of(), Set.of(S3VectorsController.class)),
+                descriptor("ivs", "ivs", config.services().ivs().enabled(), true,
+                        "ivs", storageMode(config.storage().services().ivs().mode(), config.storage().mode()),
+                        config.storage().services().ivs().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ivs"), Set.of(), Set.of(IvsController.class)),
                 descriptor("iot", "iot", config.services().iot().enabled(), true,
                         "iot", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

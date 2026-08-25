@@ -243,6 +243,7 @@ public class AwsJson11Controller {
         this.directoryServiceJsonHandler = directoryServiceJsonHandler;
         this.daxJsonHandler = daxJsonHandler;
         this.forecastJsonHandler = forecastJsonHandler;
+        this.globalAcceleratorJsonHandler = globalAcceleratorJsonHandler;
     }
 
     @POST
