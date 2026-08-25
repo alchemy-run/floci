@@ -28,6 +28,7 @@ import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.configservice.ConfigServiceJsonHandler;
 import io.github.hectorvent.floci.services.cur.CurJsonHandler;
 import io.github.hectorvent.floci.services.pricing.PricingJsonHandler;
+import io.github.hectorvent.floci.services.comprehend.ComprehendJsonHandler;
 import io.github.hectorvent.floci.services.comprehendmedical.ComprehendMedicalJsonHandler;
 import io.github.hectorvent.floci.services.textract.TextractJsonHandler;
 import io.github.hectorvent.floci.services.bedrockdataautomation.BedrockDataAutomationRuntimeJsonHandler;
@@ -102,6 +103,7 @@ public class AwsJson11Controller {
     private final TransferHandler transferHandler;
     private final TextractJsonHandler textractJsonHandler;
     private final BedrockDataAutomationRuntimeJsonHandler bedrockDataAutomationRuntimeJsonHandler;
+    private final ComprehendJsonHandler comprehendJsonHandler;
     private final ComprehendMedicalJsonHandler comprehendMedicalJsonHandler;
     private final PricingJsonHandler pricingJsonHandler;
     private final TranscribeJsonHandler transcribeJsonHandler;
@@ -144,6 +146,7 @@ public class AwsJson11Controller {
                                TransferHandler transferHandler,
                                TextractJsonHandler textractJsonHandler,
                                BedrockDataAutomationRuntimeJsonHandler bedrockDataAutomationRuntimeJsonHandler,
+                               ComprehendJsonHandler comprehendJsonHandler,
                                ComprehendMedicalJsonHandler comprehendMedicalJsonHandler,
                                PricingJsonHandler pricingJsonHandler,
                                TranscribeJsonHandler transcribeJsonHandler,
@@ -190,6 +193,7 @@ public class AwsJson11Controller {
         this.transferHandler = transferHandler;
         this.textractJsonHandler = textractJsonHandler;
         this.bedrockDataAutomationRuntimeJsonHandler = bedrockDataAutomationRuntimeJsonHandler;
+        this.comprehendJsonHandler = comprehendJsonHandler;
         this.comprehendMedicalJsonHandler = comprehendMedicalJsonHandler;
         this.pricingJsonHandler = pricingJsonHandler;
         this.transcribeJsonHandler = transcribeJsonHandler;
@@ -268,6 +272,7 @@ public class AwsJson11Controller {
                 case "textract" -> textractJsonHandler.handle(action, request, region);
                 case "bedrock-data-automation-runtime" -> bedrockDataAutomationRuntimeJsonHandler.handle(
                         action, request, region);
+                case "comprehend" -> comprehendJsonHandler.handle(action, request, region);
                 case "comprehendmedical" -> comprehendMedicalJsonHandler.handle(action, request, region);
                 case "pricing" -> pricingJsonHandler.handle(action, request, region);
                 case "transcribe" -> transcribeJsonHandler.handle(action, request, region);
