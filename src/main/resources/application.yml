@@ -153,6 +153,8 @@ floci:
         flush-interval-ms: 5000
       oam:
         flush-interval-ms: 5000
+      observabilityadmin:
+        flush-interval-ms: 5000
       internetmonitor:
         flush-interval-ms: 5000
       fis:
@@ -487,6 +489,8 @@ floci:
       proxy-base-port: 9400
       proxy-max-port: 9499
       keep-running-on-shutdown: false
+    opensearchserverless:
+      enabled: true
     osis:
       enabled: true
     ec2:
@@ -716,6 +720,8 @@ floci:
     rum:
       enabled: true
     oam:
+      enabled: true
+    observabilityadmin:
       enabled: true
     internetmonitor:
       enabled: true

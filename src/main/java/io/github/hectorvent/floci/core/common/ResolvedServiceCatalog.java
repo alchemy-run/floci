@@ -91,6 +91,7 @@ import io.github.hectorvent.floci.services.geomaps.GeoMapsController;
 import io.github.hectorvent.floci.services.location.LocationController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.oam.OamController;
+import io.github.hectorvent.floci.services.observabilityadmin.ObservabilityAdminController;
 import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
@@ -431,6 +432,10 @@ public class ResolvedServiceCatalog {
                         "osis", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("osis"), Set.of(), Set.of(OsisController.class)),
+                descriptor("aoss", "opensearchserverless", config.services().opensearchserverless().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
                 descriptor("ec2", "ec2", config.services().ec2().enabled(), true,
                         "ec2", storageMode(config.storage().services().ec2().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.EC2, ServiceProtocol.QUERY,
@@ -820,6 +825,15 @@ public class ResolvedServiceCatalog {
                         config.storage().services().oam().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("oam"), Set.of(), Set.of(OamController.class)),
+                descriptor("observabilityadmin", "observabilityadmin",
+                        config.services().observabilityadmin().enabled(), true,
+                        "observabilityadmin",
+                        storageMode(config.storage().services().observabilityadmin().mode(), config.storage().mode()),
+                        config.storage().services().observabilityadmin().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("observabilityadmin"), Set.of(),
+                        Set.of(ObservabilityAdminController.class)),
                 descriptor("internetmonitor", "internetmonitor", config.services().internetmonitor().enabled(), true,
                         "internetmonitor", storageMode(config.storage().services().internetmonitor().mode(),
                                 config.storage().mode()),

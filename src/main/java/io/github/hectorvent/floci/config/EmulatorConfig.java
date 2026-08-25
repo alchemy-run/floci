@@ -303,6 +303,7 @@ public interface EmulatorConfig {
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
         OamStorageConfig oam();
+        ObservabilityAdminStorageConfig observabilityadmin();
         InternetMonitorStorageConfig internetmonitor();
         FisStorageConfig fis();
         FinSpaceStorageConfig finspace();
@@ -689,6 +690,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface ObservabilityAdminStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface InternetMonitorStorageConfig {
         Optional<String> mode();
 
@@ -986,6 +994,7 @@ public interface EmulatorConfig {
         LakeFormationServiceConfig lakeformation();
         SesServiceConfig ses();
         OpenSearchServiceConfig opensearch();
+        OpenSearchServerlessServiceConfig opensearchserverless();
         OsisServiceConfig osis();
         Ec2ServiceConfig ec2();
         EcsServiceConfig ecs();
@@ -1071,6 +1080,7 @@ public interface EmulatorConfig {
         IotWirelessServiceConfig iotwireless();
         RumServiceConfig rum();
         OamServiceConfig oam();
+        ObservabilityAdminServiceConfig observabilityadmin();
         InternetMonitorServiceConfig internetmonitor();
         LocationServiceConfig location();
         GeoMapsServiceConfig geoMaps();
@@ -1153,6 +1163,11 @@ public interface EmulatorConfig {
     }
 
     interface OamServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ObservabilityAdminServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -2016,6 +2031,11 @@ public interface EmulatorConfig {
 
         @WithDefault("false")
         boolean keepRunningOnShutdown();
+    }
+
+    interface OpenSearchServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface OsisServiceConfig {
