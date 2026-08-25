@@ -292,9 +292,11 @@ public interface EmulatorConfig {
         AppRegistryStorageConfig appregistry();
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
+        ChatbotStorageConfig chatbot();
         ApplicationSignalsStorageConfig applicationSignals();
         BedrockAgentStorageConfig bedrockAgent();
         BedrockAgentCoreStorageConfig bedrockAgentCore();
+        BedrockDataAutomationStorageConfig bedrockDataAutomation();
     }
 
     interface SsmStorageConfig {
@@ -524,6 +526,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface BedrockDataAutomationStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AmpStorageConfig {
         Optional<String> mode();
 
@@ -595,6 +604,13 @@ public interface EmulatorConfig {
     }
 
     interface B2biStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ChatbotStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -678,6 +694,7 @@ public interface EmulatorConfig {
         BedrockRuntimeServiceConfig bedrockRuntime();
         BedrockAgentServiceConfig bedrockAgent();
         BedrockAgentCoreServiceConfig bedrockAgentCore();
+        BedrockDataAutomationServiceConfig bedrockDataAutomation();
         EksServiceConfig eks();
         MwaaServiceConfig mwaa();
         PipesServiceConfig pipes();
@@ -700,6 +717,7 @@ public interface EmulatorConfig {
         CostExplorerServiceConfig ce();
         CurServiceConfig cur();
         BcmDataExportsServiceConfig bcmDataExports();
+        BudgetsServiceConfig budgets();
         ConfigServiceConfig configservice();
         CloudTrailServiceConfig cloudtrail();
         CloudControlServiceConfig cloudcontrol();
@@ -723,6 +741,7 @@ public interface EmulatorConfig {
         AppRegistryServiceConfig appregistry();
         AppRunnerServiceConfig apprunner();
         B2biServiceConfig b2bi();
+        ChatbotServiceConfig chatbot();
         ApplicationSignalsServiceConfig applicationSignals();
     }
 
@@ -808,6 +827,11 @@ public interface EmulatorConfig {
     }
 
     interface B2biServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ChatbotServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1411,6 +1435,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface BedrockDataAutomationServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface BedrockProxyConfig {
         /**
          * Base URL of the OpenAI-compatible backend (Ollama, OpenRouter, LiteLLM,
@@ -1593,6 +1622,11 @@ public interface EmulatorConfig {
          */
         @WithDefault("synchronous")
         String emitMode();
+    }
+
+    interface BudgetsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface UiServiceConfig {

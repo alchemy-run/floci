@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.services.batch.BatchController;
 import io.github.hectorvent.floci.services.bedrockruntime.BedrockRuntimeController;
 import io.github.hectorvent.floci.services.bedrockagent.BedrockAgentController;
 import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreController;
+import io.github.hectorvent.floci.services.bedrockdataautomation.BedrockDataAutomationController;
 import io.github.hectorvent.floci.services.cognito.CognitoOAuthController;
 import io.github.hectorvent.floci.services.cognito.CognitoWellKnownController;
 import io.github.hectorvent.floci.services.eks.EksController;
@@ -37,6 +38,7 @@ import io.github.hectorvent.floci.services.appintegrations.AppIntegrationsContro
 import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
 import io.github.hectorvent.floci.services.apprunner.AppRunnerProxyController;
 import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignalsController;
+import io.github.hectorvent.floci.services.chatbot.ChatbotController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -315,6 +317,21 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("bedrock-agentcore", "bedrock-agentcore-control"), Set.of(),
                         Set.of(BedrockAgentCoreController.class)),
+                descriptor("bedrock-data-automation", "bedrock-data-automation",
+                        config.services().bedrockDataAutomation().enabled(), true,
+                        "bedrock-data-automation", storageMode(config.storage().services().bedrockDataAutomation().mode(),
+                                config.storage().mode()),
+                        config.storage().services().bedrockDataAutomation().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("bedrock-data-automation"), Set.of(),
+                        Set.of(BedrockDataAutomationController.class)),
+                descriptor("bedrock-data-automation-runtime", "bedrock-data-automation-runtime",
+                        config.services().bedrockDataAutomation().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonBedrockKeystoneRuntimeService."),
+                        Set.of("bedrock-data-automation-runtime"), Set.of(), Set.of()),
                 descriptor("eks", "eks", config.services().eks().enabled(), true,
                         "eks", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
@@ -440,6 +457,10 @@ public class ResolvedServiceCatalog {
                         "bcmdataexports", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSBillingAndCostManagementDataExports."), Set.of("bcm-data-exports"), Set.of(), Set.of()),
+                descriptor("budgets", "budgets", config.services().budgets().enabled(), true,
+                        "budgets", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSBudgetServiceGateway."), Set.of("budgets"), Set.of(), Set.of()),
                 descriptor("cloudfront", "cloudfront", config.services().cloudfront().enabled(), true,
                         "cloudfront", storageMode(config.storage().services().cloudfront().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.CLOUDFRONT, ServiceProtocol.REST_XML,
@@ -548,7 +569,13 @@ public class ResolvedServiceCatalog {
                         ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("application-signals"), Set.of(),
-                        Set.of(ApplicationSignalsController.class))
+                        Set.of(ApplicationSignalsController.class)),
+                descriptor("chatbot", "chatbot", config.services().chatbot().enabled(), true,
+                        "chatbot", storageMode(config.storage().services().chatbot().mode(),
+                                config.storage().mode()),
+                        config.storage().services().chatbot().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class))
         ));
     }
 

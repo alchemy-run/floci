@@ -163,11 +163,15 @@ floci:
         flush-interval-ms: 5000
       b2bi:
         flush-interval-ms: 5000
+      chatbot:
+        flush-interval-ms: 5000
       application-signals:
         flush-interval-ms: 5000
       bedrock-agent:
         flush-interval-ms: 5000
       bedrock-agent-core:
+        flush-interval-ms: 5000
+      bedrock-data-automation:
         flush-interval-ms: 5000
 
   dns:
@@ -422,6 +426,8 @@ floci:
       enabled: true
     bedrock-agent-core:
       enabled: true
+    bedrock-data-automation:
+      enabled: true
     eks:
       enabled: true
       mock: false
@@ -492,6 +498,8 @@ floci:
     bcm-data-exports:
       enabled: true
       emit-mode: synchronous
+    budgets:
+      enabled: true
     cloudtrail:
       enabled: true
     lightsail:
@@ -546,6 +554,8 @@ floci:
     apprunner:
       enabled: true
     b2bi:
+      enabled: true
+    chatbot:
       enabled: true
     application-signals:
       enabled: true
