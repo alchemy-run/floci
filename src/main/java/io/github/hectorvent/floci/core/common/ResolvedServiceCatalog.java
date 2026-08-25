@@ -22,12 +22,13 @@ import io.github.hectorvent.floci.services.route53.Route53Controller;
 import io.github.hectorvent.floci.services.ses.SesController;
 import io.github.hectorvent.floci.services.appsync.AppSyncController;
 import io.github.hectorvent.floci.services.rdsdata.RdsDataController;
-import io.github.hectorvent.floci.services.account.AccountController;
-import io.github.hectorvent.floci.services.account.AccountRegionController;
 import io.github.hectorvent.floci.services.amp.AmpController;
 import io.github.hectorvent.floci.services.amp.AmpRuleController;
+import io.github.hectorvent.floci.services.account.AccountController;
+import io.github.hectorvent.floci.services.account.AccountRegionController;
 import io.github.hectorvent.floci.services.aiops.AiOpsController;
 import io.github.hectorvent.floci.services.accessanalyzer.AccessAnalyzerController;
+import io.github.hectorvent.floci.services.amplify.AmplifyController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -449,12 +450,6 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
-                descriptor("account", "account", config.services().account().enabled(), true,
-                        "account", storageMode(config.storage().services().account().mode(), config.storage().mode()),
-                        config.storage().services().account().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
-                        protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("account"), Set.of(), Set.of(
-                                AccountController.class, AccountRegionController.class)),
                 descriptor("aps", "amp", config.services().amp().enabled(), true,
                         "amp", storageMode(config.storage().services().amp().mode(), config.storage().mode()),
                         config.storage().services().amp().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -466,12 +461,23 @@ public class ResolvedServiceCatalog {
                         config.storage().services().aiops().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("aiops"), Set.of(), Set.of(AiOpsController.class)),
+                descriptor("account", "account", config.services().account().enabled(), true,
+                        "account", storageMode(config.storage().services().account().mode(), config.storage().mode()),
+                        config.storage().services().account().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("account"), Set.of(), Set.of(
+                                AccountController.class, AccountRegionController.class)),
                 descriptor("access-analyzer", "accessanalyzer", config.services().accessanalyzer().enabled(), true,
                         "accessanalyzer", storageMode(config.storage().services().accessanalyzer().mode(),
                                 config.storage().mode()),
                         config.storage().services().accessanalyzer().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("access-analyzer"), Set.of(), Set.of(AccessAnalyzerController.class))
+                        Set.of(), Set.of("access-analyzer"), Set.of(), Set.of(AccessAnalyzerController.class)),
+                descriptor("amplify", "amplify", config.services().amplify().enabled(), true,
+                        "amplify", storageMode(config.storage().services().amplify().mode(), config.storage().mode()),
+                        config.storage().services().amplify().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("amplify"), Set.of(), Set.of(AmplifyController.class))
         ));
     }
 

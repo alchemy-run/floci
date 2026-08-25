@@ -63,13 +63,15 @@ floci:
         flush-interval-ms: 60000
       rum:
         flush-interval-ms: 60000
-      account:
-        flush-interval-ms: 60000
       amp:
         flush-interval-ms: 60000
       aiops:
         flush-interval-ms: 60000
+      account:
+        flush-interval-ms: 60000
       accessanalyzer:
+        flush-interval-ms: 60000
+      amplify:
         flush-interval-ms: 60000
 
   auth:
@@ -309,11 +311,13 @@ floci:
       enabled: true
     rum:
       enabled: true
-    account:
-      enabled: true
     amp:
       enabled: true
     aiops:
       enabled: true
+    account:
+      enabled: true
     accessanalyzer:
+      enabled: true
+    amplify:
       enabled: true

@@ -281,10 +281,11 @@ public interface EmulatorConfig {
         ElasticBeanstalkStorageConfig elasticbeanstalk();
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
-        AccountStorageConfig account();
         AmpStorageConfig amp();
         AiOpsStorageConfig aiops();
+        AccountStorageConfig account();
         AccessAnalyzerStorageConfig accessanalyzer();
+        AmplifyStorageConfig amplify();
     }
 
     interface SsmStorageConfig {
@@ -500,13 +501,6 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
-    interface AccountStorageConfig {
-        Optional<String> mode();
-
-        @WithDefault("5000")
-        long flushIntervalMs();
-    }
-
     interface AmpStorageConfig {
         Optional<String> mode();
 
@@ -521,7 +515,21 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface AccountStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AccessAnalyzerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AmplifyStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -630,10 +638,11 @@ public interface EmulatorConfig {
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
-        AccountServiceConfig account();
         AmpServiceConfig amp();
         AiOpsServiceConfig aiops();
+        AccountServiceConfig account();
         AccessAnalyzerServiceConfig accessanalyzer();
+        AmplifyServiceConfig amplify();
     }
 
     interface IotServiceConfig {
@@ -667,11 +676,6 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
-    interface AccountServiceConfig {
-        @WithDefault("true")
-        boolean enabled();
-    }
-
     interface AmpServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -682,7 +686,17 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface AccountServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface AccessAnalyzerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AmplifyServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
