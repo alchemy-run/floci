@@ -12,6 +12,8 @@ import io.github.hectorvent.floci.services.amazonmq.container.RabbitMqManager;
 import io.github.hectorvent.floci.services.amazonmq.model.Broker;
 import io.github.hectorvent.floci.services.amazonmq.model.BrokerInstance;
 import io.github.hectorvent.floci.services.amazonmq.model.BrokerState;
+import io.github.hectorvent.floci.services.amazonmq.model.MqConfiguration;
+import io.github.hectorvent.floci.services.amazonmq.model.MqConfigurationRevision;
 import io.github.hectorvent.floci.services.amazonmq.model.MqUser;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -19,10 +21,16 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -32,12 +40,27 @@ import java.util.concurrent.TimeUnit;
 @ApplicationScoped
 public class AmazonMqService {
 
+    static final String SERVICE = "mq";
     private static final Logger LOG = Logger.getLogger(AmazonMqService.class);
     private static final String ENGINE_RABBITMQ = "RABBITMQ";
+    private static final String ENGINE_ACTIVEMQ = "ACTIVEMQ";
+    private static final String DISPLAY_RABBITMQ = "RabbitMQ";
+    private static final String DISPLAY_ACTIVEMQ = "ActiveMQ";
     private static final String DEFAULT_ENGINE_VERSION = "3.13";
+    private static final String DEFAULT_ACTIVEMQ_VERSION = "5.18";
     private static final String DEPLOYMENT_SINGLE_INSTANCE = "SINGLE_INSTANCE";
+    private static final String DEFAULT_AUTH_STRATEGY = "SIMPLE";
+    // Distinct from the ActiveMQ XML Alchemy publishes on create so the first
+    // UpdateConfiguration actually produces revision 2 (AWS seeds revision 1
+    // with the engine default, then publishes custom data as revision 2).
+    private static final String DEFAULT_ACTIVEMQ_DATA =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+                    + "<broker xmlns=\"http://activemq.apache.org/schema/core\" persistent=\"true\">\n"
+                    + "</broker>\n";
+    private static final String DEFAULT_RABBITMQ_DATA = "# Default RabbitMQ configuration\n";
 
     private final StorageBackend<String, Broker> storage;
+    private final StorageBackend<String, MqConfiguration> configurations;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final RabbitMqManager rabbitMqManager;
@@ -48,6 +71,8 @@ public class AmazonMqService {
                            RegionResolver regionResolver, RabbitMqManager rabbitMqManager) {
         this.storage = storageFactory.create("amazonmq", "amazonmq-brokers.json",
                 new TypeReference<Map<String, Broker>>() {});
+        this.configurations = storageFactory.create("amazonmq", "amazonmq-configurations.json",
+                new TypeReference<Map<String, MqConfiguration>>() {});
         this.config = config;
         this.regionResolver = regionResolver;
         this.rabbitMqManager = rabbitMqManager;
@@ -286,4 +311,244 @@ public class AmazonMqService {
                     "Broker user password must not contain commas, colons, or equal signs", 400);
         }
     }
+
+    // --- Configurations ---
+    // CreateConfiguration seeds revision 1 with the engine default document.
+    // UpdateConfiguration publishes a new immutable revision (custom data).
+
+    public MqConfiguration createConfiguration(CreateConfigurationParams params) {
+        String name = params.name();
+        if (name == null || name.isBlank()) {
+            throw new AwsException("BadRequestException", "Name is required", 400);
+        }
+        String engineType = displayEngineType(params.engineType());
+        String engineVersion = params.engineVersion() == null || params.engineVersion().isBlank()
+                ? defaultEngineVersion(engineType) : params.engineVersion();
+        String auth = params.authenticationStrategy() == null || params.authenticationStrategy().isBlank()
+                ? DEFAULT_AUTH_STRATEGY : params.authenticationStrategy();
+
+        if (configurations.scan(k -> true).stream().anyMatch(c -> name.equals(c.getName()))) {
+            throw new AwsException("ConflictException", "Configuration already exists: " + name, 409);
+        }
+
+        String configurationId = "c-" + UUID.randomUUID();
+        String accountId = regionResolver.getAccountId();
+        String arn = AwsArnUtils.Arn.of("mq", config.defaultRegion(), accountId,
+                "configuration:" + name + ":" + configurationId).toString();
+
+        MqConfiguration configuration = new MqConfiguration(
+                configurationId, arn, name, engineType, engineVersion, auth);
+        configuration.setAccountId(accountId);
+        if (params.tags() != null) {
+            configuration.setTags(new LinkedHashMap<>(params.tags()));
+        }
+        Instant now = Instant.now();
+        configuration.getRevisions().add(new MqConfigurationRevision(
+                1, now, "Amazon MQ default configuration", defaultData(engineType)));
+        configurations.put(configurationId, configuration);
+        LOG.infov("Created Amazon MQ configuration {0} ({1})", name, configurationId);
+        return configuration;
+    }
+
+    public MqConfiguration describeConfiguration(String configurationId) {
+        return configurations.get(configurationId)
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Configuration not found: " + configurationId, 404));
+    }
+
+    public List<MqConfiguration> listConfigurations() {
+        return configurations.scan(k -> true);
+    }
+
+    public MqConfiguration updateConfiguration(String configurationId, String data, String description) {
+        MqConfiguration configuration = describeConfiguration(configurationId);
+        MqConfigurationRevision latest = configuration.latestRevision();
+        int next = latest == null ? 1 : latest.getRevision() + 1;
+        String decoded = decodeConfigurationData(data);
+        configuration.getRevisions().add(new MqConfigurationRevision(
+                next, Instant.now(), description, decoded));
+        putConfiguration(configuration);
+        LOG.infov("Published Amazon MQ configuration {0} revision {1}", configurationId, next);
+        return configuration;
+    }
+
+    public void deleteConfiguration(String configurationId) {
+        describeConfiguration(configurationId);
+        configurations.delete(configurationId);
+        LOG.infov("Deleted Amazon MQ configuration {0}", configurationId);
+    }
+
+    public MqConfigurationRevision describeConfigurationRevision(String configurationId, String revision) {
+        MqConfiguration configuration = describeConfiguration(configurationId);
+        int number;
+        try {
+            number = Integer.parseInt(revision);
+        } catch (NumberFormatException e) {
+            throw new AwsException("NotFoundException",
+                    "Configuration revision not found: " + revision, 404);
+        }
+        MqConfigurationRevision found = configuration.revision(number);
+        if (found == null) {
+            throw new AwsException("NotFoundException",
+                    "Configuration revision not found: " + revision, 404);
+        }
+        return found;
+    }
+
+    public List<MqConfigurationRevision> listConfigurationRevisions(String configurationId) {
+        return new ArrayList<>(describeConfiguration(configurationId).getRevisions());
+    }
+
+    public List<Map<String, Object>> describeBrokerEngineTypes(String engineType) {
+        List<Map<String, Object>> types = new ArrayList<>();
+        types.add(engineTypeEntry(ENGINE_ACTIVEMQ, List.of(DEFAULT_ACTIVEMQ_VERSION, "5.17.6")));
+        types.add(engineTypeEntry(ENGINE_RABBITMQ, List.of(DEFAULT_ENGINE_VERSION, "3.12.14")));
+        if (engineType == null || engineType.isBlank()) {
+            return types;
+        }
+        String wanted = engineType.trim().toUpperCase(Locale.ROOT).replace("-", "");
+        List<Map<String, Object>> filtered = new ArrayList<>();
+        for (Map<String, Object> entry : types) {
+            Object raw = entry.get("engineType");
+            if (raw != null && wanted.equals(raw.toString().toUpperCase(Locale.ROOT))) {
+                filtered.add(entry);
+            }
+        }
+        return filtered;
+    }
+
+    public Map<String, String> listTags(String resourceArn) {
+        return new LinkedHashMap<>(taggedResource(resourceArn).tags());
+    }
+
+    public void createTags(String resourceArn, Map<String, String> tags) {
+        TaggedResource resource = taggedResource(resourceArn);
+        if (tags != null) {
+            resource.tags().putAll(tags);
+            resource.persist();
+        }
+    }
+
+    public void deleteTags(String resourceArn, List<String> tagKeys) {
+        TaggedResource resource = taggedResource(resourceArn);
+        if (tagKeys != null) {
+            for (String key : tagKeys) {
+                resource.tags().remove(key);
+            }
+            resource.persist();
+        }
+    }
+
+    static String encodeConfigurationData(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String decodeConfigurationData(String encoded) {
+        if (encoded == null || encoded.isBlank()) {
+            return "";
+        }
+        try {
+            return new String(Base64.getDecoder().decode(encoded.strip()), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return encoded;
+        }
+    }
+
+    static String decodeArn(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        try {
+            String decoded = value;
+            for (int i = 0; i < 2; i++) {
+                String next = URLDecoder.decode(decoded, StandardCharsets.UTF_8);
+                if (next.equals(decoded)) {
+                    break;
+                }
+                decoded = next;
+            }
+            return decoded;
+        } catch (IllegalArgumentException e) {
+            return value;
+        }
+    }
+
+    private TaggedResource taggedResource(String resourceArn) {
+        String arn = decodeArn(resourceArn);
+        for (MqConfiguration configuration : configurations.scan(k -> true)) {
+            if (arn.equals(configuration.getArn())) {
+                return new TaggedResource(ensureConfigurationTags(configuration),
+                        () -> putConfiguration(configuration));
+            }
+        }
+        for (Broker broker : storage.scan(k -> true)) {
+            if (arn.equals(broker.getBrokerArn())) {
+                return new TaggedResource(ensureBrokerTags(broker), () -> putBroker(broker));
+            }
+        }
+        throw new AwsException("NotFoundException", "Resource not found: " + arn, 404);
+    }
+
+    private Map<String, String> ensureBrokerTags(Broker broker) {
+        if (broker.getTags() == null) {
+            broker.setTags(new LinkedHashMap<>());
+        }
+        return broker.getTags();
+    }
+
+    private Map<String, String> ensureConfigurationTags(MqConfiguration configuration) {
+        if (configuration.getTags() == null) {
+            configuration.setTags(new LinkedHashMap<>());
+        }
+        return configuration.getTags();
+    }
+
+    private void putConfiguration(MqConfiguration configuration) {
+        if (configuration.getAccountId() != null
+                && configurations instanceof AccountAwareStorageBackend<MqConfiguration> aware) {
+            aware.putForAccount(configuration.getAccountId(), configuration.getId(), configuration);
+        } else {
+            configurations.put(configuration.getId(), configuration);
+        }
+    }
+
+    private static String displayEngineType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new AwsException("BadRequestException", "EngineType is required", 400);
+        }
+        String normalized = raw.trim().toUpperCase(Locale.ROOT).replace("-", "");
+        if (ENGINE_ACTIVEMQ.equals(normalized)) {
+            return DISPLAY_ACTIVEMQ;
+        }
+        if (ENGINE_RABBITMQ.equals(normalized)) {
+            return DISPLAY_RABBITMQ;
+        }
+        throw new AwsException("BadRequestException", "Invalid EngineType: " + raw, 400);
+    }
+
+    private static String defaultEngineVersion(String displayEngineType) {
+        return DISPLAY_ACTIVEMQ.equals(displayEngineType)
+                ? DEFAULT_ACTIVEMQ_VERSION : DEFAULT_ENGINE_VERSION;
+    }
+
+    private static String defaultData(String displayEngineType) {
+        return DISPLAY_RABBITMQ.equals(displayEngineType)
+                ? DEFAULT_RABBITMQ_DATA : DEFAULT_ACTIVEMQ_DATA;
+    }
+
+    private static Map<String, Object> engineTypeEntry(String engineType, List<String> versions) {
+        List<Map<String, Object>> engineVersions = new ArrayList<>();
+        for (String version : versions) {
+            engineVersions.add(Map.of("name", version));
+        }
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("engineType", engineType);
+        entry.put("engineVersions", engineVersions);
+        return entry;
+    }
+
+    private record TaggedResource(Map<String, String> tags, Runnable persist) {}
 }
