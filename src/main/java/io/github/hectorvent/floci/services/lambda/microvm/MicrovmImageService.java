@@ -319,8 +319,10 @@ public class MicrovmImageService {
         String artifactUri = artifactUri(version);
         String tag = dockerTag(region, imageName, imageVersion);
         try {
-            buildService.build(artifactUri, tag);
-            version.setDockerImageTag(tag);
+            // `build` returns the tag the runnable image lives under — the
+            // generated tag for a Floci-side build, or the caller's own
+            // reference for a pre-built `docker://` artifact.
+            version.setDockerImageTag(buildService.build(artifactUri, tag));
             version.setState("SUCCESSFUL");
             version.setStatus("ACTIVE");
             version.setBuildState("SUCCESSFUL");

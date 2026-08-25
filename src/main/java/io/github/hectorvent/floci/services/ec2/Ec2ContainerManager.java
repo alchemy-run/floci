@@ -431,10 +431,59 @@ public class Ec2ContainerManager {
             try {
                 dockerClient.restartContainerCmd(containerId).exec();
                 LOG.infov("Rebooted EC2 container {0}", containerId);
+                restartGuestServices(instance, containerId);
             } catch (Exception e) {
                 LOG.warnv("Error rebooting EC2 container {0}: {1}", containerId, e.getMessage());
             }
         });
+    }
+
+    /**
+     * Post-reboot guest bring-up. On a real instance systemd restarts enabled
+     * units at boot — ExecStartPre included, which re-downloads the Alchemy
+     * hosted bundle and env file. The systemctl shim's unit processes die
+     * with the container and nothing inside the guest re-runs them, so mirror
+     * the launch-time bring-up here: wait for the restarted container,
+     * refresh the IMDS wiring for its (possibly changed) bridge IP, re-run
+     * the persisted user data (idempotent for Alchemy hosted guests: it
+     * rewrites the same unit files and {@code systemctl enable --now}s them —
+     * the shim sees the stale pidfile and starts a fresh process with a fresh
+     * ExecStartPre), and re-point the port-forward mux at the new IP.
+     */
+    private void restartGuestServices(Instance instance, String containerId) {
+        try {
+            String instanceId = instance.getInstanceId();
+            boolean running = false;
+            for (int i = 0; i < 30 && !running; i++) {
+                running = lifecycleManager.isContainerRunning(containerId);
+                if (!running) {
+                    Thread.sleep(500);
+                }
+            }
+            if (!running) {
+                LOG.warnv("EC2 container {0} did not come back after reboot", containerId);
+                return;
+            }
+            String containerIp = waitForContainerBridgeIp(containerId, instanceId);
+            if (containerIp != null && !containerIp.isBlank()) {
+                instance.setContainerBridgeIp(containerIp);
+                metadataServer.registerContainer(containerIp, instanceId, instance);
+            }
+            configureLinkLocalMetadataEndpoint(containerId, instanceId,
+                    dockerHostResolver.resolve(), config.services().ec2().imdsPort());
+            String userData = instance.getUserData();
+            if (userData != null && !userData.isBlank()) {
+                executeUserData(containerId, instanceId, userData, instance.getRegion());
+            }
+            // Mux backends capture the instance's bridge IP at registration —
+            // re-register so a changed IP does not strand the published port.
+            portForwardManager.restore(instance);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            LOG.warnv("Post-reboot bring-up failed for EC2 container {0}: {1}",
+                    containerId, e.getMessage());
+        }
     }
 
     public boolean isContainerRunning(Instance instance) {
@@ -653,7 +702,9 @@ public class Ec2ContainerManager {
                 "      exit 0",
                 "    fi",
                 "    # ExecStartPre downloads EnvironmentFile (Alchemy hosted env).",
-                "    # Source it after setup so bun sees ALCHEMY_STACK_NAME et al.",
+                "    # Run it INSIDE the restart loop, like systemd Restart=always",
+                "    # does: every unit restart re-syncs the bundle and re-sources",
+                "    # the env before ExecStart.",
                 "    nohup sh -c '",
                 "      unitfile=\"$0\"",
                 "      wd=$(sed -n \"s/^WorkingDirectory=//p\" \"$unitfile\" | tail -n 1)",
@@ -661,9 +712,9 @@ public class Ec2ContainerManager {
                 "      start=$(sed -n \"s/^ExecStart=//p\" \"$unitfile\" | tail -n 1)",
                 "      envfile=$(sed -n \"s/^EnvironmentFile=-\\{0,1\\}//p\" \"$unitfile\" | tail -n 1)",
                 "      if [ -n \"$wd\" ]; then cd \"$wd\" || exit 1; fi",
-                "      if [ -n \"$pre\" ]; then $pre || exit 1; fi",
-                "      if [ -n \"$envfile\" ] && [ -f \"$envfile\" ]; then set -a; . \"$envfile\"; set +a; fi",
                 "      while true; do",
+                "        if [ -n \"$pre\" ]; then $pre || { sleep 5; continue; }; fi",
+                "        if [ -n \"$envfile\" ] && [ -f \"$envfile\" ]; then set -a; . \"$envfile\"; set +a; fi",
                 "        if [ -n \"$start\" ]; then $start; fi",
                 "        sleep 5",
                 "      done",
