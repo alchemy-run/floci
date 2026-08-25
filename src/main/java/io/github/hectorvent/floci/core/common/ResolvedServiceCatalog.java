@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.services.medialive.MediaLiveController;
 import io.github.hectorvent.floci.services.mediapackagev2.MediaPackageV2Controller;
 import io.github.hectorvent.floci.services.mediatailor.MediaTailorController;
 import io.github.hectorvent.floci.services.medicalimaging.MedicalImagingController;
+import io.github.hectorvent.floci.services.omics.OmicsController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
@@ -700,6 +701,10 @@ public class ResolvedServiceCatalog {
                         "medicalimaging", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("medical-imaging"), Set.of(), Set.of(MedicalImagingController.class)),
+                descriptor("omics", "omics", config.services().omics().enabled(), true,
+                        "omics", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("omics"), Set.of(), Set.of(OmicsController.class)),
                 descriptor("mailmanager", "mailmanager", config.services().mailmanager().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

@@ -642,6 +642,8 @@ floci:
       enabled: true
     medical-imaging:
       enabled: true
+    omics:
+      enabled: true
     mailmanager:
       enabled: true
     pricing:

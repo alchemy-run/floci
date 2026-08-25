@@ -1039,6 +1039,7 @@ public interface EmulatorConfig {
         ComprehendMedicalServiceConfig comprehendmedical();
         HealthLakeServiceConfig healthlake();
         MedicalImagingServiceConfig medicalImaging();
+        OmicsServiceConfig omics();
         MailManagerServiceConfig mailmanager();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2186,6 +2187,11 @@ public interface EmulatorConfig {
     }
 
     interface MedicalImagingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface OmicsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
