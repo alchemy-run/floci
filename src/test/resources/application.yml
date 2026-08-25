@@ -50,6 +50,8 @@ floci:
         flush-interval-ms: 60000
       ivschat:
         flush-interval-ms: 60000
+      lex:
+        flush-interval-ms: 60000
       ecs:
         flush-interval-ms: 60000
       efs:
@@ -93,6 +95,8 @@ floci:
         flush-interval-ms: 60000
       dataexchange:
         flush-interval-ms: 60000
+      mediaconnect:
+        flush-interval-ms: 60000
       datazone:
         flush-interval-ms: 60000
       dlm:
@@ -120,6 +124,8 @@ floci:
       amplify:
         flush-interval-ms: 60000
       appflow:
+        flush-interval-ms: 60000
+      mediaconnect:
         flush-interval-ms: 60000
       appintegrations:
         flush-interval-ms: 60000
@@ -220,6 +226,8 @@ floci:
       proxy-max-port: 6399
       default-image: "valkey/valkey:8"
       default-memcached-image: "memcached:1.6"
+    mediaconnect:
+      enabled: true
     memorydb:
       enabled: true
       mock: false
@@ -282,6 +290,8 @@ floci:
       enabled: true
     fms:
       enabled: true
+    license-manager:
+      enabled: true
     frauddetector:
       enabled: true
     kms:
@@ -335,6 +345,8 @@ floci:
     guardduty:
       enabled: true
     inspector2:
+      enabled: true
+    macie2:
       enabled: true
     fsx:
       enabled: true
@@ -398,6 +410,8 @@ floci:
       enabled: true
     dataexchange:
       enabled: true
+    mediaconvert:
+      enabled: true
     datazone:
       enabled: true
     dlm:
@@ -425,6 +439,8 @@ floci:
     comprehendmedical:
       enabled: true
     healthlake:
+      enabled: true
+    mailmanager:
       enabled: true
     pricing:
       enabled: true
@@ -458,6 +474,8 @@ floci:
       enabled: true
     ivschat:
       enabled: true
+    lex:
+      enabled: true
     iot:
       enabled: true
       mqtt:
@@ -478,6 +496,8 @@ floci:
     rum:
       enabled: true
     internetmonitor:
+      enabled: true
+    location:
       enabled: true
     geo-maps:
       enabled: true

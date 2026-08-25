@@ -263,6 +263,7 @@ public interface EmulatorConfig {
         AppConfigDataStorageConfig appconfigdata();
         ElastiCacheStorageConfig elasticache();
         MemoryDbStorageConfig memorydb();
+        MediaConnectStorageConfig mediaconnect();
         RdsStorageConfig rds();
         Ec2StorageConfig ec2();
         NeptuneStorageConfig neptune();
@@ -286,6 +287,7 @@ public interface EmulatorConfig {
         S3VectorsStorageConfig s3vectors();
         IvsStorageConfig ivs();
         IvsChatStorageConfig ivschat();
+        LexStorageConfig lex();
         EcsStorageConfig ecs();
         EfsStorageConfig efs();
         CodeBuildStorageConfig codebuild();
@@ -419,6 +421,13 @@ public interface EmulatorConfig {
     }
 
     interface MemoryDbStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface MediaConnectStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -561,6 +570,13 @@ public interface EmulatorConfig {
     }
 
     interface IvsChatStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface LexStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -873,6 +889,7 @@ public interface EmulatorConfig {
         KinesisAnalyticsServiceConfig kinesisAnalytics();
         ElastiCacheServiceConfig elasticache();
         MemoryDbServiceConfig memorydb();
+        MediaConnectServiceConfig mediaconnect();
         DaxServiceConfig dax();
         DsServiceConfig ds();
         RdsServiceConfig rds();
@@ -915,6 +932,7 @@ public interface EmulatorConfig {
         GreengrassV2ServiceConfig greengrassv2();
         GuardDutyServiceConfig guardduty();
         Inspector2ServiceConfig inspector2();
+        Macie2ServiceConfig macie2();
         FsxServiceConfig fsx();
         SsoAdminServiceConfig ssoAdmin();
         IdentityStoreServiceConfig identitystore();
@@ -958,9 +976,11 @@ public interface EmulatorConfig {
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendmedical();
         HealthLakeServiceConfig healthlake();
+        MailManagerServiceConfig mailmanager();
         PricingServiceConfig pricing();
         DuckConfig duck();
         TranscribeServiceConfig transcribe();
+        MediaConvertServiceConfig mediaconvert();
         CostExplorerServiceConfig ce();
         CurServiceConfig cur();
         BcmDataExportsServiceConfig bcmDataExports();
@@ -977,6 +997,7 @@ public interface EmulatorConfig {
         S3VectorsServiceConfig s3vectors();
         IvsServiceConfig ivs();
         IvsChatServiceConfig ivschat();
+        LexServiceConfig lex();
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         IotFleetWiseServiceConfig iotfleetwise();
@@ -985,6 +1006,7 @@ public interface EmulatorConfig {
         IotWirelessServiceConfig iotwireless();
         RumServiceConfig rum();
         InternetMonitorServiceConfig internetmonitor();
+        LocationServiceConfig location();
         GeoMapsServiceConfig geoMaps();
         GeoRoutesServiceConfig geoRoutes();
         GeoPlacesServiceConfig geoPlaces();
@@ -1062,6 +1084,11 @@ public interface EmulatorConfig {
     }
 
     interface InternetMonitorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LocationServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1202,6 +1229,11 @@ public interface EmulatorConfig {
     }
 
     interface IvsChatServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LexServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1512,6 +1544,11 @@ public interface EmulatorConfig {
 
         /** Docker network to attach MemoryDB containers to. Empty = default bridge. */
         Optional<String> dockerNetwork();
+    }
+
+    interface MediaConnectServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface DaxServiceConfig {
@@ -1914,6 +1951,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface Macie2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface FsxServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -2036,6 +2078,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface MailManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface PricingServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -2050,6 +2097,11 @@ public interface EmulatorConfig {
     }
 
     interface TranscribeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MediaConvertServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
