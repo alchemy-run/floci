@@ -13,14 +13,22 @@
 | `DeleteConfigRule` | Delete a config rule |
 | `DescribeConfigRules` | List config rules, optionally filtered by name |
 | `DescribeComplianceByConfigRule` | Get compliance summary for config rules |
+| `DescribeComplianceByResource` | List compliance by resource type/id |
 | `DescribeConfigRuleEvaluationStatus` | Get evaluation status for config rules |
+| `GetComplianceDetailsByConfigRule` | List evaluation results for a config rule |
+| `GetComplianceDetailsByResource` | List evaluation results for a resource |
+| `GetComplianceSummaryByConfigRule` | Account-level rule compliance summary |
+| `GetComplianceSummaryByResourceType` | Per-type compliance summaries |
 | `StartConfigRulesEvaluation` | Trigger evaluation for config rules |
+| `PutEvaluations` | Record custom Lambda rule evaluations (TestMode validates only) |
+| `PutExternalEvaluation` | Record an external evaluation; managed AWS rules reject with `InvalidParameterValueException` |
 
 ### Configuration Recorder
 
 | Action | Description |
 |---|---|
 | `PutConfigurationRecorder` | Create or update a configuration recorder |
+| `DeleteConfigurationRecorder` | Delete the configuration recorder |
 | `DescribeConfigurationRecorders` | List configuration recorders |
 | `StartConfigurationRecorder` | Start recording configuration changes |
 | `StopConfigurationRecorder` | Stop recording configuration changes |
@@ -49,6 +57,26 @@
 | `DeleteConformancePack` | Delete a conformance pack |
 | `DescribeConformancePacks` | List conformance packs |
 | `DescribeConformancePackStatus` | Get the deployment status of conformance packs |
+
+### Discovered resources and queries
+
+| Action | Description |
+|---|---|
+| `SelectResourceConfig` | Run a SQL query over recorded configuration (returns an empty `Results` list) |
+| `ListDiscoveredResources` | List custom resources recorded via `PutResourceConfig` |
+| `GetDiscoveredResourceCounts` | Count recorded custom resources by type |
+| `BatchGetResourceConfig` | Fetch current config; unknown keys are returned as `unprocessedResourceKeys` |
+| `GetResourceConfigHistory` | History for a recorded custom resource, or `ResourceNotDiscoveredException` |
+| `PutResourceConfig` | Record a custom (non-`AWS::`) resource; requires a running recorder |
+| `DeleteResourceConfig` | Delete a custom resource; requires a running recorder |
+
+### Proactive resource evaluation
+
+| Action | Description |
+|---|---|
+| `StartResourceEvaluation` | Start a proactive evaluation and return a `ResourceEvaluationId` |
+| `GetResourceEvaluationSummary` | Read an evaluation; unknown ids fail with `ResourceNotFoundException` |
+| `ListResourceEvaluations` | List proactive evaluations, optionally filtered by `EvaluationMode` |
 
 ### Aggregation Authorizations
 

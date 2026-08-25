@@ -11,8 +11,10 @@ import io.github.hectorvent.floci.services.configservice.model.ConfigurationReco
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorderStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePackStatusDetail;
+import io.github.hectorvent.floci.services.configservice.model.CustomResourceConfig;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
 import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
+import io.github.hectorvent.floci.services.configservice.model.StoredResourceEvaluation;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -62,6 +64,23 @@ public class ConfigServiceJsonHandler {
             case "TagResource" -> tagResource(request);
             case "UntagResource" -> untagResource(request);
             case "ListTagsForResource" -> listTagsForResource(request);
+            case "SelectResourceConfig" -> selectResourceConfig();
+            case "ListDiscoveredResources" -> listDiscoveredResources(request, region);
+            case "GetDiscoveredResourceCounts" -> getDiscoveredResourceCounts(region);
+            case "BatchGetResourceConfig" -> batchGetResourceConfig(request, region);
+            case "GetResourceConfigHistory" -> getResourceConfigHistory(request, region);
+            case "DescribeComplianceByResource" -> describeComplianceByResource();
+            case "GetComplianceDetailsByResource" -> getComplianceDetailsByResource();
+            case "GetComplianceSummaryByConfigRule" -> getComplianceSummaryByConfigRule();
+            case "GetComplianceSummaryByResourceType" -> getComplianceSummaryByResourceType();
+            case "GetComplianceDetailsByConfigRule" -> getComplianceDetailsByConfigRule(request, region);
+            case "PutEvaluations" -> putEvaluations();
+            case "PutExternalEvaluation" -> putExternalEvaluation(request, region);
+            case "PutResourceConfig" -> putResourceConfig(request, region);
+            case "DeleteResourceConfig" -> deleteResourceConfig(request, region);
+            case "StartResourceEvaluation" -> startResourceEvaluation(request, region);
+            case "GetResourceEvaluationSummary" -> getResourceEvaluationSummary(request, region);
+            case "ListResourceEvaluations" -> listResourceEvaluations(request, region);
             default -> throw new io.github.hectorvent.floci.core.common.AwsException(
                     "InvalidAction", "Could not find operation " + action, 400);
         };
@@ -311,6 +330,216 @@ public class ConfigServiceJsonHandler {
         return Response.ok(resp).build();
     }
 
+    // --- Discovered resources / querying ---
+
+    private Response selectResourceConfig() {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.putArray("Results");
+        return Response.ok(resp).build();
+    }
+
+    private Response listDiscoveredResources(JsonNode req, String region) {
+        String resourceType = text(req, "resourceType", "ResourceType");
+        List<CustomResourceConfig> resources = service.listDiscoveredResources(region, resourceType);
+        ObjectNode resp = mapper.createObjectNode();
+        ArrayNode identifiers = resp.putArray("resourceIdentifiers");
+        for (CustomResourceConfig resource : resources) {
+            ObjectNode id = identifiers.addObject();
+            id.put("resourceType", resource.resourceType());
+            id.put("resourceId", resource.resourceId());
+            if (resource.resourceName() != null) {
+                id.put("resourceName", resource.resourceName());
+            }
+        }
+        return Response.ok(resp).build();
+    }
+
+    private Response getDiscoveredResourceCounts(String region) {
+        List<CustomResourceConfig> resources = service.allCustomResources(region);
+        ObjectNode resp = mapper.createObjectNode();
+        resp.put("totalDiscoveredResources", resources.size());
+        ArrayNode counts = resp.putArray("resourceCounts");
+        Map<String, Integer> byType = new java.util.LinkedHashMap<>();
+        for (CustomResourceConfig resource : resources) {
+            byType.merge(resource.resourceType(), 1, Integer::sum);
+        }
+        byType.forEach((type, count) -> {
+            ObjectNode entry = counts.addObject();
+            entry.put("resourceType", type);
+            entry.put("count", count);
+        });
+        return Response.ok(resp).build();
+    }
+
+    private Response batchGetResourceConfig(JsonNode req, String region) {
+        ObjectNode resp = mapper.createObjectNode();
+        ArrayNode items = resp.putArray("baseConfigurationItems");
+        ArrayNode unprocessed = resp.putArray("unprocessedResourceKeys");
+        JsonNode keys = field(req, "resourceKeys", "ResourceKeys");
+        if (keys.isArray()) {
+            for (JsonNode key : keys) {
+                String resourceType = text(key, "resourceType", "ResourceType");
+                String resourceId = text(key, "resourceId", "ResourceId");
+                CustomResourceConfig resource = service.getCustomResource(region, resourceType, resourceId);
+                if (resource == null) {
+                    ObjectNode missed = unprocessed.addObject();
+                    missed.put("resourceType", resourceType);
+                    missed.put("resourceId", resourceId);
+                } else {
+                    ObjectNode item = items.addObject();
+                    item.put("resourceType", resource.resourceType());
+                    item.put("resourceId", resource.resourceId());
+                    if (resource.resourceName() != null) {
+                        item.put("resourceName", resource.resourceName());
+                    }
+                    if (resource.configuration() != null) {
+                        item.put("configuration", resource.configuration());
+                    }
+                }
+            }
+        }
+        return Response.ok(resp).build();
+    }
+
+    private Response getResourceConfigHistory(JsonNode req, String region) {
+        String resourceType = text(req, "resourceType", "ResourceType");
+        String resourceId = text(req, "resourceId", "ResourceId");
+        CustomResourceConfig resource = service.getCustomResource(region, resourceType, resourceId);
+        if (resource == null) {
+            throw new io.github.hectorvent.floci.core.common.AwsException(
+                    "ResourceNotDiscoveredException",
+                    "Resource " + resourceType + "/" + resourceId + " is not discovered.", 400);
+        }
+        ObjectNode resp = mapper.createObjectNode();
+        ArrayNode items = resp.putArray("configurationItems");
+        ObjectNode item = items.addObject();
+        item.put("resourceType", resource.resourceType());
+        item.put("resourceId", resource.resourceId());
+        if (resource.configuration() != null) {
+            item.put("configuration", resource.configuration());
+        }
+        return Response.ok(resp).build();
+    }
+
+    // --- Compliance reads ---
+
+    private Response describeComplianceByResource() {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.putArray("ComplianceByResources");
+        return Response.ok(resp).build();
+    }
+
+    private Response getComplianceDetailsByResource() {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.putArray("EvaluationResults");
+        return Response.ok(resp).build();
+    }
+
+    private Response getComplianceSummaryByConfigRule() {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.set("ComplianceSummary", emptyComplianceSummary());
+        return Response.ok(resp).build();
+    }
+
+    private Response getComplianceSummaryByResourceType() {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.putArray("ComplianceSummariesByResourceType");
+        return Response.ok(resp).build();
+    }
+
+    private Response getComplianceDetailsByConfigRule(JsonNode req, String region) {
+        String ruleName = text(req, "ConfigRuleName", "configRuleName");
+        service.describeConfigRules(region, ruleName == null ? List.of() : List.of(ruleName));
+        ObjectNode resp = mapper.createObjectNode();
+        resp.putArray("EvaluationResults");
+        return Response.ok(resp).build();
+    }
+
+    // --- Evaluations ---
+
+    private Response putEvaluations() {
+        ObjectNode resp = mapper.createObjectNode();
+        resp.putArray("FailedEvaluations");
+        return Response.ok(resp).build();
+    }
+
+    private Response putExternalEvaluation(JsonNode req, String region) {
+        String ruleName = text(req, "ConfigRuleName", "configRuleName");
+        service.putExternalEvaluation(region, ruleName);
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response putResourceConfig(JsonNode req, String region) {
+        Map<String, String> resourceTags = new java.util.LinkedHashMap<>();
+        JsonNode tagsNode = field(req, "Tags", "tags");
+        if (tagsNode.isObject()) {
+            tagsNode.fields().forEachRemaining(e -> resourceTags.put(e.getKey(), e.getValue().asText()));
+        }
+        service.putResourceConfig(region,
+                text(req, "ResourceType", "resourceType"),
+                text(req, "SchemaVersionId", "schemaVersionId"),
+                text(req, "ResourceId", "resourceId"),
+                text(req, "ResourceName", "resourceName"),
+                text(req, "Configuration", "configuration"),
+                resourceTags);
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response deleteResourceConfig(JsonNode req, String region) {
+        service.deleteResourceConfig(region,
+                text(req, "ResourceType", "resourceType"),
+                text(req, "ResourceId", "resourceId"));
+        return Response.ok(mapper.createObjectNode()).build();
+    }
+
+    private Response startResourceEvaluation(JsonNode req, String region) {
+        JsonNode details = field(req, "ResourceDetails", "resourceDetails");
+        StoredResourceEvaluation evaluation = service.startResourceEvaluation(region,
+                text(req, "EvaluationMode", "evaluationMode"),
+                text(details, "ResourceId", "resourceId"),
+                text(details, "ResourceType", "resourceType"),
+                text(details, "ResourceConfiguration", "resourceConfiguration"),
+                text(details, "ResourceConfigurationSchemaType", "resourceConfigurationSchemaType"),
+                text(req, "ClientToken", "clientToken"));
+        ObjectNode resp = mapper.createObjectNode();
+        resp.put("ResourceEvaluationId", evaluation.resourceEvaluationId());
+        return Response.ok(resp).build();
+    }
+
+    private Response getResourceEvaluationSummary(JsonNode req, String region) {
+        StoredResourceEvaluation evaluation = service.getResourceEvaluation(region,
+                text(req, "ResourceEvaluationId", "resourceEvaluationId"));
+        ObjectNode resp = mapper.createObjectNode();
+        resp.put("ResourceEvaluationId", evaluation.resourceEvaluationId());
+        resp.put("EvaluationMode", evaluation.evaluationMode());
+        resp.put("EvaluationStartTimestamp", evaluation.evaluationStartTimestamp());
+        ObjectNode status = resp.putObject("EvaluationStatus");
+        status.put("Status", evaluation.status());
+        ObjectNode details = resp.putObject("ResourceDetails");
+        details.put("ResourceId", evaluation.resourceId());
+        details.put("ResourceType", evaluation.resourceType());
+        details.put("ResourceConfiguration", evaluation.resourceConfiguration());
+        if (evaluation.resourceConfigurationSchemaType() != null) {
+            details.put("ResourceConfigurationSchemaType", evaluation.resourceConfigurationSchemaType());
+        }
+        return Response.ok(resp).build();
+    }
+
+    private Response listResourceEvaluations(JsonNode req, String region) {
+        JsonNode filters = field(req, "Filters", "filters");
+        String mode = text(filters, "EvaluationMode", "evaluationMode");
+        List<StoredResourceEvaluation> evaluations = service.listResourceEvaluations(region, mode);
+        ObjectNode resp = mapper.createObjectNode();
+        ArrayNode arr = resp.putArray("ResourceEvaluations");
+        for (StoredResourceEvaluation evaluation : evaluations) {
+            ObjectNode entry = arr.addObject();
+            entry.put("ResourceEvaluationId", evaluation.resourceEvaluationId());
+            entry.put("EvaluationMode", evaluation.evaluationMode());
+            entry.put("EvaluationStartTimestamp", evaluation.evaluationStartTimestamp());
+        }
+        return Response.ok(resp).build();
+    }
+
     // --- Helpers ---
 
     private List<String> extractStringList(JsonNode req, String fieldName) {
@@ -329,5 +558,37 @@ public class ConfigServiceJsonHandler {
                     "Value", t.path("Value").asText())));
         }
         return tagList;
+    }
+
+    private static JsonNode field(JsonNode req, String... names) {
+        if (req == null || req.isMissingNode() || req.isNull()) {
+            return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+        }
+        for (String name : names) {
+            if (req.has(name)) {
+                return req.get(name);
+            }
+        }
+        return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+    }
+
+    private static String text(JsonNode req, String... names) {
+        JsonNode node = field(req, names);
+        if (node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        String value = node.asText(null);
+        return (value == null || value.isBlank()) ? null : value;
+    }
+
+    private ObjectNode emptyComplianceSummary() {
+        ObjectNode summary = mapper.createObjectNode();
+        ObjectNode compliant = summary.putObject("CompliantResourceCount");
+        compliant.put("CappedCount", 0);
+        compliant.put("CapExceeded", false);
+        ObjectNode nonCompliant = summary.putObject("NonCompliantResourceCount");
+        nonCompliant.put("CappedCount", 0);
+        nonCompliant.put("CapExceeded", false);
+        return summary;
     }
 }

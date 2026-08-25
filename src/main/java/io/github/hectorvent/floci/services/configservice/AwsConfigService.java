@@ -14,8 +14,10 @@ import io.github.hectorvent.floci.services.configservice.model.ConfigurationReco
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorderStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePackStatusDetail;
+import io.github.hectorvent.floci.services.configservice.model.CustomResourceConfig;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
 import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
+import io.github.hectorvent.floci.services.configservice.model.StoredResourceEvaluation;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -54,6 +56,12 @@ public class AwsConfigService {
     // resourceArn -> {tagKey -> tagValue} (flat outer, mutable inner)
     private Map<String, Map<String, String>> tags = new ConcurrentHashMap<>();
 
+    // region -> type/id -> custom resource recorded via PutResourceConfig
+    private Map<String, Map<String, CustomResourceConfig>> customResources = new ConcurrentHashMap<>();
+    // region -> evaluationId -> proactive evaluation (transient)
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, StoredResourceEvaluation>> resourceEvaluations =
+            new ConcurrentHashMap<>();
+
     @Inject
     public AwsConfigService(RegionResolver regionResolver, StorageFactory storageFactory) {
         this.regionResolver = regionResolver;
@@ -79,10 +87,13 @@ public class AwsConfigService {
                 new TypeReference<Map<String, RetentionConfiguration>>() {});
         this.tags = storageBacked("config-tags.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
+        this.customResources = storageBacked("config-custom-resources.json",
+                new TypeReference<Map<String, Map<String, CustomResourceConfig>>>() {});
         normalizeRegionMaps(configRules);
         normalizeRegionMaps(conformancePacks);
         normalizeRegionMaps(aggregationAuthorizations);
         normalizeRegionMaps(tags);
+        normalizeRegionMaps(customResources);
     }
 
     private <V> Map<String, V> storageBacked(String fileName, TypeReference<Map<String, V>> typeReference) {
@@ -486,6 +497,153 @@ public class AwsConfigService {
         }
     }
 
+    // --- Discovered / custom resources ---
+
+    public boolean isRecorderRunning(String region) {
+        return recorderRunning.getOrDefault(region, false);
+    }
+
+    public void requireRunningRecorder(String region) {
+        if (!isRecorderRunning(region)) {
+            throw new AwsException("NoRunningConfigurationRecorderException",
+                    "There is no configuration recorder running.", 400);
+        }
+    }
+
+    public List<CustomResourceConfig> listDiscoveredResources(String region, String resourceType) {
+        if (resourceType == null || resourceType.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "resourceType is required.", 400);
+        }
+        List<CustomResourceConfig> result = new ArrayList<>();
+        for (CustomResourceConfig resource : customResourcesFor(region).values()) {
+            if (resourceType.equals(resource.resourceType())) {
+                result.add(resource);
+            }
+        }
+        return result;
+    }
+
+    public List<CustomResourceConfig> allCustomResources(String region) {
+        return new ArrayList<>(customResourcesFor(region).values());
+    }
+
+    public CustomResourceConfig getCustomResource(String region, String resourceType, String resourceId) {
+        return customResourcesFor(region).get(customResourceKey(resourceType, resourceId));
+    }
+
+    public CustomResourceConfig putResourceConfig(String region, String resourceType, String schemaVersionId,
+                                                  String resourceId, String resourceName, String configuration,
+                                                  Map<String, String> resourceTags) {
+        requireRunningRecorder(region);
+        if (resourceType == null || resourceType.isBlank()) {
+            throw new AwsException("ValidationException", "ResourceType is required.", 400);
+        }
+        if (resourceType.startsWith("AWS::")) {
+            throw new AwsException("ValidationException",
+                    "PutResourceConfig only supports custom resource types.", 400);
+        }
+        if (schemaVersionId == null || schemaVersionId.isBlank()) {
+            throw new AwsException("ValidationException", "SchemaVersionId is required.", 400);
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            throw new AwsException("ValidationException", "ResourceId is required.", 400);
+        }
+        if (configuration == null) {
+            throw new AwsException("ValidationException", "Configuration is required.", 400);
+        }
+        CustomResourceConfig stored = new CustomResourceConfig(
+                resourceType, resourceId, resourceName, schemaVersionId, configuration,
+                resourceTags == null ? Map.of() : new ConcurrentHashMap<>(resourceTags));
+        Map<String, CustomResourceConfig> store = customResourcesFor(region);
+        store.put(customResourceKey(resourceType, resourceId), stored);
+        persistRegion(customResources, region);
+        return stored;
+    }
+
+    public void deleteResourceConfig(String region, String resourceType, String resourceId) {
+        requireRunningRecorder(region);
+        if (resourceType == null || resourceType.isBlank() || resourceId == null || resourceId.isBlank()) {
+            throw new AwsException("ValidationException",
+                    "ResourceType and ResourceId are required.", 400);
+        }
+        Map<String, CustomResourceConfig> store = customResourcesFor(region);
+        store.remove(customResourceKey(resourceType, resourceId));
+        persistRegion(customResources, region);
+    }
+
+    // --- Proactive resource evaluations ---
+
+    public StoredResourceEvaluation startResourceEvaluation(String region, String evaluationMode,
+                                                            String resourceId, String resourceType,
+                                                            String resourceConfiguration,
+                                                            String schemaType, String clientToken) {
+        if (evaluationMode == null || evaluationMode.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "EvaluationMode is required.", 400);
+        }
+        if (resourceId == null || resourceId.isBlank() || resourceType == null || resourceType.isBlank()
+                || resourceConfiguration == null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ResourceDetails.ResourceId, ResourceType and ResourceConfiguration are required.", 400);
+        }
+        String evaluationId = clientToken != null && !clientToken.isBlank()
+                ? "re-" + Integer.toHexString(clientToken.hashCode())
+                : "re-" + shortId();
+        StoredResourceEvaluation evaluation = new StoredResourceEvaluation(
+                evaluationId,
+                evaluationMode,
+                System.currentTimeMillis() / 1000,
+                "SUCCEEDED",
+                resourceId,
+                resourceType,
+                resourceConfiguration,
+                schemaType);
+        evaluationsFor(region).put(evaluationId, evaluation);
+        return evaluation;
+    }
+
+    public StoredResourceEvaluation getResourceEvaluation(String region, String evaluationId) {
+        if (evaluationId == null || evaluationId.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ResourceEvaluationId is required.", 400);
+        }
+        StoredResourceEvaluation evaluation = evaluationsFor(region).get(evaluationId);
+        if (evaluation == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Resource evaluation '" + evaluationId + "' was not found.", 400);
+        }
+        return evaluation;
+    }
+
+    public List<StoredResourceEvaluation> listResourceEvaluations(String region, String evaluationMode) {
+        List<StoredResourceEvaluation> result = new ArrayList<>();
+        for (StoredResourceEvaluation evaluation : evaluationsFor(region).values()) {
+            if (evaluationMode == null || evaluationMode.equals(evaluation.evaluationMode())) {
+                result.add(evaluation);
+            }
+        }
+        return result;
+    }
+
+    public void putExternalEvaluation(String region, String configRuleName) {
+        if (configRuleName == null || configRuleName.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ConfigRuleName is required.", 400);
+        }
+        ConfigRule rule = rulesFor(region).get(configRuleName);
+        if (rule == null) {
+            throw new AwsException("NoSuchConfigRuleException",
+                    "The ConfigRule provided in the request is invalid. " +
+                            "Please check the configRule name.", 400);
+        }
+        String owner = rule.source() != null ? rule.source().owner() : null;
+        if (!"CUSTOM_LAMBDA".equals(owner) && !"CUSTOM_POLICY".equals(owner)) {
+            throw new AwsException("InvalidParameterValueException",
+                    "PutExternalEvaluation is only valid for custom rules.", 400);
+        }
+    }
+
     // --- Tagging ---
 
     public void tagResource(String arn, List<Map<String, String>> tagList) {
@@ -523,6 +681,18 @@ public class AwsConfigService {
 
     private Map<String, AggregationAuthorization> authorizationsFor(String region) {
         return aggregationAuthorizations.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, CustomResourceConfig> customResourcesFor(String region) {
+        return customResources.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private ConcurrentHashMap<String, StoredResourceEvaluation> evaluationsFor(String region) {
+        return resourceEvaluations.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private static String customResourceKey(String resourceType, String resourceId) {
+        return resourceType + "/" + resourceId;
     }
 
     private static String authorizationKey(String authorizedAccountId, String authorizedAwsRegion) {
