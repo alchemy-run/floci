@@ -292,6 +292,7 @@ public interface EmulatorConfig {
         ElasticBeanstalkStorageConfig elasticbeanstalk();
         CloudTrailStorageConfig cloudtrail();
         RumStorageConfig rum();
+        FisStorageConfig fis();
         AmpStorageConfig amp();
         AiOpsStorageConfig aiops();
         AccountStorageConfig account();
@@ -311,8 +312,9 @@ public interface EmulatorConfig {
         BedrockAgentCoreStorageConfig bedrockAgentCore();
         BedrockDataAutomationStorageConfig bedrockDataAutomation();
         DeadlineStorageConfig deadline();
-        EntityResolutionStorageConfig entityresolution();
+        EmrContainersStorageConfig emrContainers();
         EmrServerlessStorageConfig emrServerless();
+        EntityResolutionStorageConfig entityresolution();
     }
 
     interface SsmStorageConfig {
@@ -598,6 +600,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface FisStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface BedrockAgentStorageConfig {
         Optional<String> mode();
 
@@ -626,7 +635,7 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
-    interface EntityResolutionStorageConfig {
+    interface EmrContainersStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -634,6 +643,13 @@ public interface EmulatorConfig {
     }
 
     interface EmrServerlessStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface EntityResolutionStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -799,6 +815,7 @@ public interface EmulatorConfig {
         EventBridgeServiceConfig eventbridge();
         CloudMapServiceConfig cloudmap();
         EmrServiceConfig emr();
+        EmrContainersServiceConfig emrContainers();
         EmrServerlessServiceConfig emrServerless();
         EntityResolutionServiceConfig entityresolution();
         WafV2ServiceConfig wafv2();
@@ -809,6 +826,7 @@ public interface EmulatorConfig {
         ApiGatewayV2ServiceConfig apigatewayv2();
         KinesisServiceConfig kinesis();
         FirehoseServiceConfig firehose();
+        FmsServiceConfig fms();
         KmsServiceConfig kms();
         CognitoServiceConfig cognito();
         StepFunctionsServiceConfig stepfunctions();
@@ -878,6 +896,7 @@ public interface EmulatorConfig {
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         RumServiceConfig rum();
+        FisServiceConfig fis();
         AmpServiceConfig amp();
         AiOpsServiceConfig aiops();
         AccountServiceConfig account();
@@ -923,6 +942,11 @@ public interface EmulatorConfig {
     }
 
     interface RumServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FisServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1452,6 +1476,11 @@ public interface EmulatorConfig {
         int clusterStartupDelaySeconds();
     }
 
+    interface EmrContainersServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface EmrServerlessServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1528,6 +1557,11 @@ public interface EmulatorConfig {
     }
 
     interface FirehoseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FmsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -145,6 +145,8 @@ floci:
         flush-interval-ms: 5000
       rum:
         flush-interval-ms: 5000
+      fis:
+        flush-interval-ms: 5000
       amp:
         flush-interval-ms: 5000
       aiops:
@@ -172,6 +174,8 @@ floci:
       devops-guru:
         flush-interval-ms: 5000
       deadline:
+        flush-interval-ms: 5000
+      emr-containers:
         flush-interval-ms: 5000
       entityresolution:
         flush-interval-ms: 5000
@@ -364,6 +368,8 @@ floci:
       enabled: true
     emr:
       enabled: true
+    emr-containers:
+      enabled: true
     emr-serverless:
       enabled: true
     entityresolution:
@@ -383,6 +389,8 @@ floci:
     kinesis:
       enabled: true
     firehose:
+      enabled: true
+    fms:
       enabled: true
     kms:
       enabled: true
@@ -606,6 +614,8 @@ floci:
     iotdata:
       enabled: true
     rum:
+      enabled: true
+    fis:
       enabled: true
     amp:
       enabled: true

@@ -67,6 +67,8 @@ floci:
         flush-interval-ms: 60000
       rum:
         flush-interval-ms: 60000
+      fis:
+        flush-interval-ms: 60000
       amp:
         flush-interval-ms: 60000
       aiops:
@@ -95,9 +97,11 @@ floci:
         flush-interval-ms: 60000
       deadline:
         flush-interval-ms: 60000
-      entityresolution:
+      emr-containers:
         flush-interval-ms: 60000
       emr-serverless:
+        flush-interval-ms: 60000
+      entityresolution:
         flush-interval-ms: 60000
       auditmanager:
         flush-interval-ms: 60000
@@ -234,6 +238,8 @@ floci:
       enabled: true
     emr:
       enabled: true
+    emr-containers:
+      enabled: true
     emr-serverless:
       enabled: true
     entityresolution:
@@ -253,6 +259,8 @@ floci:
     kinesis:
       enabled: true
     firehose:
+      enabled: true
+    fms:
       enabled: true
     kms:
       enabled: true
@@ -414,6 +422,8 @@ floci:
     iotdata:
       enabled: true
     rum:
+      enabled: true
+    fis:
       enabled: true
     amp:
       enabled: true

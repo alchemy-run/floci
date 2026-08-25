@@ -9,7 +9,6 @@ import io.github.hectorvent.floci.services.dataexchange.DataExchangeController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
-import io.github.hectorvent.floci.services.emrserverless.EmrServerlessController;
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
@@ -53,7 +52,10 @@ import io.github.hectorvent.floci.services.chatbot.ChatbotController;
 import io.github.hectorvent.floci.services.controltower.ControlTowerController;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactController;
 import io.github.hectorvent.floci.services.deadline.DeadlineController;
+import io.github.hectorvent.floci.services.emrcontainers.EmrContainersController;
+import io.github.hectorvent.floci.services.emrserverless.EmrServerlessController;
 import io.github.hectorvent.floci.services.entityresolution.EntityResolutionController;
+import io.github.hectorvent.floci.services.fis.FisController;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -207,6 +209,12 @@ public class ResolvedServiceCatalog {
                         "emr", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("ElasticMapReduce."), Set.of("elasticmapreduce"), Set.of(), Set.of()),
+                descriptor("emr-containers", "emrcontainers", config.services().emrContainers().enabled(), true,
+                        "emrcontainers", storageMode(config.storage().services().emrContainers().mode(),
+                                config.storage().mode()),
+                        config.storage().services().emrContainers().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("emr-containers"), Set.of(), Set.of(EmrContainersController.class)),
                 descriptor("emr-serverless", "emrserverless", config.services().emrServerless().enabled(), true,
                         "emrserverless", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
@@ -298,6 +306,10 @@ public class ResolvedServiceCatalog {
                         "firehose", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("Firehose_20150804."), Set.of("firehose"), Set.of(), Set.of()),
+                descriptor("fms", "fms", config.services().fms().enabled(), true,
+                        "fms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSFMS_20180101."), Set.of("fms"), Set.of(), Set.of()),
                 descriptor("email", "ses", config.services().ses().enabled(), true,
                         "ses", config.storage().mode(), 5000L, AwsNamespaces.SES, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON, ServiceProtocol.QUERY),
@@ -615,6 +627,11 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
+                descriptor("fis", "fis", config.services().fis().enabled(), true,
+                        "fis", storageMode(config.storage().services().fis().mode(), config.storage().mode()),
+                        config.storage().services().fis().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("fis"), Set.of(), Set.of(FisController.class)),
                 descriptor("aps", "amp", config.services().amp().enabled(), true,
                         "amp", storageMode(config.storage().services().amp().mode(), config.storage().mode()),
                         config.storage().services().amp().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
