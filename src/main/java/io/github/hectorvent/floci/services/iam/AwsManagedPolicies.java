@@ -228,7 +228,14 @@ final class AwsManagedPolicies {
         // CloudWatch investigations (AIOps) assistant role — Alchemy InvestigationGroup
         // fixtures attach this ARN at create time.
         new ManagedPolicyDef("AIOpsAssistantPolicy", "/",
-                "Provides permissions for CloudWatch investigations to access telemetry during investigations.")
+                "Provides permissions for CloudWatch investigations to access telemetry during investigations."),
+
+        // AWS Budgets action execution role — Alchemy Budgets Bindings attach this ARN.
+        new ManagedPolicyDef("AWSBudgetsActionsWithAWSResourceControlAccess", "/",
+                "Provides full access to AWS Budgets Actions including using Budgets Actions to control AWS resources."),
+        // IAM policy the fixture budget action applies to target roles.
+        new ManagedPolicyDef("AWSDenyAll", "/",
+                "AWS managed policy that denies all actions on all resources.")
     );
 
     private AwsManagedPolicies() {}

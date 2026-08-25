@@ -155,6 +155,27 @@ class IamIntegrationTest {
                     equalTo("arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"));
     }
 
+    @ParameterizedTest
+    @Order(5)
+    @ValueSource(strings = {
+            "arn:aws:iam::aws:policy/AWSBudgetsActionsWithAWSResourceControlAccess",
+            "arn:aws:iam::aws:policy/AWSDenyAll",
+    })
+    void getBudgetsManagedPolicy(String arn) {
+        String expectedName = arn.substring(arn.lastIndexOf('/') + 1);
+        given()
+            .formParam("Action", "GetPolicy")
+            .formParam("PolicyArn", arn)
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("GetPolicyResponse.GetPolicyResult.Policy.PolicyName", equalTo(expectedName))
+            .body("GetPolicyResponse.GetPolicyResult.Policy.Arn", equalTo(arn));
+    }
+
     // The standard EKS managed policies the EKS console/SDK and the
     // terraform-aws-modules/eks module attach to cluster and node roles (#1092).
     @ParameterizedTest
