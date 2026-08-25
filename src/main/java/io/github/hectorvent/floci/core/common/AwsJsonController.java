@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.apprunner.AppRunnerJsonHandler;
 import io.github.hectorvent.floci.services.b2bi.B2biJsonHandler;
 import io.github.hectorvent.floci.services.codeconnections.CodeConnectionsJsonHandler;
 import io.github.hectorvent.floci.services.healthlake.HealthLakeJsonHandler;
+import io.github.hectorvent.floci.services.mailmanager.MailManagerJsonHandler;
 import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseJsonHandler;
 import io.github.hectorvent.floci.services.keyspaces.KeyspacesJsonHandler;
 import io.github.hectorvent.floci.services.keyspacesstreams.KeyspacesStreamsJsonHandler;
@@ -57,6 +58,7 @@ public class AwsJsonController {
     private final B2biJsonHandler b2biJsonHandler;
     private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
     private final HealthLakeJsonHandler healthLakeJsonHandler;
+    private final MailManagerJsonHandler mailManagerJsonHandler;
     private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
     private final KeyspacesJsonHandler keyspacesJsonHandler;
     private final KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler;
@@ -75,6 +77,7 @@ public class AwsJsonController {
                              B2biJsonHandler b2biJsonHandler,
                              CodeConnectionsJsonHandler codeConnectionsJsonHandler,
                              HealthLakeJsonHandler healthLakeJsonHandler,
+                             MailManagerJsonHandler mailManagerJsonHandler,
                              IotFleetWiseJsonHandler iotFleetWiseJsonHandler,
                              KeyspacesJsonHandler keyspacesJsonHandler,
                              KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler,
@@ -94,6 +97,7 @@ public class AwsJsonController {
         this.b2biJsonHandler = b2biJsonHandler;
         this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
         this.healthLakeJsonHandler = healthLakeJsonHandler;
+        this.mailManagerJsonHandler = mailManagerJsonHandler;
         this.iotFleetWiseJsonHandler = iotFleetWiseJsonHandler;
         this.keyspacesJsonHandler = keyspacesJsonHandler;
         this.keyspacesStreamsJsonHandler = keyspacesStreamsJsonHandler;
@@ -148,6 +152,7 @@ public class AwsJsonController {
                 case "b2bi" -> b2biJsonHandler.handle(action, request, region);
                 case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
                 case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
+                case "mailmanager" -> mailManagerJsonHandler.handle(action, request, region);
                 case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
                 case "cassandra" -> keyspacesJsonHandler.handle(action, request, region);
                 case "keyspacesstreams" -> keyspacesStreamsJsonHandler.handle(action, request, region);
