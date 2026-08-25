@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import io.github.hectorvent.floci.services.acm.AcmJsonHandler;
+import io.github.hectorvent.floci.services.acmpca.AcmPcaJsonHandler;
 import io.github.hectorvent.floci.services.athena.AthenaJsonHandler;
 import io.github.hectorvent.floci.services.codebuild.CodeBuildJsonHandler;
 import io.github.hectorvent.floci.services.codedeploy.CodeDeployJsonHandler;
@@ -83,6 +84,7 @@ public class AwsJson11Controller {
     private final CognitoJsonHandler cognitoJsonHandler;
     private final CognitoIdentityJsonHandler cognitoIdentityJsonHandler;
     private final AcmJsonHandler acmJsonHandler;
+    private final AcmPcaJsonHandler acmPcaJsonHandler;
     private final EcsJsonHandler ecsJsonHandler;
     private final EcrJsonHandler ecrJsonHandler;
     private final GlueJsonHandler glueJsonHandler;
@@ -121,7 +123,8 @@ public class AwsJson11Controller {
                                ApiGatewayV2JsonHandler apigwV2JsonHandler,
                                KmsJsonHandler kmsJsonHandler, CognitoJsonHandler cognitoJsonHandler,
                                CognitoIdentityJsonHandler cognitoIdentityJsonHandler,
-                               AcmJsonHandler acmJsonHandler, EcsJsonHandler ecsJsonHandler,
+                               AcmJsonHandler acmJsonHandler, AcmPcaJsonHandler acmPcaJsonHandler,
+                               EcsJsonHandler ecsJsonHandler,
                                EcrJsonHandler ecrJsonHandler, GlueJsonHandler glueJsonHandler,
                                AthenaJsonHandler athenaJsonHandler,
                                FirehoseJsonHandler firehoseJsonHandler,
@@ -161,6 +164,7 @@ public class AwsJson11Controller {
         this.cognitoJsonHandler = cognitoJsonHandler;
         this.cognitoIdentityJsonHandler = cognitoIdentityJsonHandler;
         this.acmJsonHandler = acmJsonHandler;
+        this.acmPcaJsonHandler = acmPcaJsonHandler;
         this.ecsJsonHandler = ecsJsonHandler;
         this.ecrJsonHandler = ecrJsonHandler;
         this.glueJsonHandler = glueJsonHandler;
@@ -232,6 +236,7 @@ public class AwsJson11Controller {
                 case "cognito-idp" -> cognitoJsonHandler.handle(action, request, region);
                 case "cognito-identity" -> cognitoIdentityJsonHandler.handle(action, request, region);
                 case "acm" -> acmJsonHandler.handle(action, request, region);
+                case "acm-pca" -> acmPcaJsonHandler.handle(action, request, region);
                 case "ecs" -> ecsJsonHandler.handle(action, request, region);
                 case "ecr" -> ecrJsonHandler.handle(action, request, region);
                 case "glue" -> glueJsonHandler.handle(action, request, region);

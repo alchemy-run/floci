@@ -110,6 +110,7 @@ nav:
     - AMP: services/amp.md
     - IAM Access Analyzer: services/access-analyzer.md
     - ACM: services/acm.md
+    - ACM PCA: services/acm-pca.md
     - ECS: services/ecs.md
     - ECR: services/ecr.md
     - Resource Groups Tagging API: services/resource-groups-tagging.md

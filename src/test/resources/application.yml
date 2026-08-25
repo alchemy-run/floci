@@ -196,6 +196,8 @@ floci:
     acm:
       enabled: true
       validation-wait-seconds: 0
+    acm-pca:
+      enabled: true
     athena:
       enabled: true
       mock: true

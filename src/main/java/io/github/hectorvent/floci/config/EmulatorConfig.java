@@ -576,6 +576,7 @@ public interface EmulatorConfig {
         StepFunctionsServiceConfig stepfunctions();
         CloudFormationServiceConfig cloudformation();
         AcmServiceConfig acm();
+        AcmPcaServiceConfig acmPca();
         AthenaServiceConfig athena();
         GlueServiceConfig glue();
         SesServiceConfig ses();
@@ -1139,6 +1140,11 @@ public interface EmulatorConfig {
         /** Seconds to wait before transitioning from PENDING_VALIDATION to ISSUED (0 = immediate) */
         @WithDefault("0")
         int validationWaitSeconds();
+    }
+
+    interface AcmPcaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface AthenaServiceConfig {
