@@ -24,6 +24,7 @@ import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.s3.model.S3ObjectUpdatedEvent;
 import io.github.hectorvent.floci.services.sqs.SqsService;
+import io.github.hectorvent.floci.services.xray.XRayService;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -96,6 +97,10 @@ public class LambdaService {
     @Inject
     Instance<LambdaDurableService> durableServiceInstance;
     private LambdaDurableService durableService;
+
+    /** Optional: Active tracing records a function-level X-Ray segment on invoke. */
+    @Inject
+    Instance<XRayService> xrayServiceInstance;
 
     /**
      * Package-private constructor for testing without CDI. Config defaults
@@ -682,7 +687,28 @@ public class LambdaService {
         LambdaFunction fn = resolveInvokeTarget(region, name, qualifier);
         InvokeResult result = executorService.invoke(fn, payload, type);
         result.setExecutedVersion(fn.getVersion());
+        recordActiveTrace(fn);
         return result;
+    }
+
+    private void recordActiveTrace(LambdaFunction fn) {
+        if (fn == null || !"Active".equals(fn.getTracingMode())) {
+            return;
+        }
+        if (xrayServiceInstance == null || !xrayServiceInstance.isResolvable()) {
+            return;
+        }
+        try {
+            String region;
+            try {
+                region = AwsArnUtils.parse(fn.getFunctionArn()).region();
+            } catch (RuntimeException e) {
+                region = regionResolver.getRegion();
+            }
+            xrayServiceInstance.get().recordLambdaInvocation(region, fn.getFunctionName(), fn.getFunctionArn());
+        } catch (RuntimeException e) {
+            LOG.debugv("Skipping X-Ray segment for {0}: {1}", fn.getFunctionName(), e.getMessage());
+        }
     }
 
     /**

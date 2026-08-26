@@ -139,41 +139,117 @@ public class XRayController {
     }
 
     @POST
-    @Path("/PutTraceSegments")
+    @Path("/TraceSegments")
     public Response putTraceSegments(@Context HttpHeaders headers, String body) {
         return regional(headers, body, service::putTraceSegments);
     }
 
     @POST
-    @Path("/GetTraceSummaries")
+    @Path("/TraceSummaries")
     public Response getTraceSummaries(@Context HttpHeaders headers, String body) {
         return regional(headers, body, service::getTraceSummaries);
     }
 
     @POST
-    @Path("/BatchGetTraces")
+    @Path("/Traces")
     public Response batchGetTraces(@Context HttpHeaders headers, String body) {
         return regional(headers, body, service::batchGetTraces);
     }
 
     @POST
-    @Path("/PutTelemetryRecords")
+    @Path("/TelemetryRecords")
     @Consumes(MediaType.WILDCARD)
     public Response putTelemetryRecords(String body) {
         return plain(body, service::putTelemetryRecords);
     }
 
     @POST
-    @Path("/GetSamplingTargets")
+    @Path("/SamplingTargets")
     public Response getSamplingTargets(@Context HttpHeaders headers, String body) {
         return regional(headers, body, service::getSamplingTargets);
     }
 
     @POST
-    @Path("/GetSamplingStatisticSummaries")
+    @Path("/SamplingStatisticSummaries")
     @Consumes(MediaType.WILDCARD)
     public Response getSamplingStatisticSummaries(@Context HttpHeaders headers, String body) {
         return regional(headers, body, service::getSamplingStatisticSummaries);
+    }
+
+    @POST
+    @Path("/ServiceGraph")
+    public Response getServiceGraph(@Context HttpHeaders headers, String body) {
+        return regional(headers, body, service::getServiceGraph);
+    }
+
+    @POST
+    @Path("/TraceGraph")
+    public Response getTraceGraph(@Context HttpHeaders headers, String body) {
+        return regional(headers, body, service::getTraceGraph);
+    }
+
+    @POST
+    @Path("/TimeSeriesServiceStatistics")
+    public Response getTimeSeriesServiceStatistics(@Context HttpHeaders headers, String body) {
+        return regional(headers, body, service::getTimeSeriesServiceStatistics);
+    }
+
+    @POST
+    @Path("/InsightSummaries")
+    public Response getInsightSummaries(@Context HttpHeaders headers, String body) {
+        return regional(headers, body, service::getInsightSummaries);
+    }
+
+    @POST
+    @Path("/Insight")
+    public Response getInsight(@Context HttpHeaders headers, String body) {
+        return regional(headers, body, service::getInsight);
+    }
+
+    @POST
+    @Path("/InsightEvents")
+    public Response getInsightEvents(@Context HttpHeaders headers, String body) {
+        return regional(headers, body, service::getInsightEvents);
+    }
+
+    @POST
+    @Path("/InsightImpactGraph")
+    public Response getInsightImpactGraph(@Context HttpHeaders headers, String body) {
+        return regional(headers, body, service::getInsightImpactGraph);
+    }
+
+    @POST
+    @Path("/GetTraceSegmentDestination")
+    @Consumes(MediaType.WILDCARD)
+    public Response getTraceSegmentDestination(String body) {
+        return run(() -> {
+            parse(body);
+            return Response.ok(service.getTraceSegmentDestination()).build();
+        });
+    }
+
+    @POST
+    @Path("/StartTraceRetrieval")
+    public Response startTraceRetrieval(String body) {
+        return plain(body, service::startTraceRetrieval);
+    }
+
+    @POST
+    @Path("/ListRetrievedTraces")
+    public Response listRetrievedTraces(String body) {
+        return plain(body, service::listRetrievedTraces);
+    }
+
+    @POST
+    @Path("/GetRetrievedTracesGraph")
+    public Response getRetrievedTracesGraph(String body) {
+        return plain(body, service::getRetrievedTracesGraph);
+    }
+
+    @POST
+    @Path("/CancelTraceRetrieval")
+    public Response cancelTraceRetrieval(String body) {
+        return plain(body, service::cancelTraceRetrieval);
     }
 
     private Response regional(HttpHeaders headers, String body, BiFunction<String, JsonNode, ObjectNode> action) {
