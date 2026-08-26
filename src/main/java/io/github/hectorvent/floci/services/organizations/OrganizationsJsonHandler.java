@@ -40,6 +40,7 @@ public class OrganizationsJsonHandler {
                 case "UntagResource" -> ok(service.untagResource(body));
                 case "CreateAccount" -> ok(service.createAccount(body));
                 case "DescribeCreateAccountStatus" -> ok(service.describeCreateAccountStatus(body));
+                case "ListCreateAccountStatus" -> ok(service.listCreateAccountStatus(body));
                 case "RemoveAccountFromOrganization" -> ok(service.removeAccountFromOrganization(body));
                 case "DescribeOrganization" -> ok(service.describeOrganization());
                 case "CreateOrganization" -> ok(service.createOrganization(body));
@@ -79,6 +80,21 @@ public class OrganizationsJsonHandler {
                     service.detachPolicy(body);
                     yield ok(objectMapper.createObjectNode());
                 }
+                case "ListAccountsForParent" -> ok(service.listAccountsForParent(body));
+                case "ListChildren" -> ok(service.listChildren(body));
+                case "ListPoliciesForTarget" -> ok(service.listPoliciesForTarget(body));
+                case "DescribeEffectivePolicy" -> ok(service.describeEffectivePolicy(body));
+                case "ListAccountsWithInvalidEffectivePolicy" ->
+                        ok(service.listAccountsWithInvalidEffectivePolicy(body));
+                case "ListEffectivePolicyValidationErrors" ->
+                        ok(service.listEffectivePolicyValidationErrors(body));
+                case "ListHandshakesForAccount" -> ok(service.listHandshakesForAccount(body));
+                case "ListHandshakesForOrganization" -> ok(service.listHandshakesForOrganization(body));
+                case "DescribeHandshake" -> ok(service.describeHandshake(body));
+                case "AcceptHandshake" -> ok(service.acceptHandshake(body));
+                case "DeclineHandshake" -> ok(service.declineHandshake(body));
+                case "CancelHandshake" -> ok(service.cancelHandshake(body));
+                case "InviteAccountToOrganization" -> ok(service.inviteAccountToOrganization(body));
                 default -> JsonErrorResponseUtils.createUnknownOperationErrorResponse(TARGET_PREFIX + action);
             };
         } catch (AwsException e) {
