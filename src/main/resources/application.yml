@@ -94,6 +94,8 @@ floci:
         flush-interval-ms: 5000
       ssm-incidents:
         flush-interval-ms: 5000
+      ssm-contacts:
+        flush-interval-ms: 5000
       dynamodb:
         flush-interval-ms: 5000
       sns:
@@ -119,6 +121,8 @@ floci:
       codeconnections:
         flush-interval-ms: 5000
       s3vectors:
+        flush-interval-ms: 5000
+      s3tables:
         flush-interval-ms: 5000
       ivs:
         flush-interval-ms: 5000
@@ -155,11 +159,17 @@ floci:
         flush-interval-ms: 5000
       ram:
         flush-interval-ms: 5000
+      rolesanywhere:
+        flush-interval-ms: 5000
       rbin:
         flush-interval-ms: 5000
       repostspace:
         flush-interval-ms: 5000
       rum:
+        flush-interval-ms: 5000
+      resource-explorer-2:
+        flush-interval-ms: 5000
+      resource-groups:
         flush-interval-ms: 5000
       oam:
         flush-interval-ms: 5000
@@ -313,9 +323,9 @@ floci:
     ssm:
       enabled: true
       max-parameter-history: 5
-    ssm-contacts:
-      enabled: true
     ssm-incidents:
+      enabled: true
+    ssm-contacts:
       enabled: true
     sqs:
       enabled: true
@@ -662,13 +672,23 @@ floci:
       enabled: true
     route53:
       enabled: true
+    route53profiles:
+      enabled: true
+    route53resolver:
+      enabled: true  # JSON 1.1 Route53Resolver.* (endpoints + rules)
+    route53domains:
+      enabled: true  # JSON 1.1 Route53Domains_v20140515.*
     transfer:
       enabled: true
     textract:
       enabled: true
+    rekognition:
+      enabled: true
     forecast:
       enabled: true
     personalize:
+      enabled: true
+    sagemaker:
       enabled: true
     globalaccelerator:
       enabled: true  # JSON 1.1 GlobalAccelerator_V20180706.*
@@ -728,6 +748,8 @@ floci:
       schema-worker-shutdown-timeout-seconds: 30
     s3vectors:
       enabled: true
+    s3tables:
+      enabled: true
     s3files:
       enabled: true
     ivs:
@@ -759,11 +781,17 @@ floci:
       enabled: true
     ram:
       enabled: true
+    rolesanywhere:
+      enabled: true
     rbin:
       enabled: true
     repostspace:
       enabled: true
     rum:
+      enabled: true
+    resource-explorer-2:
+      enabled: true
+    resource-groups:
       enabled: true
     oam:
       enabled: true

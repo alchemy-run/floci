@@ -251,6 +251,8 @@ public interface EmulatorConfig {
         SsmStorageConfig ssm();
         @WithName("ssm-incidents")
         SsmIncidentsStorageConfig ssmIncidents();
+        @WithName("ssm-contacts")
+        SsmContactsStorageConfig ssmContacts();
         SqsStorageConfig sqs();
         S3StorageConfig s3();
         DynamoDbStorageConfig dynamodb();
@@ -291,6 +293,7 @@ public interface EmulatorConfig {
         CodePipelineStorageConfig codepipeline();
         CodeConnectionsStorageConfig codeconnections();
         S3VectorsStorageConfig s3vectors();
+        S3TablesStorageConfig s3tables();
         IvsStorageConfig ivs();
         IvsChatStorageConfig ivschat();
         LexStorageConfig lex();
@@ -305,9 +308,14 @@ public interface EmulatorConfig {
         CloudTrailStorageConfig cloudtrail();
         QAppsStorageConfig qapps();
         RamStorageConfig ram();
+        RolesAnywhereStorageConfig rolesanywhere();
         RbinStorageConfig rbin();
         RepostspaceStorageConfig repostspace();
         RumStorageConfig rum();
+        @WithName("resource-explorer-2")
+        ResourceExplorerStorageConfig resourceExplorer2();
+        @WithName("resource-groups")
+        ResourceGroupsStorageConfig resourceGroups();
         OamStorageConfig oam();
         ObservabilityAdminStorageConfig observabilityadmin();
         InternetMonitorStorageConfig internetmonitor();
@@ -353,6 +361,13 @@ public interface EmulatorConfig {
     }
 
     interface SsmIncidentsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface SsmContactsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -614,6 +629,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface S3TablesStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface IvsStorageConfig {
         Optional<String> mode();
 
@@ -705,6 +727,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface RolesAnywhereStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface RbinStorageConfig {
         Optional<String> mode();
 
@@ -720,6 +749,20 @@ public interface EmulatorConfig {
     }
 
     interface RumStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ResourceExplorerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ResourceGroupsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -997,10 +1040,10 @@ public interface EmulatorConfig {
         Optional<String> dockerNetwork();
 
         SsmServiceConfig ssm();
-        @WithName("ssm-contacts")
-        SsmContactsServiceConfig ssmContacts();
         @WithName("ssm-incidents")
         SsmIncidentsServiceConfig ssmIncidents();
+        @WithName("ssm-contacts")
+        SsmContactsServiceConfig ssmContacts();
         SqsServiceConfig sqs();
         S3ServiceConfig s3();
         DynamoDbServiceConfig dynamodb();
@@ -1108,10 +1151,15 @@ public interface EmulatorConfig {
         DocDbServiceConfig docdb();
         DocDbElasticServiceConfig docdbElastic();
         Route53ServiceConfig route53();
+        Route53ProfilesServiceConfig route53profiles();
+        Route53ResolverServiceConfig route53resolver();
+        Route53DomainsServiceConfig route53domains();
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
+        RekognitionServiceConfig rekognition();
         ForecastServiceConfig forecast();
         PersonalizeServiceConfig personalize();
+        SageMakerServiceConfig sagemaker();
         GlobalAcceleratorServiceConfig globalaccelerator();
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendmedical();
@@ -1138,6 +1186,7 @@ public interface EmulatorConfig {
         LightsailServiceConfig lightsail();
         UiServiceConfig ui();
         S3VectorsServiceConfig s3vectors();
+        S3TablesServiceConfig s3tables();
         S3FilesServiceConfig s3files();
         IvsServiceConfig ivs();
         IvsChatServiceConfig ivschat();
@@ -1151,9 +1200,14 @@ public interface EmulatorConfig {
         IotWirelessServiceConfig iotwireless();
         QAppsServiceConfig qapps();
         RamServiceConfig ram();
+        RolesAnywhereServiceConfig rolesanywhere();
         RbinServiceConfig rbin();
         RepostspaceServiceConfig repostspace();
         RumServiceConfig rum();
+        @WithName("resource-explorer-2")
+        ResourceExplorerServiceConfig resourceExplorer2();
+        @WithName("resource-groups")
+        ResourceGroupsServiceConfig resourceGroups();
         OamServiceConfig oam();
         ObservabilityAdminServiceConfig observabilityadmin();
         InternetMonitorServiceConfig internetmonitor();
@@ -1243,6 +1297,12 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    /** IAM Roles Anywhere restJson1 trust anchors, profiles, and CRLs. */
+    interface RolesAnywhereServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     /** Recycle Bin (rbin) restJson1 retention rules. */
     interface RbinServiceConfig {
         @WithDefault("true")
@@ -1255,6 +1315,16 @@ public interface EmulatorConfig {
     }
 
     interface RumServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ResourceExplorerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ResourceGroupsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1424,6 +1494,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface S3TablesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface S3FilesServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1526,6 +1601,21 @@ public interface EmulatorConfig {
         String defaultNameserver4();
     }
 
+    interface Route53ProfilesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Route53ResolverServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Route53DomainsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface ConfigServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1611,12 +1701,12 @@ public interface EmulatorConfig {
         int maxParameterHistory();
     }
 
-    interface SsmContactsServiceConfig {
+    interface SsmIncidentsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
 
-    interface SsmIncidentsServiceConfig {
+    interface SsmContactsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -2339,12 +2429,22 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface RekognitionServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface ForecastServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
 
     interface PersonalizeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SageMakerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

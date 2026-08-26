@@ -59,6 +59,9 @@ import io.github.hectorvent.floci.services.opensearch.OpenSearchDataPlaneControl
 import io.github.hectorvent.floci.services.osis.OsisController;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontController;
 import io.github.hectorvent.floci.services.route53.Route53Controller;
+import io.github.hectorvent.floci.services.route53profiles.Route53ProfilesController;
+import io.github.hectorvent.floci.services.route53profiles.Route53ProfilesErrorHeaderFilter;
+import io.github.hectorvent.floci.services.route53profiles.Route53ProfilesRoutingFilter;
 import io.github.hectorvent.floci.services.ses.SesController;
 import io.github.hectorvent.floci.services.appsync.AppSyncController;
 import io.github.hectorvent.floci.services.rdsdata.RdsDataController;
@@ -98,6 +101,8 @@ import io.github.hectorvent.floci.services.location.LocationController;
 import io.github.hectorvent.floci.services.qapps.QAppsController;
 import io.github.hectorvent.floci.services.qapps.QAppsRoutingFilter;
 import io.github.hectorvent.floci.services.ram.RamController;
+import io.github.hectorvent.floci.services.rolesanywhere.RolesAnywhereController;
+import io.github.hectorvent.floci.services.rolesanywhere.RolesAnywhereRoutingFilter;
 import io.github.hectorvent.floci.services.rbin.RbinController;
 import io.github.hectorvent.floci.services.rbin.RbinRoutingFilter;
 import io.github.hectorvent.floci.services.repostspace.RepostspaceController;
@@ -105,9 +110,16 @@ import io.github.hectorvent.floci.services.repostspace.RepostspaceErrorHeaderFil
 import io.github.hectorvent.floci.services.repostspace.RepostspaceRoutingFilter;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.ssmincidents.SsmIncidentsController;
+import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerController;
+import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerErrorHeaderFilter;
+import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerRoutingFilter;
+import io.github.hectorvent.floci.services.resourcegroups.ResourceGroupsController;
+import io.github.hectorvent.floci.services.resourcegroups.ResourceGroupsRoutingFilter;
 import io.github.hectorvent.floci.services.oam.OamController;
 import io.github.hectorvent.floci.services.observabilityadmin.ObservabilityAdminController;
 import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
+import io.github.hectorvent.floci.services.s3tables.S3TablesController;
+import io.github.hectorvent.floci.services.s3tables.S3TablesRoutingFilter;
 import io.github.hectorvent.floci.services.s3vectors.S3VectorsController;
 import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
 import io.github.hectorvent.floci.services.imagebuilder.ImageBuilderController;
@@ -117,6 +129,8 @@ import io.github.hectorvent.floci.services.paymentcryptography.PaymentCryptograp
 import io.github.hectorvent.floci.services.personalize.PersonalizeEventsController;
 import io.github.hectorvent.floci.services.personalize.PersonalizeRoutingFilter;
 import io.github.hectorvent.floci.services.personalize.PersonalizeRuntimeController;
+import io.github.hectorvent.floci.services.sagemaker.SageMakerFeatureStoreController;
+import io.github.hectorvent.floci.services.sagemaker.SageMakerFeatureStoreRoutingFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -155,16 +169,18 @@ public class ResolvedServiceCatalog {
                         config.storage().services().ssm().flushIntervalMs(), null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonSSM."), Set.of("ssm"), Set.of(), Set.of()),
-                descriptor("ssm-contacts", "ssm-contacts", config.services().ssmContacts().enabled(), true,
-                        null, null, 5000L, null, ServiceProtocol.JSON,
-                        protocols(ServiceProtocol.JSON),
-                        Set.of("SSMContacts."), Set.of("ssm-contacts"), Set.of(), Set.of()),
                 descriptor("ssm-incidents", "ssm-incidents", config.services().ssmIncidents().enabled(), true,
                         "ssm-incidents",
                         storageMode(config.storage().services().ssmIncidents().mode(), config.storage().mode()),
                         config.storage().services().ssmIncidents().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("ssm-incidents"), Set.of(), Set.of(SsmIncidentsController.class)),
+                descriptor("ssm-contacts", "ssm-contacts", config.services().ssmContacts().enabled(), true,
+                        "ssm-contacts",
+                        storageMode(config.storage().services().ssmContacts().mode(), config.storage().mode()),
+                        config.storage().services().ssmContacts().flushIntervalMs(), null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("SSMContacts."), Set.of("ssm-contacts"), Set.of(), Set.of()),
                 descriptor("sqs", "sqs", config.services().sqs().enabled(), true,
                         "sqs", storageMode(config.storage().services().sqs().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.SQS, ServiceProtocol.QUERY,
@@ -274,7 +290,7 @@ public class ResolvedServiceCatalog {
                         Set.of(), Set.of("rds-data"), Set.of(), Set.of(RdsDataController.class)),
                 descriptor("redshift", "redshift", config.services().redshift().enabled(), true,
                         "redshift", config.storage().mode(),
-                        5000L, AwsNamespaces.REDSHIFT, ServiceProtocol.QUERY, // Query protocol
+                        5000L, AwsNamespaces.REDSHIFT, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("redshift"), Set.of(), Set.of()),
                 descriptor("redshift-serverless", "redshiftserverless",
@@ -748,10 +764,28 @@ public class ResolvedServiceCatalog {
                         "route53", config.storage().mode(), 5000L, null, ServiceProtocol.REST_XML,
                         protocols(ServiceProtocol.REST_XML),
                         Set.of(), Set.of("route53"), Set.of(), Set.of(Route53Controller.class)),
+                descriptor("route53domains", "route53domains", config.services().route53domains().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("Route53Domains_v20140515."), Set.of("route53domains"), Set.of(), Set.of()),
+                descriptor("route53resolver", "route53resolver", config.services().route53resolver().enabled(), true,
+                        "route53resolver", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("Route53Resolver."), Set.of("route53resolver"), Set.of(), Set.of()), // JSON 1.1 Route53Resolver.* endpoints
+                descriptor("route53profiles", "route53profiles", config.services().route53profiles().enabled(), true,
+                        "route53profiles", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("route53profiles"), Set.of(),
+                        Set.of(Route53ProfilesController.class, Route53ProfilesRoutingFilter.class,
+                                Route53ProfilesErrorHeaderFilter.class)), // restJson1 /profile*
                 descriptor("textract", "textract", config.services().textract().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("Textract."), Set.of("textract"), Set.of(), Set.of()),
+                descriptor("rekognition", "rekognition", config.services().rekognition().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("RekognitionService."), Set.of("rekognition"), Set.of(), Set.of()),
                 descriptor("forecast", "forecast", config.services().forecast().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -764,6 +798,12 @@ public class ResolvedServiceCatalog {
                         Set.of("personalize"), Set.of(),
                         Set.of(PersonalizeEventsController.class, PersonalizeRuntimeController.class,
                                 PersonalizeRoutingFilter.class)),
+                descriptor("sagemaker", "sagemaker", config.services().sagemaker().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
+                        Set.of("SageMaker."),
+                        Set.of("sagemaker"), Set.of(),
+                        Set.of(SageMakerFeatureStoreController.class, SageMakerFeatureStoreRoutingFilter.class)),
                 descriptor("globalaccelerator", "globalaccelerator",
                         config.services().globalaccelerator().enabled(), true,
                         "globalaccelerator", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
@@ -842,6 +882,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().s3vectors().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("s3vectors"), Set.of(), Set.of(S3VectorsController.class)),
+                descriptor("s3tables", "s3tables", config.services().s3tables().enabled(), true,
+                        "s3tables", storageMode(config.storage().services().s3tables().mode(), config.storage().mode()),
+                        config.storage().services().s3tables().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("s3tables"), Set.of(),
+                        Set.of(S3TablesController.class, S3TablesRoutingFilter.class)),
                 descriptor("ivs", "ivs", config.services().ivs().enabled(), true,
                         "ivs", storageMode(config.storage().services().ivs().mode(), config.storage().mode()),
                         config.storage().services().ivs().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -906,6 +952,14 @@ public class ResolvedServiceCatalog {
                         config.storage().services().ram().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("ram"), Set.of(), Set.of(RamController.class)),
+                descriptor("rolesanywhere", "rolesanywhere", config.services().rolesanywhere().enabled(), true,
+                        "rolesanywhere", storageMode(config.storage().services().rolesanywhere().mode(),
+                                config.storage().mode()),
+                        config.storage().services().rolesanywhere().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("rolesanywhere"), Set.of(),
+                        Set.of(RolesAnywhereController.class, RolesAnywhereRoutingFilter.class)),
                 descriptor("rbin", "rbin", config.services().rbin().enabled(), true,
                         "rbin", storageMode(config.storage().services().rbin().mode(), config.storage().mode()),
                         config.storage().services().rbin().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -926,6 +980,27 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
+                // Resource Explorer 2 restJson1 — index, view, and search
+                descriptor("resource-explorer-2", "resource-explorer-2",
+                        config.services().resourceExplorer2().enabled(), true,
+                        "resource-explorer-2",
+                        storageMode(config.storage().services().resourceExplorer2().mode(), config.storage().mode()),
+                        config.storage().services().resourceExplorer2().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("resource-explorer-2"), Set.of(),
+                        Set.of(ResourceExplorerController.class, ResourceExplorerRoutingFilter.class,
+                                ResourceExplorerErrorHeaderFilter.class)),
+                // Resource Groups restJson1 (query + configuration groups)
+                descriptor("resource-groups", "resource-groups",
+                        config.services().resourceGroups().enabled(), true,
+                        "resource-groups",
+                        storageMode(config.storage().services().resourceGroups().mode(), config.storage().mode()),
+                        config.storage().services().resourceGroups().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("resource-groups"), Set.of(),
+                        Set.of(ResourceGroupsController.class, ResourceGroupsRoutingFilter.class)),
                 descriptor("oam", "oam", config.services().oam().enabled(), true,
                         "oam", storageMode(config.storage().services().oam().mode(), config.storage().mode()),
                         config.storage().services().oam().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

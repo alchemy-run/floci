@@ -22,6 +22,8 @@ floci:
         flush-interval-ms: 60000
       ssm-incidents:
         flush-interval-ms: 60000
+      ssm-contacts:
+        flush-interval-ms: 60000
       dynamodb:
         flush-interval-ms: 60000
       sns:
@@ -47,6 +49,8 @@ floci:
       codeconnections:
         flush-interval-ms: 60000
       s3vectors:
+        flush-interval-ms: 60000
+      s3tables:
         flush-interval-ms: 60000
       ivs:
         flush-interval-ms: 60000
@@ -77,11 +81,17 @@ floci:
         flush-interval-ms: 60000
       ram:
         flush-interval-ms: 60000
+      rolesanywhere:
+        flush-interval-ms: 60000
       rbin:
         flush-interval-ms: 60000
       repostspace:
         flush-interval-ms: 60000
       rum:
+        flush-interval-ms: 60000
+      resource-explorer-2:
+        flush-interval-ms: 60000
+      resource-groups:
         flush-interval-ms: 60000
       oam:
         flush-interval-ms: 60000
@@ -209,9 +219,9 @@ floci:
     ssm:
       enabled: true
       max-parameter-history: 5
-    ssm-contacts:
-      enabled: true
     ssm-incidents:
+      enabled: true
+    ssm-contacts:
       enabled: true
     sqs:
       enabled: true
@@ -486,11 +496,21 @@ floci:
       enabled: true
     route53:
       enabled: true
+    route53profiles:
+      enabled: true
+    route53resolver:
+      enabled: true
+    route53domains:
+      enabled: true
     textract:
+      enabled: true
+    rekognition:
       enabled: true
     forecast:
       enabled: true
     personalize:
+      enabled: true
+    sagemaker:
       enabled: true
     globalaccelerator:
       enabled: true
@@ -536,6 +556,8 @@ floci:
       schema-worker-shutdown-timeout-seconds: 30
     s3vectors:
       enabled: true
+    s3tables:
+      enabled: true
     s3files:
       enabled: true
     ivs:
@@ -567,11 +589,17 @@ floci:
       enabled: true
     ram:
       enabled: true
+    rolesanywhere:
+      enabled: true
     rbin:
       enabled: true
     repostspace:
       enabled: true
     rum:
+      enabled: true
+    resource-explorer-2:
+      enabled: true
+    resource-groups:
       enabled: true
     oam:
       enabled: true

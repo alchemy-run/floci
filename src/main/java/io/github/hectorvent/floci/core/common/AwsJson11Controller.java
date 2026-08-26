@@ -35,6 +35,7 @@ import io.github.hectorvent.floci.services.pricing.PricingJsonHandler;
 import io.github.hectorvent.floci.services.comprehend.ComprehendJsonHandler;
 import io.github.hectorvent.floci.services.comprehendmedical.ComprehendMedicalJsonHandler;
 import io.github.hectorvent.floci.services.textract.TextractJsonHandler;
+import io.github.hectorvent.floci.services.rekognition.RekognitionJsonHandler;
 import io.github.hectorvent.floci.services.bedrockdataautomation.BedrockDataAutomationRuntimeJsonHandler;
 import io.github.hectorvent.floci.services.transcribe.TranscribeJsonHandler;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2JsonHandler;
@@ -61,10 +62,13 @@ import io.github.hectorvent.floci.services.fsx.FsxJsonHandler;
 import io.github.hectorvent.floci.services.directoryservice.DirectoryServiceJsonHandler;
 import io.github.hectorvent.floci.services.forecast.ForecastJsonHandler;
 import io.github.hectorvent.floci.services.personalize.PersonalizeJsonHandler;
+import io.github.hectorvent.floci.services.sagemaker.SageMakerJsonHandler;
 import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
 import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataJsonHandler;
 import io.github.hectorvent.floci.services.redshiftserverless.RedshiftServerlessJsonHandler;
+import io.github.hectorvent.floci.services.route53domains.Route53DomainsJsonHandler;
+import io.github.hectorvent.floci.services.route53resolver.Route53ResolverJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -125,6 +129,7 @@ public class AwsJson11Controller {
     private final Ec2MessagesJsonHandler ec2MessagesJsonHandler;
     private final TransferHandler transferHandler;
     private final TextractJsonHandler textractJsonHandler;
+    private final RekognitionJsonHandler rekognitionJsonHandler;
     private final BedrockDataAutomationRuntimeJsonHandler bedrockDataAutomationRuntimeJsonHandler;
     private final ComprehendJsonHandler comprehendJsonHandler;
     private final ComprehendMedicalJsonHandler comprehendMedicalJsonHandler;
@@ -147,10 +152,13 @@ public class AwsJson11Controller {
     private final DaxJsonHandler daxJsonHandler;
     private final ForecastJsonHandler forecastJsonHandler;
     private final PersonalizeJsonHandler personalizeJsonHandler;
+    private final SageMakerJsonHandler sageMakerJsonHandler;
     private final GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler;
     private final OrganizationsJsonHandler organizationsJsonHandler;
     private final RedshiftServerlessJsonHandler redshiftServerlessJsonHandler;
     private final RedshiftDataJsonHandler redshiftDataJsonHandler;
+    private final Route53DomainsJsonHandler route53DomainsJsonHandler;
+    private final Route53ResolverJsonHandler route53ResolverJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -185,6 +193,7 @@ public class AwsJson11Controller {
                                Ec2MessagesJsonHandler ec2MessagesJsonHandler,
                                TransferHandler transferHandler,
                                TextractJsonHandler textractJsonHandler,
+                               RekognitionJsonHandler rekognitionJsonHandler,
                                BedrockDataAutomationRuntimeJsonHandler bedrockDataAutomationRuntimeJsonHandler,
                                ComprehendJsonHandler comprehendJsonHandler,
                                ComprehendMedicalJsonHandler comprehendMedicalJsonHandler,
@@ -207,10 +216,13 @@ public class AwsJson11Controller {
                                DaxJsonHandler daxJsonHandler,
                                ForecastJsonHandler forecastJsonHandler,
                                PersonalizeJsonHandler personalizeJsonHandler,
+                               SageMakerJsonHandler sageMakerJsonHandler,
                                GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler,
                                OrganizationsJsonHandler organizationsJsonHandler,
                                RedshiftServerlessJsonHandler redshiftServerlessJsonHandler,
-                               RedshiftDataJsonHandler redshiftDataJsonHandler) {
+                               RedshiftDataJsonHandler redshiftDataJsonHandler,
+                               Route53DomainsJsonHandler route53DomainsJsonHandler,
+                               Route53ResolverJsonHandler route53ResolverJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -249,6 +261,7 @@ public class AwsJson11Controller {
         this.ec2MessagesJsonHandler = ec2MessagesJsonHandler;
         this.transferHandler = transferHandler;
         this.textractJsonHandler = textractJsonHandler;
+        this.rekognitionJsonHandler = rekognitionJsonHandler;
         this.bedrockDataAutomationRuntimeJsonHandler = bedrockDataAutomationRuntimeJsonHandler;
         this.comprehendJsonHandler = comprehendJsonHandler;
         this.comprehendMedicalJsonHandler = comprehendMedicalJsonHandler;
@@ -271,10 +284,13 @@ public class AwsJson11Controller {
         this.daxJsonHandler = daxJsonHandler;
         this.forecastJsonHandler = forecastJsonHandler;
         this.personalizeJsonHandler = personalizeJsonHandler;
+        this.sageMakerJsonHandler = sageMakerJsonHandler;
         this.globalAcceleratorJsonHandler = globalAcceleratorJsonHandler;
         this.organizationsJsonHandler = organizationsJsonHandler;
         this.redshiftServerlessJsonHandler = redshiftServerlessJsonHandler;
         this.redshiftDataJsonHandler = redshiftDataJsonHandler;
+        this.route53DomainsJsonHandler = route53DomainsJsonHandler;
+        this.route53ResolverJsonHandler = route53ResolverJsonHandler;
     }
 
     @POST
@@ -345,6 +361,7 @@ public class AwsJson11Controller {
                 case "ec2messages" -> ec2MessagesJsonHandler.handle(action, request, region);
                 case "transfer" -> transferHandler.handle(action, request, region);
                 case "textract" -> textractJsonHandler.handle(action, request, region);
+                case "rekognition" -> rekognitionJsonHandler.handle(action, request, region);
                 case "bedrock-data-automation-runtime" -> bedrockDataAutomationRuntimeJsonHandler.handle(
                         action, request, region);
                 case "comprehend" -> comprehendJsonHandler.handle(action, request, region);
@@ -367,10 +384,13 @@ public class AwsJson11Controller {
                 case "ds" -> directoryServiceJsonHandler.handle(action, request, region);
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
                 case "personalize" -> personalizeJsonHandler.handle(action, request, region);
+                case "sagemaker" -> sageMakerJsonHandler.handle(action, request, region);
                 case "globalaccelerator" -> globalAcceleratorJsonHandler.handle(action, request, region);
                 case "organizations" -> organizationsJsonHandler.handle(action, request, region);
                 case "redshift-serverless" -> redshiftServerlessJsonHandler.handle(action, request, region);
                 case "redshift-data" -> redshiftDataJsonHandler.handle(action, request, region);
+                case "route53domains" -> route53DomainsJsonHandler.handle(action, request, region);
+                case "route53resolver" -> route53ResolverJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target
