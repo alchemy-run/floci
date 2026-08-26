@@ -148,6 +148,70 @@ class CodeDeployBindingsIntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", containsString("DeploymentDoesNotExistException"));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.StopDeployment")
+            .contentType(CONTENT_TYPE)
+            .body("{\"deploymentId\": \"%s\"}".formatted(FAKE_DEPLOYMENT))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", containsString("DeploymentDoesNotExistException"));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.BatchGetDeployments")
+            .contentType(CONTENT_TYPE)
+            .body("{\"deploymentIds\": [\"%s\"]}".formatted(FAKE_DEPLOYMENT))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", containsString("DeploymentDoesNotExistException"));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.ListDeploymentTargets")
+            .contentType(CONTENT_TYPE)
+            .body("{\"deploymentId\": \"%s\"}".formatted(FAKE_DEPLOYMENT))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", containsString("DeploymentDoesNotExistException"));
+
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.BatchGetDeploymentTargets")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "deploymentId": "%s",
+                    "targetIds": ["alchemy-test-nonexistent-function"]
+                }
+                """.formatted(FAKE_DEPLOYMENT))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", containsString("DeploymentDoesNotExistException"));
+    }
+
+    @Test
+    @Order(5)
+    void listDeploymentsIsEmptyForNewGroup() {
+        given()
+            .header("X-Amz-Target", "CodeDeploy_20141006.ListDeployments")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "applicationName": "%s",
+                    "deploymentGroupName": "%s"
+                }
+                """.formatted(APP, GROUP))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("deployments", empty());
     }
 
     @Test
