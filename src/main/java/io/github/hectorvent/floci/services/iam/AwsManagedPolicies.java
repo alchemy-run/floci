@@ -216,6 +216,8 @@ final class AwsManagedPolicies {
                 "Provides permissions required for EC2 Image Builder to create images."),
 
         // SageMaker execution role policies
+        new ManagedPolicyDef("AmazonSageMakerFullAccess", "/",
+                "Provides full access to Amazon SageMaker and supporting services."),
         new ManagedPolicyDef("AmazonSageMakerGeospatialExecutionRole", "/service-role/",
                 "Provides full access to Amazon SageMaker Geospatial capabilities and related services."),
         new ManagedPolicyDef("AmazonSageMakerCanvasEMRServerlessExecutionRolePolicy", "/",
