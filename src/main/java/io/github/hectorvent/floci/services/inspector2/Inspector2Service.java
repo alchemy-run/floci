@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.core.common.TagHandler;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.inspector2.model.AccountStatus;
+import io.github.hectorvent.floci.services.inspector2.model.Inspector2Account;
 import io.github.hectorvent.floci.services.inspector2.model.Inspector2Filter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -25,7 +26,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * Amazon Inspector2 restJson1: account/region scan-type enablement and findings filters.
+ * Amazon Inspector2 restJson1: account/region scan-type enablement, findings filters,
+ * and the read-only bindings Alchemy's Inspector2 fixture drives.
  *
  * <p>Emulates {@code BatchGetAccountStatus}, {@code Enable}, and {@code Disable} so Alchemy's
  * Inspector2 Enabler can converge locally. Scan types are {@code ENABLED} or {@code DISABLED}
@@ -33,6 +35,10 @@ import java.util.regex.Pattern;
  * skipped so local stacks do not wait on eventual consistency. Findings filters work
  * regardless of enablement; CIS scan-configuration APIs reject a disabled account with
  * {@code AccessDeniedException}. Empty {@code accountIds} defaults to the caller.
+ *
+ * <p>List/get bindings return empty collections or default configuration. The public
+ * vulnerability catalog resolves log4shell. Missing encryption keys, findings reports,
+ * and delegated administrators surface typed {@code ResourceNotFoundException}.
  */
 @ApplicationScoped
 public class Inspector2Service implements Resettable, TagHandler {
@@ -44,6 +50,11 @@ public class Inspector2Service implements Resettable, TagHandler {
             "EC2", "ECR", "LAMBDA", "LAMBDA_CODE", "CODE_REPOSITORY");
     private static final Set<String> RESOURCE_TYPE_SET = Set.copyOf(RESOURCE_TYPES);
     private static final Set<String> FILTER_ACTIONS = Set.of("NONE", "SUPPRESS");
+    private static final Set<String> SCAN_TYPES = Set.of("NETWORK", "PACKAGE", "CODE");
+    private static final Set<String> ENCRYPTION_RESOURCE_TYPES = Set.of(
+            "AWS_EC2_INSTANCE", "AWS_ECR_CONTAINER_IMAGE", "AWS_ECR_REPOSITORY", "AWS_LAMBDA_FUNCTION");
+    private static final List<String> FREE_TRIAL_TYPES = List.of("EC2", "ECR", "LAMBDA", "LAMBDA_CODE");
+    private static final Map<String, Map<String, Object>> VULNERABILITIES = vulnerabilities();
     private static final Pattern ACCOUNT_ID = Pattern.compile("\\d{12}");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -258,6 +269,126 @@ public class Inspector2Service implements Resettable, TagHandler {
                     "Invoking account is not enabled.",
                     403);
         }
+    }
+
+    public void requireBody(JsonNode request) {
+        requireObject(request, "Request body");
+    }
+
+    public List<Map<String, Object>> searchVulnerabilities(JsonNode request) {
+        requireObject(request, "Request body");
+        JsonNode criteria = request.get("filterCriteria");
+        if (criteria == null || criteria.isNull()) {
+            throw validation("filterCriteria is a required parameter.", "fieldValidationFailed");
+        }
+        if (!criteria.isObject()) {
+            throw validation("filterCriteria must be a JSON object.", "fieldValidationFailed");
+        }
+        if (!criteria.has("vulnerabilityIds") || criteria.get("vulnerabilityIds").isNull()) {
+            throw validation("filterCriteria.vulnerabilityIds is a required parameter.", "fieldValidationFailed");
+        }
+        JsonNode ids = criteria.get("vulnerabilityIds");
+        if (!ids.isArray()) {
+            throw validation("filterCriteria.vulnerabilityIds must be an array.", "fieldValidationFailed");
+        }
+        List<Map<String, Object>> matches = new ArrayList<>();
+        for (JsonNode idNode : ids) {
+            if (idNode == null || !idNode.isTextual() || idNode.asText().isBlank()) {
+                throw validation("filterCriteria.vulnerabilityIds members must be strings.", "fieldValidationFailed");
+            }
+            Map<String, Object> vulnerability = VULNERABILITIES.get(idNode.asText());
+            if (vulnerability != null) {
+                matches.add(vulnerability);
+            }
+        }
+        return matches;
+    }
+
+    public List<String> freeTrialAccountIds(JsonNode request) {
+        requireObject(request, "Request body");
+        return readAccountIds(request, true);
+    }
+
+    public List<Map<String, Object>> freeTrialInfo() {
+        long start = Instant.now().getEpochSecond() - 15 * 24 * 60 * 60;
+        long end = start + 15 * 24 * 60 * 60;
+        List<Map<String, Object>> info = new ArrayList<>();
+        for (String type : FREE_TRIAL_TYPES) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("type", type);
+            entry.put("start", start);
+            entry.put("end", end);
+            entry.put("status", "INACTIVE");
+            info.add(entry);
+        }
+        return info;
+    }
+
+    public Inspector2Account configuration() {
+        return Inspector2Account.defaults();
+    }
+
+    public String getEncryptionKey(String scanType, String resourceType) {
+        if (scanType == null || scanType.isBlank()) {
+            throw validation("scanType is a required parameter.", "fieldValidationFailed");
+        }
+        if (resourceType == null || resourceType.isBlank()) {
+            throw validation("resourceType is a required parameter.", "fieldValidationFailed");
+        }
+        if (!SCAN_TYPES.contains(scanType)) {
+            throw validation("scanType contains an invalid value: " + scanType + ".", "fieldValidationFailed");
+        }
+        if (!ENCRYPTION_RESOURCE_TYPES.contains(resourceType)) {
+            throw validation(
+                    "resourceType contains an invalid value: " + resourceType + ".", "fieldValidationFailed");
+        }
+        String key = configuration().getEncryptionKeys().get(scanType + ":" + resourceType);
+        if (key == null || key.isBlank()) {
+            throw notFound("The requested encryption key was not found.");
+        }
+        return key;
+    }
+
+    public void requireDelegatedAdminAccount() {
+        String accountId = configuration().getDelegatedAdminAccountId();
+        if (accountId == null || accountId.isBlank()) {
+            throw notFound("The requested delegated administrator was not found.");
+        }
+    }
+
+    public void requireFindingsReport(JsonNode request) {
+        requireObject(request, "Request body");
+        requireText(request, "reportId");
+        throw notFound("The specified findings report was not found.");
+    }
+
+    static AwsException notFound(String message) {
+        return new AwsException("ResourceNotFoundException", message, 404);
+    }
+
+    private static Map<String, Map<String, Object>> vulnerabilities() {
+        Map<String, Object> log4shellCvss = new LinkedHashMap<>();
+        log4shellCvss.put("baseScore", 10.0);
+        log4shellCvss.put("scoringVector", "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H");
+        Map<String, Object> log4shell = new LinkedHashMap<>();
+        log4shell.put("id", "CVE-2021-44228");
+        log4shell.put("source", "NVD");
+        log4shell.put("vendorSeverity", "CRITICAL");
+        log4shell.put(
+                "description",
+                "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP and other JNDI related endpoints.");
+        log4shell.put("cvss3", log4shellCvss);
+        Map<String, Object> followUp = new LinkedHashMap<>();
+        followUp.put("id", "CVE-2021-45046");
+        followUp.put("source", "NVD");
+        followUp.put("vendorSeverity", "CRITICAL");
+        followUp.put(
+                "description",
+                "Apache Log4j2 Thread Context Lookup Pattern is vulnerable to denial of service and remote code execution.");
+        Map<String, Map<String, Object>> catalog = new LinkedHashMap<>();
+        catalog.put("CVE-2021-44228", Map.copyOf(log4shell));
+        catalog.put("CVE-2021-45046", Map.copyOf(followUp));
+        return Map.copyOf(catalog);
     }
 
     public List<Inspector2Filter> listFilters(JsonNode request) {

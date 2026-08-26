@@ -7,26 +7,33 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.inspector2.model.AccountStatus;
+import io.github.hectorvent.floci.services.inspector2.model.Inspector2Account;
 import io.github.hectorvent.floci.services.inspector2.model.Inspector2Filter;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Amazon Inspector2 restJson1.
  *
- * <p>Literal {@code /status/batch/get}, {@code /filters/*}, {@code /enable} and
- * {@code /disable} paths take JAX-RS precedence over S3's {@code /{bucket}} catch-all.
+ * <p>{@link Inspector2RoutingFilter} prefixes SigV4 {@code inspector2} requests
+ * so literal {@code /members}, {@code /findings}, {@code /coverage} and
+ * {@code /encryptionkey} paths do not collide with S3's {@code /{bucket}}
+ * catch-all. Tag APIs share {@code /tags/{arn}} and are dispatched by
+ * {@code SharedTagsController}.
  */
-@Path("/")
+@Path(Inspector2RoutingFilter.INTERNAL_PREFIX)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class Inspector2Controller {
@@ -124,6 +131,161 @@ public class Inspector2Controller {
         service.requireCisApis(regionResolver.resolveRegion(headers));
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("scanConfigurations");
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/findings/list")
+    @Consumes(MediaType.WILDCARD)
+    public Response listFindings(@Context HttpHeaders headers, String body) {
+        return emptyList("findings", body);
+    }
+
+    @POST
+    @Path("/coverage/list")
+    @Consumes(MediaType.WILDCARD)
+    public Response listCoverage(@Context HttpHeaders headers, String body) {
+        return emptyList("coveredResources", body);
+    }
+
+    @POST
+    @Path("/vulnerabilities/search")
+    @Consumes(MediaType.WILDCARD)
+    public Response searchVulnerabilities(@Context HttpHeaders headers, String body) {
+        List<Map<String, Object>> vulnerabilities = service.searchVulnerabilities(parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("vulnerabilities", objectMapper.valueToTree(vulnerabilities));
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/usage/list")
+    @Consumes(MediaType.WILDCARD)
+    public Response listUsageTotals(@Context HttpHeaders headers, String body) {
+        return emptyList("totals", body);
+    }
+
+    @POST
+    @Path("/accountpermissions/list")
+    @Consumes(MediaType.WILDCARD)
+    public Response listAccountPermissions(@Context HttpHeaders headers, String body) {
+        return emptyList("permissions", body);
+    }
+
+    @POST
+    @Path("/freetrialinfo/batchget")
+    @Consumes(MediaType.WILDCARD)
+    public Response batchGetFreeTrialInfo(@Context HttpHeaders headers, String body) {
+        List<String> accountIds = service.freeTrialAccountIds(parse(body));
+        List<Map<String, Object>> info = service.freeTrialInfo();
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode accounts = response.putArray("accounts");
+        for (String accountId : accountIds) {
+            ObjectNode account = accounts.addObject();
+            account.put("accountId", accountId);
+            account.set("freeTrialInfo", objectMapper.valueToTree(info));
+        }
+        response.putArray("failedAccounts");
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/configuration/get")
+    @Consumes(MediaType.WILDCARD)
+    public Response getConfiguration(@Context HttpHeaders headers, String body) {
+        parse(body);
+        Inspector2Account account = service.configuration();
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putObject("ecrConfiguration")
+                .putObject("rescanDurationState")
+                .put("rescanDuration", account.getEcrRescanDuration())
+                .put("status", "SUCCESS");
+        response.putObject("ec2Configuration")
+                .putObject("scanModeState")
+                .put("scanMode", account.getEc2ScanMode())
+                .put("scanModeStatus", "SUCCESS");
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/ec2deepinspectionconfiguration/get")
+    @Consumes(MediaType.WILDCARD)
+    public Response getEc2DeepInspectionConfiguration(@Context HttpHeaders headers, String body) {
+        parse(body);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("status", service.configuration().getDeepInspectionStatus());
+        response.putArray("packagePaths");
+        response.putArray("orgPackagePaths");
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/encryptionkey/get")
+    @Consumes(MediaType.WILDCARD)
+    public Response getEncryptionKey(
+            @Context HttpHeaders headers,
+            @QueryParam("scanType") String scanType,
+            @QueryParam("resourceType") String resourceType) {
+        String kmsKeyId = service.getEncryptionKey(scanType, resourceType);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("kmsKeyId", kmsKeyId);
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/cis/scan/list")
+    @Consumes(MediaType.WILDCARD)
+    public Response listCisScans(@Context HttpHeaders headers, String body) {
+        return emptyList("scans", body);
+    }
+
+    @POST
+    @Path("/members/list")
+    @Consumes(MediaType.WILDCARD)
+    public Response listMembers(@Context HttpHeaders headers, String body) {
+        return emptyList("members", body);
+    }
+
+    @POST
+    @Path("/organizationconfiguration/describe")
+    @Consumes(MediaType.WILDCARD)
+    public Response describeOrganizationConfiguration(@Context HttpHeaders headers, String body) {
+        parse(body);
+        Inspector2Account account = service.configuration();
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode autoEnable = response.putObject("autoEnable");
+        autoEnable.put("ec2", false);
+        autoEnable.put("ecr", false);
+        autoEnable.put("lambda", false);
+        autoEnable.put("lambdaCode", false);
+        autoEnable.put("codeRepository", false);
+        response.put("maxAccountLimitReached", account.isMaxAccountLimitReached());
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/delegatedadminaccounts/get")
+    @Consumes(MediaType.WILDCARD)
+    public Response getDelegatedAdminAccount(@Context HttpHeaders headers, String body) {
+        parse(body);
+        service.requireDelegatedAdminAccount();
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putObject("delegatedAdmin").put("accountId", service.configuration().getDelegatedAdminAccountId());
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/reporting/status/get")
+    @Consumes(MediaType.WILDCARD)
+    public Response getFindingsReportStatus(@Context HttpHeaders headers, String body) {
+        service.requireFindingsReport(parse(body));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response emptyList(String field, String body) {
+        service.requireBody(parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray(field);
         return Response.ok(response).build();
     }
 
