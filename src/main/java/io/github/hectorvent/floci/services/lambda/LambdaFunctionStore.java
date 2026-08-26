@@ -19,6 +19,17 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class LambdaFunctionStore implements Resettable {
 
+    /**
+     * Survives {@code @ApplicationScoped} reconstruction during quarkus:dev
+     * live-reload of <em>other</em> services. Memory-backed stores are new and
+     * empty after a reload, so Function URL invocations 404 unless the
+     * previous generation's functions are copied back in. Cleared on
+     * {@link #clear()} so {@code /_floci/state/reset} still empties the
+     * emulator.
+     */
+    private static final ConcurrentHashMap<String, LambdaFunction> PROCESS_URL_INDEX =
+            new ConcurrentHashMap<>();
+
     private final StorageBackend<String, LambdaFunction> backend;
     private final ConcurrentHashMap<String, LambdaFunction> urlIdIndex = new ConcurrentHashMap<>();
 
@@ -40,27 +51,33 @@ public class LambdaFunctionStore implements Resettable {
                 ? aware.scanAllAccounts()
                 : backend.scan(key -> true);
         all.forEach(this::indexFunction);
+        PROCESS_URL_INDEX.forEach((id, fn) -> restoreIntoBackend(fn));
     }
 
     public void clear() {
         urlIdIndex.clear();
+        PROCESS_URL_INDEX.clear();
     }
 
     private void indexFunction(LambdaFunction fn) {
-        if (fn.getUrlConfig() != null && fn.getUrlConfig().getFunctionUrl() != null) {
-            String urlId = extractUrlId(fn.getUrlConfig().getFunctionUrl());
-            if (urlId != null) {
-                urlIdIndex.put(urlId, fn);
-            }
+        if (!hasFunctionUrl(fn)) {
+            return;
+        }
+        String urlId = extractUrlId(fn.getUrlConfig().getFunctionUrl());
+        if (urlId != null) {
+            urlIdIndex.put(urlId, fn);
+            PROCESS_URL_INDEX.put(urlId, fn);
         }
     }
 
     private void deindexFunction(LambdaFunction fn) {
-        if (fn.getUrlConfig() != null && fn.getUrlConfig().getFunctionUrl() != null) {
-            String urlId = extractUrlId(fn.getUrlConfig().getFunctionUrl());
-            if (urlId != null) {
-                urlIdIndex.remove(urlId);
-            }
+        if (!hasFunctionUrl(fn)) {
+            return;
+        }
+        String urlId = extractUrlId(fn.getUrlConfig().getFunctionUrl());
+        if (urlId != null) {
+            urlIdIndex.remove(urlId);
+            PROCESS_URL_INDEX.remove(urlId);
         }
     }
 
@@ -74,9 +91,16 @@ public class LambdaFunctionStore implements Resettable {
     }
 
     public void save(String region, LambdaFunction fn) {
-        // Remove old index entry if URL changed or was removed
-        get(region, fn.getFunctionName(), fn.getVersion()).ifPresent(this::deindexFunction);
-        
+        Optional<LambdaFunction> existing = get(region, fn.getFunctionName(), fn.getVersion());
+        existing.ifPresent(old -> {
+            // UpdateFunctionCode / config saves often round-trip a copy that
+            // omitted urlConfig (or left an empty object without FunctionUrl).
+            // Dropping it deindexes the Function URL and invocations 404.
+            if (!hasFunctionUrl(fn) && hasFunctionUrl(old)) {
+                fn.setUrlConfig(old.getUrlConfig());
+            }
+            deindexFunction(old);
+        });
         backend.put(regionKey(region, fn.getFunctionName(), fn.getVersion()), fn);
         indexFunction(fn);
     }
@@ -97,6 +121,21 @@ public class LambdaFunctionStore implements Resettable {
     }
 
     public Optional<LambdaFunction> getByUrlId(String urlId) {
+        if (urlId == null || urlId.isBlank()) {
+            return Optional.empty();
+        }
+        LambdaFunction cached = urlIdIndex.get(urlId);
+        if (cached != null) {
+            return Optional.of(cached);
+        }
+        cached = PROCESS_URL_INDEX.get(urlId);
+        if (cached != null) {
+            restoreIntoBackend(cached);
+            return Optional.of(cached);
+        }
+        // Resettable.clear() only drops this map; quarkus:dev live-reload can
+        // reconstruct the bean against a still-populated backend. Rebuild.
+        loadIndex();
         return Optional.ofNullable(urlIdIndex.get(urlId));
     }
 
@@ -130,5 +169,33 @@ public class LambdaFunctionStore implements Resettable {
 
     private static String regionKey(String region, String functionName, String version) {
         return "lambda::" + region + "::" + functionName + "::" + (version != null ? version : "$LATEST");
+    }
+
+    private static boolean hasFunctionUrl(LambdaFunction fn) {
+        return fn != null
+                && fn.getUrlConfig() != null
+                && fn.getUrlConfig().getFunctionUrl() != null
+                && !fn.getUrlConfig().getFunctionUrl().isBlank();
+    }
+
+    private void restoreIntoBackend(LambdaFunction fn) {
+        if (fn == null || fn.getFunctionName() == null) {
+            return;
+        }
+        String region = regionOf(fn);
+        String version = fn.getVersion() != null ? fn.getVersion() : "$LATEST";
+        backend.put(regionKey(region, fn.getFunctionName(), version), fn);
+        indexFunction(fn);
+    }
+
+    private static String regionOf(LambdaFunction fn) {
+        String arn = fn.getFunctionArn();
+        if (arn != null) {
+            String[] parts = arn.split(":");
+            if (parts.length > 3 && !parts[3].isBlank()) {
+                return parts[3];
+            }
+        }
+        return "us-east-1";
     }
 }
