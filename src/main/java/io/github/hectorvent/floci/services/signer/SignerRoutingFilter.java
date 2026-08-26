@@ -15,9 +15,13 @@ import java.util.regex.Pattern;
 /**
  * Signer restJson1 paths such as {@code /signing-profiles} collide with S3's
  * path-style catch-all. Floci serves every service on one port, so SigV4
- * credential scope {@code signer} is rewritten onto an internal prefix the
- * Signer controller owns. Tag APIs stay on {@code /tags/{arn}} and are
- * dispatched by {@code SharedTagsController}.
+ * credential scope {@code signer} (or Host {@code data-signer.{region}}) is
+ * rewritten onto an internal prefix the Signer controller owns. Tag APIs stay
+ * on {@code /tags/{arn}} and are dispatched by {@code SharedTagsController}.
+ *
+ * <p>Function URL invocations are rewritten to {@code /lambda-url/{urlId}/...}
+ * before this filter. Prefixing those paths with {@code /aws-signer} 404s the
+ * Lambda fixture the Bindings suite probes at {@code /bindings}.
  */
 @Provider
 @PreMatching
@@ -31,7 +35,12 @@ public class SignerRoutingFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        if (!isSigner(requestContext.getHeaderString("Authorization"))) {
+        String host = requestContext.getHeaderString("Host");
+        if (isLambdaUrlHost(host)) {
+            return;
+        }
+        if (!isSigner(requestContext.getHeaderString("Authorization"))
+                && !isSignerHost(host)) {
             return;
         }
         URI original = requestContext.getUriInfo().getRequestUri();
@@ -56,9 +65,28 @@ public class SignerRoutingFilter implements ContainerRequestFilter {
     }
 
     /**
+     * Control-plane {@code signer.{region}.amazonaws.com} and data-plane
+     * {@code data-signer.{region}.amazonaws.com} (GetRevocationStatus hostPrefix
+     * {@code data-}).
+     */
+    static boolean isSignerHost(String host) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        String hostname = host.split(":")[0].toLowerCase(Locale.ROOT);
+        return hostname.matches("data-signer(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com")
+                || hostname.matches("signer(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    static boolean isLambdaUrlHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains(".lambda-url.");
+    }
+
+    /**
      * Prefixes signer-signed paths onto {@link #INTERNAL_PREFIX}, stripping a trailing
      * slash so RestAssured and the SDK hit the same resource. {@code /tags} is left
-     * alone for {@code SharedTagsController}.
+     * alone for {@code SharedTagsController}. Function URL invocations stay on
+     * {@code /lambda-url/{urlId}/...}.
      */
     static String rewritePath(String path) {
         if (path == null || path.isBlank()) {
@@ -71,7 +99,14 @@ public class SignerRoutingFilter implements ContainerRequestFilter {
         if ("/tags".equals(normalized) || normalized.startsWith("/tags/")) {
             return path;
         }
+        if (isLambdaUrlPath(normalized)) {
+            return path;
+        }
         return INTERNAL_PREFIX + normalized;
+    }
+
+    static boolean isLambdaUrlPath(String path) {
+        return "/lambda-url".equals(path) || path.startsWith("/lambda-url/");
     }
 
     static String stripTrailingSlash(String path) {

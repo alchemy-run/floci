@@ -18,6 +18,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -508,6 +509,212 @@ class SignerIntegrationTest {
                 .body("permissions.size()", equalTo(1))
                 .body("permissions[0].action", equalTo("signer:GetSigningProfile"))
                 .body("permissions[0].statementId", equalTo(statement));
+    }
+
+    @Test
+    void getRevocationStatusOnDataSignerHost() {
+        String name = "Alchemy_DataHost_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String src = "signer-datahost-" + UUID.randomUUID().toString().substring(0, 8);
+        String dst = "signer-datahost-dst-" + UUID.randomUUID().toString().substring(0, 8);
+        s3Service.createBucket(src, EAST);
+        s3Service.createBucket(dst, EAST);
+        s3Service.putBucketVersioning(src, "Enabled");
+        var uploaded = s3Service.putObject(src, "code.zip", "exports.handler=async()=>({})".getBytes(StandardCharsets.UTF_8),
+                "application/zip", Map.of());
+        String version = uploaded.getVersionId();
+        String authorization = auth();
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"platformId\":\"AWSLambda-SHA384-ECDSA\"}")
+                .when()
+                .put("/signing-profiles/" + name)
+                .then()
+                .statusCode(200);
+
+        String jobId = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {
+                          "profileName":"%s",
+                          "clientRequestToken":"%s",
+                          "source":{"s3":{"bucketName":"%s","key":"code.zip","version":"%s"}},
+                          "destination":{"s3":{"bucketName":"%s","prefix":"signed/"}}
+                        }
+                        """.formatted(name, UUID.randomUUID(), src, version, dst))
+                .when()
+                .post("/signing-jobs")
+                .then()
+                .statusCode(200)
+                .extract().path("jobId");
+
+        Response described = given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/signing-jobs/" + jobId)
+                .then()
+                .statusCode(200)
+                .extract().response();
+        String profileVersionArn = SignerService.profileArn(EAST, ACCOUNT, name) + "/"
+                + described.path("profileVersion");
+        String jobArn = "arn:aws:signer:" + EAST + ":" + ACCOUNT + ":/signing-jobs/" + jobId;
+        Object completedAt = described.path("completedAt");
+
+        given()
+                .header("Authorization", authorization)
+                .header("Host", "data-signer.us-east-1.amazonaws.com")
+                .queryParam("signatureTimestamp", completedAt == null ? "0" : String.valueOf(completedAt))
+                .queryParam("platformId", "AWSLambda-SHA384-ECDSA")
+                .queryParam("profileVersionArn", profileVersionArn)
+                .queryParam("jobArn", jobArn)
+                .when()
+                .get("/revocations")
+                .then()
+                .statusCode(200)
+                .body("revokedEntities.size()", equalTo(0));
+    }
+
+    @Test
+    void startSigningJobPublishesEventsMatchedByConsumeSigningJobEventsRule() {
+        String name = "Alchemy_EB_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String src = "signer-eb-src-" + UUID.randomUUID().toString().substring(0, 8);
+        String dst = "signer-eb-dst-" + UUID.randomUUID().toString().substring(0, 8);
+        String ruleName = "SignerJobEvents_" + UUID.randomUUID().toString().substring(0, 8);
+        String queueName = "signer-job-events-" + UUID.randomUUID().toString().substring(0, 8);
+        String lambdaArn = "arn:aws:lambda:" + EAST + ":" + ACCOUNT + ":function:SignerTestFunction";
+        String eventsAuth = "AWS4-HMAC-SHA256 Credential=" + ACCOUNT + "/20260205/" + EAST
+                + "/events/aws4_request";
+        String sqsAuth = "AWS4-HMAC-SHA256 Credential=" + ACCOUNT + "/20260205/" + EAST
+                + "/sqs/aws4_request";
+        s3Service.createBucket(src, EAST);
+        s3Service.createBucket(dst, EAST);
+        s3Service.putBucketVersioning(src, "Enabled");
+        var uploaded = s3Service.putObject(src, "code.zip", "exports.handler=async()=>({})".getBytes(StandardCharsets.UTF_8),
+                "application/zip", Map.of());
+        String version = uploaded.getVersionId();
+        String authorization = auth();
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"platformId\":\"AWSLambda-SHA384-ECDSA\"}")
+                .when()
+                .put("/signing-profiles/" + name)
+                .then()
+                .statusCode(200);
+
+        String queueUrl = given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", sqsAuth)
+                .formParam("Action", "CreateQueue")
+                .formParam("QueueName", queueName)
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        String queueArn = given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", sqsAuth)
+                .formParam("Action", "GetQueueAttributes")
+                .formParam("QueueUrl", queueUrl)
+                .formParam("AttributeName.1", "QueueArn")
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .extract().xmlPath().getString("**.find { it.Name == 'QueueArn' }.Value");
+
+        given()
+                .contentType("application/x-amz-json-1.1")
+                .header("Authorization", eventsAuth)
+                .header("X-Amz-Target", "AWSEvents.PutRule")
+                .body("""
+                        {
+                          "Name": "%s",
+                          "EventPattern": "{\\"source\\":[\\"aws.signer\\"],\\"detail-type\\":[\\"Signer Job Status Change\\"]}",
+                          "State": "ENABLED"
+                        }
+                        """.formatted(ruleName))
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200);
+
+        given()
+                .contentType("application/x-amz-json-1.1")
+                .header("Authorization", eventsAuth)
+                .header("X-Amz-Target", "AWSEvents.PutTargets")
+                .body("""
+                        {
+                          "Rule": "%s",
+                          "Targets": [
+                            {"Id": "lambda", "Arn": "%s"},
+                            {"Id": "queue", "Arn": "%s"}
+                          ]
+                        }
+                        """.formatted(ruleName, lambdaArn, queueArn))
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .body("FailedEntryCount", equalTo(0));
+
+        given()
+                .contentType("application/x-amz-json-1.1")
+                .header("Authorization", eventsAuth)
+                .header("X-Amz-Target", "AWSEvents.ListRuleNamesByTarget")
+                .body("{\"TargetArn\":\"" + lambdaArn + "\"}")
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .body("RuleNames", hasItem(ruleName));
+
+        String jobId = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {
+                          "profileName":"%s",
+                          "clientRequestToken":"%s",
+                          "source":{"s3":{"bucketName":"%s","key":"code.zip","version":"%s"}},
+                          "destination":{"s3":{"bucketName":"%s","prefix":"signed/"}}
+                        }
+                        """.formatted(name, UUID.randomUUID(), src, version, dst))
+                .when()
+                .post("/signing-jobs")
+                .then()
+                .statusCode(200)
+                .extract().path("jobId");
+
+        String messageBody = null;
+        for (int i = 0; i < 8; i++) {
+            messageBody = given()
+                    .contentType("application/x-www-form-urlencoded")
+                    .header("Authorization", sqsAuth)
+                    .formParam("Action", "ReceiveMessage")
+                    .formParam("QueueUrl", queueUrl)
+                    .formParam("MaxNumberOfMessages", "10")
+                    .formParam("WaitTimeSeconds", "1")
+                    .when()
+                    .post("/")
+                    .then()
+                    .statusCode(200)
+                    .extract().xmlPath()
+                    .getString("ReceiveMessageResponse.ReceiveMessageResult.Message.Body");
+            if (messageBody != null && !messageBody.isBlank()) {
+                break;
+            }
+        }
+        assertNotNull(messageBody, "Expected aws.signer events on the consumeSigningJobEvents target");
+        assertTrue(messageBody.contains("aws.signer"), "Expected source aws.signer in: " + messageBody);
+        assertTrue(messageBody.contains("Signer Job Status Change"),
+                "Expected Signer detail-type in: " + messageBody);
+        assertTrue(messageBody.contains(jobId), "Expected job id " + jobId + " in: " + messageBody);
     }
 
     private static String auth() {

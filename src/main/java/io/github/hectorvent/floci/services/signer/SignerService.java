@@ -9,13 +9,17 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.TagHandler;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.signer.model.SigningJob;
 import io.github.hectorvent.floci.services.signer.model.ProfilePermission;
 import io.github.hectorvent.floci.services.signer.model.SigningProfile;
+import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -30,6 +34,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 /**
@@ -39,6 +44,7 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 public class SignerService implements TagHandler {
 
+    private static final Logger LOG = Logger.getLogger(SignerService.class);
     static final String SERVICE = "signer";
     private static final Pattern PROFILE_NAME = Pattern.compile("^[a-zA-Z0-9_]{2,64}$");
     private static final int DEFAULT_MAX_RESULTS = 25;
@@ -67,9 +73,16 @@ public class SignerService implements TagHandler {
     private final StorageBackend<String, SigningJob> jobs;
     private final ObjectMapper objectMapper;
     private final S3Service s3Service;
+    private final Instance<EventBridgeService> eventBridgeService;
+    private final Instance<Vertx> vertx;
 
     @Inject
-    public SignerService(StorageFactory storageFactory, ObjectMapper objectMapper, S3Service s3Service) {
+    public SignerService(
+            StorageFactory storageFactory,
+            ObjectMapper objectMapper,
+            S3Service s3Service,
+            Instance<EventBridgeService> eventBridgeService,
+            Instance<Vertx> vertx) {
         this(
                 storageFactory.create("signer", "signer-profiles.json",
                         new TypeReference<Map<String, SigningProfile>>() {
@@ -78,7 +91,9 @@ public class SignerService implements TagHandler {
                         new TypeReference<Map<String, SigningJob>>() {
                         }),
                 objectMapper,
-                s3Service);
+                s3Service,
+                eventBridgeService,
+                vertx);
     }
 
     SignerService(
@@ -86,10 +101,31 @@ public class SignerService implements TagHandler {
             StorageBackend<String, SigningJob> jobs,
             ObjectMapper objectMapper,
             S3Service s3Service) {
+        this(profiles, jobs, objectMapper, s3Service, null, null);
+    }
+
+    SignerService(
+            StorageBackend<String, SigningProfile> profiles,
+            StorageBackend<String, SigningJob> jobs,
+            ObjectMapper objectMapper,
+            S3Service s3Service,
+            Instance<EventBridgeService> eventBridgeService) {
+        this(profiles, jobs, objectMapper, s3Service, eventBridgeService, null);
+    }
+
+    SignerService(
+            StorageBackend<String, SigningProfile> profiles,
+            StorageBackend<String, SigningJob> jobs,
+            ObjectMapper objectMapper,
+            S3Service s3Service,
+            Instance<EventBridgeService> eventBridgeService,
+            Instance<Vertx> vertx) {
         this.profiles = profiles;
         this.jobs = jobs;
         this.objectMapper = objectMapper;
         this.s3Service = s3Service;
+        this.eventBridgeService = eventBridgeService;
+        this.vertx = vertx;
     }
 
     @Override
@@ -361,8 +397,10 @@ public class SignerService implements TagHandler {
         job.destBucket = destBucket;
         job.destPrefix = destPrefix;
         job.signedKey = signedKey;
+        publishJobStatus(job, "Started");
         completeJob(job, profile);
         jobs.put(jobKey(accountId, region, job.jobId), job);
+        publishJobStatus(job, job.status);
         return jobIdJson(job);
     }
 
@@ -420,8 +458,10 @@ public class SignerService implements TagHandler {
         String token = "payload-" + UUID.randomUUID();
         SigningJob job = newJob(accountId, region, profile, token);
         job.signature = sha384(payload);
+        publishJobStatus(job, "Started");
         completeJob(job, profile);
         jobs.put(jobKey(accountId, region, job.jobId), job);
+        publishJobStatus(job, job.status);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("jobId", job.jobId);
         response.put("jobOwner", job.jobOwner);
@@ -574,6 +614,59 @@ public class SignerService implements TagHandler {
         job.signatureExpiresAt = expireAt(now, profile);
     }
 
+    /**
+     * Signer publishes {@code Signer Job Status Change} on the default bus
+     * (source {@code aws.signer}) when a job starts or lands. Delivery is
+     * asynchronous so a Bindings Function URL that is itself the EventBridge
+     * target cannot deadlock on Lambda concurrency while StartSigningJob is
+     * still in flight.
+     */
+    private void publishJobStatus(SigningJob job, String status) {
+        if (eventBridgeService == null || eventBridgeService.isUnsatisfied() || job == null) {
+            return;
+        }
+        String jobId = job.jobId;
+        String region = job.region;
+        String platformId = job.platformId;
+        String profileName = job.profileName;
+        String accountId = job.accountId != null ? job.accountId : job.jobOwner;
+        Runnable publish = () -> {
+            try {
+                ObjectNode detail = objectMapper.createObjectNode();
+                detail.put("job_id", jobId);
+                detail.put("jobId", jobId);
+                detail.put("status", status);
+                if (platformId != null) {
+                    detail.put("platform", platformId);
+                    detail.put("platformId", platformId);
+                }
+                if (profileName != null) {
+                    detail.put("profileName", profileName);
+                }
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("Source", "aws.signer");
+                entry.put("DetailType", "Signer Job Status Change");
+                entry.put("Detail", objectMapper.writeValueAsString(detail));
+                if (region != null && accountId != null && jobId != null) {
+                    ArrayNode resources = objectMapper.createArrayNode();
+                    resources.add(jobArn(region, accountId, jobId));
+                    entry.put("Resources", resources);
+                }
+                if (region != null) {
+                    eventBridgeService.get().putEvents(List.of(entry), region);
+                }
+            } catch (Exception e) {
+                LOG.warnv("Failed to publish Signer Job Status Change for {0}: {1}",
+                        jobId, e.getMessage());
+            }
+        };
+        if (vertx != null && !vertx.isUnsatisfied()) {
+            vertx.get().runOnContext(ignored -> publish.run());
+        } else {
+            CompletableFuture.runAsync(publish);
+        }
+    }
+
     private long expireAt(long now, SigningProfile profile) {
         int value = profile.signatureValidityValue == null ? 135 : profile.signatureValidityValue;
         String type = profile.signatureValidityType == null ? "MONTHS" : profile.signatureValidityType;
@@ -717,6 +810,10 @@ public class SignerService implements TagHandler {
 
     static String profileArn(String region, String accountId, String profileName) {
         return "arn:aws:signer:" + region + ":" + accountId + ":/signing-profiles/" + profileName;
+    }
+
+    static String jobArn(String region, String accountId, String jobId) {
+        return "arn:aws:signer:" + region + ":" + accountId + ":/signing-jobs/" + jobId;
     }
 
     private static String jobIdFromArn(String arn) {
