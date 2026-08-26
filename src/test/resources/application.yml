@@ -530,6 +530,8 @@ floci:
       schema-worker-shutdown-timeout-seconds: 30
     s3vectors:
       enabled: true
+    s3files:
+      enabled: true
     ivs:
       enabled: true
     ivschat:

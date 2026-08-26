@@ -1125,6 +1125,7 @@ public interface EmulatorConfig {
         LightsailServiceConfig lightsail();
         UiServiceConfig ui();
         S3VectorsServiceConfig s3vectors();
+        S3FilesServiceConfig s3files();
         IvsServiceConfig ivs();
         IvsChatServiceConfig ivschat();
         LexServiceConfig lex();
@@ -1406,6 +1407,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
     interface S3VectorsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface S3FilesServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

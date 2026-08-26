@@ -15,6 +15,7 @@ import io.github.hectorvent.floci.services.omics.OmicsController;
 import io.github.hectorvent.floci.services.datazone.DataZoneController;
 import io.github.hectorvent.floci.services.dlm.DlmController;
 import io.github.hectorvent.floci.services.efs.EfsController; // elasticfilesystem restJson1
+import io.github.hectorvent.floci.services.s3files.S3FilesController;
 import io.github.hectorvent.floci.services.glacier.GlacierController; // glacier restJson1
 import io.github.hectorvent.floci.services.guardduty.GuardDutyController;
 import io.github.hectorvent.floci.services.inspector2.Inspector2Controller;
@@ -498,6 +499,11 @@ public class ResolvedServiceCatalog {
                         5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("elasticfilesystem"), Set.of(), Set.of(EfsController.class)),
+                descriptor("s3files", "s3files", config.services().s3files().enabled(), true,
+                        "s3files", config.storage().mode(),
+                        5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("s3files"), Set.of(), Set.of(S3FilesController.class)),
                 descriptor("fsx", "fsx", config.services().fsx().enabled(), true,
                         "fsx", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
