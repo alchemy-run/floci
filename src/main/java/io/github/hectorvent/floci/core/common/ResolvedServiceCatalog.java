@@ -49,6 +49,7 @@ import io.github.hectorvent.floci.services.lexv2.LexV2RoutingFilter;
 import io.github.hectorvent.floci.services.ivsrealtime.IvsRealtimeController;
 import io.github.hectorvent.floci.services.kinesisvideo.KinesisVideoController;
 import io.github.hectorvent.floci.services.pipes.PipesController;
+import io.github.hectorvent.floci.services.polly.PollyController;
 import io.github.hectorvent.floci.services.lambda.LambdaController;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmController;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmEndpointProxyController;
@@ -559,6 +560,10 @@ public class ResolvedServiceCatalog {
                         "pipes", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("pipes"), Set.of(), Set.of(PipesController.class)),
+                descriptor("polly", "polly", config.services().polly().enabled(), true,
+                        "polly", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("polly"), Set.of(), Set.of(PollyController.class)),
                 descriptor("elasticloadbalancing", "elbv2", config.services().elbv2().enabled(), true,
                         "elbv2", config.storage().mode(), 5000L, AwsNamespaces.ELB_V2, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),

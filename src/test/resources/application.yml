@@ -516,6 +516,8 @@ floci:
       enabled: true
     lex:
       enabled: true
+    polly:
+      enabled: true
     iot:
       enabled: true
       mqtt:

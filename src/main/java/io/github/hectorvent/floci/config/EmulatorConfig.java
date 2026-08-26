@@ -1076,6 +1076,7 @@ public interface EmulatorConfig {
         IvsServiceConfig ivs();
         IvsChatServiceConfig ivschat();
         LexServiceConfig lex();
+        PollyServiceConfig polly();
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
         IotFleetWiseServiceConfig iotfleetwise();
@@ -1337,6 +1338,11 @@ public interface EmulatorConfig {
     }
 
     interface LexServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface PollyServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
