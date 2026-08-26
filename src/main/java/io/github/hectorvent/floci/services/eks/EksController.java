@@ -39,9 +39,11 @@ import java.util.Map;
  *
  * <p>
  * EKS uses standard HTTP verbs with JSON bodies — not JSON 1.1 (X-Amz-Target)
- * or Query protocol.
+ * or Query protocol. Paths are rewritten onto
+ * {@link EksRoutingFilter#INTERNAL_PREFIX} so they do not match S3's
+ * {@code /{bucket}} catch-all or the Lambda Function URL {@code /bindings} probe.
  */
-@Path("/")
+@Path(EksRoutingFilter.INTERNAL_PREFIX)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class EksController {

@@ -10,6 +10,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -34,10 +35,15 @@ class EksClusterListIntegrationTest {
     private static final String CLUSTER = "cluster-list-it";
     private static final String ROLE = "arn:aws:iam::000000000000:role/eks-role";
 
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
+
     @Test
     @Order(1)
     void emptyListOmitsNextToken() {
-        given()
+        eks()
         .when()
             .get("/clusters")
         .then()
@@ -50,7 +56,7 @@ class EksClusterListIntegrationTest {
     @Test
     @Order(2)
     void emptyListWithMaxResultsOmitsNextToken() {
-        given()
+        eks()
         .when()
             .get("/clusters?maxResults=100")
         .then()
@@ -62,7 +68,7 @@ class EksClusterListIntegrationTest {
     @Test
     @Order(3)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"" + ROLE + "\","
                         + "\"version\":\"1.29\",\"tags\":{\"env\":\"list-it\"}}")
                 .when().post("/clusters")
@@ -76,7 +82,7 @@ class EksClusterListIntegrationTest {
     @Test
     @Order(4)
     void listClustersReturnsNamesWithoutNextToken() {
-        given()
+        eks()
         .when()
             .get("/clusters")
         .then()
@@ -89,14 +95,14 @@ class EksClusterListIntegrationTest {
     @Test
     @Order(5)
     void listClustersPagesThenOmitsTerminalNextToken() {
-        given()
+        eks()
         .when()
             .get("/clusters?maxResults=1")
         .then()
             .statusCode(200)
             .body("clusters", hasSize(1));
 
-        String next = given()
+        String next = eks()
         .when()
             .get("/clusters?maxResults=1")
         .then()
@@ -105,7 +111,7 @@ class EksClusterListIntegrationTest {
             .path("nextToken");
 
         if (next != null) {
-            given()
+            eks()
             .when()
                 .get("/clusters?maxResults=1&nextToken=" + next)
             .then()
@@ -117,7 +123,7 @@ class EksClusterListIntegrationTest {
     @Test
     @Order(6)
     void describeClusterHasAlchemyListFields() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER)
         .then()
@@ -132,7 +138,7 @@ class EksClusterListIntegrationTest {
     @Test
     @Order(7)
     void listTagsForResourceReturnsTagMap() {
-        String arn = given()
+        String arn = eks()
                 .when()
                     .get("/clusters/" + CLUSTER)
                 .then()
@@ -140,7 +146,7 @@ class EksClusterListIntegrationTest {
                     .extract()
                     .path("cluster.arn");
 
-        given()
+        eks()
         .when()
             .get("/tags/" + encode(arn))
         .then()
@@ -152,9 +158,9 @@ class EksClusterListIntegrationTest {
     @Test
     @Order(8)
     void deleteCluster() {
-        given().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
+        eks().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER)
         .then()

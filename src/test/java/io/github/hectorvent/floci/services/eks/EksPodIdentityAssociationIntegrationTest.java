@@ -10,6 +10,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -31,12 +32,17 @@ class EksPodIdentityAssociationIntegrationTest {
     private static final String NAMESPACE = "default";
     private static final String SERVICE_ACCOUNT = "alchemy-test-list-sa";
 
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
+
     private static String associationId;
 
     @Test
     @Order(1)
     void missingClusterReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/no-such-cluster/pod-identity-associations")
         .then()
@@ -49,7 +55,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(2)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
                         + "\"version\":\"1.29\"}")
                 .when().post("/clusters")
@@ -60,7 +66,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(3)
     void emptyListBeforeCreate() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations")
         .then()
@@ -71,7 +77,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(4)
     void createAssociation() {
-        associationId = given().contentType(JSON)
+        associationId = eks().contentType(JSON)
                 .body("{\"namespace\":\"" + NAMESPACE + "\",\"serviceAccount\":\"" + SERVICE_ACCOUNT + "\","
                         + "\"roleArn\":\"" + ROLE + "\",\"tags\":{\"env\":\"test\"}}")
                 .when().post("/clusters/" + CLUSTER + "/pod-identity-associations")
@@ -93,7 +99,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(5)
     void duplicateCreateIsResourceInUse() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"namespace\":\"" + NAMESPACE + "\",\"serviceAccount\":\"" + SERVICE_ACCOUNT + "\","
                         + "\"roleArn\":\"" + ROLE + "\"}")
                 .when().post("/clusters/" + CLUSTER + "/pod-identity-associations")
@@ -105,7 +111,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(6)
     void listAssociationsReturnsSummary() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations")
         .then()
@@ -121,7 +127,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(7)
     void listFiltersByNamespaceAndServiceAccount() {
-        given()
+        eks()
             .queryParam("namespace", NAMESPACE)
             .queryParam("serviceAccount", SERVICE_ACCOUNT)
         .when()
@@ -131,7 +137,7 @@ class EksPodIdentityAssociationIntegrationTest {
             .body("associations", hasSize(1))
             .body("associations[0].associationId", equalTo(associationId));
 
-        given()
+        eks()
             .queryParam("namespace", "other")
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations")
@@ -143,7 +149,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(8)
     void describeAssociation() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations/" + associationId)
         .then()
@@ -157,7 +163,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(9)
     void describeMissingReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations/a-missing")
         .then()
@@ -168,7 +174,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(10)
     void updateAssociation() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"roleArn\":\"" + ROLE_UPDATED + "\",\"disableSessionTags\":true}")
                 .when().post("/clusters/" + CLUSTER + "/pod-identity-associations/" + associationId)
                 .then()
@@ -180,7 +186,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(11)
     void tagAssociation() {
-        String arn = given()
+        String arn = eks()
                 .when()
                     .get("/clusters/" + CLUSTER + "/pod-identity-associations/" + associationId)
                 .then()
@@ -188,13 +194,13 @@ class EksPodIdentityAssociationIntegrationTest {
                     .extract()
                     .path("association.associationArn");
 
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"tags\":{\"team\":\"platform\"}}")
                 .when().post("/tags/" + encode(arn))
                 .then()
                 .statusCode(204);
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations/" + associationId)
         .then()
@@ -206,21 +212,21 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(12)
     void deleteAssociation() {
-        given()
+        eks()
         .when()
             .delete("/clusters/" + CLUSTER + "/pod-identity-associations/" + associationId)
         .then()
             .statusCode(200)
             .body("association.associationId", equalTo(associationId));
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations/" + associationId)
         .then()
             .statusCode(404)
             .body("__type", equalTo("ResourceNotFoundException"));
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/pod-identity-associations")
         .then()
@@ -231,7 +237,7 @@ class EksPodIdentityAssociationIntegrationTest {
     @Test
     @Order(13)
     void deleteCluster() {
-        given().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
+        eks().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
     }
 
     private static String encode(String value) {

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -26,10 +27,15 @@ class EksNodegroupIntegrationTest {
     private static final String CLUSTER = "ng-it-cluster";
     private static final String NODE_ROLE = "arn:aws:iam::000000000000:role/eks-node-role";
 
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
+
     @Test
     @Order(1)
     void describeNodegroupOnMissingClusterReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/alchemy-nonexistent-cluster-probe/node-groups/alchemy-nonexistent-nodegroup-probe")
         .then()
@@ -42,7 +48,7 @@ class EksNodegroupIntegrationTest {
     @Test
     @Order(2)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
                         + "\"version\":\"1.29\"}")
                 .when().post("/clusters")
@@ -53,7 +59,7 @@ class EksNodegroupIntegrationTest {
     @Test
     @Order(3)
     void describeNodegroupOnMissingNodegroupReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/node-groups/alchemy-nonexistent-nodegroup-probe")
         .then()
@@ -65,7 +71,7 @@ class EksNodegroupIntegrationTest {
     @Test
     @Order(4)
     void createNodeGroupRoutesToEksNotS3() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"nodegroupName\":\"ng1\",\"subnets\":[\"subnet-abc\"],\"nodeRole\":\"" + NODE_ROLE + "\","
                         + "\"scalingConfig\":{\"minSize\":1,\"maxSize\":3,\"desiredSize\":2}}")
                 .when().post("/clusters/" + CLUSTER + "/node-groups")
@@ -83,7 +89,7 @@ class EksNodegroupIntegrationTest {
     @Test
     @Order(5)
     void listNodeGroups() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .when().get("/clusters/" + CLUSTER + "/node-groups")
                 .then().statusCode(200)
                 .body("nodegroups", hasItem("ng1"));
@@ -92,7 +98,7 @@ class EksNodegroupIntegrationTest {
     @Test
     @Order(6)
     void describeNodeGroup() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .when().get("/clusters/" + CLUSTER + "/node-groups/ng1")
                 .then().statusCode(200)
                 .body("nodegroup.nodegroupName", equalTo("ng1"))
@@ -103,12 +109,12 @@ class EksNodegroupIntegrationTest {
     @Test
     @Order(7)
     void deleteNodeGroup() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .when().delete("/clusters/" + CLUSTER + "/node-groups/ng1")
                 .then().statusCode(200)
                 .body("nodegroup.status", equalTo("DELETING"));
 
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .when().get("/clusters/" + CLUSTER + "/node-groups/ng1")
                 .then().statusCode(404);
     }

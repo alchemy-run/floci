@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -25,6 +26,11 @@ import static org.hamcrest.Matchers.notNullValue;
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class EksClusterBindingsIntegrationTest {
+
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
 
     private static final String JSON = "application/json";
     private static final String CLUSTER = "cluster-bindings-it";
@@ -43,7 +49,7 @@ class EksClusterBindingsIntegrationTest {
             "POST, /clusters/no-such-cluster/insights-refresh"
     })
     void missingClusterReturnsResourceNotFound(String method, String path) {
-        var spec = given().contentType(JSON).body("{}");
+        var spec = eks().contentType(JSON).body("{}");
         (method.equals("POST") ? spec.when().post(path) : spec.when().get(path))
                 .then()
                 .statusCode(404)
@@ -54,7 +60,7 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(2)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
                         + "\"version\":\"1.29\"}")
                 .when().post("/clusters")
@@ -69,7 +75,7 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(3)
     void listUpdatesEmpty() {
-        given()
+        eks()
         .when().get("/clusters/" + CLUSTER + "/updates")
         .then()
             .statusCode(200)
@@ -79,7 +85,7 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(4)
     void listCapabilitiesEmpty() {
-        given()
+        eks()
         .when().get("/clusters/" + CLUSTER + "/capabilities")
         .then()
             .statusCode(200)
@@ -89,7 +95,7 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(5)
     void listInsightsEmpty() {
-        given().contentType(JSON).body("{}")
+        eks().contentType(JSON).body("{}")
         .when().post("/clusters/" + CLUSTER + "/insights")
         .then()
             .statusCode(200)
@@ -105,7 +111,7 @@ class EksClusterBindingsIntegrationTest {
             "/clusters/" + CLUSTER + "/pod-identity-associations/a-" + BOGUS
     })
     void describeMissingSubresourceReturnsResourceNotFound(String path) {
-        given()
+        eks()
         .when().get(path)
         .then()
             .statusCode(404)
@@ -116,7 +122,7 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(7)
     void describeMissingIdentityProviderConfigReturnsResourceNotFound() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"identityProviderConfig\":{\"type\":\"oidc\",\"name\":\"" + BOGUS + "\"}}")
                 .when().post("/clusters/" + CLUSTER + "/identity-provider-configs/describe")
                 .then()
@@ -128,7 +134,7 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(8)
     void listAssociatedAccessPoliciesForMissingPrincipalReturnsResourceNotFound() {
-        given()
+        eks()
         .when().get("/clusters/" + CLUSTER + "/access-entries/" + BOGUS_PRINCIPAL + "/access-policies")
         .then()
             .statusCode(404)
@@ -139,13 +145,13 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(9)
     void insightsRefreshStartAndDescribe() {
-        given().contentType(JSON).body("{}")
+        eks().contentType(JSON).body("{}")
         .when().post("/clusters/" + CLUSTER + "/insights-refresh")
         .then()
             .statusCode(200)
             .body("status", equalTo("COMPLETED"));
 
-        given()
+        eks()
         .when().get("/clusters/" + CLUSTER + "/insights-refresh")
         .then()
             .statusCode(200)
@@ -155,6 +161,6 @@ class EksClusterBindingsIntegrationTest {
     @Test
     @Order(10)
     void deleteCluster() {
-        given().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
+        eks().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
     }
 }

@@ -10,6 +10,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -32,10 +33,15 @@ class EksFargateProfileIntegrationTest {
     private static final String PROFILE = "alchemy-fp";
     private static final String PROFILE_B = "alchemy-fp-b";
 
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
+
     @Test
     @Order(1)
     void describeFargateProfileOnMissingClusterReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/alchemy-nonexistent-cluster-probe/fargate-profiles/alchemy-nonexistent-profile-probe")
         .then()
@@ -48,7 +54,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(2)
     void listFargateProfilesOnMissingClusterReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/alchemy-nonexistent-cluster-probe/fargate-profiles")
         .then()
@@ -60,7 +66,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(3)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
                         + "\"version\":\"1.29\"}")
                 .when().post("/clusters")
@@ -71,7 +77,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(4)
     void existingClusterListsEmptyProfilesWithoutNextToken() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/fargate-profiles")
         .then()
@@ -84,7 +90,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(5)
     void createFargateProfileRoutesToEksNotS3() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"fargateProfileName\":\"" + PROFILE + "\",\"podExecutionRoleArn\":\"" + ROLE + "\","
                         + "\"subnets\":[\"subnet-aaa\",\"subnet-bbb\"],"
                         + "\"selectors\":[{\"namespace\":\"alchemy-fargate-test\"}],"
@@ -108,7 +114,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(6)
     void listFargateProfiles() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/fargate-profiles")
         .then().statusCode(200)
@@ -119,7 +125,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(7)
     void describeFargateProfile() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/fargate-profiles/" + PROFILE)
         .then().statusCode(200)
@@ -132,13 +138,13 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(8)
     void listFargateProfilesPaginatesWithoutLooping() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"fargateProfileName\":\"" + PROFILE_B + "\",\"podExecutionRoleArn\":\"" + ROLE + "\","
                         + "\"selectors\":[{\"namespace\":\"default\"}]}")
                 .when().post("/clusters/" + CLUSTER + "/fargate-profiles")
                 .then().statusCode(200);
 
-        given()
+        eks()
             .queryParam("maxResults", 1)
         .when()
             .get("/clusters/" + CLUSTER + "/fargate-profiles")
@@ -146,7 +152,7 @@ class EksFargateProfileIntegrationTest {
                 .body("fargateProfileNames", hasSize(1))
                 .body("nextToken", equalTo("1"));
 
-        given()
+        eks()
             .queryParam("maxResults", 1)
             .queryParam("nextToken", "1")
         .when()
@@ -159,7 +165,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(9)
     void tagFargateProfile() {
-        String arn = given()
+        String arn = eks()
                 .when()
                     .get("/clusters/" + CLUSTER + "/fargate-profiles/" + PROFILE)
                 .then()
@@ -167,13 +173,13 @@ class EksFargateProfileIntegrationTest {
                     .extract()
                     .path("fargateProfile.fargateProfileArn");
 
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"tags\":{\"team\":\"platform\"}}")
                 .when().post("/tags/" + encode(arn))
                 .then()
                 .statusCode(204);
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/fargate-profiles/" + PROFILE)
         .then()
@@ -181,13 +187,13 @@ class EksFargateProfileIntegrationTest {
             .body("fargateProfile.tags.env", equalTo("test"))
             .body("fargateProfile.tags.team", equalTo("platform"));
 
-        given()
+        eks()
         .when()
             .delete("/tags/" + encode(arn) + "?tagKeys=env")
         .then()
             .statusCode(204);
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/fargate-profiles/" + PROFILE)
         .then()
@@ -199,14 +205,14 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(10)
     void deleteFargateProfile() {
-        given()
+        eks()
         .when()
             .delete("/clusters/" + CLUSTER + "/fargate-profiles/" + PROFILE)
         .then()
             .statusCode(200)
             .body("fargateProfile.status", equalTo("DELETING"));
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/fargate-profiles/" + PROFILE)
         .then()
@@ -217,7 +223,7 @@ class EksFargateProfileIntegrationTest {
     @Test
     @Order(11)
     void deleteCluster() {
-        given().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
+        eks().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
     }
 
     private static String encode(String value) {

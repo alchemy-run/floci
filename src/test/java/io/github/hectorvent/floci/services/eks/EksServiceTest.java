@@ -825,4 +825,54 @@ class EksServiceTest {
         assertEquals(List.of("c"), last.get("addons"));
         assertFalse(last.containsKey("nextToken"));
     }
+
+    @Test
+    void listAccessPoliciesIncludesAmazonEksViewPolicy() {
+        Map<String, Object> body = eksService.listAccessPolicies(null, null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> policies = (List<Map<String, Object>>) body.get("accessPolicies");
+        assertFalse(policies.isEmpty());
+        assertTrue(policies.stream().anyMatch(policy -> "AmazonEKSViewPolicy".equals(policy.get("name"))));
+        assertFalse(body.containsKey("nextToken"));
+    }
+
+    @Test
+    void describeClusterVersionsDefaultOnlyMatchesSemver() {
+        Map<String, Object> body = eksService.describeClusterVersions(
+                true, false, null, null, null, null, null, null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> versions = (List<Map<String, Object>>) body.get("clusterVersions");
+        assertFalse(versions.isEmpty());
+        assertEquals(true, versions.get(0).get("defaultVersion"));
+        assertTrue(versions.get(0).get("clusterVersion").toString().matches("^\\d+\\.\\d+$"));
+    }
+
+    @Test
+    void describeAddonVersionsFindsVpcCni() {
+        Map<String, Object> body = eksService.describeAddonVersions(
+                "vpc-cni", null, 1, null, null, null, null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> addons = (List<Map<String, Object>>) body.get("addons");
+        assertEquals(1, addons.size());
+        assertEquals("vpc-cni", addons.get(0).get("addonName"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> versions = (List<Map<String, Object>>) addons.get(0).get("addonVersions");
+        assertFalse(versions.isEmpty());
+    }
+
+    @Test
+    void describeAddonConfigurationReturnsSchemaForLiveVpcCniVersion() {
+        Map<String, Object> versionsBody = eksService.describeAddonVersions(
+                "vpc-cni", null, 1, null, null, null, null);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> addons = (List<Map<String, Object>>) versionsBody.get("addons");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> versions = (List<Map<String, Object>>) addons.get(0).get("addonVersions");
+        String addonVersion = versions.get(0).get("addonVersion").toString();
+
+        Map<String, Object> schema = eksService.describeAddonConfiguration("vpc-cni", addonVersion);
+        assertEquals("vpc-cni", schema.get("addonName"));
+        assertEquals(addonVersion, schema.get("addonVersion"));
+        assertFalse(schema.get("configurationSchema").toString().isBlank());
+    }
 }

@@ -57,6 +57,8 @@ import java.util.stream.Collectors;
 @ApplicationScoped
 public class EksService implements TagHandler {
 
+    static final String SERVICE = "eks";
+
     private static final Logger LOG = Logger.getLogger(EksService.class);
 
     /**

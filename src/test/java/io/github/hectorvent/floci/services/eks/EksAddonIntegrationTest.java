@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -25,10 +26,15 @@ class EksAddonIntegrationTest {
     private static final String JSON = "application/json";
     private static final String CLUSTER = "addon-it-cluster";
 
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
+
     @Test
     @Order(1)
     void missingClusterReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/no-such-cluster/addons")
         .then()
@@ -41,7 +47,7 @@ class EksAddonIntegrationTest {
     @Test
     @Order(2)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
                         + "\"version\":\"1.29\"}")
                 .when().post("/clusters")
@@ -52,7 +58,7 @@ class EksAddonIntegrationTest {
     @Test
     @Order(3)
     void existingClusterListsEmptyAddonsWithoutNextToken() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/addons")
         .then()
@@ -65,7 +71,7 @@ class EksAddonIntegrationTest {
     @Test
     @Order(4)
     void createAddonRoutesToEksNotS3() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"addonName\":\"metrics-server\",\"tags\":{\"env\":\"test\"}}")
                 .when().post("/clusters/" + CLUSTER + "/addons")
                 .then()
@@ -82,7 +88,7 @@ class EksAddonIntegrationTest {
     @Test
     @Order(5)
     void listAddons() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/addons")
         .then().statusCode(200)
@@ -93,7 +99,7 @@ class EksAddonIntegrationTest {
     @Test
     @Order(6)
     void describeAddon() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/addons/metrics-server")
         .then().statusCode(200)
@@ -106,14 +112,14 @@ class EksAddonIntegrationTest {
     @Test
     @Order(7)
     void updateAddon() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"addonVersion\":\"v1.2.3-eksbuild.1\"}")
                 .when().post("/clusters/" + CLUSTER + "/addons/metrics-server/update")
                 .then().statusCode(200)
                 .body("update.status", equalTo("Successful"))
                 .body("update.type", equalTo("AddonUpdate"));
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/addons/metrics-server")
         .then().statusCode(200)
@@ -123,12 +129,12 @@ class EksAddonIntegrationTest {
     @Test
     @Order(8)
     void listAddonsPaginatesWithoutLooping() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"addonName\":\"vpc-cni\"}")
                 .when().post("/clusters/" + CLUSTER + "/addons")
                 .then().statusCode(200);
 
-        given()
+        eks()
             .queryParam("maxResults", 1)
         .when()
             .get("/clusters/" + CLUSTER + "/addons")
@@ -136,7 +142,7 @@ class EksAddonIntegrationTest {
                 .body("addons", hasSize(1))
                 .body("nextToken", equalTo("1"));
 
-        given()
+        eks()
             .queryParam("maxResults", 1)
             .queryParam("nextToken", "1")
         .when()
@@ -149,13 +155,13 @@ class EksAddonIntegrationTest {
     @Test
     @Order(9)
     void deleteAddon() {
-        given()
+        eks()
         .when()
             .delete("/clusters/" + CLUSTER + "/addons/metrics-server")
         .then().statusCode(200)
                 .body("addon.status", equalTo("DELETING"));
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/addons/metrics-server")
         .then().statusCode(404);
@@ -164,6 +170,6 @@ class EksAddonIntegrationTest {
     @Test
     @Order(10)
     void deleteCluster() {
-        given().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
+        eks().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
     }
 }

@@ -37,6 +37,7 @@ import io.github.hectorvent.floci.services.bedrockdataautomation.BedrockDataAuto
 import io.github.hectorvent.floci.services.cognito.CognitoOAuthController;
 import io.github.hectorvent.floci.services.cognito.CognitoWellKnownController;
 import io.github.hectorvent.floci.services.eks.EksController;
+import io.github.hectorvent.floci.services.eks.EksRoutingFilter;
 import io.github.hectorvent.floci.services.mwaa.MwaaController;
 import io.github.hectorvent.floci.services.iot.IotController;
 import io.github.hectorvent.floci.services.iot.IotDataController;
@@ -652,7 +653,8 @@ public class ResolvedServiceCatalog {
                 descriptor("eks", "eks", config.services().eks().enabled(), true,
                         "eks", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("eks"), Set.of(), Set.of(EksController.class)),
+                        Set.of(), Set.of("eks"), Set.of(),
+                        Set.of(EksController.class, EksRoutingFilter.class)),
                 descriptor("mwaa", "mwaa", config.services().mwaa().enabled(), true,
                         "mwaa", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

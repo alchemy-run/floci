@@ -10,6 +10,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -25,6 +26,11 @@ import static org.hamcrest.Matchers.notNullValue;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class EksAccessEntryIntegrationTest {
 
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
+
     private static final String JSON = "application/json";
     private static final String CLUSTER = "access-entry-it-cluster";
     private static final String PRINCIPAL = "arn:aws:iam::000000000000:role/eks-access-it";
@@ -34,7 +40,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(1)
     void missingClusterReturnsResourceNotFound() {
-        given()
+        eks()
         .when()
             .get("/clusters/no-such-cluster/access-entries")
         .then()
@@ -46,7 +52,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(2)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
                         + "\"version\":\"1.29\"}")
                 .when().post("/clusters")
@@ -57,7 +63,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(3)
     void emptyListBeforeCreate() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries")
         .then()
@@ -68,7 +74,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(4)
     void createAccessEntry() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"principalArn\":\"" + PRINCIPAL + "\",\"kubernetesGroups\":[\"viewers\"],"
                         + "\"tags\":{\"env\":\"test\"}}")
                 .when().post("/clusters/" + CLUSTER + "/access-entries")
@@ -87,7 +93,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(5)
     void duplicateCreateIsResourceInUse() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"principalArn\":\"" + PRINCIPAL + "\"}")
                 .when().post("/clusters/" + CLUSTER + "/access-entries")
                 .then()
@@ -98,7 +104,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(6)
     void listAccessEntriesReturnsPrincipalArns() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries")
         .then()
@@ -109,7 +115,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(7)
     void describeAccessEntry() {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL))
         .then()
@@ -122,7 +128,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(8)
     void updateAccessEntry() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"kubernetesGroups\":[\"admins\"],\"username\":\"cluster-admin\"}")
                 .when().post("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL))
                 .then()
@@ -134,7 +140,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(9)
     void associateAndListAccessPolicies() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"policyArn\":\"" + POLICY + "\",\"accessScope\":{\"type\":\"cluster\"}}")
                 .when().post("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL)
                         + "/access-policies")
@@ -145,7 +151,7 @@ class EksAccessEntryIntegrationTest {
                 .body("associatedAccessPolicy.policyArn", equalTo(POLICY))
                 .body("associatedAccessPolicy.accessScope.type", equalTo("cluster"));
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL) + "/access-policies")
         .then()
@@ -157,7 +163,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(10)
     void tagAccessEntry() {
-        String arn = given()
+        String arn = eks()
                 .when()
                     .get("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL))
                 .then()
@@ -165,13 +171,13 @@ class EksAccessEntryIntegrationTest {
                     .extract()
                     .path("accessEntry.accessEntryArn");
 
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"tags\":{\"team\":\"platform\"}}")
                 .when().post("/tags/" + encode(arn))
                 .then()
                 .statusCode(204);
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL))
         .then()
@@ -183,14 +189,14 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(11)
     void disassociateAccessPolicy() {
-        given()
+        eks()
         .when()
             .delete("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL)
                     + "/access-policies/" + encode(POLICY))
         .then()
             .statusCode(200);
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL) + "/access-policies")
         .then()
@@ -201,20 +207,20 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(12)
     void deleteAccessEntry() {
-        given()
+        eks()
         .when()
             .delete("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL))
         .then()
             .statusCode(200);
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries/" + encode(PRINCIPAL))
         .then()
             .statusCode(404)
             .body("__type", equalTo("ResourceNotFoundException"));
 
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/access-entries")
         .then()
@@ -225,7 +231,7 @@ class EksAccessEntryIntegrationTest {
     @Test
     @Order(13)
     void deleteCluster() {
-        given().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
+        eks().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
     }
 
     private static String encode(String value) {
