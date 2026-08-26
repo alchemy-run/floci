@@ -177,6 +177,10 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AWSDataLifecycleManagerServiceRoleForAMIManagement", "/service-role/",
                 "Provides AWS Data Lifecycle Manager permission to manage EBS-backed AMIs."),
 
+        // CodeDeploy Lambda service role — Alchemy CodeDeploy Bindings attach this ARN.
+        new ManagedPolicyDef("AWSCodeDeployRoleForLambda", "/service-role/",
+                "Provides CodeDeploy service access to perform a Lambda deployment on your behalf."),
+
         // S3 Object Lambda execution role policy
         new ManagedPolicyDef("AmazonS3ObjectLambdaExecutionRolePolicy", "/service-role/",
                 "Provides write permissions to CloudWatch Logs for S3 Object Lambda access points."),
