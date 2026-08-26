@@ -59,7 +59,7 @@ class PricingIntegrationTest {
     }
 
     @Test
-    void describeServices_unknownServiceCode_returns400() {
+    void describeServices_unknownServiceCode_returnsEmpty() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "AWSPriceListService.DescribeServices")
@@ -68,8 +68,8 @@ class PricingIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", equalTo("InvalidParameterException"));
+            .statusCode(200)
+            .body("Services", hasSize(0));
     }
 
     @Test
@@ -98,6 +98,34 @@ class PricingIntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void getAttributeValues_volumeType_returnsGeneralPurpose() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSPriceListService.GetAttributeValues")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"ServiceCode\":\"AmazonEC2\",\"AttributeName\":\"volumeType\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("AttributeValues.Value", hasItem(startsWith("General Purpose")));
+    }
+
+    @Test
+    void getAttributeValues_unknownServiceCode_returnsEmpty() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSPriceListService.GetAttributeValues")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"ServiceCode\":\"AmazonBogus\",\"AttributeName\":\"volumeType\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("AttributeValues", hasSize(0));
     }
 
     @Test
@@ -162,7 +190,21 @@ class PricingIntegrationTest {
     }
 
     @Test
-    void getProducts_unknownServiceCode_returns400() {
+    void getProducts_maxResultsZero_returnsInvalidParameterException() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSPriceListService.GetProducts")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"ServiceCode\":\"AmazonEC2\",\"MaxResults\":0}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("InvalidParameterException"));
+    }
+
+    @Test
+    void getProducts_unknownServiceCode_returnsEmptyPriceList() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "AWSPriceListService.GetProducts")
@@ -171,8 +213,9 @@ class PricingIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", equalTo("InvalidParameterException"));
+            .statusCode(200)
+            .body("FormatVersion", equalTo("aws_v1"))
+            .body("PriceList", hasSize(0));
     }
 
     @Test

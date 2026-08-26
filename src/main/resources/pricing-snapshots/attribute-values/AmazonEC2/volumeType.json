@@ -1,0 +1,8 @@
+[
+  {"Value": "General Purpose"},
+  {"Value": "General Purpose-EBS only"},
+  {"Value": "Provisioned IOPS"},
+  {"Value": "Magnetic"},
+  {"Value": "Throughput Optimized HDD"},
+  {"Value": "Cold HDD"}
+]
