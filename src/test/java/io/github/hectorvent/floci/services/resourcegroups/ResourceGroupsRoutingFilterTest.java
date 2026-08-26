@@ -37,8 +37,25 @@ class ResourceGroupsRoutingFilterTest {
     }
 
     @Test
-    void leavesAlreadyPrefixedPathsAlone() {
+    void leavesAlreadyPrefixedPathsAndFunctionUrlsAlone() {
         assertEquals("/aws-resource-groups/groups",
                 ResourceGroupsRoutingFilter.rewritePath("/aws-resource-groups/groups"));
+        assertEquals("/lambda-url/abc123/bindings",
+                ResourceGroupsRoutingFilter.rewritePath("/lambda-url/abc123/bindings"));
+        assertEquals("/lambda-url/abc123/bindings/",
+                ResourceGroupsRoutingFilter.rewritePath("/lambda-url/abc123/bindings/"));
+        // Unsigned Function URL probes never reach rewritePath (filter returns
+        // on missing resource-groups scope / lambda-url Host). Signed /bindings is
+        // prefixed like any other restJson1 path.
+        assertEquals("/aws-resource-groups/bindings",
+                ResourceGroupsRoutingFilter.rewritePath("/bindings"));
+    }
+
+    @Test
+    void lambdaUrlHostsAreNotResourceGroups() {
+        assertTrue(ResourceGroupsRoutingFilter.isLambdaUrlHost(
+                "abc123.lambda-url.us-east-1.localhost:4566"));
+        assertFalse(ResourceGroupsRoutingFilter.isLambdaUrlHost("localhost:4566"));
+        assertFalse(ResourceGroupsRoutingFilter.isLambdaUrlHost(null));
     }
 }

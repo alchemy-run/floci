@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -37,6 +38,49 @@ class ResourceGroupsIntegrationTest {
     }
 
     @Test
+    void functionUrlBindingsPathIsNotClaimedByResourceGroups() {
+        given()
+                .header("Host", "deadbeefdeadbeefdeadbeefdeadbeef.lambda-url.us-east-1.localhost:4566")
+                .header("Authorization", auth(EAST))
+                .when()
+                .get("/bindings")
+                .then()
+                .statusCode(404)
+                .body("message", containsString("URL ID"));
+    }
+
+    @Test
+    void cancelTagSyncTaskOnBindingsFixtureArnIsTypedBadRequest() {
+        // The Bindings suite posts this group ARN (not a TagSyncTaskArn) through
+        // CancelTagSyncTask. AWS documents BadRequestException, not NotFoundException.
+        given()
+                .contentType("application/json")
+                .header("Authorization", auth("us-west-2"))
+                .body("{\"TaskArn\":\"arn:aws:resource-groups:us-west-2:000000000000:group/none/00000000-0000-0000-0000-000000000000\"}")
+                .when()
+                .post("/cancel-tag-sync-task")
+                .then()
+                .statusCode(400)
+                .header("X-Amzn-Errortype", equalTo("BadRequestException"))
+                .body("__type", equalTo("BadRequestException"))
+                .body("message", containsString("taskArn"));
+    }
+
+    @Test
+    void cancelTagSyncTaskOnWellFormedMissingTaskIsTypedBadRequest() {
+        given()
+                .contentType("application/json")
+                .header("Authorization", auth(EAST))
+                .body("{\"TaskArn\":\"arn:aws:resource-groups:us-east-1:000000000000:group/none/abcdefghijklmnopqrstuvwxyz/tag-sync-task/abcdefghijklmnopqrstuvwxyz\"}")
+                .when()
+                .post("/cancel-tag-sync-task")
+                .then()
+                .statusCode(400)
+                .header("X-Amzn-Errortype", equalTo("BadRequestException"))
+                .body("__type", equalTo("BadRequestException"));
+    }
+
+    @Test
     void getGroupOnAMissingGroupFailsWithNotFoundException() {
         given()
                 .contentType("application/json")
@@ -46,6 +90,7 @@ class ResourceGroupsIntegrationTest {
                 .post("/get-group")
                 .then()
                 .statusCode(404)
+                .header("X-Amzn-Errortype", equalTo("NotFoundException"))
                 .body("__type", equalTo("NotFoundException"));
     }
 
@@ -59,6 +104,7 @@ class ResourceGroupsIntegrationTest {
                 .post("/list-grouping-statuses")
                 .then()
                 .statusCode(404)
+                .header("X-Amzn-Errortype", equalTo("NotFoundException"))
                 .body("__type", equalTo("NotFoundException"));
     }
 
@@ -160,6 +206,7 @@ class ResourceGroupsIntegrationTest {
                 .post("/list-grouping-statuses")
                 .then()
                 .statusCode(400)
+                .header("X-Amzn-Errortype", equalTo("BadRequestException"))
                 .body("__type", equalTo("BadRequestException"))
                 .body("message", org.hamcrest.Matchers.containsString("application group"));
 
@@ -208,6 +255,7 @@ class ResourceGroupsIntegrationTest {
                 .post("/start-tag-sync-task")
                 .then()
                 .statusCode(400)
+                .header("X-Amzn-Errortype", equalTo("BadRequestException"))
                 .body("__type", equalTo("BadRequestException"));
 
         given()
@@ -229,8 +277,9 @@ class ResourceGroupsIntegrationTest {
                 .when()
                 .post("/cancel-tag-sync-task")
                 .then()
-                .statusCode(404)
-                .body("__type", equalTo("NotFoundException"));
+                .statusCode(400)
+                .header("X-Amzn-Errortype", equalTo("BadRequestException"))
+                .body("__type", equalTo("BadRequestException"));
 
         given()
                 .contentType("application/json")
@@ -261,6 +310,7 @@ class ResourceGroupsIntegrationTest {
                 .post("/get-group")
                 .then()
                 .statusCode(404)
+                .header("X-Amzn-Errortype", equalTo("NotFoundException"))
                 .body("__type", equalTo("NotFoundException"));
     }
 

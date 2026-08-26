@@ -18,6 +18,10 @@ import java.util.regex.Pattern;
  * path-style catch-all. Floci serves every service on one port, so SigV4
  * credential scope {@code resource-groups} is rewritten onto an internal prefix
  * the Resource Groups controller owns.
+ *
+ * <p>Function URL invocations are rewritten to {@code /lambda-url/{urlId}/...}
+ * before this filter. Prefixing those paths with {@code /aws-resource-groups}
+ * 404s the Lambda fixture the Bindings suite probes at {@code /bindings}.
  */
 @Provider
 @PreMatching
@@ -31,6 +35,10 @@ public class ResourceGroupsRoutingFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        String host = requestContext.getHeaderString("Host");
+        if (isLambdaUrlHost(host)) {
+            return;
+        }
         if (!isResourceGroups(requestContext.getHeaderString("Authorization"))) {
             return;
         }
@@ -55,9 +63,14 @@ public class ResourceGroupsRoutingFilter implements ContainerRequestFilter {
                 && ResourceGroupsService.SERVICE.equals(matcher.group(1).toLowerCase(Locale.ROOT));
     }
 
+    static boolean isLambdaUrlHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains(".lambda-url.");
+    }
+
     /**
      * Prefixes resource-groups-signed paths onto {@link #INTERNAL_PREFIX},
      * stripping a trailing slash so RestAssured and the SDK hit the same resource.
+     * Function URL invocations stay on {@code /lambda-url/{urlId}/...}.
      */
     static String rewritePath(String path) {
         if (path == null || path.isBlank()) {
@@ -66,7 +79,15 @@ public class ResourceGroupsRoutingFilter implements ContainerRequestFilter {
         if (path.equals(INTERNAL_PREFIX) || path.startsWith(INTERNAL_PREFIX + "/")) {
             return path;
         }
-        return INTERNAL_PREFIX + stripTrailingSlash(path);
+        String normalized = stripTrailingSlash(path);
+        if (isLambdaUrlPath(normalized)) {
+            return path;
+        }
+        return INTERNAL_PREFIX + normalized;
+    }
+
+    static boolean isLambdaUrlPath(String path) {
+        return "/lambda-url".equals(path) || path.startsWith("/lambda-url/");
     }
 
     static String stripTrailingSlash(String path) {

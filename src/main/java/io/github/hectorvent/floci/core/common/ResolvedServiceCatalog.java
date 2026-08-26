@@ -132,6 +132,7 @@ import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerCont
 import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerErrorHeaderFilter;
 import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerRoutingFilter;
 import io.github.hectorvent.floci.services.resourcegroups.ResourceGroupsController;
+import io.github.hectorvent.floci.services.resourcegroups.ResourceGroupsErrorHeaderFilter;
 import io.github.hectorvent.floci.services.resourcegroups.ResourceGroupsRoutingFilter;
 import io.github.hectorvent.floci.services.oam.OamController;
 import io.github.hectorvent.floci.services.xray.XRayController;
@@ -1080,7 +1081,8 @@ public class ResolvedServiceCatalog {
                         ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("resource-groups"), Set.of(),
-                        Set.of(ResourceGroupsController.class, ResourceGroupsRoutingFilter.class)),
+                        Set.of(ResourceGroupsController.class, ResourceGroupsRoutingFilter.class,
+                                ResourceGroupsErrorHeaderFilter.class)),
                 descriptor("oam", "oam", config.services().oam().enabled(), true,
                         "oam", storageMode(config.storage().services().oam().mode(), config.storage().mode()),
                         config.storage().services().oam().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * AWS Resource Groups restJson1 (2017-11-27).
@@ -42,6 +43,15 @@ public class ResourceGroupsService implements Resettable {
     private static final String APPLICATION_GROUP_TYPE = "AWS::ResourceGroups::ApplicationGroup";
     private static final String CAPACITY_POOL_TYPE = "AWS::EC2::CapacityReservationPool";
     private static final String HOST_MGMT_TYPE = "AWS::EC2::HostManagement";
+    /**
+     * {@code TagSyncTaskArn} from the Resource Groups API. CancelTagSyncTask
+     * does not document {@code NotFoundException}; malformed ARNs and missing
+     * tasks both surface as {@code BadRequestException} so distilled maps a
+     * typed error instead of {@code UnknownAwsError}.
+     */
+    private static final Pattern TAG_SYNC_TASK_ARN = Pattern.compile(
+            "arn:aws(-[a-z]+)*:resource-groups:[a-z]{2}(-[a-z]+)+-\\d{1}:[0-9]{12}"
+                    + ":group/[a-zA-Z0-9_.-]{1,150}/[a-z0-9]{26}/tag-sync-task/[a-z0-9]{26}");
 
     private final StorageBackend<String, ResourceGroup> store;
     private final RegionResolver regionResolver;
@@ -370,11 +380,10 @@ public class ResourceGroupsService implements Resettable {
 
     public ObjectNode cancelTagSyncTask(JsonNode request) {
         requireObject(request);
-        String taskArn = text(request, "TaskArn");
-        if (taskArn == null || taskArn.isBlank()) {
-            throw new AwsException("BadRequestException", "TaskArn is required.", 400);
-        }
-        throw new AwsException("NotFoundException", "Tag-sync task not found: " + taskArn, 404);
+        String taskArn = requireTagSyncTaskArn(request);
+        throw new AwsException("BadRequestException",
+                "Cannot cancel tag-sync task: the TaskArn is invalid or the task does not exist: "
+                        + taskArn, 400);
     }
 
     private ObjectNode mutateMembership(String region, JsonNode request, boolean add) {
@@ -722,6 +731,21 @@ public class ResourceGroupsService implements Resettable {
         if (name.regionMatches(true, 0, "AWS", 0, 3)) {
             throw new AwsException("BadRequestException", "Group names cannot start with 'AWS'.", 400);
         }
+    }
+
+    private String requireTagSyncTaskArn(JsonNode request) {
+        String taskArn = text(request, "TaskArn");
+        if (taskArn == null || taskArn.isBlank()) {
+            throw new AwsException("BadRequestException", "TaskArn is required.", 400);
+        }
+        if (taskArn.length() < 12 || taskArn.length() > 1600
+                || !TAG_SYNC_TASK_ARN.matcher(taskArn).matches()) {
+            throw new AwsException("BadRequestException",
+                    "1 validation error detected: Value at 'taskArn' failed to satisfy constraint: "
+                            + "Member must satisfy regular expression pattern for TagSyncTaskArn.",
+                    400);
+        }
+        return taskArn;
     }
 
     private String requiredText(JsonNode request, String field) {
