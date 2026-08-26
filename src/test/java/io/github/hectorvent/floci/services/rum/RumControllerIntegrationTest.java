@@ -6,6 +6,8 @@ import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -33,6 +35,65 @@ class RumControllerIntegrationTest {
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    @Test
+    void getAppMonitorOnANonexistentMonitorFailsWithResourceNotFoundException() {
+        given()
+                .contentType("application/json")
+                .header("Authorization", auth("000000000110", EAST))
+                .when()
+                .get("/appmonitor/alchemy-nonexistent-rum-monitor-probe")
+                .then()
+                .statusCode(404)
+                .header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"))
+                .body("__type", equalTo("ResourceNotFoundException"))
+                .body("resourceName", equalTo("alchemy-nonexistent-rum-monitor-probe"))
+                .body("resourceType", equalTo("AppMonitor"));
+    }
+
+    @Test
+    void tagResourceAndUntagResourceConvergeOnObservedTags() {
+        String authorization = auth("000000000111", EAST);
+        create(authorization, """
+                {
+                  "Name":"tagged-monitor",
+                  "Domain":"example.com",
+                  "Tags":{"fixture":"rum-app-monitor","alchemy::id":"TestMonitor"}
+                }
+                """);
+        String arn = "arn:aws:rum:" + EAST + ":000000000111:appmonitor/tagged-monitor";
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"Tags\":{\"phase\":\"two\"}}")
+                .when()
+                .post("/tags/" + encode(arn))
+                .then()
+                .statusCode(204);
+
+        get(authorization, "tagged-monitor")
+                .then()
+                .statusCode(200)
+                .body("AppMonitor.Tags.fixture", equalTo("rum-app-monitor"))
+                .body("AppMonitor.Tags.phase", equalTo("two"))
+                .body("AppMonitor.Tags['alchemy::id']", equalTo("TestMonitor"));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("tagKeys", "phase")
+                .when()
+                .delete("/tags/" + encode(arn))
+                .then()
+                .statusCode(204);
+
+        get(authorization, "tagged-monitor")
+                .then()
+                .statusCode(200)
+                .body("AppMonitor.Tags.phase", equalTo(null))
+                .body("AppMonitor.Tags.fixture", equalTo("rum-app-monitor"))
+                .body("AppMonitor.Tags['alchemy::id']", equalTo("TestMonitor"));
     }
 
     @Test
@@ -295,6 +356,219 @@ class RumControllerIntegrationTest {
                 .then()
                 .statusCode(400)
                 .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void resourcePolicyAndMetricsDestinationLifecycle() {
+        String authorization = auth("000000000111", EAST);
+        String name = "alchemy-test-rum-config-monitor";
+        create(authorization, "{\"Name\":\"" + name + "\",\"Domain\":\"example.com\"}");
+
+        String putDestinationBody = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"Destination\":\"CloudWatch\"}")
+                .when()
+                .post("/rummetrics/" + name + "/metricsdestination")
+                .then()
+                .statusCode(200)
+                .extract().asString();
+        assertTrue(putDestinationBody.isEmpty());
+
+        String sessionPattern = "{\"event_type\":[\"com.amazon.rum.session_start_event\"]}";
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {
+                          "Destination":"CloudWatch",
+                          "MetricDefinitions":[{"Name":"SessionCount","EventPattern":%s}]
+                        }
+                        """.formatted(jsonString(sessionPattern)))
+                .when()
+                .post("/rummetrics/" + name + "/metrics")
+                .then()
+                .statusCode(200)
+                .body("Errors.size()", equalTo(0))
+                .body("MetricDefinitions[0].Name", equalTo("SessionCount"));
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/rummetrics/" + name + "/metricsdestination")
+                .then()
+                .statusCode(200)
+                .body("Destinations[0].Destination", equalTo("CloudWatch"));
+
+        String sessionId = given()
+                .header("Authorization", authorization)
+                .queryParam("destination", "CloudWatch")
+                .when()
+                .get("/rummetrics/" + name + "/metrics")
+                .then()
+                .statusCode(200)
+                .body("MetricDefinitions.Name", equalTo(List.of("SessionCount")))
+                .extract().path("MetricDefinitions[0].MetricDefinitionId");
+
+        String policyDocument = """
+                {"Version":"2012-10-17","Statement":[{"Sid":"AlchemyRumTest","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::000000000111:root"},"Action":["rum:PutRumEvents"],"Resource":"*"}]}
+                """.strip();
+        String firstRevision = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"PolicyDocument\":" + jsonString(policyDocument) + "}")
+                .when()
+                .put("/appmonitor/" + name + "/policy")
+                .then()
+                .statusCode(200)
+                .body("PolicyDocument", equalTo(policyDocument))
+                .extract().path("PolicyRevisionId");
+        assertNotNull(firstRevision);
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/appmonitor/" + name + "/policy")
+                .then()
+                .statusCode(200)
+                .body("PolicyRevisionId", equalTo(firstRevision))
+                .body("PolicyDocument", equalTo(policyDocument));
+
+        String browserPattern = "{\"event_type\":[\"com.amazon.rum.session_start_event\"],\"metadata\":{\"browserName\":[\"Chrome\",\"Firefox\",\"Safari\"]}}";
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {
+                          "Destination":"CloudWatch",
+                          "MetricDefinitionId":"%s",
+                          "MetricDefinition":{
+                            "Name":"SessionCount",
+                            "EventPattern":%s,
+                            "DimensionKeys":{"metadata.browserName":"BrowserName"}
+                          }
+                        }
+                        """.formatted(sessionId, jsonString(browserPattern)))
+                .when()
+                .patch("/rummetrics/" + name + "/metrics")
+                .then()
+                .statusCode(200);
+
+        String jsPattern = "{\"event_type\":[\"com.amazon.rum.js_error_event\"]}";
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("""
+                        {
+                          "Destination":"CloudWatch",
+                          "MetricDefinitions":[{"Name":"JsErrorCount","EventPattern":%s}]
+                        }
+                        """.formatted(jsonString(jsPattern)))
+                .when()
+                .post("/rummetrics/" + name + "/metrics")
+                .then()
+                .statusCode(200)
+                .body("Errors.size()", equalTo(0));
+
+        Response afterUpdate = given()
+                .header("Authorization", authorization)
+                .queryParam("destination", "CloudWatch")
+                .when()
+                .get("/rummetrics/" + name + "/metrics")
+                .then()
+                .statusCode(200)
+                .extract().response();
+        assertEquals(List.of("JsErrorCount", "SessionCount"), afterUpdate.path("MetricDefinitions.Name"));
+        List<Map<String, Object>> definitions = afterUpdate.path("MetricDefinitions");
+        Map<String, Object> session = definitions.stream()
+                .filter(definition -> "SessionCount".equals(definition.get("Name")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("BrowserName", ((Map<?, ?>) session.get("DimensionKeys")).get("metadata.browserName"));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("destination", "CloudWatch")
+                .queryParam("metricDefinitionIds", sessionId)
+                .when()
+                .delete("/rummetrics/" + name + "/metrics")
+                .then()
+                .statusCode(200)
+                .body("Errors.size()", equalTo(0))
+                .body("MetricDefinitionIds", equalTo(List.of(sessionId)));
+
+        given()
+                .header("Authorization", authorization)
+                .queryParam("destination", "CloudWatch")
+                .when()
+                .get("/rummetrics/" + name + "/metrics")
+                .then()
+                .statusCode(200)
+                .body("MetricDefinitions.Name", equalTo(List.of("JsErrorCount")));
+
+        String rotated = policyDocument.replace("AlchemyRumTest", "AlchemyRumTestRotated");
+        String secondRevision = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"PolicyDocument\":" + jsonString(rotated)
+                        + ",\"PolicyRevisionId\":\"" + firstRevision + "\"}")
+                .when()
+                .put("/appmonitor/" + name + "/policy")
+                .then()
+                .statusCode(200)
+                .extract().path("PolicyRevisionId");
+        assertNotEquals(firstRevision, secondRevision);
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/appmonitor/" + name + "/policy")
+                .then()
+                .statusCode(200)
+                .body("PolicyDocument", equalTo(rotated));
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .delete("/appmonitor/" + name)
+                .then()
+                .statusCode(200);
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/appmonitor/" + name)
+                .then()
+                .statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/appmonitor/" + name + "/policy")
+                .then()
+                .statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void getResourcePolicyWithoutAPolicyReturnsPolicyNotFound() {
+        String authorization = auth("000000000112", EAST);
+        create(authorization, "{\"Name\":\"no-policy-monitor\",\"Domain\":\"example.com\"}");
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/appmonitor/no-policy-monitor/policy")
+                .then()
+                .statusCode(404)
+                .body("__type", equalTo("PolicyNotFoundException"));
+    }
+
+    private static String jsonString(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    private static String encode(String arn) {
+        return URLEncoder.encode(arn, StandardCharsets.UTF_8);
     }
 
     private static String auth(String accountId, String region) {
