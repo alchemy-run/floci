@@ -834,8 +834,17 @@ public class ApplicationSignalsService implements TagHandler {
     private static String canonicalWindow(JsonNode window) {
         JsonNode spec = window.get("Window");
         String durationUnit = spec != null && spec.has("DurationUnit") ? spec.get("DurationUnit").asText() : "";
-        String duration = spec != null && spec.has("Duration") ? spec.get("Duration").asText() : "";
-        String start = window.has("StartTime") ? window.get("StartTime").asText() : "";
+        String duration = spec != null && spec.has("Duration")
+                ? Long.toString(spec.get("Duration").asLong())
+                : "";
+        String start = "";
+        if (window.has("StartTime") && !window.get("StartTime").isNull()) {
+            try {
+                start = Long.toString(asEpoch(window.get("StartTime"), "StartTime"));
+            } catch (RuntimeException e) {
+                start = window.get("StartTime").asText();
+            }
+        }
         String reason = window.has("Reason") ? window.get("Reason").asText() : "";
         String recurrence = "";
         if (window.has("RecurrenceRule") && window.get("RecurrenceRule").has("Expression")) {
