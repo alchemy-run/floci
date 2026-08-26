@@ -165,6 +165,32 @@ class PersonalizeBindingsIntegrationTest {
     }
 
     @Test
+    void putUsersOnUsersDataset_returns200() {
+        String usersSchemaArn = personalize("CreateSchema",
+                "{\"name\":\"BindingsUsersSchema\",\"schema\":\"{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"Users\\\"}\"}")
+                .then()
+                .statusCode(200)
+                .extract().path("schemaArn");
+        String groupArn = personalize("CreateDatasetGroup", "{\"name\":\"BindingsUsersGroup\"}")
+                .then()
+                .statusCode(200)
+                .extract().path("datasetGroupArn");
+        String usersArn = personalize("CreateDataset", "{"
+                + "\"name\":\"BindingsUsers\","
+                + "\"schemaArn\":\"" + usersSchemaArn + "\","
+                + "\"datasetGroupArn\":\"" + groupArn + "\","
+                + "\"datasetType\":\"Users\"}")
+                .then()
+                .statusCode(200)
+                .extract().path("datasetArn");
+
+        events("/users", "{\"datasetArn\":\"" + usersArn
+                + "\",\"users\":[{\"userId\":\"alchemy-user-1\",\"properties\":\"{\\\"membership\\\":\\\"gold\\\"}\"}]}")
+                .then()
+                .statusCode(200);
+    }
+
+    @Test
     void bindingProbes_missingArns_returnResourceNotFoundException() {
         String campaign = "arn:aws:personalize:us-east-1:000000000000:campaign/alchemy-probe";
         String dataset = "arn:aws:personalize:us-east-1:000000000000:dataset/alchemy-probe/INTERACTIONS";
@@ -233,10 +259,55 @@ class PersonalizeBindingsIntegrationTest {
                 .body("__type", equalTo("ResourceNotFoundException"));
     }
 
+    @Test
+    void putActionInteractions_trackerWithoutActionInteractionsDataset_returnsResourceNotFoundException() {
+        String schemaArn = personalize("CreateSchema",
+                "{\"name\":\"BindingsActionIxSchema\",\"schema\":" + quote(INTERACTIONS_SCHEMA) + "}")
+                .then()
+                .statusCode(200)
+                .extract().path("schemaArn");
+        String groupArn = personalize("CreateDatasetGroup", "{\"name\":\"BindingsActionIxGroup\"}")
+                .then()
+                .statusCode(200)
+                .extract().path("datasetGroupArn");
+        personalize("CreateDataset", "{"
+                + "\"name\":\"BindingsActionIxDs\","
+                + "\"schemaArn\":\"" + schemaArn + "\","
+                + "\"datasetGroupArn\":\"" + groupArn + "\","
+                + "\"datasetType\":\"Interactions\"}")
+                .then()
+                .statusCode(200);
+        String trackerArn = personalize("CreateEventTracker", "{"
+                + "\"name\":\"BindingsActionIxTracker\","
+                + "\"datasetGroupArn\":\"" + groupArn + "\"}")
+                .then()
+                .statusCode(200)
+                .extract().path("eventTrackerArn");
+        String trackingId = personalize("DescribeEventTracker",
+                "{\"eventTrackerArn\":\"" + trackerArn + "\"}")
+                .then()
+                .statusCode(200)
+                .extract().path("eventTracker.trackingId");
+
+        events("/action-interactions", "{"
+                + "\"trackingId\":\"" + trackingId + "\","
+                + "\"actionInteractions\":[{"
+                + "\"actionId\":\"alchemy-action-1\","
+                + "\"userId\":\"alchemy-user-1\","
+                + "\"sessionId\":\"alchemy-session-1\","
+                + "\"eventType\":\"Taken\","
+                + "\"timestamp\":1700000000}]}")
+                .then()
+                .statusCode(404)
+                .header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"))
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
     private static void assertNotFound(String action, String body) {
         personalize(action, body)
                 .then()
                 .statusCode(404)
+                .header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"))
                 .body("__type", equalTo("ResourceNotFoundException"));
     }
 
