@@ -62,10 +62,21 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
         if (bucket == null) return;
 
         String path = uri.getRawPath();
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
 
         // Do not rewrite S3 Control API paths — the account ID appears as a host label
         // in the S3ControlClient but the path belongs to the S3 Control service, not S3.
         if (path.startsWith("/v20180820/")) {
+            return;
+        }
+
+        // Distilled (and some SDKs) keep the Smithy `/{Bucket}/...` URI on a
+        // virtual-hosted endpoint, producing Host={bucket}.localhost and
+        // Path=/{bucket}?tagging (or /{bucket}/{key}). Prepending the bucket
+        // again turns GetBucketTagging into GetObjectTagging of key={bucket}.
+        if (pathAlreadyIncludesBucket(path, bucket)) {
             return;
         }
 
@@ -97,6 +108,19 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
             return hostHeader;
         }
         return requestUri != null ? requestUri.getAuthority() : null;
+    }
+
+    /**
+     * True when {@code path} is already path-style for {@code bucket}
+     * ({@code /bucket} or {@code /bucket/...}), so a virtual-host rewrite
+     * would duplicate the bucket segment.
+     */
+    static boolean pathAlreadyIncludesBucket(String path, String bucket) {
+        if (path == null || bucket == null || bucket.isEmpty()) {
+            return false;
+        }
+        String prefix = "/" + bucket;
+        return path.equals(prefix) || path.startsWith(prefix + "/");
     }
 
     /**

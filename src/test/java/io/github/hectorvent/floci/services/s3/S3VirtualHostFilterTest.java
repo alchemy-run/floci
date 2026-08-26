@@ -184,6 +184,35 @@ class S3VirtualHostFilterTest {
     // --- HTTP/2 website request: the path rewrite must preserve the s3-website authority (#1954) ---
 
     @Test
+    void pathAlreadyIncludesBucketDetectsDistilledStyleUri() {
+        assertEquals(true, S3VirtualHostFilter.pathAlreadyIncludesBucket("/my-bucket", "my-bucket"));
+        assertEquals(true, S3VirtualHostFilter.pathAlreadyIncludesBucket("/my-bucket/", "my-bucket"));
+        assertEquals(true, S3VirtualHostFilter.pathAlreadyIncludesBucket("/my-bucket/key.txt", "my-bucket"));
+        assertEquals(false, S3VirtualHostFilter.pathAlreadyIncludesBucket("/", "my-bucket"));
+        assertEquals(false, S3VirtualHostFilter.pathAlreadyIncludesBucket("/key.txt", "my-bucket"));
+        assertEquals(false, S3VirtualHostFilter.pathAlreadyIncludesBucket("/my-bucket-other", "my-bucket"));
+        assertEquals(false, S3VirtualHostFilter.pathAlreadyIncludesBucket("/my-bucke", "my-bucket"));
+    }
+
+    @Test
+    void distilledVirtualHostedBucketOpDoesNotDoublePrefix() {
+        // Distilled GetBucketTagging with Endpoint=http://localhost:4566 uses
+        // Host=my-bucket.localhost and Path=/my-bucket?tagging. Rewriting that
+        // to /my-bucket/my-bucket?tagging would miss the bucket-level handler.
+        URI requestUri = URI.create("http://my-bucket.localhost:4566/my-bucket?tagging");
+
+        UriInfo uriInfo = mock(UriInfo.class);
+        when(uriInfo.getRequestUri()).thenReturn(requestUri);
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+        when(ctx.getHeaderString("Host")).thenReturn("my-bucket.localhost:4566");
+
+        new S3VirtualHostFilter().filter(ctx);
+
+        verify(ctx, org.mockito.Mockito.never()).setRequestUri(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void http2WebsiteRequestRewritePreservesAuthorityForDownstreamDetection() {
         // Over HTTP/2 a website request has no Host header. The filter rewrites the path to
         // /bucket/key for the path-style S3 controller, but must keep the s3-website authority

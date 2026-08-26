@@ -410,7 +410,8 @@ public class CloudTrailService {
     }
 
     private void publishToEventBridge(String region, ObjectNode record) {
-        if (eventBridgeService == null || eventBridgeService.isUnsatisfied()) {
+        if (eventBridgeService == null || !eventBridgeService.isResolvable()) {
+            LOG.debug("EventBridge is not resolvable; skipping CloudTrail API-call delivery");
             return;
         }
         String eventSource = record.path("eventSource").asText("s3.amazonaws.com");
