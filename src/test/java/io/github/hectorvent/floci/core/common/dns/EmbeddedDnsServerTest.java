@@ -167,6 +167,22 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_rumDataplaneHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("dataplane.rum.us-east-1.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("dataplane.rum-fips.us-west-2.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertTrue(dns.resolveARecord("rum.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("dataplane.rum.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(EmbeddedDnsServer.isRumDataplaneHost("dataplane.rum.us-east-1.amazonaws.com"));
+        assertFalse(EmbeddedDnsServer.isRumDataplaneHost("rum.us-east-1.amazonaws.com"));
+    }
+
+    @Test
     void resolveARecord_prefersEc2PrivateDnsAddressOverFlociWildcard() {
         assertEquals(
                 "172.16.128.9",

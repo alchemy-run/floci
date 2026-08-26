@@ -610,7 +610,9 @@ class ContainerLauncherTest {
                 "IPv6 addresses ending in :: must not be classified as missing an ip");
         assertTrue(extraHosts.contains("aps-workspaces.us-east-1.amazonaws.com:host-gateway"));
         assertTrue(extraHosts.contains("aps-workspaces-fips.us-east-1.amazonaws.com:host-gateway"));
-        assertEquals(6, extraHosts.size(),
+        assertTrue(extraHosts.contains("dataplane.rum.us-east-1.amazonaws.com:host-gateway"));
+        assertTrue(extraHosts.contains("dataplane.rum-fips.us-east-1.amazonaws.com:host-gateway"));
+        assertEquals(8, extraHosts.size(),
                 "entries without a hostname and an ip must be skipped, not passed to Docker");
     }
 
@@ -630,8 +632,11 @@ class ContainerLauncherTest {
         assertTrue(extraHosts.contains("aps-workspaces.us-east-1.amazonaws.com:host-gateway"),
                 "AMP data-plane host must resolve to the Docker host when embedded DNS is off");
         assertTrue(extraHosts.contains("aps-workspaces-fips.us-east-1.amazonaws.com:host-gateway"));
-        assertEquals(2, extraHosts.size(),
-                "only AMP data-plane extra hosts when the config is unset (non-Linux host in this test)");
+        assertTrue(extraHosts.contains("dataplane.rum.us-east-1.amazonaws.com:host-gateway"),
+                "RUM PutRumEvents dataplane host must resolve to the Docker host when embedded DNS is off");
+        assertTrue(extraHosts.contains("dataplane.rum-fips.us-east-1.amazonaws.com:host-gateway"));
+        assertEquals(4, extraHosts.size(),
+                "built-in AMP and RUM data-plane extra hosts when the config is unset (non-Linux host in this test)");
     }
 
     @Test

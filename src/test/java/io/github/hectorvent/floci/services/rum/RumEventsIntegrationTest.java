@@ -77,6 +77,44 @@ class RumEventsIntegrationTest {
     }
 
     @Test
+    void putRumEventsAcceptsDataplaneHostPrefix() {
+        String authorization = auth("000000000207", EAST);
+        String name = "dataplane-host-monitor";
+        String id = create(authorization, name);
+        String eventId = UUID.randomUUID().toString();
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .header("Host", "dataplane.rum.us-east-1.amazonaws.com")
+                .body(Map.of(
+                        "BatchId", UUID.randomUUID().toString(),
+                        "AppMonitorDetails", Map.of("name", name, "id", id),
+                        "UserDetails", Map.of("userId", "u", "sessionId", "s"),
+                        "RumEvents", List.of(Map.of(
+                                "id", eventId,
+                                "timestamp", 1_710_000_000L,
+                                "type", TYPE,
+                                "details", "{}"))))
+                .when()
+                .post("/appmonitors/" + id + "/")
+                .then()
+                .statusCode(200);
+
+        List<String> events = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"TimeRange\":{\"After\":0}}")
+                .when()
+                .post("/appmonitor/" + name + "/data")
+                .then()
+                .statusCode(200)
+                .extract().path("Events");
+        assertEquals(1, events.size());
+        assertTrue(events.getFirst().contains(eventId));
+    }
+
+    @Test
     void getAppMonitorDataOnANewMonitorReturnsAnEmptyEventsList() {
         String authorization = auth("000000000202", EAST);
         String name = "empty-data-monitor";

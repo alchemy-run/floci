@@ -248,6 +248,8 @@ public class ContainerLauncher {
         specBuilder.withEmbeddedDns();
         specBuilder.withExtraHost("aps-workspaces." + lambdaRegion + ".amazonaws.com", "host-gateway");
         specBuilder.withExtraHost("aps-workspaces-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("dataplane.rum." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("dataplane.rum-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
 
         // Inject extra hosts entries into the container if present. Split on the FIRST
         // colon, mirroring docker --add-host: hostnames cannot contain colons, but IPv6
