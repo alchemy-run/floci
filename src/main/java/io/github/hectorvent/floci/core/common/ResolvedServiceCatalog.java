@@ -104,6 +104,7 @@ import io.github.hectorvent.floci.services.repostspace.RepostspaceController;
 import io.github.hectorvent.floci.services.repostspace.RepostspaceErrorHeaderFilter;
 import io.github.hectorvent.floci.services.repostspace.RepostspaceRoutingFilter;
 import io.github.hectorvent.floci.services.rum.RumController;
+import io.github.hectorvent.floci.services.ssmincidents.SsmIncidentsController;
 import io.github.hectorvent.floci.services.oam.OamController;
 import io.github.hectorvent.floci.services.observabilityadmin.ObservabilityAdminController;
 import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
@@ -158,6 +159,12 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("SSMContacts."), Set.of("ssm-contacts"), Set.of(), Set.of()),
+                descriptor("ssm-incidents", "ssm-incidents", config.services().ssmIncidents().enabled(), true,
+                        "ssm-incidents",
+                        storageMode(config.storage().services().ssmIncidents().mode(), config.storage().mode()),
+                        config.storage().services().ssmIncidents().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ssm-incidents"), Set.of(), Set.of(SsmIncidentsController.class)),
                 descriptor("sqs", "sqs", config.services().sqs().enabled(), true,
                         "sqs", storageMode(config.storage().services().sqs().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.SQS, ServiceProtocol.QUERY,

@@ -249,6 +249,8 @@ public interface EmulatorConfig {
 
     interface ServiceStorageOverrides {
         SsmStorageConfig ssm();
+        @WithName("ssm-incidents")
+        SsmIncidentsStorageConfig ssmIncidents();
         SqsStorageConfig sqs();
         S3StorageConfig s3();
         DynamoDbStorageConfig dynamodb();
@@ -344,6 +346,13 @@ public interface EmulatorConfig {
     }
 
     interface SsmStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface SsmIncidentsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -990,6 +999,8 @@ public interface EmulatorConfig {
         SsmServiceConfig ssm();
         @WithName("ssm-contacts")
         SsmContactsServiceConfig ssmContacts();
+        @WithName("ssm-incidents")
+        SsmIncidentsServiceConfig ssmIncidents();
         SqsServiceConfig sqs();
         S3ServiceConfig s3();
         DynamoDbServiceConfig dynamodb();
@@ -1601,6 +1612,11 @@ public interface EmulatorConfig {
     }
 
     interface SsmContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SsmIncidentsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

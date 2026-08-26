@@ -92,6 +92,8 @@ floci:
     services:
       ssm:
         flush-interval-ms: 5000
+      ssm-incidents:
+        flush-interval-ms: 5000
       dynamodb:
         flush-interval-ms: 5000
       sns:
@@ -312,6 +314,8 @@ floci:
       enabled: true
       max-parameter-history: 5
     ssm-contacts:
+      enabled: true
+    ssm-incidents:
       enabled: true
     sqs:
       enabled: true
