@@ -22,6 +22,7 @@ import jakarta.inject.Inject;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -269,7 +270,14 @@ public class Macie2Service implements Resettable, TagHandler {
 
     public List<ClassificationJob> listClassificationJobs(String region) {
         requireEnabled(region);
-        return new ArrayList<>(jobs.values());
+        String account = regionResolver.getAccountId();
+        List<ClassificationJob> matches = new ArrayList<>();
+        for (ClassificationJob job : jobs.values()) {
+            if (jobOwnedBy(job, account, region)) {
+                matches.add(job);
+            }
+        }
+        return matches;
     }
 
     public synchronized void createSampleFindings(String region, JsonNode request) {
@@ -927,7 +935,20 @@ public class Macie2Service implements Resettable, TagHandler {
     }
 
     private static String now() {
-        return Instant.now().toString();
+        return Instant.now().truncatedTo(ChronoUnit.MILLIS).toString();
+    }
+
+    private static boolean jobOwnedBy(ClassificationJob job, String account, String region) {
+        String arn = job.getJobArn();
+        if (arn == null || arn.isBlank()) {
+            return false;
+        }
+        try {
+            AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+            return account.equals(parsed.accountId()) && region.equals(parsed.region());
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private static String newId() {

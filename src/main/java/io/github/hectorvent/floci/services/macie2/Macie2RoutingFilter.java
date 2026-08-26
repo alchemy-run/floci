@@ -66,6 +66,12 @@ public class Macie2RoutingFilter implements ContainerRequestFilter {
         if ("/tags".equals(normalized) || normalized.startsWith("/tags/")) {
             return path;
         }
+        // Function URL invocations are rewritten to /lambda-url/{urlId}/...
+        // before this filter. Prefixing those paths with /macie2 404s the
+        // Lambda fixture the Bindings suite probes at /bindings.
+        if ("/lambda-url".equals(normalized) || normalized.startsWith("/lambda-url/")) {
+            return path;
+        }
         return INTERNAL_PREFIX + normalized;
     }
 
