@@ -2,10 +2,14 @@ package io.github.hectorvent.floci.services.timestream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * JSON 1.0 handler for Amazon Timestream write + query. Dispatched from
@@ -29,7 +33,8 @@ public class TimestreamJsonHandler {
         JsonNode body = request == null || request.isNull() || request.isMissingNode()
                 ? objectMapper.createObjectNode()
                 : request;
-        return switch (action) {
+        try {
+            return switch (action) {
             case "DescribeEndpoints" -> ok(service.describeEndpoints(host));
             case "CreateDatabase" -> ok(service.createDatabase(body, region));
             case "DescribeDatabase" -> ok(service.describeDatabase(body));
@@ -45,11 +50,27 @@ public class TimestreamJsonHandler {
             case "Query" -> ok(service.query(body));
             case "PrepareQuery" -> ok(service.prepareQuery(body));
             case "CancelQuery" -> ok(service.cancelQuery(body));
+            case "CreateScheduledQuery" -> ok(service.createScheduledQuery(body, region));
+            case "DescribeScheduledQuery" -> ok(service.describeScheduledQuery(body));
+            case "ListScheduledQueries" -> ok(service.listScheduledQueries());
+            case "UpdateScheduledQuery" -> ok(service.updateScheduledQuery(body));
+            case "DeleteScheduledQuery" -> ok(service.deleteScheduledQuery(body));
+            case "ExecuteScheduledQuery" -> ok(service.executeScheduledQuery(body));
             case "TagResource" -> ok(service.tagResource(body));
             case "UntagResource" -> ok(service.untagResource(body));
             case "ListTagsForResource" -> ok(service.listTagsForResource(body));
             default -> JsonErrorResponseUtils.createUnknownOperationErrorResponse(TARGET_PREFIX + action);
-        };
+            };
+        } catch (AwsException e) {
+            if (e.getExtendedData() == null) {
+                throw e;
+            }
+            Map<String, Object> entity = new LinkedHashMap<>();
+            entity.put("__type", e.jsonType());
+            entity.put("message", e.getMessage());
+            entity.putAll(e.getExtendedData());
+            return Response.status(e.getHttpStatus()).entity(entity).build();
+        }
     }
 
     private static Response ok(Object body) {

@@ -21,21 +21,29 @@ import java.util.regex.Pattern;
 
 /**
  * In-memory Amazon Timestream for LiveAnalytics (write + query). JSON 1.0
- * {@code Timestream_20181101.*}.
+ * {@code Timestream_20181101.*}. DescribeEndpoints echoes the inbound Host so
+ * Alchemy's {@code https://} discovery rewrite still lands on this gateway.
  *
- * <p>LiveAnalytics is closed to new AWS accounts. {@code DescribeEndpoints}
- * rejects with {@code AccessDeniedException} whose message matches Alchemy's
- * distilled {@code TimestreamNotOnboarded} synthetic error.
+ * WriteRecords ingests the valid subset of a batch and reports out-of-retention
+ * timestamps as {@code RejectedRecordsException} (HTTP 419). Query COUNT(*)
+ * supports an optional {@code WHERE <dimension> = '<value>'} filter used by
+ * Alchemy's RecordsSink tests.
  */
 @ApplicationScoped
 public class TimestreamService implements Resettable {
 
     private static final int DEFAULT_MEMORY_HOURS = 6;
     private static final int DEFAULT_MAGNETIC_DAYS = 73_000;
+    private static final int ENDPOINT_CACHE_MINUTES = 1_440;
+    private static final int MAX_RECORDS_PER_WRITE = 100;
     static final String NOT_ONBOARDED_MESSAGE =
             "Only existing Timestream for LiveAnalytics customers can access this service.";
+    private static final String OUT_OF_RETENTION_REASON =
+            "The record timestamp is outside the retention period of the memory store and magnetic store writes are not enabled.";
     private static final Pattern COUNT_FROM = Pattern.compile(
-            "SELECT\\s+COUNT\\s*\\(\\s*\\*\\s*\\)\\s+(?:AS\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+)?FROM\\s+\"([^\"]+)\"\\s*\\.\\s*\"([^\"]+)\"",
+            "SELECT\\s+COUNT\\s*\\(\\s*\\*\\s*\\)\\s+(?:AS\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+)?"
+                    + "FROM\\s+\"([^\"]+)\"\\s*\\.\\s*\"([^\"]+)\""
+                    + "(?:\\s+WHERE\\s+\"?([A-Za-z_][A-Za-z0-9_]*)\"?\\s*=\\s*'([^']*)')?",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     static final class Database {
@@ -62,8 +70,27 @@ public class TimestreamService implements Resettable {
         final List<Map<String, Object>> records = Collections.synchronizedList(new ArrayList<>());
     }
 
+    static final class ScheduledQueryRecord {
+        String name;
+        String arn;
+        String queryString;
+        String state = "ENABLED";
+        String executionRoleArn;
+        String kmsKeyId;
+        long creationTime;
+        Object scheduleConfiguration;
+        Object notificationConfiguration;
+        Object targetConfiguration;
+        Object errorReportConfiguration;
+        final Map<String, String> tags = new LinkedHashMap<>();
+    }
+
     private final RegionResolver regionResolver;
     private final ConcurrentHashMap<String, Database> databases = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ScheduledQueryRecord> scheduledQueriesByName =
+            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ScheduledQueryRecord> scheduledQueriesByArn =
+            new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Map<String, String>> tagsByArn = new ConcurrentHashMap<>();
 
     @Inject
@@ -78,14 +105,24 @@ public class TimestreamService implements Resettable {
     @Override
     public void clear() {
         databases.clear();
+        scheduledQueriesByName.clear();
+        scheduledQueriesByArn.clear();
         tagsByArn.clear();
     }
 
-    @SuppressWarnings("unused")
     public Map<String, Object> describeEndpoints(String host) {
-        throw notOnboarded();
+        String address = host == null || host.isBlank() ? "localhost:4566" : host.trim();
+        if (address.startsWith("[") && address.contains("]")) {
+            int end = address.indexOf(']');
+            String ipv6 = address.substring(1, end);
+            String rest = address.substring(end + 1);
+            address = ipv6 + rest;
+        }
+        Map<String, Object> endpoint = new LinkedHashMap<>();
+        endpoint.put("Address", address);
+        endpoint.put("CachePeriodInMinutes", ENDPOINT_CACHE_MINUTES);
+        return Map.of("Endpoints", List.of(endpoint));
     }
-
 
     public Map<String, Object> createDatabase(JsonNode request, String region) {
         String name = requireName(request, "DatabaseName");
@@ -233,18 +270,48 @@ public class TimestreamService implements Resettable {
         if (recordsNode == null || !recordsNode.isArray() || recordsNode.isEmpty()) {
             throw invalid("Records must contain at least one record.");
         }
+        if (recordsNode.size() > MAX_RECORDS_PER_WRITE) {
+            throw invalid("A single WriteRecords request can contain at most "
+                    + MAX_RECORDS_PER_WRITE + " records.");
+        }
         JsonNode common = request.get("CommonAttributes");
-        int ingested = 0;
+        boolean magneticWrites = magneticWritesEnabled(table);
+        long nowMillis = System.currentTimeMillis();
+        long memoryCutoff = nowMillis - hoursToMillis(table.memoryStoreRetentionPeriodInHours);
+        long magneticCutoff = nowMillis - daysToMillis(table.magneticStoreRetentionPeriodInDays);
+        List<Map<String, Object>> rejected = new ArrayList<>();
+        int memory = 0;
+        int magnetic = 0;
+        int index = 0;
         for (JsonNode recordNode : recordsNode) {
             Map<String, Object> record = mergeRecord(common, recordNode);
-            table.records.add(record);
-            ingested++;
+            long timeMillis = recordTimeMillis(record);
+            if (timeMillis >= memoryCutoff) {
+                table.records.add(record);
+                memory++;
+            } else if (magneticWrites && timeMillis >= magneticCutoff) {
+                table.records.add(record);
+                magnetic++;
+            } else {
+                Map<String, Object> rejection = new LinkedHashMap<>();
+                rejection.put("RecordIndex", index);
+                rejection.put("Reason", OUT_OF_RETENTION_REASON);
+                rejected.add(rejection);
+            }
+            index++;
         }
         table.lastUpdatedTime = nowSeconds();
+        if (!rejected.isEmpty()) {
+            throw new AwsException(
+                    "RejectedRecordsException",
+                    "One or more records have been rejected. See RejectedRecords for details.",
+                    419,
+                    Map.of("RejectedRecords", rejected));
+        }
         Map<String, Object> ingestedCounts = new LinkedHashMap<>();
-        ingestedCounts.put("Total", ingested);
-        ingestedCounts.put("MemoryStore", ingested);
-        ingestedCounts.put("MagneticStore", 0);
+        ingestedCounts.put("Total", memory + magnetic);
+        ingestedCounts.put("MemoryStore", memory);
+        ingestedCounts.put("MagneticStore", magnetic);
         return Map.of("RecordsIngested", ingestedCounts);
     }
 
@@ -256,7 +323,7 @@ public class TimestreamService implements Resettable {
         }
         String alias = matcher.group(1) != null ? matcher.group(1) : "count";
         Table table = requireTable(matcher.group(2), matcher.group(3));
-        int count = table.records.size();
+        int count = countRecords(table, matcher.group(4), matcher.group(5));
         Map<String, Object> type = Map.of("ScalarType", "BIGINT");
         Map<String, Object> column = new LinkedHashMap<>();
         column.put("Name", alias);
@@ -293,6 +360,66 @@ public class TimestreamService implements Resettable {
     public Map<String, Object> cancelQuery(JsonNode request) {
         requireText(request, "QueryId");
         return Map.of("CancellationMessage", "Successfully cancelled the query");
+    }
+
+    public Map<String, Object> createScheduledQuery(JsonNode request, String region) {
+        String name = requireName(request, "Name");
+        if (scheduledQueriesByName.containsKey(name)) {
+            throw conflict("A scheduled query with the name " + name + " already exists.");
+        }
+        ScheduledQueryRecord query = new ScheduledQueryRecord();
+        query.name = name;
+        query.arn = scheduledQueryArn(region, name);
+        query.queryString = requireText(request, "QueryString");
+        query.executionRoleArn = requireText(request, "ScheduledQueryExecutionRoleArn");
+        query.kmsKeyId = textOrNull(request, "KmsKeyId");
+        query.scheduleConfiguration = jsonValue(requireObject(request, "ScheduleConfiguration"));
+        query.notificationConfiguration = jsonValue(requireObject(request, "NotificationConfiguration"));
+        query.errorReportConfiguration = jsonValue(requireObject(request, "ErrorReportConfiguration"));
+        if (request.hasNonNull("TargetConfiguration")) {
+            query.targetConfiguration = jsonValue(request.get("TargetConfiguration"));
+        }
+        query.creationTime = nowSeconds();
+        applyTags(query.tags, request.get("Tags"));
+        tagsByArn.put(query.arn, query.tags);
+        scheduledQueriesByName.put(name, query);
+        scheduledQueriesByArn.put(query.arn, query);
+        return Map.of("Arn", query.arn);
+    }
+
+    public Map<String, Object> describeScheduledQuery(JsonNode request) {
+        return Map.of("ScheduledQuery", scheduledQueryDescription(requireScheduledQuery(request)));
+    }
+
+    public Map<String, Object> listScheduledQueries() {
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (ScheduledQueryRecord query : scheduledQueriesByName.values()) {
+            items.add(scheduledQuerySummary(query));
+        }
+        return Map.of("ScheduledQueries", items);
+    }
+
+    public Map<String, Object> updateScheduledQuery(JsonNode request) {
+        ScheduledQueryRecord query = requireScheduledQuery(request);
+        String state = requireText(request, "State");
+        if (!"ENABLED".equals(state) && !"DISABLED".equals(state)) {
+            throw invalid("State must be ENABLED or DISABLED.");
+        }
+        query.state = state;
+        return Map.of();
+    }
+
+    public Map<String, Object> deleteScheduledQuery(JsonNode request) {
+        ScheduledQueryRecord query = requireScheduledQuery(request);
+        scheduledQueriesByArn.remove(query.arn);
+        scheduledQueriesByName.remove(query.name);
+        tagsByArn.remove(query.arn);
+        return Map.of();
+    }
+
+    public Map<String, Object> executeScheduledQuery(JsonNode request) {
+        requireScheduledQuery(request);
+        return Map.of();
     }
 
     public Map<String, Object> tagResource(JsonNode request) {
@@ -344,6 +471,60 @@ public class TimestreamService implements Resettable {
         return table;
     }
 
+    private ScheduledQueryRecord requireScheduledQuery(JsonNode request) {
+        String arn = requireText(request, "ScheduledQueryArn");
+        ScheduledQueryRecord query = scheduledQueriesByArn.get(arn);
+        if (query == null) {
+            throw notFound("The scheduled query " + arn + " does not exist.");
+        }
+        return query;
+    }
+
+    private Map<String, Object> scheduledQueryDescription(ScheduledQueryRecord query) {
+        Map<String, Object> view = scheduledQuerySummary(query);
+        view.put("QueryString", query.queryString);
+        view.put("ScheduleConfiguration", query.scheduleConfiguration);
+        view.put("NotificationConfiguration", query.notificationConfiguration);
+        view.put("ScheduledQueryExecutionRoleArn", query.executionRoleArn);
+        view.put("ErrorReportConfiguration", query.errorReportConfiguration);
+        if (query.targetConfiguration != null) {
+            view.put("TargetConfiguration", query.targetConfiguration);
+        }
+        if (query.kmsKeyId != null) {
+            view.put("KmsKeyId", query.kmsKeyId);
+        }
+        return view;
+    }
+
+    private Map<String, Object> scheduledQuerySummary(ScheduledQueryRecord query) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("Arn", query.arn);
+        view.put("Name", query.name);
+        view.put("CreationTime", query.creationTime);
+        view.put("State", query.state);
+        if (query.errorReportConfiguration != null) {
+            view.put("ErrorReportConfiguration", query.errorReportConfiguration);
+        }
+        if (query.targetConfiguration instanceof Map<?, ?> target) {
+            Object timestream = target.get("TimestreamConfiguration");
+            if (timestream instanceof Map<?, ?> config) {
+                Map<String, Object> destination = new LinkedHashMap<>();
+                Object databaseName = config.get("DatabaseName");
+                Object tableName = config.get("TableName");
+                if (databaseName != null) {
+                    destination.put("DatabaseName", databaseName);
+                }
+                if (tableName != null) {
+                    destination.put("TableName", tableName);
+                }
+                if (!destination.isEmpty()) {
+                    view.put("TargetDestination", Map.of("TimestreamDestination", destination));
+                }
+            }
+        }
+        return view;
+    }
+
     private Map<String, Object> databaseView(Database database) {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("Arn", database.arn);
@@ -386,6 +567,12 @@ public class TimestreamService implements Resettable {
                 resolvedRegion(region),
                 accountId(),
                 "database/" + databaseName + "/table/" + tableName).toString();
+    }
+
+    private String scheduledQueryArn(String region, String name) {
+        return AwsArnUtils.Arn.of(
+                "timestream", resolvedRegion(region), accountId(), "scheduled-query/" + name)
+                .toString();
     }
 
     private String resolvedRegion(String region) {
@@ -447,6 +634,70 @@ public class TimestreamService implements Resettable {
         return merged;
     }
 
+    private static boolean magneticWritesEnabled(Table table) {
+        JsonNode properties = table.magneticStoreWriteProperties;
+        return properties != null && properties.path("EnableMagneticStoreWrites").asBoolean(false);
+    }
+
+    private static long hoursToMillis(int hours) {
+        return (long) hours * 3_600_000L;
+    }
+
+    private static long daysToMillis(int days) {
+        return (long) days * 86_400_000L;
+    }
+
+    private static long recordTimeMillis(Map<String, Object> record) {
+        Object time = record.get("Time");
+        if (time == null) {
+            return System.currentTimeMillis();
+        }
+        long raw;
+        try {
+            raw = Long.parseLong(String.valueOf(time));
+        } catch (NumberFormatException e) {
+            return System.currentTimeMillis();
+        }
+        Object unit = record.get("TimeUnit");
+        String timeUnit = unit == null ? "MILLISECONDS" : String.valueOf(unit).toUpperCase();
+        return switch (timeUnit) {
+            case "SECONDS" -> raw * 1_000L;
+            case "MICROSECONDS" -> raw / 1_000L;
+            case "NANOSECONDS" -> raw / 1_000_000L;
+            default -> raw;
+        };
+    }
+
+    private static int countRecords(Table table, String dimension, String value) {
+        if (dimension == null || value == null) {
+            return table.records.size();
+        }
+        int count = 0;
+        synchronized (table.records) {
+            for (Map<String, Object> record : table.records) {
+                if (dimensionEquals(record, dimension, value)) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static boolean dimensionEquals(Map<String, Object> record, String name, String value) {
+        Object dimensions = record.get("Dimensions");
+        if (!(dimensions instanceof List<?> list)) {
+            return false;
+        }
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> dim
+                    && name.equals(String.valueOf(dim.get("Name")))
+                    && value.equals(String.valueOf(dim.get("Value")))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static void copyRecordFields(Map<String, Object> target, JsonNode source) {
         if (source == null || source.isNull() || !source.isObject()) {
             return;
@@ -492,6 +743,13 @@ public class TimestreamService implements Resettable {
             throw invalid(field + " must be between 3 and 256 characters.");
         }
         return name;
+    }
+
+    private static JsonNode requireObject(JsonNode request, String field) {
+        if (request == null || !request.hasNonNull(field) || !request.get(field).isObject()) {
+            throw invalid(field + " is required.");
+        }
+        return request.get(field);
     }
 
     private static String requireText(JsonNode request, String field) {
