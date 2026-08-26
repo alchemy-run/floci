@@ -80,7 +80,9 @@ public class TranscribeService implements Resettable {
         requireNonBlank(jobName, "TranscriptionJobName");
         TranscriptionJob job = transcriptionJobs.get(jobName);
         if (job == null) {
-            throw new AwsException("NotFoundException",
+            // AWS reports a missing transcription job as BadRequestException, not
+            // NotFoundException — a documented Transcribe API quirk.
+            throw new AwsException("BadRequestException",
                     "The requested job couldn't be found. Check the job name and try your request again.", 400);
         }
         return job;
