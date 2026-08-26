@@ -21,8 +21,9 @@ import java.util.regex.Pattern;
 
 /**
  * In-memory Amazon Timestream for LiveAnalytics (write + query). JSON 1.0
- * {@code Timestream_20181101.*}. DescribeEndpoints echoes the inbound Host so
- * Alchemy's {@code https://} discovery rewrite still lands on this gateway.
+ * {@code Timestream_20181101.*}. DescribeEndpoints returns an Address that
+ * Alchemy's {@code https://} discovery rewrite can reach (the inbound Host
+ * when the gateway already speaks TLS; a sidecar TLS port otherwise).
  *
  * WriteRecords ingests the valid subset of a batch and reports out-of-retention
  * timestamps as {@code RejectedRecordsException} (HTTP 419). Query COUNT(*)
@@ -86,6 +87,7 @@ public class TimestreamService implements Resettable {
     }
 
     private final RegionResolver regionResolver;
+    private final TimestreamDiscoveryTls discoveryTls;
     private final ConcurrentHashMap<String, Database> databases = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ScheduledQueryRecord> scheduledQueriesByName =
             new ConcurrentHashMap<>();
@@ -94,12 +96,14 @@ public class TimestreamService implements Resettable {
     private final ConcurrentHashMap<String, Map<String, String>> tagsByArn = new ConcurrentHashMap<>();
 
     @Inject
-    public TimestreamService(RegionResolver regionResolver) {
+    public TimestreamService(RegionResolver regionResolver, TimestreamDiscoveryTls discoveryTls) {
         this.regionResolver = regionResolver;
+        this.discoveryTls = discoveryTls;
     }
 
     TimestreamService() {
         this.regionResolver = null;
+        this.discoveryTls = null;
     }
 
     @Override
@@ -111,6 +115,16 @@ public class TimestreamService implements Resettable {
     }
 
     public Map<String, Object> describeEndpoints(String host) {
+        String address = discoveryTls != null
+                ? discoveryTls.httpsAddress(host)
+                : echoHost(host);
+        Map<String, Object> endpoint = new LinkedHashMap<>();
+        endpoint.put("Address", address);
+        endpoint.put("CachePeriodInMinutes", ENDPOINT_CACHE_MINUTES);
+        return Map.of("Endpoints", List.of(endpoint));
+    }
+
+    private static String echoHost(String host) {
         String address = host == null || host.isBlank() ? "localhost:4566" : host.trim();
         if (address.startsWith("[") && address.contains("]")) {
             int end = address.indexOf(']');
@@ -118,10 +132,7 @@ public class TimestreamService implements Resettable {
             String rest = address.substring(end + 1);
             address = ipv6 + rest;
         }
-        Map<String, Object> endpoint = new LinkedHashMap<>();
-        endpoint.put("Address", address);
-        endpoint.put("CachePeriodInMinutes", ENDPOINT_CACHE_MINUTES);
-        return Map.of("Endpoints", List.of(endpoint));
+        return address;
     }
 
     public Map<String, Object> createDatabase(JsonNode request, String region) {
