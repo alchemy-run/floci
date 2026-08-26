@@ -60,6 +60,13 @@ public class RedshiftDataService implements Resettable {
         registerTarget(workgroup, cluster, databaseOf(request));
 
         Statement statement = newStatement(request, sql, false);
+        if (isLongRunning(sql)) {
+            // ExecuteStatement is async on AWS; keep count(*) scans RUNNING
+            // so CancelStatement can succeed before they finish.
+            statement.setStatus("RUNNING");
+            statements.put(statement.getId(), statement);
+            return statement;
+        }
         QueryResult result = evaluate(sql);
         finish(statement, result);
         statements.put(statement.getId(), statement);
@@ -261,6 +268,10 @@ public class RedshiftDataService implements Resettable {
         statement.setUpdatedAtEpochSeconds(statement.getCreatedAtEpochSeconds());
     }
 
+    static boolean isLongRunning(String sql) {
+        return sql != null && SELECT_COUNT.matcher(sql).find();
+    }
+
     static QueryResult evaluate(String sql) {
         Matcher literal = SELECT_LITERAL.matcher(sql);
         if (literal.matches()) {
@@ -268,7 +279,7 @@ public class RedshiftDataService implements Resettable {
             String alias = literal.group(2) == null ? "?column?" : literal.group(2);
             return new QueryResult(true, List.of(alias), List.of(List.of(value)));
         }
-        if (SELECT_COUNT.matcher(sql).find()) {
+        if (isLongRunning(sql)) {
             return new QueryResult(true, List.of("count"), List.of(List.of(0L)));
         }
         if (sql.trim().toUpperCase(Locale.ROOT).startsWith("SELECT")) {
