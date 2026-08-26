@@ -386,6 +386,7 @@ public class SchemasController {
 
     @POST
     @Path("/v1/discoverers/id/{discovererId}/start")
+    @Consumes(MediaType.WILDCARD)
     public Response startDiscoverer(
             @Context HttpHeaders headers, @PathParam("discovererId") String discovererId) {
         Discoverer discoverer = service.startDiscoverer(region(headers), discovererId);
@@ -394,6 +395,7 @@ public class SchemasController {
 
     @POST
     @Path("/v1/discoverers/id/{discovererId}/stop")
+    @Consumes(MediaType.WILDCARD)
     public Response stopDiscoverer(
             @Context HttpHeaders headers, @PathParam("discovererId") String discovererId) {
         Discoverer discoverer = service.stopDiscoverer(region(headers), discovererId);

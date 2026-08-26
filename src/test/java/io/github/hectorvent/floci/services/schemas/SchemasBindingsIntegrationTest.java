@@ -17,11 +17,10 @@ class SchemasBindingsIntegrationTest {
 
     private static final String EAST = "us-east-1";
     private static final String ACCOUNT = "000000000801";
-    private static final String CONTENT = """
-            {"openapi":"3.0.0","info":{"version":"1.0.0","title":"OrderCreated"},"paths":{},\
-            "components":{"schemas":{"OrderCreated":{"type":"object","properties":{\
-            "orderId":{"type":"string"},"amount":{"type":"number"}}}}}}
-            """;
+    private static final String CONTENT =
+            "{\"openapi\":\"3.0.0\",\"info\":{\"version\":\"1.0.0\",\"title\":\"OrderCreated\"},"
+                    + "\"paths\":{},\"components\":{\"schemas\":{\"OrderCreated\":{\"type\":\"object\","
+                    + "\"properties\":{\"orderId\":{\"type\":\"string\"},\"amount\":{\"type\":\"number\"}}}}}}";
 
     @BeforeAll
     static void configureRestAssured() {
@@ -170,6 +169,7 @@ class SchemasBindingsIntegrationTest {
                 .path("DiscovererId");
 
         given()
+                .contentType("application/json")
                 .header("Authorization", authorization)
                 .when()
                 .post("/v1/discoverers/id/" + discovererId + "/stop")
@@ -178,12 +178,23 @@ class SchemasBindingsIntegrationTest {
                 .body("State", equalTo("STOPPED"));
 
         given()
+                .contentType("application/json")
                 .header("Authorization", authorization)
                 .when()
                 .post("/v1/discoverers/id/" + discovererId + "/start")
                 .then()
                 .statusCode(200)
                 .body("State", equalTo("STARTED"));
+
+        // AWS SDKs and the Alchemy Lambda fixture POST with no body; some
+        // clients omit application/json. Empty POSTs must not 415.
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .post("/v1/discoverers/id/" + discovererId + "/stop")
+                .then()
+                .statusCode(200)
+                .body("State", equalTo("STOPPED"));
     }
 
     private static String auth(String accountId, String region) {
@@ -192,6 +203,10 @@ class SchemasBindingsIntegrationTest {
     }
 
     private static String jsonString(String raw) {
-        return "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        return "\"" + raw.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t") + "\"";
     }
 }
