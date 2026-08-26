@@ -283,6 +283,9 @@ public class ContainerLauncher {
         specBuilder.withExtraHost("personalize-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
         specBuilder.withExtraHost("dataplane.rum." + lambdaRegion + ".amazonaws.com", "host-gateway");
         specBuilder.withExtraHost("dataplane.rum-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("ivschat." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("ivschat-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("edge.ivschat." + lambdaRegion + ".amazonaws.com", "host-gateway");
         addDsqlDataPlaneHosts(specBuilder, fn);
 
         // Inject extra hosts entries into the container if present. Split on the FIRST

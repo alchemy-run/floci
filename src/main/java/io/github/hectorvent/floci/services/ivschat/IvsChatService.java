@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.ivschat;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -27,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +46,23 @@ import java.util.regex.Pattern;
  */
 @ApplicationScoped
 public class IvsChatService implements TagHandler {
+
+    public interface ChatSession {
+        String roomArn();
+
+        String userId();
+
+        void send(String frame);
+
+        void close(String reason);
+    }
+
+    public record ParsedChatToken(String roomArn, String userId, Set<String> capabilities,
+                                 Map<String, String> attributes) {
+    }
+
+    public record MessageReview(boolean denied, String content, Map<String, String> attributes) {
+    }
 
     private static final Logger LOG = Logger.getLogger(IvsChatService.class);
 
@@ -506,7 +525,7 @@ public class IvsChatService implements TagHandler {
     }
 
     private static String now() {
-        return Instant.now().toString();
+        return Instant.now().truncatedTo(ChronoUnit.MILLIS).toString();
     }
 
     private static void validateName(String name) {
@@ -671,5 +690,272 @@ public class IvsChatService implements TagHandler {
         public LoggingPage {
             items = List.copyOf(items);
         }
+    }
+
+    public record ChatToken(String token, String tokenExpirationTime, String sessionExpirationTime) {
+    }
+
+    public ChatToken createChatToken(String region, JsonNode request) {
+        requireObject(request, "Request body");
+        Room room = requireRoom(region, requireText(request, "roomIdentifier"));
+        String userId = requireText(request, "userId");
+        if (userId.length() > 128) {
+            throw validation("userId must be 1-128 characters.");
+        }
+        List<String> capabilities = readStringList(request, "capabilities");
+        for (String capability : capabilities) {
+            if (!TOKEN_CAPABILITIES.contains(capability)) {
+                throw validation("capabilities contains an invalid value.");
+            }
+        }
+        int sessionMinutes = optionalInt(request, "sessionDurationInMinutes",
+                DEFAULT_SESSION_MINUTES, 1, 180);
+        Map<String, String> attributes = readTags(request.get("attributes"));
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        Instant tokenExp = now.plus(TOKEN_DURATION_MINUTES, ChronoUnit.MINUTES);
+        Instant sessionExp = now.plus(sessionMinutes, ChronoUnit.MINUTES);
+        return new ChatToken(
+                mintToken(room.getArn(), userId, capabilities, attributes, tokenExp),
+                tokenExp.toString(),
+                sessionExp.toString());
+    }
+
+    public String sendEvent(String region, JsonNode request) {
+        requireObject(request, "Request body");
+        Room room = requireRoom(region, requireText(request, "roomIdentifier"));
+        String eventName = requireText(request, "eventName");
+        Map<String, String> attributes = readTags(request.get("attributes"));
+        String id = newId();
+        ObjectNode frame = objectMapper.createObjectNode();
+        frame.put("Type", "EVENT");
+        frame.put("Id", id);
+        frame.put("EventName", eventName);
+        frame.put("SendTime", Instant.now().toString());
+        ObjectNode attrs = frame.putObject("Attributes");
+        attributes.forEach(attrs::put);
+        broadcast(room.getArn(), frame.toString());
+        return id;
+    }
+
+    public String deleteMessage(String region, JsonNode request) {
+        requireObject(request, "Request body");
+        Room room = requireRoom(region, requireText(request, "roomIdentifier"));
+        String id = requireText(request, "id");
+        String reason = optionalText(request, "reason");
+        ObjectNode frame = objectMapper.createObjectNode();
+        frame.put("Type", "EVENT");
+        frame.put("Id", id);
+        frame.put("EventName", "aws:DELETE_MESSAGE");
+        frame.put("SendTime", Instant.now().toString());
+        ObjectNode attrs = frame.putObject("Attributes");
+        attrs.put("MessageID", id);
+        if (reason != null) {
+            attrs.put("Reason", reason);
+        }
+        broadcast(room.getArn(), frame.toString());
+        return id;
+    }
+
+    public void disconnectUser(String region, JsonNode request) {
+        requireObject(request, "Request body");
+        Room room = requireRoom(region, requireText(request, "roomIdentifier"));
+        String userId = requireText(request, "userId");
+        String reason = optionalText(request, "reason");
+        CopyOnWriteArrayList<ChatSession> list = sessions.get(room.getArn());
+        if (list == null) {
+            return;
+        }
+        for (ChatSession session : list) {
+            if (userId.equals(session.userId())) {
+                session.close(reason == null ? "" : reason);
+            }
+        }
+    }
+
+    public ParsedChatToken parseChatToken(String protocol) {
+        if (protocol == null || protocol.isBlank() || !protocol.startsWith(CHAT_TOKEN_PREFIX)) {
+            throw validation("Chat token is invalid.");
+        }
+        try {
+            String encoded = protocol.substring(CHAT_TOKEN_PREFIX.length());
+            JsonNode payload = objectMapper.readTree(
+                    Base64.getUrlDecoder().decode(encoded));
+            long exp = payload.path("exp").asLong(0);
+            if (exp > 0 && Instant.now().getEpochSecond() > exp) {
+                throw validation("Chat token is invalid.");
+            }
+            String roomArn = optionalText(payload, "roomArn");
+            String userId = optionalText(payload, "userId");
+            if (roomArn == null || userId == null) {
+                throw validation("Chat token is invalid.");
+            }
+            Set<String> capabilities = new LinkedHashSet<>();
+            JsonNode caps = payload.get("capabilities");
+            if (caps != null && caps.isArray()) {
+                for (JsonNode cap : caps) {
+                    if (cap != null && cap.isTextual() && !cap.textValue().isBlank()) {
+                        capabilities.add(cap.textValue());
+                    }
+                }
+            }
+            return new ParsedChatToken(roomArn, userId, Set.copyOf(capabilities),
+                    Map.copyOf(readTags(payload.get("attributes"))));
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw validation("Chat token is invalid.");
+        }
+    }
+
+    public Room requireExistingRoom(String region, String roomArn) {
+        return requireRoom(region, roomArn);
+    }
+
+    public void registerSession(ChatSession session) {
+        if (session == null || session.roomArn() == null) {
+            return;
+        }
+        sessions.computeIfAbsent(session.roomArn(), key -> new CopyOnWriteArrayList<>()).add(session);
+    }
+
+    public void unregisterSession(ChatSession session) {
+        if (session == null || session.roomArn() == null) {
+            return;
+        }
+        CopyOnWriteArrayList<ChatSession> list = sessions.get(session.roomArn());
+        if (list != null) {
+            list.remove(session);
+        }
+    }
+
+    public MessageReview reviewMessage(Room room, String content, String messageId, String userId,
+                                       Map<String, String> extra, Map<String, String> attributes,
+                                       String sourceIp) {
+        String fallback = room.getMessageReviewHandlerFallbackResult();
+        if (fallback == null || fallback.isBlank()) {
+            fallback = DEFAULT_FALLBACK;
+        }
+        String uri = room.getMessageReviewHandlerUri();
+        if (uri == null || uri.isBlank()) {
+            return new MessageReview(false, content, extra);
+        }
+        if (lambdaService == null || !lambdaService.isResolvable()) {
+            return fallbackReview(fallback, content, extra);
+        }
+        try {
+            ObjectNode event = objectMapper.createObjectNode();
+            event.put("Content", content == null ? "" : content);
+            event.put("MessageId", messageId);
+            event.put("RoomArn", room.getArn());
+            ObjectNode attrs = event.putObject("Attributes");
+            if (extra != null) {
+                extra.forEach(attrs::put);
+            }
+            ObjectNode sender = event.putObject("Sender");
+            sender.put("UserId", userId == null ? "" : userId);
+            if (sourceIp != null) {
+                sender.put("Ip", sourceIp);
+            }
+            ObjectNode senderAttrs = sender.putObject("Attributes");
+            if (attributes != null) {
+                attributes.forEach(senderAttrs::put);
+            }
+            String invokeRegion = resourceRegion(room.getArn(), regionResolver.getRegion());
+            try {
+                String arnRegion = AwsArnUtils.parse(uri).region();
+                if (arnRegion != null && !arnRegion.isBlank()) {
+                    invokeRegion = arnRegion;
+                }
+            } catch (RuntimeException ignored) {
+                // uri may be a function name rather than an ARN
+            }
+            InvokeResult result = lambdaService.get().invoke(
+                    invokeRegion, uri, event.toString().getBytes(StandardCharsets.UTF_8),
+                    InvocationType.RequestResponse);
+            if (result.getFunctionError() != null || result.getPayload() == null) {
+                LOG.debugv("IVS Chat review handler {0} failed: {1}", uri, result.getFunctionError());
+                return fallbackReview(fallback, content, extra);
+            }
+            JsonNode response = decodeReviewPayload(result.getPayload());
+            return applyReview(response, content, extra, fallback);
+        } catch (Exception e) {
+            LOG.debugv("IVS Chat review handler {0} errored: {1}", uri, e.getMessage());
+            return fallbackReview(fallback, content, extra);
+        }
+    }
+
+    public void broadcast(String roomArn, String frame) {
+        CopyOnWriteArrayList<ChatSession> list = sessions.get(roomArn);
+        if (list == null) {
+            return;
+        }
+        for (ChatSession session : list) {
+            session.send(frame);
+        }
+    }
+
+    private String mintToken(String roomArn, String userId, List<String> capabilities,
+                             Map<String, String> attributes, Instant tokenExp) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("roomArn", roomArn);
+        payload.put("userId", userId);
+        payload.put("exp", tokenExp.getEpochSecond());
+        ArrayNode caps = payload.putArray("capabilities");
+        for (String capability : capabilities) {
+            caps.add(capability);
+        }
+        ObjectNode attrs = payload.putObject("attributes");
+        if (attributes != null) {
+            attributes.forEach(attrs::put);
+        }
+        String encoded = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.toString().getBytes(StandardCharsets.UTF_8));
+        return CHAT_TOKEN_PREFIX + encoded;
+    }
+
+    private JsonNode decodeReviewPayload(byte[] payload) throws Exception {
+        JsonNode node = objectMapper.readTree(payload);
+        if (node != null && node.isTextual()) {
+            node = objectMapper.readTree(node.textValue());
+        }
+        if (node != null && node.isObject() && node.has("body") && node.get("body").isTextual()) {
+            JsonNode body = objectMapper.readTree(node.get("body").textValue());
+            if (body != null && body.isObject()) {
+                return body;
+            }
+        }
+        return node;
+    }
+
+    private MessageReview applyReview(JsonNode response, String content, Map<String, String> extra,
+                                      String fallback) {
+        if (response == null || !response.isObject()) {
+            return fallbackReview(fallback, content, extra);
+        }
+        String result = optionalText(response, "ReviewResult");
+        if (result == null) {
+            result = optionalText(response, "reviewResult");
+        }
+        if (result == null || !FALLBACK_RESULTS.contains(result)) {
+            return fallbackReview(fallback, content, extra);
+        }
+        String reviewed = optionalText(response, "Content");
+        if (reviewed == null) {
+            reviewed = optionalText(response, "content");
+        }
+        Map<String, String> reviewedAttrs = readTags(response.get("Attributes"));
+        if (reviewedAttrs.isEmpty() && response.has("attributes")) {
+            reviewedAttrs = readTags(response.get("attributes"));
+        }
+        if (reviewedAttrs.isEmpty() && extra != null) {
+            reviewedAttrs = extra;
+        }
+        return new MessageReview("DENY".equals(result),
+                reviewed == null ? content : reviewed, reviewedAttrs);
+    }
+
+    private static MessageReview fallbackReview(String fallback, String content,
+                                                Map<String, String> attributes) {
+        return new MessageReview("DENY".equals(fallback), content, attributes);
     }
 }

@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ivschat.model.LoggingConfiguration;
 import io.github.hectorvent.floci.services.ivschat.model.Room;
+import io.smallrye.common.annotation.Blocking;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
@@ -25,8 +26,14 @@ import jakarta.ws.rs.core.Response;
  * paths take JAX-RS precedence over S3's {@code /{bucket}} catch-all. Tag APIs
  * share {@code /tags/{arn}} and are dispatched by {@code SharedTagsController}.
  * Requests are signed as {@code ivschat}.
+ *
+ * <p>{@code @Blocking}: Alchemy Bindings invoke these operations from inside a
+ * Function URL Lambda. Serving them on the Vert.x event loop deadlocks that
+ * nested call (the Function URL waiter holds the loop until the Lambda
+ * returns). Worker threads keep CreateChatToken / SendEvent reachable.
  */
 @Path("/")
+@Blocking
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class IvsChatController {
@@ -140,6 +147,48 @@ public class IvsChatController {
                 response.put("nextToken", page.nextToken());
             }
             return Response.ok(response).build();
+        });
+    }
+
+    @POST
+    @Path("/CreateChatToken")
+    @Consumes(MediaType.WILDCARD)
+    public Response createChatToken(@Context HttpHeaders headers, String body) {
+        return handle(body, request -> {
+            IvsChatService.ChatToken token = service.createChatToken(
+                    regionResolver.resolveRegion(headers), request);
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("token", token.token());
+            response.put("tokenExpirationTime", token.tokenExpirationTime());
+            response.put("sessionExpirationTime", token.sessionExpirationTime());
+            return Response.ok(response).build();
+        });
+    }
+
+    @POST
+    @Path("/SendEvent")
+    public Response sendEvent(@Context HttpHeaders headers, String body) {
+        return handle(body, request -> {
+            String id = service.sendEvent(regionResolver.resolveRegion(headers), request);
+            return Response.ok(objectMapper.createObjectNode().put("id", id)).build();
+        });
+    }
+
+    @POST
+    @Path("/DeleteMessage")
+    public Response deleteMessage(@Context HttpHeaders headers, String body) {
+        return handle(body, request -> {
+            String id = service.deleteMessage(regionResolver.resolveRegion(headers), request);
+            return Response.ok(objectMapper.createObjectNode().put("id", id)).build();
+        });
+    }
+
+    @POST
+    @Path("/DisconnectUser")
+    public Response disconnectUser(@Context HttpHeaders headers, String body) {
+        return handle(body, request -> {
+            service.disconnectUser(regionResolver.resolveRegion(headers), request);
+            return Response.ok(objectMapper.createObjectNode()).build();
         });
     }
 

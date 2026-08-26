@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.lambda;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.docker.ContainerReachableUrls;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
@@ -31,6 +32,7 @@ import org.jboss.logging.Logger;
 
 import jakarta.ws.rs.core.StreamingOutput;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -224,6 +226,21 @@ public class LambdaUrlInvocationController {
         return root.toString();
     }
 
+    /**
+     * Host-side tests dial URLs the Lambda returns. IVS Chat advertises
+     * {@code wss://edge.ivschat.{region}.amazonaws.com}; rewrite onto the
+     * path-style gateway so that connection hits Floci.
+     */
+    static byte[] rewriteHostReachableUrls(byte[] payload) {
+        if (payload == null || payload.length == 0) {
+            return payload;
+        }
+        String text = new String(payload, StandardCharsets.UTF_8);
+        String rewritten = ContainerReachableUrls.rewriteIvsChatWssToPathStyle(
+                text, ContainerReachableUrls.DEFAULT_HOST_GATEWAY_PORT);
+        return rewritten.equals(text) ? payload : rewritten.getBytes(StandardCharsets.UTF_8);
+    }
+
     private Response buildResponse(InvokeResult result) {
         if (result.getPayload() == null || result.getPayload().length == 0) {
             int status = result.getFunctionError() != null ? 502 : result.getStatusCode();
@@ -235,13 +252,19 @@ public class LambdaUrlInvocationController {
                 int status = node.get("statusCode").asInt();
                 Response.ResponseBuilder builder = Response.status(status);
                 if (node.has("headers")) {
-                    node.get("headers").fields().forEachRemaining(e -> builder.header(e.getKey(), e.getValue().asText()));
+                    node.get("headers").fields().forEachRemaining(e -> {
+                        if (!"content-length".equalsIgnoreCase(e.getKey())) {
+                            builder.header(e.getKey(), e.getValue().asText());
+                        }
+                    });
                 }
                 if (node.has("body")) {
                     String body = node.get("body").asText();
                     boolean isBase64 = node.path("isBase64Encoded").asBoolean(false);
-                    byte[] bytes = isBase64 ? Base64.getDecoder().decode(body) : body.getBytes();
-                    builder.entity(bytes);
+                    byte[] bytes = isBase64
+                            ? Base64.getDecoder().decode(body)
+                            : body.getBytes(StandardCharsets.UTF_8);
+                    builder.entity(rewriteHostReachableUrls(bytes));
                 }
                 return builder.build();
             }
@@ -250,7 +273,8 @@ public class LambdaUrlInvocationController {
             if (result.getFunctionError() != null) {
                 return Response.status(502).entity(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
             }
-            return Response.ok(result.getPayload()).type(MediaType.APPLICATION_JSON).build();
+            return Response.ok(rewriteHostReachableUrls(result.getPayload()))
+                    .type(MediaType.APPLICATION_JSON).build();
         } catch (Exception e) {
             int status = result.getFunctionError() != null ? 502 : 200;
             return Response.status(status).entity(result.getPayload()).build();
