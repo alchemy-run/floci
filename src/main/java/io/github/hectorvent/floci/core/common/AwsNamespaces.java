@@ -11,6 +11,7 @@ public final class AwsNamespaces {
     public static final String IAM = "https://iam.amazonaws.com/doc/2010-05-08/";
     public static final String STS = "https://sts.amazonaws.com/doc/2011-06-15/";
     public static final String RDS = "http://rds.amazonaws.com/doc/2014-10-31/";
+    public static final String REDSHIFT = "http://redshift.amazonaws.com/doc/2012-12-01/";
     public static final String EC  = "http://elasticache.amazonaws.com/doc/2015-02-02/";
     public static final String CW  = "http://monitoring.amazonaws.com/doc/2010-08-01/";
     public static final String S3  = "http://s3.amazonaws.com/doc/2006-03-01/";
