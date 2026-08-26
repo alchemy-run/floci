@@ -33,8 +33,8 @@ public class TextractJsonHandler {
         return switch (action) {
             case "DetectDocumentText" -> textractService.detectDocumentText();
             case "AnalyzeDocument" -> textractService.analyzeDocument();
-            case "AnalyzeExpense" -> textractService.analyzeExpense();
-            case "AnalyzeID" -> textractService.analyzeID();
+            case "AnalyzeExpense" -> textractService.analyzeExpense(request);
+            case "AnalyzeID" -> textractService.analyzeID(request);
             case "StartDocumentTextDetection" -> textractService.startDocumentTextDetection();
             case "GetDocumentTextDetection" -> textractService.getDocumentTextDetection(
                     getStringField(request, "JobId"));

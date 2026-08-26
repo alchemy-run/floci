@@ -429,7 +429,48 @@ class TextractIntegrationTest {
         .then()
             .statusCode(200)
             .body("DocumentMetadata.Pages", equalTo(1))
-            .body("ExpenseDocuments", hasSize(greaterThanOrEqualTo(0)));
+            .body("ExpenseDocuments", hasSize(greaterThanOrEqualTo(1)))
+            .body("ExpenseDocuments[0].SummaryFields", notNullValue());
+    }
+
+    @Test
+    void analyzeExpense_secondCallAlsoReturnsPages() {
+        String body = "{\"Document\":{\"Bytes\":\"aGVsbG8=\"}}";
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.AnalyzeExpense")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DocumentMetadata.Pages", equalTo(1));
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.AnalyzeExpense")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DocumentMetadata.Pages", equalTo(1))
+            .body("ExpenseDocuments", hasSize(greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    void analyzeExpense_missingDocument_validationException() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.AnalyzeExpense")
+            .header("Authorization", AUTH_HEADER)
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
     }
 
     @Test

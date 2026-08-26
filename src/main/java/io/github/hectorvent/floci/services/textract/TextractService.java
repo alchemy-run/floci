@@ -50,11 +50,16 @@ public class TextractService implements Resettable {
     private final ObjectMapper objectMapper;
     private final RegionResolver regionResolver;
     private final S3Service s3Service;
-    /** In-memory async job store: jobId to jobType. Jobs are kept so Get* can be polled. */
-    private final ConcurrentHashMap<String, String> asyncJobs = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, AdapterRecord> adapters = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, String> adapterIdsByName = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, String> adapterIdsByToken = new ConcurrentHashMap<>();
+    /**
+     * Process-scoped stores so Start/CreateAdapter state survives
+     * ApplicationScoped reconstruction during quarkus:dev live-reload of other
+     * services. Instance maps would miss Get job/adapter lookups after a reload
+     * even though the Lambda is still running. Cleared on {@link #clear()}.
+     */
+    private static final ConcurrentHashMap<String, String> asyncJobs = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, AdapterRecord> adapters = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, String> adapterIdsByName = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, String> adapterIdsByToken = new ConcurrentHashMap<>();
 
     @Inject
     public TextractService(ObjectMapper objectMapper, RegionResolver regionResolver, S3Service s3Service) {
@@ -98,7 +103,8 @@ public class TextractService implements Resettable {
      * AnalyzeExpense — stub expense document list.
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_AnalyzeExpense.html
      */
-    public Response analyzeExpense() {
+    public Response analyzeExpense(JsonNode request) {
+        requireDocument(objectOrEmpty(request), "Document");
         ObjectNode root = objectMapper.createObjectNode();
         root.set("DocumentMetadata", buildDocumentMetadata(1));
         root.set("ExpenseDocuments", buildExpenseDocuments());
@@ -109,7 +115,11 @@ public class TextractService implements Resettable {
      * AnalyzeID — stub identity document list (at least one document).
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_AnalyzeID.html
      */
-    public Response analyzeID() {
+    public Response analyzeID(JsonNode request) {
+        JsonNode pages = objectOrEmpty(request).get("DocumentPages");
+        if (pages == null || !pages.isArray() || pages.isEmpty()) {
+            throw new AwsException("ValidationException", "DocumentPages is required.", 400);
+        }
         ObjectNode root = objectMapper.createObjectNode();
         root.set("DocumentMetadata", buildDocumentMetadata(1));
         root.set("IdentityDocuments", buildIdentityDocuments());
@@ -812,6 +822,22 @@ public class TextractService implements Resettable {
         return Response.ok(root).build();
     }
 
+    private void requireDocument(JsonNode body, String field) {
+        JsonNode document = body == null ? null : body.get(field);
+        if (document == null || document.isNull() || !document.isObject()) {
+            throw new AwsException("ValidationException", field + " is required.", 400);
+        }
+        JsonNode bytes = document.get("Bytes");
+        JsonNode s3 = document.get("S3Object");
+        boolean hasBytes = bytes != null && !bytes.isNull()
+                && !(bytes.isTextual() && bytes.asText().isBlank());
+        boolean hasS3 = s3 != null && s3.isObject();
+        if (!hasBytes && !hasS3) {
+            throw new AwsException("InvalidParameterException",
+                    field + " must contain Bytes or S3Object.", 400);
+        }
+    }
+
     private void requireManifestObject(String bucket, String key) {
         try {
             if (s3Service == null || !s3Service.objectExists(bucket, key)) {
@@ -848,9 +874,16 @@ public class TextractService implements Resettable {
         ArrayNode docs = objectMapper.createArrayNode();
         ObjectNode doc = docs.addObject();
         doc.put("ExpenseIndex", 1);
-        doc.putArray("SummaryFields");
+        ArrayNode summary = doc.putArray("SummaryFields");
+        ObjectNode field = summary.addObject();
+        ObjectNode type = field.putObject("Type");
+        type.put("Text", "TOTAL");
+        type.put("Confidence", 99.9);
+        ObjectNode value = field.putObject("ValueDetection");
+        value.put("Text", STUB_TEXT);
+        value.put("Confidence", 99.9);
+        field.put("PageNumber", 1);
         doc.putArray("LineItemGroups");
-        doc.set("Blocks", buildStubBlocks());
         return docs;
     }
 
@@ -866,7 +899,6 @@ public class TextractService implements Resettable {
         ObjectNode value = field.putObject("ValueDetection");
         value.put("Text", STUB_TEXT);
         value.put("Confidence", 99.9);
-        doc.set("Blocks", buildStubBlocks());
         return docs;
     }
 
