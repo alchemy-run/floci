@@ -718,6 +718,8 @@ floci:
       enabled: true
     transcribe:
       enabled: true
+    translate:
+      enabled: true
     mediaconvert:
       enabled: true
     ce:
