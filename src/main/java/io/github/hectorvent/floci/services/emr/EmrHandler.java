@@ -49,6 +49,9 @@ public class EmrHandler {
                 case "RunJobFlow" -> handleRunJobFlow(request, region);
                 case "DescribeCluster" -> handleDescribeCluster(request);
                 case "ListClusters" -> handleListClusters(request, region);
+                case "ListReleaseLabels" -> handleListReleaseLabels(request);
+                case "DescribeReleaseLabel" -> handleDescribeReleaseLabel(request);
+                case "ListSupportedInstanceTypes" -> handleListSupportedInstanceTypes(request);
                 case "TerminateJobFlows" -> handleTerminateJobFlows(request);
                 case "SetTerminationProtection" -> handleSetTerminationProtection(request);
                 case "SetVisibleToAllUsers" -> handleSetVisibleToAllUsers(request);
@@ -141,6 +144,71 @@ public class EmrHandler {
         ArrayNode arr = response.putArray("Clusters");
         for (EmrCluster c : service.listClusters(region, states)) {
             arr.add(clusterSummaryNode(c));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListReleaseLabels(JsonNode request) {
+        JsonNode filters = request.path("Filters");
+        String prefix = text(filters, "Prefix");
+        String application = text(filters, "Application");
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("ReleaseLabels");
+        EmrReleaseCatalog.listLabels(prefix, application).forEach(arr::add);
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeReleaseLabel(JsonNode request) {
+        String requested = text(request, "ReleaseLabel");
+        String label = (requested == null || requested.isEmpty())
+                ? EmrReleaseCatalog.latestLabel()
+                : requested;
+        EmrReleaseCatalog.Release release = EmrReleaseCatalog.find(label)
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "Release label '" + label + "' is not a valid EMR release.", 400));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ReleaseLabel", release.label());
+        ArrayNode apps = response.putArray("Applications");
+        for (EmrReleaseCatalog.Application app : release.applications()) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("Name", app.name());
+            node.put("Version", app.version());
+            apps.add(node);
+        }
+        ArrayNode os = response.putArray("AvailableOSReleases");
+        for (String osLabel : release.osReleases()) {
+            os.add(objectMapper.createObjectNode().put("Label", osLabel));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListSupportedInstanceTypes(JsonNode request) {
+        String label = text(request, "ReleaseLabel");
+        if (label == null || label.isEmpty()) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value null at 'releaseLabel' failed to satisfy constraint: "
+                            + "Member must not be null", 400);
+        }
+        if (EmrReleaseCatalog.find(label).isEmpty()) {
+            throw new AwsException("InvalidRequestException",
+                    "Release label '" + label + "' is not a valid EMR release.", 400);
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("SupportedInstanceTypes");
+        for (EmrReleaseCatalog.SupportedInstanceType type : EmrReleaseCatalog.instanceTypes()) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("Type", type.type());
+            node.put("MemoryGB", type.memoryGb());
+            node.put("StorageGB", type.storageGb());
+            node.put("VCPU", type.vcpu());
+            node.put("Is64BitsOnly", type.is64BitsOnly());
+            node.put("InstanceFamilyId", type.instanceFamilyId());
+            node.put("EbsOptimizedAvailable", type.ebsOptimizedAvailable());
+            node.put("EbsOptimizedByDefault", type.ebsOptimizedByDefault());
+            node.put("NumberOfDisks", type.numberOfDisks());
+            node.put("EbsStorageOnly", type.ebsStorageOnly());
+            node.put("Architecture", type.architecture());
+            arr.add(node);
         }
         return Response.ok(response).build();
     }

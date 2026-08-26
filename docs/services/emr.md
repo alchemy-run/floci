@@ -14,6 +14,9 @@ Floci emulates the Amazon EMR (Elastic MapReduce) management API. Clusters (job 
 | `RunJobFlow` | Creates a new cluster (job flow) and returns its `JobFlowId` |
 | `DescribeCluster` | Returns the configuration and status of a cluster |
 | `ListClusters` | Lists clusters, filterable by state and creation time |
+| `ListReleaseLabels` | Lists EMR release labels, newest first, filterable by prefix or application |
+| `DescribeReleaseLabel` | Returns the applications and OS releases a release label ships |
+| `ListSupportedInstanceTypes` | Lists EC2 instance types a release label supports |
 | `TerminateJobFlows` | Terminates one or more clusters |
 | `SetTerminationProtection` | Enables or disables termination protection |
 | `SetVisibleToAllUsers` | Sets cluster visibility for the account |
