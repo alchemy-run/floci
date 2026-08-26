@@ -136,7 +136,7 @@ public class OrganizationsService implements Resettable {
 
     public ObjectNode listAccounts(JsonNode request) {
         OrganizationRecord org = requireOrganization();
-        List<OrganizationAccount> items = new ArrayList<>(accounts.values());
+        List<OrganizationAccount> items = new ArrayList<>(accounts.scan(k -> true));
         items.sort(Comparator.comparing(OrganizationAccount::getId));
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode list = response.putArray("Accounts");
@@ -228,7 +228,7 @@ public class OrganizationsService implements Resettable {
         status.setAccountName(name);
         status.setRequestedTimestamp(now);
         status.setCompletedTimestamp(now);
-        for (OrganizationAccount existing : accounts.values()) {
+        for (OrganizationAccount existing : accounts.scan(k -> true)) {
             if (email.equalsIgnoreCase(existing.getEmail())) {
                 status.setState("FAILED");
                 status.setFailureReason("EMAIL_ALREADY_EXISTS");
@@ -270,7 +270,7 @@ public class OrganizationsService implements Resettable {
 
     public ObjectNode listCreateAccountStatus(JsonNode request) {
         requireOrganization();
-        List<CreateAccountRequest> items = new ArrayList<>(createRequests.values());
+        List<CreateAccountRequest> items = new ArrayList<>(createRequests.scan(k -> true));
         items.sort(Comparator.comparing(CreateAccountRequest::getId));
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode list = response.putArray("CreateAccountStatuses");
@@ -395,7 +395,7 @@ public class OrganizationsService implements Resettable {
         String parentId = requireText(request, "ParentId");
         requireParent(parentId);
         List<OrganizationalUnit> items = new ArrayList<>();
-        for (OrganizationalUnit ou : ous.values()) {
+        for (OrganizationalUnit ou : ous.scan(k -> true)) {
             if (parentId.equals(ou.getParentId())) {
                 items.add(ou);
             }
@@ -423,7 +423,7 @@ public class OrganizationsService implements Resettable {
         String parentId = requireText(request, "ParentId");
         String name = requireText(request, "Name");
         requireParent(parentId);
-        for (OrganizationalUnit existing : ous.values()) {
+        for (OrganizationalUnit existing : ous.scan(k -> true)) {
             if (parentId.equals(existing.getParentId()) && name.equals(existing.getName())) {
                 throw new AwsException("DuplicateOrganizationalUnitException",
                         "An OU with the same name already exists under this parent.", 400);
@@ -470,7 +470,7 @@ public class OrganizationsService implements Resettable {
         OrganizationRecord org = requireOrganization();
         String servicePrincipal = textOr(request, "ServicePrincipal", null);
         Map<String, DelegatedAdministratorRegistration> earliest = new LinkedHashMap<>();
-        for (DelegatedAdministratorRegistration registration : delegated.values()) {
+        for (DelegatedAdministratorRegistration registration : delegated.scan(k -> true)) {
             if (servicePrincipal != null && !servicePrincipal.equals(registration.getServicePrincipal())) {
                 continue;
             }
@@ -502,7 +502,7 @@ public class OrganizationsService implements Resettable {
             throw new AwsException("AccountNotFoundException", "You specified an account that doesn't exist.", 404);
         }
         List<DelegatedAdministratorRegistration> services = new ArrayList<>();
-        for (DelegatedAdministratorRegistration registration : delegated.values()) {
+        for (DelegatedAdministratorRegistration registration : delegated.scan(k -> true)) {
             if (accountId.equals(registration.getAccountId())) {
                 services.add(registration);
             }
@@ -606,7 +606,7 @@ public class OrganizationsService implements Resettable {
         String parentId = requireText(request, "ParentId");
         requireParent(parentId);
         List<OrganizationAccount> items = new ArrayList<>();
-        for (OrganizationAccount account : accounts.values()) {
+        for (OrganizationAccount account : accounts.scan(k -> true)) {
             if (parentId.equals(account.getParentId())) {
                 items.add(account);
             }
@@ -628,7 +628,7 @@ public class OrganizationsService implements Resettable {
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode children = response.putArray("Children");
         if ("ACCOUNT".equals(childType)) {
-            for (OrganizationAccount account : accounts.values()) {
+            for (OrganizationAccount account : accounts.scan(k -> true)) {
                 if (parentId.equals(account.getParentId())) {
                     ObjectNode child = children.addObject();
                     child.put("Id", account.getId());
@@ -636,7 +636,7 @@ public class OrganizationsService implements Resettable {
                 }
             }
         } else if ("ORGANIZATIONAL_UNIT".equals(childType)) {
-            for (OrganizationalUnit ou : ous.values()) {
+            for (OrganizationalUnit ou : ous.scan(k -> true)) {
                 if (parentId.equals(ou.getParentId())) {
                     ObjectNode child = children.addObject();
                     child.put("Id", ou.getId());
@@ -770,7 +770,12 @@ public class OrganizationsService implements Resettable {
         OrganizationPolicy policy = requireOrgPolicy(requireText(request, "PolicyId"));
         String targetId = requireText(request, "TargetId");
         requireTarget(targetId);
-        policy.getAttachedTargets().add(targetId);
+        if (!policy.getAttachedTargets().add(targetId)) {
+            throw new AwsException(
+                    "DuplicatePolicyAttachmentException",
+                    "The specified policy is already attached to the specified target.",
+                    400);
+        }
         policies.put(policy.getId(), policy);
         return objectMapper.createObjectNode();
     }
@@ -778,7 +783,13 @@ public class OrganizationsService implements Resettable {
     public ObjectNode detachPolicy(JsonNode request) {
         requireOrganization();
         OrganizationPolicy policy = requireOrgPolicy(requireText(request, "PolicyId"));
-        policy.getAttachedTargets().remove(requireText(request, "TargetId"));
+        String targetId = requireText(request, "TargetId");
+        if (!policy.getAttachedTargets().remove(targetId)) {
+            throw new AwsException(
+                    "PolicyNotAttachedException",
+                    "The specified policy is not attached to the specified target.",
+                    400);
+        }
         policies.put(policy.getId(), policy);
         return objectMapper.createObjectNode();
     }
