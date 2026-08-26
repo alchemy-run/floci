@@ -222,6 +222,7 @@ public class NetworkFirewallService implements Resettable {
         }
         response.put("Type", group.getType());
         response.put("Capacity", group.getCapacity());
+        response.put("LastModifiedTime", group.getLastModifiedTime());
         return response;
     }
 
@@ -933,6 +934,7 @@ public class NetworkFirewallService implements Resettable {
         node.put("Capacity", group.getCapacity());
         node.put("RuleGroupStatus", group.getStatus());
         node.put("NumberOfAssociations", associationCount(group.getRuleGroupArn()));
+        node.put("LastModifiedTime", group.getLastModifiedTime());
         if (group.getSummaryConfiguration() != null && !group.getSummaryConfiguration().isNull()) {
             node.set("SummaryConfiguration", group.getSummaryConfiguration());
         }
