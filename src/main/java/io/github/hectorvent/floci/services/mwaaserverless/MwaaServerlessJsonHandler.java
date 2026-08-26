@@ -75,6 +75,10 @@ public class MwaaServerlessJsonHandler {
                 }
             });
         }
-        return Response.status(e.getHttpStatus()).entity(body).build();
+        String fault = e.getHttpStatus() < 500 ? "Sender" : "Receiver";
+        return Response.status(e.getHttpStatus())
+                .header("x-amzn-query-error", e.jsonType() + ";" + fault)
+                .entity(body)
+                .build();
     }
 }
