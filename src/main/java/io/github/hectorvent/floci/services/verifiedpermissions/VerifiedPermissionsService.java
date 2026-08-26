@@ -319,7 +319,7 @@ public class VerifiedPermissionsService {
         String now = now();
         policy.setCreatedDate(now);
         policy.setLastUpdatedDate(now);
-        applyDefinition(policy, definition, true);
+        applyDefinition(store, policy, definition, true);
         store.getPolicies().put(policy.getPolicyId(), policy);
         stores.put(store.getPolicyStoreId(), store);
         return policyWriteResponse(store.getPolicyStoreId(), policy);
@@ -343,7 +343,7 @@ public class VerifiedPermissionsService {
         }
         JsonNode definition = request.get("definition");
         if (definition != null && !definition.isNull() && !definition.isMissingNode()) {
-            applyDefinition(policy, definition, false);
+            applyDefinition(store, policy, definition, false);
         }
         policy.setLastUpdatedDate(now());
         store.getPolicies().put(policy.getPolicyId(), policy);
@@ -811,42 +811,6 @@ public class VerifiedPermissionsService {
         return template;
     }
 
-    private ObjectNode templateWriteResponse(String policyStoreId, PolicyTemplate template) {
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("policyStoreId", policyStoreId);
-        response.put("policyTemplateId", template.getPolicyTemplateId());
-        response.put("createdDate", template.getCreatedDate());
-        response.put("lastUpdatedDate", template.getLastUpdatedDate());
-        return response;
-    }
-
-    private ObjectNode templateReadResponse(String policyStoreId, PolicyTemplate template) {
-        ObjectNode response = templateWriteResponse(policyStoreId, template);
-        if (template.getDescription() != null) {
-            response.put("description", template.getDescription());
-        }
-        response.put("statement", template.getStatement() == null ? "" : template.getStatement());
-        if (template.getName() != null) {
-            response.put("name", template.getName());
-        }
-        return response;
-    }
-
-    private ObjectNode templateSummary(String policyStoreId, PolicyTemplate template) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("policyStoreId", policyStoreId);
-        node.put("policyTemplateId", template.getPolicyTemplateId());
-        if (template.getDescription() != null) {
-            node.put("description", template.getDescription());
-        }
-        node.put("createdDate", template.getCreatedDate());
-        node.put("lastUpdatedDate", template.getLastUpdatedDate());
-        if (template.getName() != null) {
-            node.put("name", template.getName());
-        }
-        return node;
-    }
-
     private ObjectNode identityWriteResponse(IdentitySourceRecord source) {
         ObjectNode response = objectMapper.createObjectNode();
         response.put("createdDate", source.getCreatedDate());
@@ -930,14 +894,6 @@ public class VerifiedPermissionsService {
             throw notFound(policyId, "POLICY");
         }
         return policy;
-    }
-
-    private PolicyTemplate requireTemplate(PolicyStore store, String policyTemplateId) {
-        PolicyTemplate template = store.getTemplates().get(policyTemplateId);
-        if (template == null) {
-            throw notFound(policyTemplateId, "POLICY_TEMPLATE");
-        }
-        return template;
     }
 
     private String validationMode(JsonNode request) {
