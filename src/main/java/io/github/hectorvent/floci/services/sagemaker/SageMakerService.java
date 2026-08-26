@@ -709,6 +709,38 @@ public class SageMakerService {
         return response;
     }
 
+    public record InvokeEndpointResult(byte[] body, String contentType, String invokedProductionVariant) {
+    }
+
+    public record InvokeEndpointAsyncResult(String inferenceId, String outputLocation, String failureLocation) {
+    }
+
+    /**
+     * SageMaker Runtime {@code InvokeEndpoint} / {@code InvokeEndpointWithResponseStream}.
+     * Missing endpoints raise {@code ValidationError} (runtime), not the control-plane
+     * {@code ValidationException}.
+     */
+    public synchronized InvokeEndpointResult invokeEndpoint(String region, String endpointName,
+                                                            byte[] body, String contentType) {
+        SageMakerEndpoint endpoint = requireRuntimeEndpoint(region, endpointName);
+        byte[] payload = body == null ? new byte[0] : body;
+        String type = contentType == null || contentType.isBlank() ? "application/json" : contentType;
+        return new InvokeEndpointResult(payload, type, invokedVariant(endpoint));
+    }
+
+    public synchronized InvokeEndpointAsyncResult invokeEndpointAsync(String region, String endpointName,
+                                                                      String inputLocation, String inferenceId) {
+        requireRuntimeEndpoint(region, endpointName);
+        if (inputLocation == null || inputLocation.isBlank()) {
+            throw new AwsException("ValidationError", "InputLocation is a required parameter.", 400);
+        }
+        String id = inferenceId == null || inferenceId.isBlank() ? UUID.randomUUID().toString() : inferenceId;
+        return new InvokeEndpointAsyncResult(
+                id,
+                asyncLocation(inputLocation, id, "out"),
+                asyncLocation(inputLocation, id, "failure"));
+    }
+
     public synchronized ObjectNode addTags(JsonNode request, String region) {
         String arn = requireText(request, "ResourceArn");
         Map<String, String> tags = tagsForArn(region, arn);
@@ -1092,6 +1124,40 @@ public class SageMakerService {
         return endpoints.get(storageKey(region, name)).orElseThrow(() -> endpointNotFound(name));
     }
 
+    private SageMakerEndpoint requireRuntimeEndpoint(String region, String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ValidationError", "EndpointName is a required parameter.", 400);
+        }
+        return endpoints.get(storageKey(region, name)).orElseThrow(() -> runtimeEndpointNotFound(name));
+    }
+
+    private static String invokedVariant(SageMakerEndpoint endpoint) {
+        List<Map<String, Object>> variants = endpoint.getProductionVariants();
+        if (variants != null) {
+            for (Map<String, Object> variant : variants) {
+                Object name = variant.get("VariantName");
+                if (name instanceof String value && !value.isBlank()) {
+                    return value;
+                }
+            }
+        }
+        return "AllTraffic";
+    }
+
+    private static String asyncLocation(String inputLocation, String inferenceId, String suffix) {
+        String bucket = "floci-sagemaker-async";
+        if (inputLocation.startsWith("s3://")) {
+            String rest = inputLocation.substring("s3://".length());
+            int slash = rest.indexOf('/');
+            if (slash > 0) {
+                bucket = rest.substring(0, slash);
+            } else if (!rest.isBlank()) {
+                bucket = rest;
+            }
+        }
+        return "s3://" + bucket + "/floci-async/" + inferenceId + "." + suffix;
+    }
+
     private SageMakerEndpoint findEndpointByArn(String region, String arn) {
         return endpoints.scan(key -> key.startsWith(region + "::")).stream()
                 .filter(endpoint -> arn.equals(endpoint.getEndpointArn()))
@@ -1404,6 +1470,11 @@ public class SageMakerService {
 
     private static AwsException endpointNotFound(String name) {
         return new AwsException("ValidationException",
+                "Could not find endpoint \"" + name + "\".", 400);
+    }
+
+    private static AwsException runtimeEndpointNotFound(String name) {
+        return new AwsException("ValidationError",
                 "Could not find endpoint \"" + name + "\".", 400);
     }
 

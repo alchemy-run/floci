@@ -131,6 +131,8 @@ import io.github.hectorvent.floci.services.personalize.PersonalizeRoutingFilter;
 import io.github.hectorvent.floci.services.personalize.PersonalizeRuntimeController;
 import io.github.hectorvent.floci.services.sagemaker.SageMakerFeatureStoreController;
 import io.github.hectorvent.floci.services.sagemaker.SageMakerFeatureStoreRoutingFilter;
+import io.github.hectorvent.floci.services.sagemaker.SageMakerRuntimeController;
+import io.github.hectorvent.floci.services.sagemaker.SageMakerRuntimeRoutingFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -803,7 +805,8 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
                         Set.of("SageMaker."),
                         Set.of("sagemaker"), Set.of(),
-                        Set.of(SageMakerFeatureStoreController.class, SageMakerFeatureStoreRoutingFilter.class)),
+                        Set.of(SageMakerFeatureStoreController.class, SageMakerFeatureStoreRoutingFilter.class,
+                                SageMakerRuntimeController.class, SageMakerRuntimeRoutingFilter.class)),
                 descriptor("globalaccelerator", "globalaccelerator",
                         config.services().globalaccelerator().enabled(), true,
                         "globalaccelerator", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
