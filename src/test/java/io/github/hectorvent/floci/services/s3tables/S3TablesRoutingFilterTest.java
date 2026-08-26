@@ -38,4 +38,16 @@ class S3TablesRoutingFilterTest {
         assertEquals("/aws-s3tables/buckets",
                 S3TablesRoutingFilter.rewritePath("/aws-s3tables/buckets"));
     }
+
+    @Test
+    void leavesFunctionUrlPathsAlone() {
+        assertEquals("/lambda-url/abc123/bindings",
+                S3TablesRoutingFilter.rewritePath("/lambda-url/abc123/bindings"));
+        assertEquals("/lambda-url/abc123/bindings/",
+                S3TablesRoutingFilter.rewritePath("/lambda-url/abc123/bindings/"));
+        assertTrue(S3TablesRoutingFilter.isLambdaUrlHost(
+                "abc123.lambda-url.us-east-1.localhost:4566"));
+        assertFalse(S3TablesRoutingFilter.isLambdaUrlHost("localhost:4566"));
+        assertFalse(S3TablesRoutingFilter.isLambdaUrlHost(null));
+    }
 }

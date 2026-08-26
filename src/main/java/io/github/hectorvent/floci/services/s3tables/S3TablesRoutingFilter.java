@@ -17,6 +17,10 @@ import java.util.regex.Pattern;
  * with S3's path-style catch-all. Floci serves every service on one port, so SigV4
  * credential scope {@code s3tables} is rewritten onto an internal prefix the
  * S3 Tables controller owns.
+ *
+ * <p>Function URL invocations are rewritten to {@code /lambda-url/{urlId}/...}
+ * before this filter. Prefixing those paths with {@code /aws-s3tables} 404s the
+ * Lambda fixture the Bindings suite probes at {@code /bindings}.
  */
 @Provider
 @PreMatching
@@ -31,6 +35,10 @@ public class S3TablesRoutingFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        String host = requestContext.getHeaderString("Host");
+        if (isLambdaUrlHost(host)) {
+            return;
+        }
         if (!isS3Tables(requestContext.getHeaderString("Authorization"))) {
             return;
         }
@@ -66,7 +74,18 @@ public class S3TablesRoutingFilter implements ContainerRequestFilter {
         if ("/tags".equals(normalized) || normalized.startsWith("/tags/")) {
             return path;
         }
+        if (isLambdaUrlPath(normalized)) {
+            return path;
+        }
         return INTERNAL_PREFIX + normalized;
+    }
+
+    static boolean isLambdaUrlHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains(".lambda-url.");
+    }
+
+    static boolean isLambdaUrlPath(String path) {
+        return "/lambda-url".equals(path) || path.startsWith("/lambda-url/");
     }
 
     static String stripTrailingSlash(String path) {
