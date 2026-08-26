@@ -970,7 +970,8 @@ public class SmsVoiceService implements Resettable {
         }
         return phonesInRegion(region).stream()
                 .filter(phone -> idOrArn.equals(phone.getPhoneNumberArn())
-                        || idOrArn.equals(phone.getPhoneNumberId()))
+                        || idOrArn.equals(phone.getPhoneNumberId())
+                        || idOrArn.equals(phone.getPhoneNumber()))
                 .findFirst();
     }
 
@@ -1083,5 +1084,62 @@ public class SmsVoiceService implements Resettable {
             return fallback;
         }
         return request.get(field).asBoolean();
+    }
+
+    private ObjectNode sendMessage(JsonNode request, String region, String capability, boolean originationRequired) {
+        requireE164(request, "DestinationPhoneNumber");
+        String origination = textOrNull(request, "OriginationIdentity");
+        if (originationRequired && origination == null) {
+            throw invalid("OriginationIdentity is required.");
+        }
+        if (origination != null) {
+            requireCapability(requirePhone(region, origination), capability);
+        }
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("MessageId", UUID.randomUUID().toString());
+        return out;
+    }
+
+    private void requireCapability(SmsVoicePhoneNumber phone, String capability) {
+        if (!phone.getNumberCapabilities().contains(capability)) {
+            throw conflict("Phone number " + phone.getPhoneNumberId()
+                    + " does not support " + capability + ".");
+        }
+    }
+
+    private void seedDefaultKeywords(SmsVoicePhoneNumber phone) {
+        phone.getKeywords().put("HELP", keyword("HELP",
+                "Reply HELP for help. Reply STOP to unsubscribe.", "AUTOMATIC_RESPONSE"));
+        phone.getKeywords().put("STOP", keyword("STOP",
+                "You have successfully been unsubscribed.", "OPT_OUT"));
+    }
+
+    private static SmsVoiceKeyword keyword(String name, String message, String action) {
+        SmsVoiceKeyword stored = new SmsVoiceKeyword();
+        stored.setKeyword(name);
+        stored.setKeywordMessage(message);
+        stored.setKeywordAction(action);
+        return stored;
+    }
+
+    private ObjectNode keywordNode(SmsVoiceKeyword keyword) {
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("Keyword", keyword.getKeyword());
+        out.put("KeywordMessage", keyword.getKeywordMessage());
+        out.put("KeywordAction", keyword.getKeywordAction());
+        return out;
+    }
+
+    private static List<String> stringList(JsonNode node) {
+        List<String> values = new ArrayList<>();
+        if (node == null || !node.isArray()) {
+            return values;
+        }
+        for (JsonNode item : node) {
+            if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                values.add(item.asText());
+            }
+        }
+        return values;
     }
 }
