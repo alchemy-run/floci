@@ -73,6 +73,7 @@ import io.github.hectorvent.floci.services.redshiftserverless.RedshiftServerless
 import io.github.hectorvent.floci.services.route53domains.Route53DomainsJsonHandler;
 import io.github.hectorvent.floci.services.route53resolver.Route53ResolverJsonHandler;
 import io.github.hectorvent.floci.services.servicecatalog.ServiceCatalogJsonHandler;
+import io.github.hectorvent.floci.services.servicequotas.ServiceQuotasJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -167,6 +168,7 @@ public class AwsJson11Controller {
     private final Route53DomainsJsonHandler route53DomainsJsonHandler;
     private final Route53ResolverJsonHandler route53ResolverJsonHandler;
     private final ServiceCatalogJsonHandler serviceCatalogJsonHandler;
+    private final ServiceQuotasJsonHandler serviceQuotasJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -234,7 +236,8 @@ public class AwsJson11Controller {
                                RedshiftDataJsonHandler redshiftDataJsonHandler,
                                Route53DomainsJsonHandler route53DomainsJsonHandler,
                                Route53ResolverJsonHandler route53ResolverJsonHandler,
-                               ServiceCatalogJsonHandler serviceCatalogJsonHandler) {
+                               ServiceCatalogJsonHandler serviceCatalogJsonHandler,
+                               ServiceQuotasJsonHandler serviceQuotasJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -307,6 +310,7 @@ public class AwsJson11Controller {
         this.route53DomainsJsonHandler = route53DomainsJsonHandler;
         this.route53ResolverJsonHandler = route53ResolverJsonHandler;
         this.serviceCatalogJsonHandler = serviceCatalogJsonHandler;
+        this.serviceQuotasJsonHandler = serviceQuotasJsonHandler;
     }
 
     @POST
@@ -411,6 +415,7 @@ public class AwsJson11Controller {
                 case "route53domains" -> route53DomainsJsonHandler.handle(action, request, region);
                 case "route53resolver" -> route53ResolverJsonHandler.handle(action, request, region);
                 case "servicecatalog" -> serviceCatalogJsonHandler.handle(action, request, region);
+                case "servicequotas" -> serviceQuotasJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target
