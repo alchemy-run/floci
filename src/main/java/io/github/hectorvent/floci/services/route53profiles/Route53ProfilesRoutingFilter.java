@@ -31,6 +31,10 @@ public class Route53ProfilesRoutingFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        String host = requestContext.getHeaderString("Host");
+        if (isLambdaUrlHost(host)) {
+            return;
+        }
         if (!isRoute53Profiles(requestContext.getHeaderString("Authorization"))) {
             return;
         }
@@ -55,9 +59,16 @@ public class Route53ProfilesRoutingFilter implements ContainerRequestFilter {
                 && Route53ProfilesService.SERVICE.equals(matcher.group(1).toLowerCase(Locale.ROOT));
     }
 
+    static boolean isLambdaUrlHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains(".lambda-url.");
+    }
+
     /**
      * Prefixes route53profiles-signed paths onto {@link #INTERNAL_PREFIX}.
      * {@code /tags} is left alone for {@code SharedTagsController}.
+     * Function URL invocations are rewritten to {@code /lambda-url/{urlId}/...}
+     * before this filter; prefixing those paths 404s the Lambda fixture the
+     * Bindings suite probes at {@code /bindings}.
      */
     static String rewritePath(String path) {
         if (path == null || path.isBlank()) {
@@ -70,7 +81,14 @@ public class Route53ProfilesRoutingFilter implements ContainerRequestFilter {
         if ("/tags".equals(normalized) || normalized.startsWith("/tags/")) {
             return path;
         }
+        if (isLambdaUrlPath(normalized)) {
+            return path;
+        }
         return INTERNAL_PREFIX + normalized;
+    }
+
+    static boolean isLambdaUrlPath(String path) {
+        return "/lambda-url".equals(path) || path.startsWith("/lambda-url/");
     }
 
     static String stripTrailingSlash(String path) {
