@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.iam.StsQueryHandler;
 import io.github.hectorvent.floci.services.rds.RdsQueryHandler;
 import io.github.hectorvent.floci.services.redshift.RedshiftQueryHandler;
 import io.github.hectorvent.floci.services.sns.SnsQueryHandler;
+import io.github.hectorvent.floci.services.simpledb.SimpleDbQueryHandler;
 import io.github.hectorvent.floci.services.ses.SesQueryHandler;
 import io.github.hectorvent.floci.services.sqs.SqsQueryHandler;
 import jakarta.inject.Inject;
@@ -78,6 +79,12 @@ public class AwsQueryController {
             "GetSMSSandboxAccountStatus", "ListSMSSandboxPhoneNumbers",
             "VerifySMSSandboxPhoneNumber", "ListOriginationNumbers",
             "AddPermission", "RemovePermission"
+    );
+
+    private static final Set<String> SIMPLEDB_ACTIONS = Set.of(
+            "CreateDomain", "DeleteDomain", "ListDomains", "DomainMetadata",
+            "PutAttributes", "GetAttributes", "DeleteAttributes",
+            "BatchPutAttributes", "BatchDeleteAttributes", "Select"
     );
 
     private static final Set<String> IAM_ACTIONS = Set.of(
@@ -191,6 +198,7 @@ public class AwsQueryController {
     private final DocDbService docDbService;
     private final SqsQueryHandler sqsQueryHandler;
     private final SnsQueryHandler snsQueryHandler;
+    private final SimpleDbQueryHandler simpleDbQueryHandler;
     private final SesQueryHandler sesQueryHandler;
     private final IamQueryHandler iamQueryHandler;
     private final StsQueryHandler stsQueryHandler;
@@ -213,6 +221,7 @@ public class AwsQueryController {
                               DocDbQueryHandler docDbQueryHandler,
                               DocDbService docDbService,
                               SqsQueryHandler sqsQueryHandler, SnsQueryHandler snsQueryHandler,
+                              SimpleDbQueryHandler simpleDbQueryHandler,
                               SesQueryHandler sesQueryHandler,
                               IamQueryHandler iamQueryHandler, StsQueryHandler stsQueryHandler,
                               CloudWatchMetricsQueryHandler cloudWatchMetricsQueryHandler,
@@ -233,6 +242,7 @@ public class AwsQueryController {
         this.docDbService = docDbService;
         this.sqsQueryHandler = sqsQueryHandler;
         this.snsQueryHandler = snsQueryHandler;
+        this.simpleDbQueryHandler = simpleDbQueryHandler;
         this.sesQueryHandler = sesQueryHandler;
         this.iamQueryHandler = iamQueryHandler;
         this.stsQueryHandler = stsQueryHandler;
@@ -292,6 +302,7 @@ public class AwsQueryController {
         return switch (service) {
             case "sqs" -> sqsQueryHandler.handle(action, formParams, region);
             case "sns" -> snsQueryHandler.handle(action, formParams, region);
+            case "sdb" -> simpleDbQueryHandler.handle(action, formParams, region);
             case "iam" -> iamQueryHandler.handle(action, formParams, authorization);
             case "sts" -> stsQueryHandler.handle(action, formParams);
             case "elasticache" -> elastiCacheQueryHandler.handle(action, formParams);
@@ -493,6 +504,9 @@ public class AwsQueryController {
         }
         if (SNS_ACTIONS.contains(action)) {
             return "sns";
+        }
+        if (SIMPLEDB_ACTIONS.contains(action)) {
+            return "sdb";
         }
         if (ELASTICACHE_ACTIONS.contains(action)) {
             return "elasticache";

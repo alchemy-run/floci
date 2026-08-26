@@ -8,6 +8,7 @@ public final class AwsNamespaces {
 
     public static final String SQS = "https://sqs.amazonaws.com/doc/2012-11-05/";
     public static final String SNS = "http://sns.amazonaws.com/doc/2010-03-31/";
+    public static final String SDB = "http://sdb.amazonaws.com/doc/2009-04-15/";
     public static final String IAM = "https://iam.amazonaws.com/doc/2010-05-08/";
     public static final String STS = "https://sts.amazonaws.com/doc/2011-06-15/";
     public static final String RDS = "http://rds.amazonaws.com/doc/2014-10-31/";
