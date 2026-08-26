@@ -143,6 +143,7 @@ nav:
     - CloudTrail: services/cloudtrail.md
     - CloudFront: services/cloudfront.md
     - Route53: services/route53.md
+    - Route53 Resolver: services/route53resolver.md
     - AWS Cloud Map: services/cloudmap.md
     - AWS IoT Core: services/iot.md
     - AppSync: services/appsync.md
