@@ -211,6 +211,10 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AmazonSSMManagedInstanceCore", "/",
                 "Provides permissions required for instances to use AWS Systems Manager core service functionality."),
 
+        // EC2 Image Builder instance-profile role — Alchemy ImageBuilder tests attach this ARN.
+        new ManagedPolicyDef("EC2InstanceProfileForImageBuilder", "/",
+                "Provides permissions required for EC2 Image Builder to create images."),
+
         // SageMaker execution role policies
         new ManagedPolicyDef("AmazonSageMakerGeospatialExecutionRole", "/service-role/",
                 "Provides full access to Amazon SageMaker Geospatial capabilities and related services."),
