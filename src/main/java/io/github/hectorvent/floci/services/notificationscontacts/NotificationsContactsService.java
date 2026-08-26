@@ -85,7 +85,7 @@ public class NotificationsContactsService implements TagHandler {
         contact.setStatus("inactive");
         contact.setCreationTime(now);
         contact.setUpdateTime(now);
-        contact.setActivationCode(newActivationCode());
+        contact.setActivationCode(newActivationCode(id));
         contact.setTags(tags);
         store.put(id, contact);
         return contact;
@@ -113,7 +113,10 @@ public class NotificationsContactsService implements TagHandler {
 
     public synchronized EmailContact sendActivationCode(String arn) {
         EmailContact contact = requireContact(arn);
-        contact.setActivationCode(newActivationCode());
+        if ("active".equals(contact.getStatus())) {
+            throw conflict(contact.getId(), "The email contact is already activated.");
+        }
+        contact.setActivationCode(newActivationCode(contact.getId()));
         contact.setUpdateTime(timestamp());
         store.put(contact.getId(), contact);
         return contact;
@@ -125,7 +128,7 @@ public class NotificationsContactsService implements TagHandler {
             throw validation("Activation code is invalid.");
         }
         if ("active".equals(contact.getStatus())) {
-            return contact;
+            throw conflict(contact.getId(), "The email contact is already activated.");
         }
         contact.setStatus("active");
         contact.setUpdateTime(timestamp());
@@ -217,8 +220,9 @@ public class NotificationsContactsService implements TagHandler {
         return UUID.randomUUID().toString().replace("-", "").substring(0, ID_LENGTH);
     }
 
-    private static String newActivationCode() {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    /** Deterministic 8-char code derived from the contact id so tests can activate over HTTP. */
+    private static String newActivationCode(String id) {
+        return id.substring(0, 8);
     }
 
     private static String timestamp() {

@@ -183,6 +183,36 @@ class NotificationsContactsIntegrationTest {
     }
 
     @Test
+    void getSendAndRejectBogusActivationCodeForBindings() {
+        String authorization = auth("000000000407", EAST);
+        String arn = create(authorization,
+                "{\"name\":\"bindings-contact\",\"emailAddress\":\"bindings@alchemy.run\"}");
+
+        Response observed = get(authorization, arn);
+        observed.then()
+                .statusCode(200)
+                .body("emailContact.arn", equalTo(arn))
+                .body("emailContact.status", equalTo("inactive"));
+        assertTrue(((String) observed.path("emailContact.arn")).contains(":emailcontact/"));
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .post("/2022-10-31/emailcontacts/" + encode(arn) + "/activate/send")
+                .then()
+                .statusCode(200);
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .put("/emailcontacts/" + encode(arn) + "/activate/000000")
+                .then()
+                .statusCode(400)
+                .header("X-Amzn-Errortype", equalTo("ValidationException"))
+                .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
     void sendActivationCodeThenActivateTransitionsToActive() {
         String authorization = auth("000000000405", EAST);
         String arn = create(authorization, "{\"name\":\"activate-me\",\"emailAddress\":\"activate@alchemy.run\"}");
@@ -200,9 +230,30 @@ class NotificationsContactsIntegrationTest {
                 .put("/emailcontacts/" + encode(arn) + "/activate/not-the-code")
                 .then()
                 .statusCode(400)
+                .header("X-Amzn-Errortype", equalTo("ValidationException"))
                 .body("__type", equalTo("ValidationException"));
 
         get(authorization, arn).then().body("emailContact.status", equalTo("inactive"));
+
+        String code = arn.substring(arn.lastIndexOf('/') + 1).substring(0, 8);
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .put("/emailcontacts/" + encode(arn) + "/activate/" + encode(code))
+                .then()
+                .statusCode(200);
+
+        get(authorization, arn).then().body("emailContact.status", equalTo("active"));
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .post("/2022-10-31/emailcontacts/" + encode(arn) + "/activate/send")
+                .then()
+                .statusCode(409)
+                .header("X-Amzn-Errortype", equalTo("ConflictException"))
+                .body("__type", equalTo("ConflictException"))
+                .body("resourceType", equalTo("EmailContact"));
     }
 
     @Test

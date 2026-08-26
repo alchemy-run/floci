@@ -20,12 +20,11 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 /**
- * AWS User Notifications Contacts (Smithy restJson1). Literal paths such as
- * {@code /2022-09-19/emailcontacts} and {@code /emailcontacts} take JAX-RS
- * precedence over S3's {@code /{bucket}} catch-all. Tag APIs share
- * {@code /tags/{arn}}.
+ * AWS User Notifications Contacts (Smithy restJson1). Public paths are
+ * rewritten by {@link NotificationsContactsRoutingFilter} so they do not
+ * collide with S3's path-style catch-all. Tag APIs share {@code /tags/{arn}}.
  */
-@Path("/")
+@Path(NotificationsContactsRoutingFilter.INTERNAL_PREFIX)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class NotificationsContactsController {

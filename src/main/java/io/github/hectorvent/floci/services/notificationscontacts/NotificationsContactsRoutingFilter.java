@@ -13,11 +13,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Notifications Contacts restJson1 paths such as {@code /2022-09-19/emailcontacts}
- * collide with S3 path-style routes. Requests signed for
- * {@code notifications-contacts} are rewritten onto an internal prefix the
- * controller owns. Tag APIs stay on {@code /tags/{arn}} for
+ * Notifications Contacts restJson1 paths such as {@code /emailcontacts} and
+ * {@code /2022-09-19/emailcontacts} collide with S3 path-style routes. Requests
+ * signed for {@code notifications-contacts} are rewritten onto an internal prefix
+ * the controller owns. Tag APIs stay on {@code /tags/{arn}} for
  * {@code SharedTagsController}.
+ *
+ * <p>Function URL invocations are rewritten to {@code /lambda-url/{urlId}/...}
+ * before this filter. Prefixing those paths with {@code /aws-notifications-contacts}
+ * 404s the Lambda fixture the Bindings suite probes at {@code /ping}.
  */
 @Provider
 @PreMatching
@@ -31,6 +35,10 @@ public class NotificationsContactsRoutingFilter implements ContainerRequestFilte
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        String host = requestContext.getHeaderString("Host");
+        if (isLambdaUrlHost(host)) {
+            return;
+        }
         if (!isNotificationsContacts(requestContext.getHeaderString("Authorization"))) {
             return;
         }
@@ -55,10 +63,34 @@ public class NotificationsContactsRoutingFilter implements ContainerRequestFilte
                 && NotificationsContactsService.SERVICE.equals(matcher.group(1).toLowerCase(Locale.ROOT));
     }
 
+    /**
+     * Prefixes notifications-contacts-signed paths onto {@link #INTERNAL_PREFIX},
+     * stripping a trailing slash so RestAssured and the SDK hit the same resource.
+     * {@code /tags} is left alone for {@code SharedTagsController}.
+     */
     static String rewritePath(String path) {
-        // Literal /emailcontacts and /2022-09-19/emailcontacts already beat S3's
-        // /{bucket} templates; do not prefix (the controller is mounted at /).
-        return path;
+        if (path == null || path.isBlank()) {
+            return path;
+        }
+        if (path.equals(INTERNAL_PREFIX) || path.startsWith(INTERNAL_PREFIX + "/")) {
+            return path;
+        }
+        String normalized = stripTrailingSlash(path);
+        if ("/tags".equals(normalized) || normalized.startsWith("/tags/")) {
+            return path;
+        }
+        if (isLambdaUrlPath(normalized)) {
+            return path;
+        }
+        return INTERNAL_PREFIX + normalized;
+    }
+
+    static boolean isLambdaUrlHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains(".lambda-url.");
+    }
+
+    static boolean isLambdaUrlPath(String path) {
+        return "/lambda-url".equals(path) || path.startsWith("/lambda-url/");
     }
 
     static String stripTrailingSlash(String path) {
