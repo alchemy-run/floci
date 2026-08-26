@@ -225,6 +225,71 @@ public class DataZoneController {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    @GET
+    @Path("/v2/domains/{domainIdentifier}/environment-blueprints")
+    @Consumes(MediaType.WILDCARD)
+    public Response listEnvironmentBlueprints(
+            @Context HttpHeaders headers,
+            @PathParam("domainIdentifier") String domainIdentifier,
+            @QueryParam("name") String name,
+            @QueryParam("managed") Boolean managed) {
+        return Response.ok(service.listEnvironmentBlueprints(
+                region(headers), domainIdentifier, name, managed)).build();
+    }
+
+    @PUT
+    @Path("/v2/domains/{domainIdentifier}/environment-blueprint-configurations/{environmentBlueprintIdentifier}")
+    public Response putEnvironmentBlueprintConfiguration(
+            @Context HttpHeaders headers,
+            @PathParam("domainIdentifier") String domainIdentifier,
+            @PathParam("environmentBlueprintIdentifier") String environmentBlueprintIdentifier,
+            String body) {
+        return Response.ok(service.toBlueprintConfiguration(
+                service.putEnvironmentBlueprintConfiguration(
+                        region(headers), domainIdentifier, environmentBlueprintIdentifier, parse(body))))
+                .build();
+    }
+
+    @GET
+    @Path("/v2/domains/{domainIdentifier}/environment-blueprint-configurations/{environmentBlueprintIdentifier}")
+    @Consumes(MediaType.WILDCARD)
+    public Response getEnvironmentBlueprintConfiguration(
+            @Context HttpHeaders headers,
+            @PathParam("domainIdentifier") String domainIdentifier,
+            @PathParam("environmentBlueprintIdentifier") String environmentBlueprintIdentifier) {
+        return Response.ok(service.toBlueprintConfiguration(
+                service.getEnvironmentBlueprintConfiguration(
+                        region(headers), domainIdentifier, environmentBlueprintIdentifier)))
+                .build();
+    }
+
+    @GET
+    @Path("/v2/domains/{domainIdentifier}/environment-blueprint-configurations")
+    @Consumes(MediaType.WILDCARD)
+    public Response listEnvironmentBlueprintConfigurations(
+            @Context HttpHeaders headers,
+            @PathParam("domainIdentifier") String domainIdentifier) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode items = response.putArray("items");
+        for (var config : service.listEnvironmentBlueprintConfigurations(
+                region(headers), domainIdentifier)) {
+            items.add(service.toBlueprintConfiguration(config));
+        }
+        return Response.ok(response).build();
+    }
+
+    @DELETE
+    @Path("/v2/domains/{domainIdentifier}/environment-blueprint-configurations/{environmentBlueprintIdentifier}")
+    @Consumes(MediaType.WILDCARD)
+    public Response deleteEnvironmentBlueprintConfiguration(
+            @Context HttpHeaders headers,
+            @PathParam("domainIdentifier") String domainIdentifier,
+            @PathParam("environmentBlueprintIdentifier") String environmentBlueprintIdentifier) {
+        service.deleteEnvironmentBlueprintConfiguration(
+                region(headers), domainIdentifier, environmentBlueprintIdentifier);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     @POST
     @Path("/v2/domains/{domainIdentifier}/user-profiles")
     public Response createUserProfile(

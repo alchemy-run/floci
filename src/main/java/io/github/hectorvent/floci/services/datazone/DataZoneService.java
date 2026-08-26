@@ -44,6 +44,9 @@ public class DataZoneService implements TagHandler {
 
     static final String SERVICE = "datazone";
 
+    private record ManagedBlueprint(String id, String name, String description, String provider) {
+    }
+
     private static final List<ManagedBlueprint> MANAGED_BLUEPRINTS = List.of(
             new ManagedBlueprint(
                     "11111111-1111-1111-1111-111111111111",
@@ -209,6 +212,12 @@ public class DataZoneService implements TagHandler {
         for (Environment environment : new ArrayList<>(environments.values())) {
             if (region.equals(environment.getRegion()) && identifier.equals(environment.getDomainId())) {
                 environments.delete(environmentKey(region, identifier, environment.getId()));
+            }
+        }
+        for (EnvironmentBlueprintConfiguration config : new ArrayList<>(blueprintConfigurations.values())) {
+            if (region.equals(config.getRegion()) && identifier.equals(config.getDomainId())) {
+                blueprintConfigurations.delete(blueprintConfigKey(
+                        region, identifier, config.getEnvironmentBlueprintId()));
             }
         }
         domains.delete(domainKey(region, identifier));
@@ -537,6 +546,107 @@ public class DataZoneService implements TagHandler {
         return response;
     }
 
+    public ObjectNode listEnvironmentBlueprints(
+            String region, String domainId, String name, Boolean managed) {
+        requireDomain(region, domainId);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode items = response.putArray("items");
+        boolean includeManaged = managed == null || managed;
+        if (includeManaged) {
+            for (ManagedBlueprint blueprint : MANAGED_BLUEPRINTS) {
+                if (name != null && !name.isBlank() && !name.equals(blueprint.name())) {
+                    continue;
+                }
+                items.add(toBlueprintSummary(blueprint));
+            }
+        }
+        return response;
+    }
+
+    public synchronized EnvironmentBlueprintConfiguration putEnvironmentBlueprintConfiguration(
+            String region, String domainId, String environmentBlueprintIdentifier, JsonNode request) {
+        requireDomain(region, domainId);
+        requireObject(request, "Request body");
+        if (!request.has("enabledRegions") || !request.get("enabledRegions").isArray()) {
+            throw new AwsException("ValidationException", "enabledRegions is required.", 400);
+        }
+        ManagedBlueprint blueprint = requireManagedBlueprint(environmentBlueprintIdentifier);
+        String now = Instant.now().toString();
+        String key = blueprintConfigKey(region, domainId, blueprint.id());
+        EnvironmentBlueprintConfiguration config = blueprintConfigurations.get(key)
+                .orElseGet(EnvironmentBlueprintConfiguration::new);
+        config.setDomainId(domainId);
+        config.setEnvironmentBlueprintId(blueprint.id());
+        config.setRegion(region);
+        config.setProvisioningRoleArn(optionalText(request, "provisioningRoleArn"));
+        config.setManageAccessRoleArn(optionalText(request, "manageAccessRoleArn"));
+        config.setEnvironmentRolePermissionBoundary(
+                optionalText(request, "environmentRolePermissionBoundary"));
+        config.setEnabledRegions(stringList(request, "enabledRegions"));
+        config.setRegionalParameters(readStringMapMap(request.get("regionalParameters")));
+        config.setGlobalParameters(readStringMap(request.get("globalParameters")));
+        if (request.has("provisioningConfigurations") && !request.get("provisioningConfigurations").isNull()) {
+            config.setProvisioningConfigurations(request.get("provisioningConfigurations").deepCopy());
+        } else {
+            config.setProvisioningConfigurations(null);
+        }
+        if (request.has("resourceConfigurations") && !request.get("resourceConfigurations").isNull()) {
+            config.setResourceConfigurations(request.get("resourceConfigurations").deepCopy());
+        } else {
+            config.setResourceConfigurations(null);
+        }
+        if (request.has("allowUserProvidedConfigurations")
+                && request.get("allowUserProvidedConfigurations").isBoolean()) {
+            config.setAllowUserProvidedConfigurations(
+                    request.get("allowUserProvidedConfigurations").asBoolean());
+        } else {
+            config.setAllowUserProvidedConfigurations(null);
+        }
+        if (config.getCreatedAt() == null) {
+            config.setCreatedAt(now);
+        }
+        config.setUpdatedAt(now);
+        blueprintConfigurations.put(key, config);
+        return config;
+    }
+
+    public EnvironmentBlueprintConfiguration getEnvironmentBlueprintConfiguration(
+            String region, String domainId, String environmentBlueprintIdentifier) {
+        requireDomain(region, domainId);
+        String blueprintId = resolveBlueprintId(environmentBlueprintIdentifier);
+        return blueprintConfigurations.get(blueprintConfigKey(region, domainId, blueprintId))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Environment blueprint configuration " + environmentBlueprintIdentifier
+                                + " was not found.", 404));
+    }
+
+    public List<EnvironmentBlueprintConfiguration> listEnvironmentBlueprintConfigurations(
+            String region, String domainId) {
+        requireDomain(region, domainId);
+        List<EnvironmentBlueprintConfiguration> result = new ArrayList<>();
+        for (EnvironmentBlueprintConfiguration config : blueprintConfigurations.values()) {
+            if (region.equals(config.getRegion()) && domainId.equals(config.getDomainId())) {
+                result.add(config);
+            }
+        }
+        result.sort(Comparator.comparing(
+                EnvironmentBlueprintConfiguration::getCreatedAt, Comparator.nullsLast(String::compareTo)));
+        return result;
+    }
+
+    public synchronized void deleteEnvironmentBlueprintConfiguration(
+            String region, String domainId, String environmentBlueprintIdentifier) {
+        requireDomain(region, domainId);
+        String blueprintId = resolveBlueprintId(environmentBlueprintIdentifier);
+        String key = blueprintConfigKey(region, domainId, blueprintId);
+        if (blueprintConfigurations.get(key).isEmpty()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Environment blueprint configuration " + environmentBlueprintIdentifier
+                            + " was not found.", 404);
+        }
+        blueprintConfigurations.delete(key);
+    }
+
     @Override
     public String serviceKey() {
         return SERVICE;
@@ -774,6 +884,76 @@ public class DataZoneService implements TagHandler {
         return node;
     }
 
+    ObjectNode toBlueprintConfiguration(EnvironmentBlueprintConfiguration config) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("domainId", config.getDomainId());
+        node.put("environmentBlueprintId", config.getEnvironmentBlueprintId());
+        if (config.getProvisioningRoleArn() != null) {
+            node.put("provisioningRoleArn", config.getProvisioningRoleArn());
+        }
+        if (config.getManageAccessRoleArn() != null) {
+            node.put("manageAccessRoleArn", config.getManageAccessRoleArn());
+        }
+        if (config.getEnvironmentRolePermissionBoundary() != null) {
+            node.put("environmentRolePermissionBoundary", config.getEnvironmentRolePermissionBoundary());
+        }
+        ArrayNode enabledRegions = node.putArray("enabledRegions");
+        if (config.getEnabledRegions() != null) {
+            config.getEnabledRegions().forEach(enabledRegions::add);
+        }
+        putStringMapMap(node, "regionalParameters", config.getRegionalParameters());
+        if (config.getAllowUserProvidedConfigurations() != null) {
+            node.put("allowUserProvidedConfigurations", config.getAllowUserProvidedConfigurations());
+        }
+        if (config.getCreatedAt() != null) {
+            node.put("createdAt", config.getCreatedAt());
+        }
+        if (config.getUpdatedAt() != null) {
+            node.put("updatedAt", config.getUpdatedAt());
+        }
+        if (config.getProvisioningConfigurations() != null) {
+            node.set("provisioningConfigurations", config.getProvisioningConfigurations());
+        }
+        if (config.getResourceConfigurations() != null) {
+            node.set("resourceConfigurations", config.getResourceConfigurations());
+        }
+        return node;
+    }
+
+    private ObjectNode toBlueprintSummary(ManagedBlueprint blueprint) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("id", blueprint.id());
+        node.put("name", blueprint.name());
+        if (blueprint.description() != null) {
+            node.put("description", blueprint.description());
+        }
+        node.put("provider", blueprint.provider());
+        node.putObject("provisioningProperties")
+                .putObject("cloudFormation")
+                .put("templateUrl",
+                        "https://datazone.amazonaws.com/blueprints/" + blueprint.name() + ".yaml");
+        return node;
+    }
+
+    private ManagedBlueprint requireManagedBlueprint(String identifier) {
+        for (ManagedBlueprint blueprint : MANAGED_BLUEPRINTS) {
+            if (blueprint.id().equals(identifier) || blueprint.name().equals(identifier)) {
+                return blueprint;
+            }
+        }
+        throw new AwsException("ResourceNotFoundException",
+                "Environment blueprint " + identifier + " was not found.", 404);
+    }
+
+    private static String resolveBlueprintId(String identifier) {
+        for (ManagedBlueprint blueprint : MANAGED_BLUEPRINTS) {
+            if (blueprint.id().equals(identifier) || blueprint.name().equals(identifier)) {
+                return blueprint.id();
+            }
+        }
+        return identifier;
+    }
+
     private Domain requireDomain(String region, String identifier) {
         if (identifier == null || identifier.isBlank()) {
             throw new AwsException("ValidationException", "identifier is required.", 400);
@@ -910,16 +1090,47 @@ public class DataZoneService implements TagHandler {
     }
 
     private static Map<String, String> readTags(JsonNode node) {
-        Map<String, String> tags = new LinkedHashMap<>();
+        return readStringMap(node);
+    }
+
+    private static Map<String, String> readStringMap(JsonNode node) {
+        Map<String, String> values = new LinkedHashMap<>();
         if (node == null || !node.isObject()) {
-            return tags;
+            return values;
         }
         node.fields().forEachRemaining(entry -> {
             if (entry.getValue() != null && entry.getValue().isTextual()) {
-                tags.put(entry.getKey(), entry.getValue().asText());
+                values.put(entry.getKey(), entry.getValue().asText());
             }
         });
-        return tags;
+        return values;
+    }
+
+    private static Map<String, Map<String, String>> readStringMapMap(JsonNode node) {
+        Map<String, Map<String, String>> values = new LinkedHashMap<>();
+        if (node == null || !node.isObject()) {
+            return values;
+        }
+        node.fields().forEachRemaining(entry -> {
+            if (entry.getValue() != null && entry.getValue().isObject()) {
+                values.put(entry.getKey(), readStringMap(entry.getValue()));
+            }
+        });
+        return values;
+    }
+
+    private static void putStringMapMap(
+            ObjectNode parent, String field, Map<String, Map<String, String>> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        ObjectNode node = parent.putObject(field);
+        values.forEach((key, nested) -> {
+            ObjectNode child = node.putObject(key);
+            if (nested != null) {
+                nested.forEach(child::put);
+            }
+        });
     }
 
     private static String profileType(String userType) {
@@ -970,5 +1181,9 @@ public class DataZoneService implements TagHandler {
 
     private static String environmentKey(String region, String domainId, String id) {
         return region + ":" + domainId + ":env:" + id;
+    }
+
+    private static String blueprintConfigKey(String region, String domainId, String blueprintId) {
+        return region + ":" + domainId + ":blueprint:" + blueprintId;
     }
 }

@@ -228,6 +228,12 @@ final class AwsManagedPolicies {
         // Amazon DataZone execution role policy
         new ManagedPolicyDef("AmazonDataZoneDomainExecutionRolePolicy", "/service-role/",
                 "Provides permissions for the Amazon DataZone domain execution role."),
+        // DataZone environment blueprint provisioning / manage-access roles —
+        // Alchemy EnvironmentBlueprintConfiguration attaches these ARNs.
+        new ManagedPolicyDef("AmazonDataZoneRedshiftGlueProvisioningPolicy", "/",
+                "Provides Amazon DataZone permissions to provision Glue and Redshift resources."),
+        new ManagedPolicyDef("AmazonDataZoneGlueManageAccessRolePolicy", "/service-role/",
+                "Provides Amazon DataZone permissions to manage Glue access grants."),
 
         // Amazon Bedrock policies
         new ManagedPolicyDef("AmazonBedrockFullAccess", "/",
