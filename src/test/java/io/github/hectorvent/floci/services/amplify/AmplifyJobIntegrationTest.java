@@ -35,6 +35,8 @@ class AmplifyJobIntegrationTest {
         String authorization = auth("000000000601", EAST);
         String appId = createAppAndBranch(authorization);
 
+        // Nested POST /apps/{id}/branches/{name}/deployments must not fall
+        // through to S3's path-style catch-all (XML InvalidArgument).
         Response created = given()
                 .contentType("application/json")
                 .header("Authorization", authorization)
@@ -43,6 +45,7 @@ class AmplifyJobIntegrationTest {
                 .post("/apps/" + appId + "/branches/main/deployments")
                 .then()
                 .statusCode(200)
+                .contentType("application/json")
                 .body("jobId", notNullValue())
                 .body("zipUploadUrl", containsString("https://"))
                 .extract()
@@ -150,6 +153,24 @@ class AmplifyJobIntegrationTest {
                 .path("jobSummaries");
         assertEquals(1, remaining.size());
         assertEquals(successorId, remaining.getFirst().get("jobId"));
+    }
+
+    @Test
+    void createDeploymentOnNestedPathIsJsonNotS3Xml() {
+        String authorization = auth("000000000605", EAST);
+        String appId = createAppAndBranch(authorization);
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{}")
+                .when()
+                .post("/apps/" + appId + "/branches/main/deployments")
+                .then()
+                .statusCode(200)
+                .contentType("application/json")
+                .body("jobId", notNullValue())
+                .body("zipUploadUrl", containsString("https://"));
     }
 
     @Test

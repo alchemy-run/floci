@@ -41,7 +41,7 @@ import java.util.Set;
 public class AmplifyService implements TagHandler {
 
     private static final Logger LOG = Logger.getLogger(AmplifyService.class);
-    private static final String SERVICE = "amplify";
+    static final String SERVICE = "amplify";
     private static final String TOKEN_PREFIX = "amplify:v1:";
     private static final int DEFAULT_MAX_RESULTS = 100;
     private static final int MAX_RESULTS = 100;

@@ -28,10 +28,12 @@ import java.util.Map;
 /**
  * Amplify Hosting restJson1 — app, branch, and manual-deploy job lifecycle.
  *
- * <p>Literal {@code /apps} paths take JAX-RS precedence over S3's {@code /{bucket}}
- * catch-all. Tag APIs share {@code /tags/{arn}} and are dispatched by {@code SharedTagsController}.
+ * <p>{@link AmplifyRoutingFilter} prefixes amplify-signed paths so nested
+ * {@code /apps/{id}/branches/...} and {@code /artifacts/{id}} do not collapse
+ * onto S3's path-style {@code /{bucket}/{key:.+}} catch-all. Tag APIs share
+ * {@code /tags/{arn}} and are dispatched by {@code SharedTagsController}.
  */
-@Path("/")
+@Path(AmplifyRoutingFilter.INTERNAL_PREFIX)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class AmplifyController {
