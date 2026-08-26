@@ -39,13 +39,13 @@ public class SageMakerFeatureStoreController {
     }
 
     @PUT
-    @Path("/FeatureGroup/{featureGroupName}")
+    @Path("/FeatureGroup/{featureGroupName:.+}")
     public Response putRecord(@PathParam("featureGroupName") String featureGroupName, String body) {
         return handle(() -> service.putRecord(featureGroupName, parse(body)));
     }
 
     @GET
-    @Path("/FeatureGroup/{featureGroupName}")
+    @Path("/FeatureGroup/{featureGroupName:.+}")
     public Response getRecord(
             @PathParam("featureGroupName") String featureGroupName,
             @QueryParam("RecordIdentifierValueAsString") String identifier,
@@ -54,16 +54,17 @@ public class SageMakerFeatureStoreController {
     }
 
     @DELETE
-    @Path("/FeatureGroup/{featureGroupName}")
+    @Path("/FeatureGroup/{featureGroupName:.+}")
     public Response deleteRecord(
             @PathParam("featureGroupName") String featureGroupName,
             @QueryParam("RecordIdentifierValueAsString") String identifier,
+            @QueryParam("EventTime") String eventTime,
             @QueryParam("DeletionMode") String deletionMode) {
-        return handle(() -> service.deleteRecord(featureGroupName, identifier, deletionMode));
+        return handle(() -> service.deleteRecord(featureGroupName, identifier, eventTime, deletionMode));
     }
 
     @POST
-    @Path("/FeatureGroup/{featureGroupName}/ListRecords")
+    @Path("/FeatureGroup/{featureGroupName:.+}/ListRecords")
     public Response listRecords(@PathParam("featureGroupName") String featureGroupName, String body) {
         return handle(() -> service.listRecords(featureGroupName, parse(body)));
     }

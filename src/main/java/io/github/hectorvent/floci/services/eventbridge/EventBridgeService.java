@@ -420,22 +420,40 @@ public class EventBridgeService {
                 ? "rule:" + region + ":"
                 : ruleKeyPrefix(region, resolvedBusName(busName));
         List<String> names = new ArrayList<>();
-        for (String key : targetStore.keys()) {
-            if (!key.startsWith(prefix)) {
-                continue;
-            }
+        List<Rule> rules = ruleStore.scan(key -> key.startsWith(prefix));
+        for (Rule rule : rules) {
+            String key = ruleKey(region, resolvedBusName(rule.getEventBusName()), rule.getName());
             List<Target> targets = targetStore.get(key).orElse(List.of());
-            boolean matches = targets.stream().anyMatch(t -> targetArn.equals(t.getArn()));
-            if (!matches) {
-                continue;
-            }
-            Rule rule = ruleStore.get(key).orElse(null);
-            if (rule != null) {
+            boolean matches = targets.stream().anyMatch(t -> targetArnMatches(targetArn, t.getArn()));
+            if (matches) {
                 names.add(rule.getName());
             }
         }
         names.sort(String::compareTo);
         return names;
+    }
+
+    static boolean targetArnMatches(String requested, String stored) {
+        if (requested == null || stored == null || stored.isBlank()) {
+            return false;
+        }
+        if (requested.equals(stored)) {
+            return true;
+        }
+        return stripLambdaQualifier(requested).equals(stripLambdaQualifier(stored));
+    }
+
+    static String stripLambdaQualifier(String arn) {
+        int functionIdx = arn.indexOf(":function:");
+        if (functionIdx < 0) {
+            return arn;
+        }
+        String rest = arn.substring(functionIdx + ":function:".length());
+        int colon = rest.indexOf(':');
+        if (colon < 0) {
+            return arn;
+        }
+        return arn.substring(0, functionIdx + ":function:".length() + colon);
     }
 
     // ──────────────────────────── Tags ────────────────────────────

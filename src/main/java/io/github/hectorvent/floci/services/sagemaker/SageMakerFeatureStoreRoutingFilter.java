@@ -16,9 +16,14 @@ import java.util.regex.Pattern;
 /**
  * SageMaker Feature Store Runtime restJson1 paths ({@code /FeatureGroup/...},
  * {@code /BatchGetRecord}, {@code /BatchWriteRecord}) collide with S3's
- * catch-all. SigV4 credential scope {@code sagemaker} is rewritten onto an
- * internal prefix the Feature Store controller owns. JSON 1.1 control-plane
- * posts ({@code SageMaker.*}) stay on {@code /}.
+ * catch-all. SigV4 credential scope {@code sagemaker} or Host
+ * {@code featurestore-runtime.sagemaker.{region}.amazonaws.com} is rewritten
+ * onto an internal prefix the Feature Store controller owns. JSON 1.1
+ * control-plane posts ({@code SageMaker.*}) stay on {@code /}.
+ *
+ * <p>Function URL invocations are rewritten to {@code /lambda-url/{urlId}/...}
+ * before this filter. Prefixing those paths would 404 the Lambda fixture the
+ * Bindings suite probes at {@code /bindings}.
  */
 @Provider
 @PreMatching
@@ -34,7 +39,12 @@ public class SageMakerFeatureStoreRoutingFilter implements ContainerRequestFilte
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        if (!isSageMaker(requestContext.getHeaderString("Authorization"))) {
+        String host = requestContext.getHeaderString("Host");
+        if (isLambdaUrlHost(host)) {
+            return;
+        }
+        if (!isSageMaker(requestContext.getHeaderString("Authorization"))
+                && !isFeatureStoreHost(host)) {
             return;
         }
         String contentType = requestContext.getHeaderString("Content-Type");
@@ -62,6 +72,19 @@ public class SageMakerFeatureStoreRoutingFilter implements ContainerRequestFilte
                 && SageMakerService.SERVICE.equals(matcher.group(1).toLowerCase(Locale.ROOT));
     }
 
+    static boolean isFeatureStoreHost(String host) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        String hostname = host.split(":")[0].toLowerCase(Locale.ROOT);
+        return hostname.matches(
+                "featurestore-runtime(-fips)?\\.sagemaker(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    static boolean isLambdaUrlHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains(".lambda-url.");
+    }
+
     static String rewritePath(String path) {
         if (path == null || path.isBlank()) {
             return path;
@@ -70,10 +93,17 @@ public class SageMakerFeatureStoreRoutingFilter implements ContainerRequestFilte
             return path;
         }
         String normalized = stripTrailingSlash(path);
+        if (isLambdaUrlPath(normalized)) {
+            return path;
+        }
         if (normalized.startsWith("/FeatureGroup/") || BATCH_PATHS.contains(normalized)) {
             return INTERNAL_PREFIX + normalized;
         }
         return path;
+    }
+
+    static boolean isLambdaUrlPath(String path) {
+        return "/lambda-url".equals(path) || path.startsWith("/lambda-url/");
     }
 
     static String stripTrailingSlash(String path) {

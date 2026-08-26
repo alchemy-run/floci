@@ -866,12 +866,28 @@ public class SageMakerService {
         return response;
     }
 
-    public synchronized ObjectNode deleteRecord(String featureGroupName, String identifier, String deletionMode) {
+    public synchronized ObjectNode deleteRecord(String featureGroupName, String identifier,
+                                                String eventTime, String deletionMode) {
         SageMakerFeatureGroup group = requireFeatureGroupInCurrentRegion(featureGroupName);
-        if (identifier != null) {
-            group.getRecords().remove(identifier);
-            featureGroups.put(storageKey(group.getRegion(), group.getFeatureGroupName()), group);
+        if (identifier == null || identifier.isBlank()) {
+            throw new AwsException("ValidationError",
+                    "RecordIdentifierValueAsString is a required parameter.", 400);
         }
+        if (eventTime == null || eventTime.isBlank()) {
+            throw new AwsException("ValidationError", "EventTime is a required parameter.", 400);
+        }
+        List<Map<String, Object>> existing = group.getRecords().get(identifier);
+        boolean hardDelete = "HardDelete".equals(deletionMode);
+        if (existing != null
+                && !eventTimeIsNotBefore(existing, group.getEventTimeFeatureName(), eventTime)) {
+            if (hardDelete) {
+                throw new AwsException("ValidationError",
+                        "EventTime must be later than the existing record EventTime.", 400);
+            }
+            return objectMapper.createObjectNode();
+        }
+        group.getRecords().remove(identifier);
+        featureGroups.put(storageKey(group.getRegion(), group.getFeatureGroupName()), group);
         return objectMapper.createObjectNode();
     }
 
@@ -1048,11 +1064,22 @@ public class SageMakerService {
 
     private SageMakerFeatureGroup requireFeatureGroup(String region, String name) {
         return featureGroups.get(storageKey(region, name))
-                .orElseThrow(() -> notFound(name));
+                .orElseThrow(() -> featureGroupNotFound(name));
     }
 
     private SageMakerFeatureGroup requireFeatureGroupInCurrentRegion(String name) {
-        return requireFeatureGroup(regionResolver.getRegion(), name);
+        String region = regionResolver.getRegion();
+        if (name != null && name.contains(":feature-group/")) {
+            SageMakerFeatureGroup byArn = requireFeatureGroupByArn(region, name);
+            if (byArn != null) {
+                return byArn;
+            }
+            int slash = name.lastIndexOf('/');
+            if (slash >= 0 && slash < name.length() - 1) {
+                return requireFeatureGroup(region, name.substring(slash + 1));
+            }
+        }
+        return requireFeatureGroup(region, name);
     }
 
     private SageMakerFeatureGroup requireFeatureGroupByArn(String region, String arn) {
@@ -1466,6 +1493,35 @@ public class SageMakerService {
     private static AwsException notFound(String name) {
         return new AwsException("ResourceNotFound",
                 "Could not find cluster " + name + ".", 400);
+    }
+
+    private static AwsException featureGroupNotFound(String name) {
+        return new AwsException("ResourceNotFound",
+                "Resource Not Found: " + name, 400);
+    }
+
+    private static boolean eventTimeIsNotBefore(List<Map<String, Object>> record, String eventTimeFeature,
+                                                String deleteEventTime) {
+        String stored = null;
+        if (eventTimeFeature != null) {
+            for (Map<String, Object> value : record) {
+                if (eventTimeFeature.equals(String.valueOf(value.get("FeatureName")))) {
+                    Object raw = value.get("ValueAsString");
+                    stored = raw == null ? null : raw.toString();
+                    break;
+                }
+            }
+        }
+        if (stored == null || stored.isBlank()) {
+            return true;
+        }
+        try {
+            Instant storedInstant = Instant.parse(stored);
+            Instant deleteInstant = Instant.parse(deleteEventTime);
+            return !deleteInstant.isBefore(storedInstant);
+        } catch (RuntimeException ignored) {
+            return deleteEventTime.compareTo(stored) >= 0;
+        }
     }
 
     private static AwsException endpointNotFound(String name) {
