@@ -69,6 +69,46 @@ class LambdaServiceTest {
     }
 
     @Test
+    void createFunctionStoresFileSystemConfigs() {
+        Map<String, Object> req = baseRequest("efs-fn");
+        req.put("FileSystemConfigs", List.of(Map.of(
+                "Arn", "arn:aws:elasticfilesystem:us-east-1:000000000000:access-point/fsap-abc",
+                "LocalMountPath", "/mnt/test")));
+
+        LambdaFunction fn = service.createFunction(REGION, req);
+
+        assertEquals(1, fn.getFileSystemConfigs().size());
+        assertEquals("arn:aws:elasticfilesystem:us-east-1:000000000000:access-point/fsap-abc",
+                fn.getFileSystemConfigs().get(0).get("Arn"));
+        assertEquals("/mnt/test", fn.getFileSystemConfigs().get(0).get("LocalMountPath"));
+    }
+
+    @Test
+    void createFunctionRejectsMountPathOutsideMnt() {
+        Map<String, Object> req = baseRequest("bad-mnt");
+        req.put("FileSystemConfigs", List.of(Map.of(
+                "Arn", "arn:aws:elasticfilesystem:us-east-1:000000000000:access-point/fsap-abc",
+                "LocalMountPath", "/tmp/data")));
+
+        AwsException ex = assertThrows(AwsException.class, () -> service.createFunction(REGION, req));
+        assertEquals("InvalidParameterValueException", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+    }
+
+    @Test
+    void updateFunctionConfigurationReplacesFileSystemConfigs() {
+        service.createFunction(REGION, baseRequest("efs-update"));
+        String arn = "arn:aws:elasticfilesystem:us-east-1:000000000000:access-point/fsap-xyz";
+        LambdaFunction updated = service.updateFunctionConfiguration(REGION, "efs-update", Map.of(
+                "FileSystemConfigs", List.of(Map.of("Arn", arn, "LocalMountPath", "/mnt/data"))));
+        assertEquals("/mnt/data", updated.getFileSystemConfigs().get(0).get("LocalMountPath"));
+
+        LambdaFunction cleared = service.updateFunctionConfiguration(REGION, "efs-update", Map.of(
+                "FileSystemConfigs", List.of()));
+        assertTrue(cleared.getFileSystemConfigs().isEmpty());
+    }
+
+    @Test
     void createFunctionFailsWhenMissingFunctionName() {
         Map<String, Object> req = baseRequest("x");
         req.remove("FunctionName");

@@ -9,7 +9,10 @@ import io.github.hectorvent.floci.core.common.docker.ContainerReachableEndpoint;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
+import io.github.hectorvent.floci.services.dsql.proxy.DsqlDataPlane;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
+import io.github.hectorvent.floci.services.efs.EfsService;
+import io.github.hectorvent.floci.services.efs.model.EfsAccessPoint;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServer;
@@ -49,6 +52,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -73,6 +77,7 @@ class ContainerLauncherTest {
     @Mock RuntimeApiServer runtimeApiServer;
     @Mock DockerClient dockerClient;
     @Mock IamService iamService;
+    @Mock EfsService efsService;
 
     @TempDir
     Path tempDir;
@@ -111,7 +116,8 @@ class ContainerLauncherTest {
         LaunchedContainerAwsEnv awsEnv = new LaunchedContainerAwsEnv(reachableEndpoint);
         launcher = new ContainerLauncher(containerBuilder, lifecycleManager, logStreamer, imageResolver,
                 runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
-                mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv, iamService);
+                mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv, iamService,
+                efsService);
 
         when(runtimeApiServerFactory.create()).thenReturn(runtimeApiServer);
         when(runtimeApiServer.getPort()).thenReturn(9000);
@@ -209,6 +215,41 @@ class ContainerLauncherTest {
         // The code is tar-copied straight into /var/task on the real container.
         assertTrue(capturedRemotePaths.contains("/var/task"),
                 "small code should be copied directly into /var/task");
+    }
+
+    @Test
+    void launchFunction_mountsFileSystemConfigsAsSharedNamedVolume() throws Exception {
+        Path codePath = Files.createDirectory(tempDir.resolve("efs-code"));
+        EfsAccessPoint accessPoint = new EfsAccessPoint();
+        accessPoint.setAccessPointId("fsap-abc");
+        accessPoint.setFileSystemId("fs-0123456789abcdef0");
+        accessPoint.setPosixUser(Map.of("Uid", 1000, "Gid", 1000));
+        accessPoint.setRootDirectory(Map.of(
+                "Path", "/lambda",
+                "CreationInfo", Map.of("OwnerUid", 1000, "OwnerGid", 1000, "Permissions", "750")));
+        when(efsService.findAccessPoint("us-east-1", "fsap-abc")).thenReturn(Optional.of(accessPoint));
+
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("efs-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+        fn.setFunctionArn("arn:aws:lambda:us-east-1:000000000000:function:efs-fn");
+        fn.setFileSystemConfigs(List.of(Map.of(
+                "Arn", "arn:aws:elasticfilesystem:us-east-1:000000000000:access-point/fsap-abc",
+                "LocalMountPath", "/mnt/test")));
+
+        launcher.launch(fn);
+
+        verify(lifecycleManager).ensureVolume("floci-efs-fs-0123456789abcdef0");
+
+        ContainerSpec spec = captureRealContainerSpec();
+        assertTrue(spec.mounts().stream().anyMatch(m ->
+                        m.getType() == MountType.VOLUME
+                                && "floci-efs-fs-0123456789abcdef0".equals(m.getSource())
+                                && "/mnt/test".equals(m.getTarget())
+                                && !Boolean.TRUE.equals(m.getReadOnly())),
+                "EFS FileSystemConfigs must mount the shared volume at LocalMountPath");
     }
 
     @Test
@@ -612,7 +653,8 @@ class ContainerLauncherTest {
         assertTrue(extraHosts.contains("aps-workspaces-fips.us-east-1.amazonaws.com:host-gateway"));
         assertTrue(extraHosts.contains("dataplane.rum.us-east-1.amazonaws.com:host-gateway"));
         assertTrue(extraHosts.contains("dataplane.rum-fips.us-east-1.amazonaws.com:host-gateway"));
-        assertEquals(8, extraHosts.size(),
+        assertTrue(extraHosts.contains("personalize.us-east-1.amazonaws.com:host-gateway"));
+        assertEquals(14, extraHosts.size(),
                 "entries without a hostname and an ip must be skipped, not passed to Docker");
     }
 
@@ -635,8 +677,94 @@ class ContainerLauncherTest {
         assertTrue(extraHosts.contains("dataplane.rum.us-east-1.amazonaws.com:host-gateway"),
                 "RUM PutRumEvents dataplane host must resolve to the Docker host when embedded DNS is off");
         assertTrue(extraHosts.contains("dataplane.rum-fips.us-east-1.amazonaws.com:host-gateway"));
-        assertEquals(4, extraHosts.size(),
-                "built-in AMP and RUM data-plane extra hosts when the config is unset (non-Linux host in this test)");
+        assertTrue(extraHosts.contains("personalize.us-east-1.amazonaws.com:host-gateway"));
+        assertTrue(extraHosts.contains("personalize-fips.us-east-1.amazonaws.com:host-gateway"));
+        assertEquals(10, extraHosts.size(),
+                "built-in AMP, Personalize, and RUM data-plane extra hosts when the config is unset (non-Linux host in this test)");
+    }
+
+    @Test
+    void launchFunction_addsDsqlHostFromFunctionEnv() throws Exception {
+        Path codePath = Files.createDirectory(tempDir.resolve("dsql-env-hosts"));
+
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("dsql-env-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+        fn.setEnvironment(Map.of(
+                "DSQL_DB_HOST", "ac0a36b1677f42a68a3b84dde8.dsql.us-east-1.on.aws",
+                "OTHER", "example.com"));
+
+        launcher.launch(fn);
+
+        List<String> extraHosts = captureRealContainerSpec().extraHosts();
+        assertTrue(extraHosts.contains(
+                        "ac0a36b1677f42a68a3b84dde8.dsql.us-east-1.on.aws:host-gateway"),
+                "DSQL cluster endpoint from function env must resolve to the Docker host");
+        assertFalse(extraHosts.stream().anyMatch(h -> h.startsWith("example.com:")),
+                "non-DSQL env values must not become extra hosts");
+    }
+
+    @Test
+    void launchFunction_addsLiveDsqlEndpointsAsExtraHosts() throws Exception {
+        DsqlDataPlane plane = mock(DsqlDataPlane.class);
+        when(plane.liveEndpoints()).thenReturn(List.of("live.dsql.us-east-1.on.aws"));
+        lenient().when(plane.caCertPath()).thenReturn(Optional.empty());
+
+        ContainerBuilder containerBuilder = new ContainerBuilder(config, dockerHostResolver, embeddedDnsServer);
+        ContainerReachableEndpoint reachableEndpoint =
+                new ContainerReachableEndpoint(config, dockerHostResolver, embeddedDnsServer);
+        ContainerLauncher dsqlLauncher = new ContainerLauncher(
+                containerBuilder, lifecycleManager, logStreamer, imageResolver,
+                runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
+                mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class),
+                new LaunchedContainerAwsEnv(reachableEndpoint), iamService, efsService);
+        dsqlLauncher.dsqlDataPlane = plane;
+
+        Path codePath = Files.createDirectory(tempDir.resolve("dsql-live-hosts"));
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("dsql-live-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+
+        dsqlLauncher.launch(fn);
+
+        List<String> extraHosts = captureRealContainerSpec().extraHosts();
+        assertTrue(extraHosts.contains("live.dsql.us-east-1.on.aws:host-gateway"),
+                "registered DSQL cluster endpoints must be injected as extra hosts");
+    }
+
+    @Test
+    void launchFunction_injectsDsqlCaWhenGatewayTlsIsOff() throws Exception {
+        Path dsqlCa = Files.writeString(tempDir.resolve("dsql-ca.crt"), "-----BEGIN CERTIFICATE-----\nDSQL\n-----END CERTIFICATE-----\n");
+        DsqlDataPlane plane = mock(DsqlDataPlane.class);
+        lenient().when(plane.liveEndpoints()).thenReturn(List.of());
+        when(plane.caCertPath()).thenReturn(Optional.of(dsqlCa));
+
+        ContainerBuilder containerBuilder = new ContainerBuilder(config, dockerHostResolver, embeddedDnsServer);
+        ContainerReachableEndpoint reachableEndpoint =
+                new ContainerReachableEndpoint(config, dockerHostResolver, embeddedDnsServer);
+        ContainerLauncher dsqlLauncher = new ContainerLauncher(
+                containerBuilder, lifecycleManager, logStreamer, imageResolver,
+                runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
+                mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class),
+                new LaunchedContainerAwsEnv(reachableEndpoint), iamService, efsService);
+        dsqlLauncher.dsqlDataPlane = plane;
+
+        Path codePath = Files.createDirectory(tempDir.resolve("dsql-ca-fn"));
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("dsql-ca-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+
+        dsqlLauncher.launch(fn);
+
+        List<String> env = captureRealContainerSpec().env();
+        assertTrue(env.contains("NODE_EXTRA_CA_CERTS=/etc/floci-ca.crt"),
+                "DSQL CA must be injected so sslmode=require trusts the postgres proxy");
     }
 
     @Test

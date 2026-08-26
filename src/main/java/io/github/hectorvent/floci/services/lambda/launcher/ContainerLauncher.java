@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.lambda.launcher;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
@@ -10,7 +11,10 @@ import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
+import io.github.hectorvent.floci.services.dsql.proxy.DsqlDataPlane;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
+import io.github.hectorvent.floci.services.efs.EfsService;
+import io.github.hectorvent.floci.services.efs.model.EfsAccessPoint;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lambda.LambdaLayerService;
 import io.github.hectorvent.floci.services.lambda.model.ContainerState;
@@ -39,8 +43,11 @@ import java.security.cert.X509Certificate;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -84,10 +91,30 @@ public class ContainerLauncher {
     private final LambdaLayerService layerService;
     private final LaunchedContainerAwsEnv awsEnv;
     private final IamService iamService;
+    private final EfsService efsService;
+    /** Field-injected so the {@code @Inject} constructor signature stays stable for hot reload. */
+    @Inject
+    DsqlDataPlane dsqlDataPlane;
 
     /** Matches an AWS-shaped ECR image URI: {@code <account>.dkr.ecr.<region>.amazonaws.com/<repo>[:tag]}. */
     private static final java.util.regex.Pattern AWS_ECR_URI =
             java.util.regex.Pattern.compile("^([0-9]{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com/(.+)$");
+
+    /** Package-private for tests that do not exercise EFS mounts. */
+    public ContainerLauncher(ContainerBuilder containerBuilder,
+                             ContainerLifecycleManager lifecycleManager,
+                             ContainerLogStreamer logStreamer,
+                             ImageResolver imageResolver,
+                             RuntimeApiServerFactory runtimeApiServerFactory,
+                             DockerHostResolver dockerHostResolver,
+                             EmulatorConfig config,
+                             EcrRegistryManager ecrRegistryManager,
+                             LambdaLayerService layerService,
+                             LaunchedContainerAwsEnv awsEnv,
+                             IamService iamService) {
+        this(containerBuilder, lifecycleManager, logStreamer, imageResolver, runtimeApiServerFactory,
+                dockerHostResolver, config, ecrRegistryManager, layerService, awsEnv, iamService, null);
+    }
 
     @Inject
     public ContainerLauncher(ContainerBuilder containerBuilder,
@@ -100,7 +127,8 @@ public class ContainerLauncher {
                              EcrRegistryManager ecrRegistryManager,
                              LambdaLayerService layerService,
                              LaunchedContainerAwsEnv awsEnv,
-                             IamService iamService) {
+                             IamService iamService,
+                             EfsService efsService) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.logStreamer = logStreamer;
@@ -112,6 +140,7 @@ public class ContainerLauncher {
         this.layerService = layerService;
         this.awsEnv = awsEnv;
         this.iamService = iamService;
+        this.efsService = efsService;
     }
 
     /**
@@ -193,12 +222,10 @@ public class ContainerLauncher {
         runtimeApiServer.setPlatformLogSink(line ->
                 logStreamer.streamToCloudWatchLogs(cwLogGroup, cwLogStream, lambdaRegion, line));
 
-        // When TLS is on, the container must trust Floci's self-signed cert so HTTPS callbacks
-        // to Floci succeed (e.g. a CDK custom resource's cfn-response, which hardcodes https://).
-        // Short-circuit when TLS is off so cert-path/storage config isn't read needlessly.
-        Optional<Path> flociCaCert = config.tls().enabled()
-                ? resolveFlociCaCertPath(true, config.tls().certPath(), config.storage().persistentPath())
-                : Optional.empty();
+        // Trust bundle: Floci's HTTPS CA (when TLS is on) plus the DSQL
+        // postgres-proxy CA so {@code sslmode=require} from DSQL.Connect works
+        // even when gateway TLS is off.
+        Optional<Path> flociCaCert = lambdaTrustBundle();
 
         // Build env vars
         List<String> env = new ArrayList<>();
@@ -248,8 +275,15 @@ public class ContainerLauncher {
         specBuilder.withEmbeddedDns();
         specBuilder.withExtraHost("aps-workspaces." + lambdaRegion + ".amazonaws.com", "host-gateway");
         specBuilder.withExtraHost("aps-workspaces-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("personalize-events." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("personalize-events-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("personalize-runtime." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("personalize-runtime-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("personalize." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        specBuilder.withExtraHost("personalize-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
         specBuilder.withExtraHost("dataplane.rum." + lambdaRegion + ".amazonaws.com", "host-gateway");
         specBuilder.withExtraHost("dataplane.rum-fips." + lambdaRegion + ".amazonaws.com", "host-gateway");
+        addDsqlDataPlaneHosts(specBuilder, fn);
 
         // Inject extra hosts entries into the container if present. Split on the FIRST
         // colon, mirroring docker --add-host: hostnames cannot contain colons, but IPv6
@@ -308,6 +342,8 @@ public class ContainerLauncher {
             }
             specBuilder.withReadOnlyBind(hostPath, "/opt/aws-config");
         });
+
+        mountEfsFileSystems(fn, specBuilder, lambdaRegion);
 
         ContainerSpec spec = specBuilder.build();
 
@@ -881,6 +917,62 @@ public class ContainerLauncher {
     }
 
     /**
+     * Docker extra hosts for Aurora DSQL public endpoints so Lambda can reach
+     * the host-side IAM postgres proxy when embedded DNS is not running
+     * ({@code quarkus:dev} on the host). Hostnames come from the function
+     * environment ({@code DSQL_*_HOST}) and from live cluster endpoints.
+     */
+    private void addDsqlDataPlaneHosts(ContainerBuilder.Builder specBuilder, LambdaFunction fn) {
+        Set<String> hosts = new LinkedHashSet<>();
+        if (fn.getEnvironment() != null) {
+            for (String value : fn.getEnvironment().values()) {
+                if (value != null && EmbeddedDnsServer.isDsqlHost(value.trim())) {
+                    hosts.add(value.trim());
+                }
+            }
+        }
+        if (dsqlDataPlane != null) {
+            for (String endpoint : dsqlDataPlane.liveEndpoints()) {
+                if (endpoint != null && !endpoint.isBlank()) {
+                    hosts.add(endpoint.trim());
+                }
+            }
+        }
+        for (String host : hosts) {
+            specBuilder.withExtraHost(host, "host-gateway");
+        }
+    }
+
+    /**
+     * Combines Floci's gateway CA (TLS mode) with the DSQL postgres-proxy CA
+     * so {@code NODE_EXTRA_CA_CERTS} covers both HTTPS to Floci and
+     * {@code sslmode=require} to {@code *.dsql.{region}.on.aws}.
+     */
+    Optional<Path> lambdaTrustBundle() {
+        Optional<Path> flociCa = config.tls().enabled()
+                ? resolveFlociCaCertPath(true, config.tls().certPath(), config.storage().persistentPath())
+                : Optional.empty();
+        Optional<Path> dsqlCa = dsqlDataPlane != null ? dsqlDataPlane.caCertPath() : Optional.empty();
+        if (flociCa.isEmpty()) {
+            return dsqlCa;
+        }
+        if (dsqlCa.isEmpty() || flociCa.get().equals(dsqlCa.get())) {
+            return flociCa;
+        }
+        return Optional.of(writeCombinedPem(flociCa.get(), dsqlCa.get()));
+    }
+
+    static Path writeCombinedPem(Path first, Path second) {
+        try {
+            Path bundle = first.toAbsolutePath().getParent().resolve("lambda-ca-bundle.crt");
+            Files.writeString(bundle, Files.readString(first) + "\n" + Files.readString(second) + "\n");
+            return bundle;
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to combine Lambda CA trust bundle", e);
+        }
+    }
+
+    /**
      * Mints temporary credentials mapped to the function's execution role so
      * in-container SDK calls are evaluated as that role, not the {@code test}
      * root bypass. Falls back to empty (placeholder / host creds) when the
@@ -909,6 +1001,50 @@ public class ContainerLauncher {
 
     private static String extractRegionFromArn(String arn, String defaultRegion) {
         return AwsArnUtils.regionOrDefault(arn, defaultRegion);
+    }
+
+    /**
+     * Mounts each FileSystemConfigs entry as a shared local Docker volume, the same
+     * stand-in ECS uses for {@code efsVolumeConfiguration}. Named by file-system id so
+     * a config-only Lambda redeploy (fresh sandbox) still sees files written earlier.
+     *
+     * <p>A plain named volume (no busybox chown helper) is used so a Lambda cold start
+     * does not block on Docker image pulls. The RIC in Floci can write the default
+     * volume root; persistence across sandbox replacement is keyed by file-system id.
+     */
+    private void mountEfsFileSystems(LambdaFunction fn, ContainerBuilder.Builder specBuilder, String region) {
+        List<Map<String, Object>> configs = fn.getFileSystemConfigs();
+        if (configs == null || configs.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> entry : configs) {
+            String arn = stringOf(entry.get("Arn"));
+            String mountPath = stringOf(entry.get("LocalMountPath"));
+            if (arn == null || mountPath == null) {
+                continue;
+            }
+            String accessPointId = EfsService.accessPointIdFromArn(arn);
+            EfsAccessPoint accessPoint = null;
+            if (efsService != null && accessPointId != null) {
+                accessPoint = efsService.findAccessPoint(region, accessPointId).orElse(null);
+            }
+            String fileSystemId = accessPoint != null ? accessPoint.getFileSystemId() : accessPointId;
+            if (fileSystemId == null || fileSystemId.isBlank()) {
+                LOG.warnv("Skipping FileSystemConfigs mount {0}: could not resolve file system id", arn);
+                continue;
+            }
+            String volumeName = EfsService.dockerVolumeName(fileSystemId);
+            lifecycleManager.ensureVolume(volumeName);
+            specBuilder.withNamedVolume(volumeName, mountPath, false);
+        }
+    }
+
+    private static String stringOf(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.toString();
+        return text.isBlank() ? null : text;
     }
 
     /**

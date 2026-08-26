@@ -20,6 +20,8 @@ import io.github.hectorvent.floci.services.lambda.zip.CodeStore;
 import io.github.hectorvent.floci.services.lambda.zip.ZipExtractor;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
+import io.github.hectorvent.floci.services.efs.EfsService;
+import io.github.hectorvent.floci.services.efs.model.EfsAccessPoint;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.s3.model.S3ObjectUpdatedEvent;
@@ -40,9 +42,12 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -101,6 +106,13 @@ public class LambdaService {
     /** Optional: Active tracing records a function-level X-Ray segment on invoke. */
     @Inject
     Instance<XRayService> xrayServiceInstance;
+
+    /**
+     * Optional: validates FileSystemConfigs access-point ARNs against the EFS store.
+     * Absent in unit tests that construct LambdaService without CDI.
+     */
+    @Inject
+    Instance<EfsService> efsServiceInstance;
 
     /**
      * Package-private constructor for testing without CDI. Config defaults
@@ -350,6 +362,10 @@ public class LambdaService {
             syncVpcEnis(region, fn);
         }
 
+        if (request.containsKey("FileSystemConfigs")) {
+            fn.setFileSystemConfigs(parseFileSystemConfigs(region, request.get("FileSystemConfigs")));
+        }
+
         // ImageConfig (PackageType=Image overrides)
         if (request.get("ImageConfig") instanceof Map<?, ?> ic) {
             @SuppressWarnings("unchecked")
@@ -568,6 +584,10 @@ public class LambdaService {
                 fn.setVpcConfig(vpc);
                 syncVpcEnis(region, fn);
             }
+        }
+
+        if (request.containsKey("FileSystemConfigs")) {
+            fn.setFileSystemConfigs(parseFileSystemConfigs(region, request.get("FileSystemConfigs")));
         }
 
         if (request.containsKey("ImageConfig")) {
@@ -1129,6 +1149,7 @@ public class LambdaService {
         snapshot.setHotReloadHostPath(fn.getHotReloadHostPath());
         snapshot.setS3Bucket(fn.getS3Bucket());
         snapshot.setS3Key(fn.getS3Key());
+        snapshot.setFileSystemConfigs(fn.getFileSystemConfigs());
         snapshot.setLastModified(System.currentTimeMillis());
         snapshot.setRevisionId(UUID.randomUUID().toString());
 
@@ -1988,6 +2009,81 @@ public class LambdaService {
             }
         }
         return out;
+    }
+
+    /**
+     * Normalizes Create/UpdateFunctionConfiguration {@code FileSystemConfigs} to
+     * {@code [{Arn, LocalMountPath}, ...]}. An empty list clears mounts. When EFS is
+     * available, each Arn must name an existing access point.
+     */
+    List<Map<String, Object>> parseFileSystemConfigs(String region, Object raw) {
+        if (raw == null) {
+            return new ArrayList<>();
+        }
+        if (!(raw instanceof List<?> list)) {
+            throw new AwsException("InvalidParameterValueException",
+                    "FileSystemConfigs must be a list", 400);
+        }
+        List<Map<String, Object>> parsed = new ArrayList<>();
+        Set<String> mountPaths = new LinkedHashSet<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) {
+                throw new AwsException("InvalidParameterValueException",
+                        "Each FileSystemConfigs entry must be an object", 400);
+            }
+            Object arnObj = map.get("Arn");
+            Object pathObj = map.get("LocalMountPath");
+            if (arnObj == null || arnObj.toString().isBlank()) {
+                throw new AwsException("InvalidParameterValueException",
+                        "FileSystemConfigs entry is missing Arn", 400);
+            }
+            if (pathObj == null || pathObj.toString().isBlank()) {
+                throw new AwsException("InvalidParameterValueException",
+                        "FileSystemConfigs entry is missing LocalMountPath", 400);
+            }
+            String arn = arnObj.toString();
+            String localMountPath = pathObj.toString();
+            if (!localMountPath.startsWith("/mnt/")) {
+                throw new AwsException("InvalidParameterValueException",
+                        "LocalMountPath must start with /mnt/", 400);
+            }
+            if (!mountPaths.add(localMountPath)) {
+                throw new AwsException("InvalidParameterValueException",
+                        "LocalMountPath '" + localMountPath + "' is used more than once", 400);
+            }
+            validateEfsAccessPoint(region, arn);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("Arn", arn);
+            entry.put("LocalMountPath", localMountPath);
+            parsed.add(entry);
+        }
+        return parsed;
+    }
+
+    private void validateEfsAccessPoint(String region, String arn) {
+        if (efsServiceInstance == null) {
+            return;
+        }
+        EfsService efs;
+        try {
+            if (efsServiceInstance.isUnsatisfied()) {
+                return;
+            }
+            efs = efsServiceInstance.get();
+        } catch (RuntimeException e) {
+            LOG.debugv("EFS service unavailable for FileSystemConfigs validation: {0}", e.getMessage());
+            return;
+        }
+        String accessPointId = EfsService.accessPointIdFromArn(arn);
+        if (accessPointId == null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "FileSystemConfigs Arn must be an EFS access point ARN", 400);
+        }
+        Optional<EfsAccessPoint> accessPoint = efs.findAccessPoint(region, accessPointId);
+        if (accessPoint.isEmpty()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Access point " + arn + " does not exist", 400);
+        }
     }
 
     /**
