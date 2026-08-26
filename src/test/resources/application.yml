@@ -312,6 +312,8 @@ floci:
       enabled: true
     fms:
       enabled: true
+    organizations:
+      enabled: true
     network-firewall:
       enabled: true
     license-manager:

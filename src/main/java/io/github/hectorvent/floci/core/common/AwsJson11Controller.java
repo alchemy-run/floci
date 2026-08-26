@@ -60,6 +60,7 @@ import io.github.hectorvent.floci.services.fsx.FsxJsonHandler;
 import io.github.hectorvent.floci.services.directoryservice.DirectoryServiceJsonHandler;
 import io.github.hectorvent.floci.services.forecast.ForecastJsonHandler;
 import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
+import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -141,6 +142,7 @@ public class AwsJson11Controller {
     private final DaxJsonHandler daxJsonHandler;
     private final ForecastJsonHandler forecastJsonHandler;
     private final GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler;
+    private final OrganizationsJsonHandler organizationsJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -195,7 +197,8 @@ public class AwsJson11Controller {
                                DirectoryServiceJsonHandler directoryServiceJsonHandler,
                                DaxJsonHandler daxJsonHandler,
                                ForecastJsonHandler forecastJsonHandler,
-                               GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler) {
+                               GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler,
+                               OrganizationsJsonHandler organizationsJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -255,6 +258,7 @@ public class AwsJson11Controller {
         this.daxJsonHandler = daxJsonHandler;
         this.forecastJsonHandler = forecastJsonHandler;
         this.globalAcceleratorJsonHandler = globalAcceleratorJsonHandler;
+        this.organizationsJsonHandler = organizationsJsonHandler;
     }
 
     @POST
@@ -346,6 +350,7 @@ public class AwsJson11Controller {
                 case "ds" -> directoryServiceJsonHandler.handle(action, request, region);
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
                 case "globalaccelerator" -> globalAcceleratorJsonHandler.handle(action, request, region);
+                case "organizations" -> organizationsJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target

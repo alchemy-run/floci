@@ -1007,6 +1007,7 @@ public interface EmulatorConfig {
         FsxServiceConfig fsx();
         SsoAdminServiceConfig ssoAdmin();
         IdentityStoreServiceConfig identitystore();
+        OrganizationsServiceConfig organizations();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
         EcrServiceConfig ecr();
@@ -2101,6 +2102,11 @@ public interface EmulatorConfig {
     }
 
     interface IdentityStoreServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface OrganizationsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
