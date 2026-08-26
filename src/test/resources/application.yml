@@ -416,6 +416,8 @@ floci:
       enabled: true
     macie2:
       enabled: true
+    securitylake:
+      enabled: true
     fsx:
       enabled: true
     appconfig:

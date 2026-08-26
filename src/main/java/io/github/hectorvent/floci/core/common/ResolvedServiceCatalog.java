@@ -20,6 +20,7 @@ import io.github.hectorvent.floci.services.glacier.GlacierController; // glacier
 import io.github.hectorvent.floci.services.guardduty.GuardDutyController;
 import io.github.hectorvent.floci.services.inspector2.Inspector2Controller;
 import io.github.hectorvent.floci.services.macie2.Macie2Controller;
+import io.github.hectorvent.floci.services.securitylake.SecurityLakeController;
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.neptunegraph.NeptuneGraphController;
@@ -1207,6 +1208,10 @@ public class ResolvedServiceCatalog {
                         "macie2", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("macie2"), Set.of(), Set.of(Macie2Controller.class)),
+                descriptor("securitylake", "securitylake", config.services().securitylake().enabled(), true,
+                        "securitylake", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("securitylake"), Set.of(), Set.of(SecurityLakeController.class)),
                 descriptor("sso-admin", "ssoadmin", config.services().ssoAdmin().enabled(), true,
                         "ssoadmin", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
