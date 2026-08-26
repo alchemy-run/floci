@@ -194,7 +194,7 @@ public class QAppsController {
     @Path("/apps.predictQApp")
     public Response predictQApp(@HeaderParam("instance-id") String instanceId, String body) {
         return run(() -> {
-            service.requireKnownInstance(instanceId);
+            service.requireAuthorizedInstance(instanceId);
             return Response.ok(objectMapper.createObjectNode()).build();
         });
     }

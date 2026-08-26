@@ -132,7 +132,7 @@ class QAppsBindingsIntegrationTest {
     }
 
     @Test
-    void predictQAppAgainstNonexistentInstanceYieldsResourceNotFound() {
+    void predictQAppAgainstNonexistentInstanceYieldsUnauthorized() {
         given()
                 .contentType("application/json")
                 .header("Authorization", auth(ACCOUNT))
@@ -141,9 +141,10 @@ class QAppsBindingsIntegrationTest {
                 .when()
                 .post("/apps.predictQApp")
                 .then()
-                .statusCode(404)
-                .header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"))
-                .body("__type", equalTo("ResourceNotFoundException"));
+                .statusCode(401)
+                .header("X-Amzn-Errortype", equalTo("UnauthorizedException"))
+                .body("__type", equalTo("UnauthorizedException"))
+                .body("message", equalTo("Unauthorized"));
     }
 
     @Test

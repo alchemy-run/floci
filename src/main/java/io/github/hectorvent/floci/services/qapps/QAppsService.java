@@ -150,14 +150,20 @@ public class QAppsService implements TagHandler {
         }
     }
 
-    public Page listQApps(String region, String instanceId, Integer limit, String nextToken) {
-        // ListQApps is not modeled with ResourceNotFoundException. Live AWS
-        // rejects callers who are not Identity Center users of a Q Business
-        // instance with UnauthorizedException ("Unauthorized").
+    /**
+     * ListQApps and PredictQApp are not modeled with ResourceNotFoundException.
+     * Live AWS rejects callers who are not Identity Center users of a Q Business
+     * instance with UnauthorizedException ("Unauthorized").
+     */
+    public void requireAuthorizedInstance(String instanceId) {
         requireInstanceId(instanceId);
         if (!instanceKnown(instanceId)) {
             throw unauthorized();
         }
+    }
+
+    public Page listQApps(String region, String instanceId, Integer limit, String nextToken) {
+        requireAuthorizedInstance(instanceId);
         int maxResults = limit == null ? 100 : limit;
         if (maxResults < 1 || maxResults > 100) {
             throw validation("limit must be between 1 and 100.");
