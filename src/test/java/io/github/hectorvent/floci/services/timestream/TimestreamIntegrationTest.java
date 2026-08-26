@@ -14,8 +14,9 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.notNullValue;
 
 /**
- * JSON 1.0 Timestream coverage used by Alchemy Bindings.test.ts:
- * DescribeEndpoints, database/table CRUD, WriteRecords, Query COUNT(*), PrepareQuery.
+ * JSON 1.0 Timestream coverage used by Alchemy Database.test.ts:
+ * DescribeEndpoints is the LiveAnalytics closed-to-new-customers gate;
+ * remaining ops cover database/table CRUD, WriteRecords, Query COUNT(*), PrepareQuery.
  */
 @QuarkusTest
 class TimestreamIntegrationTest {
@@ -31,7 +32,7 @@ class TimestreamIntegrationTest {
     }
 
     @Test
-    void describeEndpoints_echoesHost() {
+    void describeEndpoints_returnsAccessDeniedForClosedLiveAnalytics() {
         given()
                 .contentType(CONTENT_TYPE)
                 .header("X-Amz-Target", TARGET + "DescribeEndpoints")
@@ -41,9 +42,9 @@ class TimestreamIntegrationTest {
         .when()
                 .post("/")
         .then()
-                .statusCode(200)
-                .body("Endpoints[0].Address", equalTo("localhost:4566"))
-                .body("Endpoints[0].CachePeriodInMinutes", equalTo(1440));
+                .statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"))
+                .body("message", equalTo(TimestreamService.NOT_ONBOARDED_MESSAGE));
     }
 
     @Test

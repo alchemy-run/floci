@@ -21,15 +21,19 @@ import java.util.regex.Pattern;
 
 /**
  * In-memory Amazon Timestream for LiveAnalytics (write + query). JSON 1.0
- * {@code Timestream_20181101.*}. DescribeEndpoints echoes the inbound Host so
- * Alchemy's {@code https://} discovery rewrite still lands on this gateway.
+ * {@code Timestream_20181101.*}.
+ *
+ * <p>LiveAnalytics is closed to new AWS accounts. {@code DescribeEndpoints}
+ * rejects with {@code AccessDeniedException} whose message matches Alchemy's
+ * distilled {@code TimestreamNotOnboarded} synthetic error.
  */
 @ApplicationScoped
 public class TimestreamService implements Resettable {
 
     private static final int DEFAULT_MEMORY_HOURS = 6;
     private static final int DEFAULT_MAGNETIC_DAYS = 73_000;
-    private static final int ENDPOINT_CACHE_MINUTES = 1_440;
+    static final String NOT_ONBOARDED_MESSAGE =
+            "Only existing Timestream for LiveAnalytics customers can access this service.";
     private static final Pattern COUNT_FROM = Pattern.compile(
             "SELECT\\s+COUNT\\s*\\(\\s*\\*\\s*\\)\\s+(?:AS\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+)?FROM\\s+\"([^\"]+)\"\\s*\\.\\s*\"([^\"]+)\"",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
@@ -77,19 +81,11 @@ public class TimestreamService implements Resettable {
         tagsByArn.clear();
     }
 
+    @SuppressWarnings("unused")
     public Map<String, Object> describeEndpoints(String host) {
-        String address = host == null || host.isBlank() ? "localhost:4566" : host.trim();
-        if (address.startsWith("[") && address.contains("]")) {
-            int end = address.indexOf(']');
-            String ipv6 = address.substring(1, end);
-            String rest = address.substring(end + 1);
-            address = ipv6 + rest;
-        }
-        Map<String, Object> endpoint = new LinkedHashMap<>();
-        endpoint.put("Address", address);
-        endpoint.put("CachePeriodInMinutes", ENDPOINT_CACHE_MINUTES);
-        return Map.of("Endpoints", List.of(endpoint));
+        throw notOnboarded();
     }
+
 
     public Map<String, Object> createDatabase(JsonNode request, String region) {
         String name = requireName(request, "DatabaseName");
@@ -516,6 +512,10 @@ public class TimestreamService implements Resettable {
 
     private static long nowSeconds() {
         return Instant.now().getEpochSecond();
+    }
+
+    private static AwsException notOnboarded() {
+        return new AwsException("AccessDeniedException", NOT_ONBOARDED_MESSAGE, 403);
     }
 
     private static AwsException invalid(String message) {
