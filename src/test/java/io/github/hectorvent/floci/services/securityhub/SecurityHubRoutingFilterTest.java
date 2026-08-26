@@ -28,4 +28,15 @@ class SecurityHubRoutingFilterTest {
         assertEquals("/tags/arn:aws:securityhub:us-east-1:1:hub/default",
                 SecurityHubRoutingFilter.rewritePath("/tags/arn:aws:securityhub:us-east-1:1:hub/default"));
     }
+
+    @Test
+    void leavesFunctionUrlInvocationsAlone() {
+        assertTrue(SecurityHubRoutingFilter.isLambdaUrlHost(
+                "4a2641d4e1713560ada2ee703a47958f.lambda-url.us-east-1.localhost:4566"));
+        assertFalse(SecurityHubRoutingFilter.isLambdaUrlHost("localhost:4566"));
+        assertEquals(
+                "/lambda-url/4a2641d4e1713560ada2ee703a47958f/bindings",
+                SecurityHubRoutingFilter.rewritePath(
+                        "/lambda-url/4a2641d4e1713560ada2ee703a47958f/bindings"));
+    }
 }

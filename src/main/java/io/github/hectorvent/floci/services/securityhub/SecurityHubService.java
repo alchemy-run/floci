@@ -571,11 +571,14 @@ public class SecurityHubService implements Resettable, TagHandler {
         JsonNode findings = field(request, "Findings");
         int success = 0;
         int failed = 0;
+        ObjectNode response = MAPPER.createObjectNode();
+        ArrayNode failedFindings = response.putArray("FailedFindings");
         if (findings != null && findings.isArray()) {
             for (JsonNode finding : findings) {
                 String id = textOrNull(finding, "Id");
                 if (id == null) {
                     failed++;
+                    failedFindings.add(importError("", "InvalidInputException", "Finding Id is required."));
                     continue;
                 }
                 Map<String, Object> stored =
@@ -589,7 +592,6 @@ public class SecurityHubService implements Resettable, TagHandler {
             }
         }
         hubs.put(sessionKey(hub.getAccountId(), region), hub);
-        ObjectNode response = MAPPER.createObjectNode();
         response.put("FailedCount", failed);
         response.put("SuccessCount", success);
         return response;
@@ -598,12 +600,18 @@ public class SecurityHubService implements Resettable, TagHandler {
     public ObjectNode getFindings(String region, JsonNode request) {
         Hub hub = requireHub(region);
         requireObject(request);
-        String matchId = filterEquals(field(request, "Filters"), "Id");
+        JsonNode filters = field(request, "Filters");
+        JsonNode max = field(request, "MaxResults");
+        int limit = max != null && max.isNumber() ? Math.max(max.asInt(), 1) : Integer.MAX_VALUE;
         ObjectNode response = MAPPER.createObjectNode();
         ArrayNode list = response.putArray("Findings");
+        int remaining = limit;
         for (Map<String, Object> finding : hub.getFindings().values()) {
-            if (matchId != null && !matchId.equals(String.valueOf(finding.get("Id")))) {
+            if (!matchesFilters(finding, filters)) {
                 continue;
+            }
+            if (remaining-- <= 0) {
+                break;
             }
             list.add(MAPPER.valueToTree(finding));
         }
@@ -907,19 +915,6 @@ public class SecurityHubService implements Resettable, TagHandler {
         s3.put("Title", "S3 general purpose buckets should have block public access settings enabled");
         s3.put("SeverityRating", "MEDIUM");
         return List.of(iam1, s3);
-    }
-
-    private static String filterEquals(JsonNode filters, String attribute) {
-        JsonNode list = field(filters, attribute);
-        if (list == null || !list.isArray() || list.isEmpty()) {
-            return null;
-        }
-        JsonNode first = list.get(0);
-        String comparison = textOrNull(first, "Comparison");
-        if (comparison != null && !"EQUALS".equals(comparison)) {
-            return null;
-        }
-        return textOrNull(first, "Value");
     }
 
     private static String hubArn(String region, String account) {

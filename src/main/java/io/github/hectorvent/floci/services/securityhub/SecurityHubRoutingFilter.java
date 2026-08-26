@@ -17,6 +17,10 @@ import java.util.regex.Pattern;
  * {@code /members}) with other services and S3's {@code /{bucket}} catch-all.
  * SigV4 credential scope {@code securityhub} is rewritten onto an internal prefix
  * the SecurityHub controller owns. Tag APIs stay on {@code /tags/{arn}}.
+ *
+ * <p>Function URL invocations are rewritten to {@code /lambda-url/{urlId}/...}
+ * before this filter. Prefixing those paths with {@code /securityhub} 404s the
+ * Lambda fixture the Bindings suite probes at {@code /bindings}.
  */
 @Provider
 @PreMatching
@@ -31,6 +35,10 @@ public class SecurityHubRoutingFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        String host = requestContext.getHeaderString("Host");
+        if (isLambdaUrlHost(host)) {
+            return;
+        }
         if (!isSecurityHub(requestContext.getHeaderString("Authorization"))) {
             return;
         }
@@ -55,6 +63,10 @@ public class SecurityHubRoutingFilter implements ContainerRequestFilter {
                 && SERVICE.equals(matcher.group(1).toLowerCase(Locale.ROOT));
     }
 
+    static boolean isLambdaUrlHost(String host) {
+        return host != null && host.toLowerCase(Locale.ROOT).contains(".lambda-url.");
+    }
+
     static String rewritePath(String path) {
         if (path == null || path.isBlank()) {
             return path;
@@ -66,7 +78,14 @@ public class SecurityHubRoutingFilter implements ContainerRequestFilter {
         if ("/tags".equals(normalized) || normalized.startsWith("/tags/")) {
             return path;
         }
+        if (isLambdaUrlPath(normalized)) {
+            return path;
+        }
         return INTERNAL_PREFIX + normalized;
+    }
+
+    static boolean isLambdaUrlPath(String path) {
+        return "/lambda-url".equals(path) || path.startsWith("/lambda-url/");
     }
 
     static String stripTrailingSlash(String path) {

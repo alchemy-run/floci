@@ -94,7 +94,8 @@ class SecurityHubBindingsIntegrationTest {
                 .then()
                 .statusCode(200)
                 .body("FailedCount", equalTo(0))
-                .body("SuccessCount", equalTo(1));
+                .body("SuccessCount", equalTo(1))
+                .body("FailedFindings", hasSize(0));
 
         given()
                 .contentType("application/json")
