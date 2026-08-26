@@ -119,6 +119,7 @@ import io.github.hectorvent.floci.services.vpclattice.VpcLatticeErrorHeaderFilte
 import io.github.hectorvent.floci.services.vpclattice.VpcLatticeRoutingFilter;
 import io.github.hectorvent.floci.services.synthetics.SyntheticsController;
 import io.github.hectorvent.floci.services.synthetics.SyntheticsErrorHeaderFilter;
+import io.github.hectorvent.floci.services.synthetics.SyntheticsRoutingFilter;
 import io.github.hectorvent.floci.services.schemas.SchemasController;
 import io.github.hectorvent.floci.services.schemas.SchemasErrorHeaderFilter;
 import io.github.hectorvent.floci.services.signer.SignerController;
@@ -1057,7 +1058,8 @@ public class ResolvedServiceCatalog {
                         config.storage().services().synthetics().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("synthetics"), Set.of(),
-                        Set.of(SyntheticsController.class, SyntheticsErrorHeaderFilter.class)),
+                        Set.of(SyntheticsController.class, SyntheticsRoutingFilter.class,
+                                SyntheticsErrorHeaderFilter.class)),
                 // Resource Explorer 2 restJson1 — index, view, and search
                 descriptor("resource-explorer-2", "resource-explorer-2",
                         config.services().resourceExplorer2().enabled(), true,

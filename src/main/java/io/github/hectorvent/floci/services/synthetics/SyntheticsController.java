@@ -30,12 +30,13 @@ import java.util.function.Supplier;
 /**
  * CloudWatch Synthetics (Smithy restJson1).
  *
- * <p>Literal {@code /canary}, {@code /canaries}, {@code /group} and
- * {@code /groups} paths take JAX-RS precedence over S3's {@code /{bucket}}
- * catch-all. Tag APIs share {@code /tags/{arn}} and are dispatched by
- * {@code SharedTagsController}.
+ * <p>{@link SyntheticsRoutingFilter} prefixes SigV4 {@code synthetics} requests
+ * so {@code /canary} and {@code /group} do not collide with S3's
+ * {@code /{bucket}} catch-all or steal Lambda Function URL paths
+ * ({@code /bindings}, {@code /canary}) the Bindings suite probes. Tag APIs
+ * share {@code /tags/{arn}} and are dispatched by {@code SharedTagsController}.
  */
-@Path("/")
+@Path(SyntheticsRoutingFilter.INTERNAL_PREFIX)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class SyntheticsController {

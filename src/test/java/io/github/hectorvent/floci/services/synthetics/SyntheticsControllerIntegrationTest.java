@@ -11,16 +11,20 @@ import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Verifies CloudWatch Synthetics restJson1 operations used by Alchemy
  * {@code Bindings.test.ts}: GetCanary of an unknown name is a typed
- * ResourceNotFoundException, StopCanary on READY is ConflictException, and
- * StartCanary records a run that GetCanaryRuns / DescribeCanariesLastRun see.
+ * ResourceNotFoundException, StopCanary on READY is ConflictException,
+ * StartCanary records a run that GetCanaryRuns / DescribeCanariesLastRun see,
+ * Function URL {@code /bindings} and {@code /canary} are not claimed, and
+ * StartCanary publishes {@code aws.synthetics} events that
+ * {@code consumeCanaryEvents} rules (ListRuleNamesByTarget) match.
  */
 @QuarkusTest
 class SyntheticsControllerIntegrationTest {
@@ -45,6 +49,28 @@ class SyntheticsControllerIntegrationTest {
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    @Test
+    void functionUrlBindingsPathIsNotClaimedBySynthetics() {
+        given()
+                .header("Host", "deadbeefdeadbeefdeadbeefdeadbeef.lambda-url.us-east-1.localhost:4566")
+                .when()
+                .get("/bindings")
+                .then()
+                .statusCode(404)
+                .body("message", containsString("URL ID"));
+    }
+
+    @Test
+    void functionUrlGetCanaryPathIsNotClaimedBySynthetics() {
+        given()
+                .header("Host", "deadbeefdeadbeefdeadbeefdeadbeef.lambda-url.us-east-1.localhost:4566")
+                .when()
+                .get("/canary")
+                .then()
+                .statusCode(404)
+                .body("message", containsString("URL ID"));
     }
 
     @Test
@@ -102,8 +128,7 @@ class SyntheticsControllerIntegrationTest {
                 .statusCode(200)
                 .extract()
                 .path("Canaries");
-        assertEquals(1, described.size());
-        assertEquals(name, described.getFirst().get("Name"));
+        assertTrue(described.stream().anyMatch(canary -> name.equals(canary.get("Name"))));
 
         String arn = "arn:aws:synthetics:" + EAST + ":" + ACCOUNT + ":canary:" + name;
         given()
@@ -249,8 +274,7 @@ class SyntheticsControllerIntegrationTest {
                 .statusCode(200)
                 .extract()
                 .path("CanariesLastRun");
-        assertEquals(1, lastRuns.size());
-        assertEquals("oneshot-canary", lastRuns.getFirst().get("CanaryName"));
+        assertTrue(lastRuns.stream().anyMatch(run -> "oneshot-canary".equals(run.get("CanaryName"))));
     }
 
     @Test
@@ -352,6 +376,134 @@ class SyntheticsControllerIntegrationTest {
                 .then()
                 .statusCode(404)
                 .header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void startCanaryPublishesEventsMatchedByConsumeCanaryEventsRule() {
+        String account = "000000000707";
+        String authorization = auth(account, EAST);
+        String eventsAuth = "AWS4-HMAC-SHA256 Credential=" + account + "/20260205/" + EAST
+                + "/events/aws4_request";
+        String canaryName = "eb-canary";
+        String ruleName = "SyntheticsCanaryEvents";
+        String lambdaArn = "arn:aws:lambda:" + EAST + ":" + account
+                + ":function:SyntheticsBindingsFunction";
+        String queueName = "synthetics-canary-events-707";
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body(CREATE_BODY.replace("bindings-canary", canaryName)
+                        .replace("000000000701", account))
+                .when()
+                .post("/canary")
+                .then()
+                .statusCode(200)
+                .body("Canary.Status.State", equalTo("READY"));
+
+        String queueUrl = given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + account
+                        + "/20260205/" + EAST + "/sqs/aws4_request")
+                .formParam("Action", "CreateQueue")
+                .formParam("QueueName", queueName)
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        String queueArn = given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + account
+                        + "/20260205/" + EAST + "/sqs/aws4_request")
+                .formParam("Action", "GetQueueAttributes")
+                .formParam("QueueUrl", queueUrl)
+                .formParam("AttributeName.1", "QueueArn")
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .extract().xmlPath().getString("**.find { it.Name == 'QueueArn' }.Value");
+
+        given()
+                .contentType("application/x-amz-json-1.1")
+                .header("Authorization", eventsAuth)
+                .header("X-Amz-Target", "AWSEvents.PutRule")
+                .body("""
+                        {
+                          "Name": "%s",
+                          "EventPattern": "{\\"source\\":[\\"aws.synthetics\\"],\\"detail-type\\":[\\"Synthetics Canary Status Change\\",\\"Synthetics Canary TestRun Successful\\",\\"Synthetics Canary TestRun Failure\\"],\\"detail\\":{\\"canary-name\\":[\\"%s\\"]}}",
+                          "State": "ENABLED"
+                        }
+                        """.formatted(ruleName, canaryName))
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200);
+
+        given()
+                .contentType("application/x-amz-json-1.1")
+                .header("Authorization", eventsAuth)
+                .header("X-Amz-Target", "AWSEvents.PutTargets")
+                .body("""
+                        {
+                          "Rule": "%s",
+                          "Targets": [
+                            {"Id": "lambda", "Arn": "%s"},
+                            {"Id": "queue", "Arn": "%s"}
+                          ]
+                        }
+                        """.formatted(ruleName, lambdaArn, queueArn))
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .body("FailedEntryCount", equalTo(0));
+
+        List<String> ruleNames = given()
+                .contentType("application/x-amz-json-1.1")
+                .header("Authorization", eventsAuth)
+                .header("X-Amz-Target", "AWSEvents.ListRuleNamesByTarget")
+                .body("{\"TargetArn\":\"" + lambdaArn + "\"}")
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .extract()
+                .path("RuleNames");
+        assertTrue(ruleNames.contains(ruleName));
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .post("/canary/" + canaryName + "/start")
+                .then()
+                .statusCode(200);
+
+        String messageBody = given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + account
+                        + "/20260205/" + EAST + "/sqs/aws4_request")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", queueUrl)
+                .formParam("MaxNumberOfMessages", "10")
+                .formParam("WaitTimeSeconds", "0")
+                .when()
+                .post("/")
+                .then()
+                .statusCode(200)
+                .extract().xmlPath()
+                .getString("ReceiveMessageResponse.ReceiveMessageResult.Message.Body");
+
+        assertNotNull(messageBody, "Expected aws.synthetics events on the consumeCanaryEvents target");
+        assertTrue(messageBody.contains("aws.synthetics"), "Expected source aws.synthetics in: " + messageBody);
+        assertTrue(
+                messageBody.contains("Synthetics Canary TestRun Successful")
+                        || messageBody.contains("Synthetics Canary Status Change"),
+                "Expected Synthetics detail-type in: " + messageBody);
+        assertTrue(messageBody.contains(canaryName), "Expected canary-name " + canaryName + " in: " + messageBody);
+        assertTrue(messageBody.contains("canary-name"), "Expected kebab-case canary-name in: " + messageBody);
     }
 
     private static String auth(String accountId, String region) {

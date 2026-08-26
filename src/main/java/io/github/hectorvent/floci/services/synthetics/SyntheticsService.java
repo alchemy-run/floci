@@ -2,17 +2,22 @@ package io.github.hectorvent.floci.services.synthetics;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.TagHandler;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.synthetics.model.Canary;
 import io.github.hectorvent.floci.services.synthetics.model.CanaryRun;
 import io.github.hectorvent.floci.services.synthetics.model.Group;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -33,10 +38,14 @@ import java.util.regex.Pattern;
  *
  * <p>StartCanary records an immediate PASSED run. A {@code rate(0 minute)}
  * schedule is a one-shot: the canary returns to {@code STOPPED} after that
- * run, matching AWS.
+ * run, matching AWS. Start and stop also publish {@code aws.synthetics}
+ * EventBridge events (status change and test-run result) so
+ * {@code consumeCanaryEvents} rules fire.
  */
 @ApplicationScoped
 public class SyntheticsService implements TagHandler {
+
+    private static final Logger LOG = Logger.getLogger(SyntheticsService.class);
 
     static final String SERVICE = "synthetics";
     private static final int DEFAULT_MAX_RESULTS = 100;
@@ -49,9 +58,15 @@ public class SyntheticsService implements TagHandler {
     private final StorageBackend<String, Canary> canaries;
     private final StorageBackend<String, Group> groups;
     private final RegionResolver regionResolver;
+    private final ObjectMapper objectMapper;
+    private final Instance<EventBridgeService> eventBridgeService;
 
     @Inject
-    public SyntheticsService(StorageFactory storageFactory, RegionResolver regionResolver) {
+    public SyntheticsService(
+            StorageFactory storageFactory,
+            RegionResolver regionResolver,
+            ObjectMapper objectMapper,
+            Instance<EventBridgeService> eventBridgeService) {
         this(
                 storageFactory.create(
                         SERVICE, "synthetics-canaries.json", new TypeReference<Map<String, Canary>>() {
@@ -59,16 +74,29 @@ public class SyntheticsService implements TagHandler {
                 storageFactory.create(
                         SERVICE, "synthetics-groups.json", new TypeReference<Map<String, Group>>() {
                         }),
-                regionResolver);
+                regionResolver,
+                objectMapper,
+                eventBridgeService);
     }
 
     SyntheticsService(
             StorageBackend<String, Canary> canaries,
             StorageBackend<String, Group> groups,
             RegionResolver regionResolver) {
+        this(canaries, groups, regionResolver, new ObjectMapper(), null);
+    }
+
+    SyntheticsService(
+            StorageBackend<String, Canary> canaries,
+            StorageBackend<String, Group> groups,
+            RegionResolver regionResolver,
+            ObjectMapper objectMapper,
+            Instance<EventBridgeService> eventBridgeService) {
         this.canaries = canaries;
         this.groups = groups;
         this.regionResolver = regionResolver;
+        this.objectMapper = objectMapper;
+        this.eventBridgeService = eventBridgeService;
     }
 
     public synchronized Canary createCanary(String region, JsonNode request) {
@@ -233,8 +261,8 @@ public class SyntheticsService implements TagHandler {
 
     public synchronized void startCanary(String region, String name) {
         Canary canary = requireCanary(region, name);
-        String state = canary.getState();
-        if ("RUNNING".equals(state) || "STARTING".equals(state)) {
+        String previousState = canary.getState();
+        if ("RUNNING".equals(previousState) || "STARTING".equals(previousState)) {
             throw conflict("Canary " + name + " is already running.");
         }
         long now = epochNow();
@@ -258,12 +286,13 @@ public class SyntheticsService implements TagHandler {
             canary.setState("RUNNING");
         }
         canaries.put(canaryKey(region, name), canary);
+        publishCanaryEvents(region, canary, previousState, run);
     }
 
     public synchronized void stopCanary(String region, String name) {
         Canary canary = requireCanary(region, name);
-        String state = canary.getState();
-        if (!"RUNNING".equals(state) && !"STARTING".equals(state)) {
+        String previousState = canary.getState();
+        if (!"RUNNING".equals(previousState) && !"STARTING".equals(previousState)) {
             throw conflict("Canary " + name + " is not running.");
         }
         long now = epochNow();
@@ -271,6 +300,7 @@ public class SyntheticsService implements TagHandler {
         canary.setLastStopped(now);
         canary.setLastModified(now);
         canaries.put(canaryKey(region, name), canary);
+        publishCanaryEvents(region, canary, previousState, null);
     }
 
     public synchronized Group createGroup(String region, JsonNode request) {
@@ -474,6 +504,62 @@ public class SyntheticsService implements TagHandler {
             }
         }
         return null;
+    }
+
+    private void publishCanaryEvents(String region, Canary canary, String previousState, CanaryRun run) {
+        if (eventBridgeService == null || !eventBridgeService.isResolvable()) {
+            return;
+        }
+        try {
+            String account = regionResolver.getAccountId();
+            String current = canary.getState();
+            if (previousState != null && !previousState.equals(current)) {
+                putSyntheticsEvent(
+                        region,
+                        "Synthetics Canary Status Change",
+                        statusDetail(account, canary, previousState, current));
+            }
+            if (run != null) {
+                String detailType = "PASSED".equals(run.getState())
+                        ? "Synthetics Canary TestRun Successful"
+                        : "Synthetics Canary TestRun Failure";
+                putSyntheticsEvent(region, detailType, runDetail(account, canary, run));
+            }
+        } catch (Exception e) {
+            LOG.warnv("Failed to publish Synthetics EventBridge events for {0}: {1}",
+                    canary.getName(), e.getMessage());
+        }
+    }
+
+    private void putSyntheticsEvent(String region, String detailType, ObjectNode detail) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Source", "aws.synthetics");
+        entry.put("DetailType", detailType);
+        entry.put("Detail", detail.toString());
+        eventBridgeService.get().putEvents(List.of(entry), region);
+    }
+
+    private ObjectNode statusDetail(String account, Canary canary, String previousState, String currentState) {
+        ObjectNode detail = objectMapper.createObjectNode();
+        detail.put("account-id", account);
+        detail.put("canary-id", canary.getId());
+        detail.put("canary-name", canary.getName());
+        detail.put("current-state", currentState);
+        detail.put("previous-state", previousState);
+        return detail;
+    }
+
+    private ObjectNode runDetail(String account, Canary canary, CanaryRun run) {
+        ObjectNode detail = objectMapper.createObjectNode();
+        detail.put("account-id", account);
+        detail.put("canary-id", canary.getId());
+        detail.put("canary-name", canary.getName());
+        detail.put("canary-run-id", run.getId());
+        if (run.getArtifactS3Location() != null) {
+            detail.put("artifact-location", run.getArtifactS3Location());
+        }
+        detail.put("test-run-status", run.getTestResult() != null ? run.getTestResult() : run.getState());
+        return detail;
     }
 
     private static void applyRunConfig(Canary canary, JsonNode runConfig) {

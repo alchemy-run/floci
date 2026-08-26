@@ -35,11 +35,17 @@ public class SyntheticsErrorHeaderFilter implements ContainerResponseFilter {
     }
 
     private static boolean isSyntheticsPath(String path) {
-        return path.startsWith("canary")
-                || path.startsWith("canaries")
-                || path.startsWith("group")
-                || path.startsWith("groups")
-                || path.startsWith("runtime-versions")
-                || path.startsWith("resource/");
+        String normalized = path.startsWith("/") ? path.substring(1) : path;
+        if (normalized.startsWith("synthetics/")) {
+            normalized = normalized.substring("synthetics/".length());
+        } else if ("synthetics".equals(normalized)) {
+            return true;
+        }
+        return normalized.startsWith("canary")
+                || normalized.startsWith("canaries")
+                || normalized.startsWith("group")
+                || normalized.startsWith("groups")
+                || normalized.startsWith("runtime-versions")
+                || normalized.startsWith("resource/");
     }
 }
