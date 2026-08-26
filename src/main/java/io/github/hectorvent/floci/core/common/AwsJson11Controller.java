@@ -66,6 +66,8 @@ import io.github.hectorvent.floci.services.personalize.PersonalizeJsonHandler;
 import io.github.hectorvent.floci.services.sagemaker.SageMakerJsonHandler;
 import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
+import io.github.hectorvent.floci.services.identitystore.IdentityStoreJsonHandler;
+import io.github.hectorvent.floci.services.ssoadmin.SsoAdminJsonHandler;
 import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataJsonHandler;
 import io.github.hectorvent.floci.services.redshiftserverless.RedshiftServerlessJsonHandler;
 import io.github.hectorvent.floci.services.route53domains.Route53DomainsJsonHandler;
@@ -157,6 +159,8 @@ public class AwsJson11Controller {
     private final SageMakerJsonHandler sageMakerJsonHandler;
     private final GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler;
     private final OrganizationsJsonHandler organizationsJsonHandler;
+    private final IdentityStoreJsonHandler identityStoreJsonHandler;
+    private final SsoAdminJsonHandler ssoAdminJsonHandler;
     private final RedshiftServerlessJsonHandler redshiftServerlessJsonHandler;
     private final RedshiftDataJsonHandler redshiftDataJsonHandler;
     private final Route53DomainsJsonHandler route53DomainsJsonHandler;
@@ -222,6 +226,8 @@ public class AwsJson11Controller {
                                SageMakerJsonHandler sageMakerJsonHandler,
                                GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler,
                                OrganizationsJsonHandler organizationsJsonHandler,
+                               IdentityStoreJsonHandler identityStoreJsonHandler,
+                               SsoAdminJsonHandler ssoAdminJsonHandler,
                                RedshiftServerlessJsonHandler redshiftServerlessJsonHandler,
                                RedshiftDataJsonHandler redshiftDataJsonHandler,
                                Route53DomainsJsonHandler route53DomainsJsonHandler,
@@ -291,6 +297,8 @@ public class AwsJson11Controller {
         this.sageMakerJsonHandler = sageMakerJsonHandler;
         this.globalAcceleratorJsonHandler = globalAcceleratorJsonHandler;
         this.organizationsJsonHandler = organizationsJsonHandler;
+        this.identityStoreJsonHandler = identityStoreJsonHandler;
+        this.ssoAdminJsonHandler = ssoAdminJsonHandler;
         this.redshiftServerlessJsonHandler = redshiftServerlessJsonHandler;
         this.redshiftDataJsonHandler = redshiftDataJsonHandler;
         this.route53DomainsJsonHandler = route53DomainsJsonHandler;
@@ -392,6 +400,8 @@ public class AwsJson11Controller {
                 case "sagemaker" -> sageMakerJsonHandler.handle(action, request, region);
                 case "globalaccelerator" -> globalAcceleratorJsonHandler.handle(action, request, region);
                 case "organizations" -> organizationsJsonHandler.handle(action, request, region);
+                case "identitystore" -> identityStoreJsonHandler.handle(action, request, region);
+                case "sso-admin" -> ssoAdminJsonHandler.handle(action, request, region);
                 case "redshift-serverless" -> redshiftServerlessJsonHandler.handle(action, request, region);
                 case "redshift-data" -> redshiftDataJsonHandler.handle(action, request, region);
                 case "route53domains" -> route53DomainsJsonHandler.handle(action, request, region);

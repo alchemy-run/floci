@@ -370,6 +370,10 @@ floci:
       enabled: true
     organizations:
       enabled: true
+    sso-admin:
+      enabled: true
+    identitystore:
+      enabled: true
     network-firewall:
       enabled: true
     license-manager:
