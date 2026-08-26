@@ -51,7 +51,7 @@ class CredentialScopeAliasTest {
 
     @Test
     void unknownScopeIsLeftAlone() {
-        assertEquals("securityhub", catalog.canonicalCredentialScope("securityhub"));
+        assertEquals("connect", catalog.canonicalCredentialScope("connect"));
     }
 
     @Test

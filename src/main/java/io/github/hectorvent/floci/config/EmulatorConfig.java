@@ -1113,6 +1113,7 @@ public interface EmulatorConfig {
         GuardDutyServiceConfig guardduty();
         Inspector2ServiceConfig inspector2();
         Macie2ServiceConfig macie2();
+        SecurityHubServiceConfig securityhub();
         SecurityLakeServiceConfig securitylake();
         FsxServiceConfig fsx();
         SsoAdminServiceConfig ssoAdmin();
@@ -2324,6 +2325,11 @@ public interface EmulatorConfig {
     }
 
     interface Macie2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SecurityHubServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

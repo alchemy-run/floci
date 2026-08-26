@@ -559,6 +559,8 @@ floci:
       enabled: true
     macie2:
       enabled: true
+    securityhub:
+      enabled: true
     securitylake:
       enabled: true
     fsx:

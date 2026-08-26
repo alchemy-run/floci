@@ -22,7 +22,7 @@ class UnknownServiceScopeGuardDisabledIntegrationTest {
     @Test
     void unsupportedScopeFallsThroughWhenRejectionDisabled() {
         given()
-            .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260707/us-east-1/securityhub"
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260707/us-east-1/connect"
                     + "/aws4_request, SignedHeaders=host;x-amz-date, Signature=deadbeef")
         .when()
             .get("/accounts")
