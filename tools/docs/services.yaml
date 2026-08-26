@@ -182,3 +182,4 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/keyspaces/KeyspacesJsonHandler.java }  # alchemy keyspace coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/mwaaserverless/MwaaServerlessJsonHandler.java }  # alchemy workflow coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/smsvoice/SmsVoiceJsonHandler.java }  # alchemy opt-out/bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/ssmcontacts/SsmContactsJsonHandler.java }  # alchemy ssm-contacts coverage; docs table later

@@ -207,6 +207,8 @@ floci:
     ssm:
       enabled: true
       max-parameter-history: 5
+    ssm-contacts:
+      enabled: true
     sqs:
       enabled: true
       default-visibility-timeout: 30

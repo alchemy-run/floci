@@ -988,6 +988,8 @@ public interface EmulatorConfig {
         Optional<String> dockerNetwork();
 
         SsmServiceConfig ssm();
+        @WithName("ssm-contacts")
+        SsmContactsServiceConfig ssmContacts();
         SqsServiceConfig sqs();
         S3ServiceConfig s3();
         DynamoDbServiceConfig dynamodb();
@@ -1596,6 +1598,11 @@ public interface EmulatorConfig {
 
         @WithDefault("5")
         int maxParameterHistory();
+    }
+
+    interface SsmContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface SqsServiceConfig {

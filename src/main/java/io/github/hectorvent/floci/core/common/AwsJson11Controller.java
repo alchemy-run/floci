@@ -54,6 +54,7 @@ import io.github.hectorvent.floci.services.kms.KmsJsonHandler;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerJsonHandler;
 import io.github.hectorvent.floci.services.ssm.Ec2MessagesJsonHandler;
 import io.github.hectorvent.floci.services.ssm.SsmJsonHandler;
+import io.github.hectorvent.floci.services.ssmcontacts.SsmContactsJsonHandler;
 import io.github.hectorvent.floci.services.dms.DmsJsonHandler;
 import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
 import io.github.hectorvent.floci.services.fsx.FsxJsonHandler;
@@ -91,6 +92,7 @@ public class AwsJson11Controller {
     private final ResolvedServiceCatalog catalog;
     private final RegionResolver regionResolver;
     private final SsmJsonHandler ssmJsonHandler;
+    private final SsmContactsJsonHandler ssmContactsJsonHandler;
     private final EventBridgeHandler eventBridgeHandler;
     private final CloudMapHandler cloudMapHandler;
     private final EmrHandler emrHandler;
@@ -153,7 +155,8 @@ public class AwsJson11Controller {
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
                                RegionResolver regionResolver,
-                               SsmJsonHandler ssmJsonHandler, EventBridgeHandler eventBridgeHandler,
+                               SsmJsonHandler ssmJsonHandler,
+                               SsmContactsJsonHandler ssmContactsJsonHandler, EventBridgeHandler eventBridgeHandler,
                                CloudMapHandler cloudMapHandler,
                                EmrHandler emrHandler,
                                MemoryDbHandler memoryDbHandler,
@@ -213,6 +216,7 @@ public class AwsJson11Controller {
         this.catalog = catalog;
         this.regionResolver = regionResolver;
         this.ssmJsonHandler = ssmJsonHandler;
+        this.ssmContactsJsonHandler = ssmContactsJsonHandler;
         this.eventBridgeHandler = eventBridgeHandler;
         this.cloudMapHandler = cloudMapHandler;
         this.emrHandler = emrHandler;
@@ -306,6 +310,7 @@ public class AwsJson11Controller {
 
             Response delegated = switch (serviceKey) {
                 case "ssm" -> ssmJsonHandler.handle(action, request, region);
+                case "ssm-contacts" -> ssmContactsJsonHandler.handle(action, request, region);
                 case "events" -> eventBridgeHandler.handle(action, request, region);
                 case "servicediscovery" -> cloudMapHandler.handle(action, request, region);
                 case "elasticmapreduce" -> emrHandler.handle(action, request, region);
