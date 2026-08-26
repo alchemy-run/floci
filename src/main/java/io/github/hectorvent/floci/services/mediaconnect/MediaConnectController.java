@@ -167,6 +167,64 @@ public class MediaConnectController {
         return Response.ok(response).build();
     }
 
+    @GET
+    @Path("/v1/flows/{flowArn}/source-metadata")
+    @Consumes(MediaType.WILDCARD)
+    public Response describeFlowSourceMetadata(
+            @Context HttpHeaders headers, @PathParam("flowArn") String flowArn) {
+        return Response.ok(service.describeFlowSourceMetadata(region(headers), flowArn)).build();
+    }
+
+    @GET
+    @Path("/v1/flows/{flowArn}/source-thumbnail")
+    @Consumes(MediaType.WILDCARD)
+    public Response describeFlowSourceThumbnail(
+            @Context HttpHeaders headers, @PathParam("flowArn") String flowArn) {
+        return Response.ok(service.describeFlowSourceThumbnail(region(headers), flowArn)).build();
+    }
+
+    @GET
+    @Path("/v1/entitlements")
+    @Consumes(MediaType.WILDCARD)
+    public Response listEntitlements(@Context HttpHeaders headers) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode entitlements = response.putArray("entitlements");
+        for (FlowEntitlement entitlement : service.listEntitlements(region(headers))) {
+            entitlements.add(service.toListedEntitlement(entitlement));
+        }
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/v1/flows/{flowArn}/entitlements")
+    public Response grantFlowEntitlements(
+            @Context HttpHeaders headers, @PathParam("flowArn") String flowArn, String body) {
+        java.util.List<FlowEntitlement> granted =
+                service.grantFlowEntitlements(region(headers), flowArn, parse(body));
+        Flow flow = service.describeFlow(region(headers), flowArn);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("flowArn", flow.getFlowArn());
+        ArrayNode entitlements = response.putArray("entitlements");
+        for (FlowEntitlement entitlement : granted) {
+            entitlements.add(service.toEntitlement(entitlement));
+        }
+        return Response.ok(response).build();
+    }
+
+    @DELETE
+    @Path("/v1/flows/{flowArn}/entitlements/{entitlementArn}")
+    @Consumes(MediaType.WILDCARD)
+    public Response revokeFlowEntitlement(
+            @Context HttpHeaders headers,
+            @PathParam("flowArn") String flowArn,
+            @PathParam("entitlementArn") String entitlementArn) {
+        FlowEntitlement entitlement = service.revokeFlowEntitlement(region(headers), flowArn, entitlementArn);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("flowArn", service.describeFlow(region(headers), flowArn).getFlowArn());
+        response.put("entitlementArn", entitlement.getEntitlementArn());
+        return Response.ok(response).build();
+    }
+
     private String region(HttpHeaders headers) {
         return regionResolver.resolveRegion(headers);
     }

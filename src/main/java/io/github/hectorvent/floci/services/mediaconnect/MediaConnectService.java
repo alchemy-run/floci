@@ -275,18 +275,30 @@ public class MediaConnectService implements TagHandler {
         return flow;
     }
 
-    public void describeFlowSourceMetadata(String region, String flowArn) {
+    public ObjectNode describeFlowSourceMetadata(String region, String flowArn) {
         Flow flow = requireFlow(region, flowArn);
         if (!STATUS_ACTIVE.equals(flow.getStatus())) {
             throw badRequest("DescribeFlowSourceMetadata is not available because the flow is not active.");
         }
+        ObjectNode response = objectMapper.createObjectNode();
+        putText(response, "flowArn", flow.getFlowArn());
+        response.putArray("messages");
+        ObjectNode mediaInfo = response.putObject("transportMediaInfo");
+        mediaInfo.putArray("programs");
+        return response;
     }
 
-    public void describeFlowSourceThumbnail(String region, String flowArn) {
+    public ObjectNode describeFlowSourceThumbnail(String region, String flowArn) {
         Flow flow = requireFlow(region, flowArn);
         if (!STATUS_ACTIVE.equals(flow.getStatus())) {
             throw badRequest("DescribeFlowSourceThumbnail is not available because the flow is not active.");
         }
+        ObjectNode details = objectMapper.createObjectNode();
+        putText(details, "flowArn", flow.getFlowArn());
+        details.putArray("thumbnailMessages");
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("thumbnailDetails", details);
+        return response;
     }
 
     public synchronized List<FlowEntitlement> grantFlowEntitlements(
