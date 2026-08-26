@@ -257,6 +257,8 @@ public interface EmulatorConfig {
         S3StorageConfig s3();
         DynamoDbStorageConfig dynamodb();
         SnsStorageConfig sns();
+        @WithName("social-messaging")
+        SocialMessagingStorageConfig socialMessaging();
         LambdaStorageConfig lambda();
         CloudWatchLogsStorageConfig cloudwatchlogs();
         CloudWatchMetricsStorageConfig cloudwatchmetrics();
@@ -312,6 +314,7 @@ public interface EmulatorConfig {
         RbinStorageConfig rbin();
         RepostspaceStorageConfig repostspace();
         RumStorageConfig rum();
+        SyntheticsStorageConfig synthetics();
         @WithName("resource-explorer-2")
         ResourceExplorerStorageConfig resourceExplorer2();
         @WithName("resource-groups")
@@ -335,6 +338,7 @@ public interface EmulatorConfig {
         AppRegistryStorageConfig appregistry();
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
+        VerifiedPermissionsStorageConfig verifiedpermissions();
         ChatbotStorageConfig chatbot();
         @WithName("aws-notifications")
         NotificationsStorageConfig awsNotifications();
@@ -390,6 +394,13 @@ public interface EmulatorConfig {
     }
 
     interface SnsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface SocialMessagingStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -755,6 +766,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface SyntheticsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface ResourceExplorerStorageConfig {
         Optional<String> mode();
 
@@ -965,6 +983,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface VerifiedPermissionsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface ChatbotStorageConfig {
         Optional<String> mode();
 
@@ -1050,6 +1075,9 @@ public interface EmulatorConfig {
         DmsServiceConfig dms();
         DataSyncServiceConfig datasync();
         SnsServiceConfig sns();
+        SimpleDbServiceConfig simpledb();
+        @WithName("social-messaging")
+        SocialMessagingServiceConfig socialMessaging();
         LambdaServiceConfig lambda();
         ApiGatewayServiceConfig apigateway();
         IamServiceConfig iam();
@@ -1070,6 +1098,8 @@ public interface EmulatorConfig {
         RedshiftServerlessServiceConfig redshiftServerless();
         RedshiftDataServiceConfig redshiftData();
         EventBridgeServiceConfig eventbridge();
+        SchemasServiceConfig schemas();
+        SignerServiceConfig signer();
         CloudMapServiceConfig cloudmap();
         EmrServiceConfig emr();
         EmrContainersServiceConfig emrContainers();
@@ -1088,6 +1118,7 @@ public interface EmulatorConfig {
         KinesisVideoServiceConfig kinesisvideo();
         FirehoseServiceConfig firehose();
         FmsServiceConfig fms();
+        ShieldServiceConfig shield();
         NetworkFirewallServiceConfig networkFirewall();
         LicenseManagerServiceConfig licenseManager();
         FraudDetectorServiceConfig frauddetector();
@@ -1209,6 +1240,7 @@ public interface EmulatorConfig {
         RbinServiceConfig rbin();
         RepostspaceServiceConfig repostspace();
         RumServiceConfig rum();
+        SyntheticsServiceConfig synthetics();
         @WithName("resource-explorer-2")
         ResourceExplorerServiceConfig resourceExplorer2();
         @WithName("resource-groups")
@@ -1233,8 +1265,11 @@ public interface EmulatorConfig {
         AppFlowServiceConfig appflow();
         AppIntegrationsServiceConfig appintegrations();
         AppRegistryServiceConfig appregistry();
+        ServiceCatalogServiceConfig servicecatalog();
+        ServiceQuotasServiceConfig serviceQuotas();
         AppRunnerServiceConfig apprunner();
         B2biServiceConfig b2bi();
+        VerifiedPermissionsServiceConfig verifiedpermissions();
         ChatbotServiceConfig chatbot();
         @WithName("aws-notifications")
         NotificationsServiceConfig awsNotifications();
@@ -1320,6 +1355,11 @@ public interface EmulatorConfig {
     }
 
     interface RumServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SyntheticsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1434,12 +1474,27 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface ServiceCatalogServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ServiceQuotasServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface AppRunnerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
 
     interface B2biServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface VerifiedPermissionsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1761,6 +1816,16 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface SimpleDbServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SocialMessagingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface ApiGatewayServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -2003,6 +2068,17 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface SchemasServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** AWS Signer restJson1 signing profiles and profile permissions. */
+    interface SignerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface CloudMapServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -2131,6 +2207,11 @@ public interface EmulatorConfig {
     }
 
     interface FmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ShieldServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

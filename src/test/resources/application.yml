@@ -28,6 +28,8 @@ floci:
         flush-interval-ms: 60000
       sns:
         flush-interval-ms: 60000
+      social-messaging:
+        flush-interval-ms: 60000
       lambda:
         flush-interval-ms: 60000
       cloudwatchlogs:
@@ -88,6 +90,8 @@ floci:
       repostspace:
         flush-interval-ms: 60000
       rum:
+        flush-interval-ms: 60000
+      synthetics:
         flush-interval-ms: 60000
       resource-explorer-2:
         flush-interval-ms: 60000
@@ -169,6 +173,8 @@ floci:
         flush-interval-ms: 60000
       b2bi:
         flush-interval-ms: 60000
+      verifiedpermissions:
+        flush-interval-ms: 60000
       chatbot:
         flush-interval-ms: 60000
       aws-notifications:
@@ -238,6 +244,10 @@ floci:
     datasync:
       enabled: true
     sns:
+      enabled: true
+    simpledb:
+      enabled: true
+    social-messaging:
       enabled: true
     lambda:
       enabled: true
@@ -312,6 +322,10 @@ floci:
       enabled: true
     eventbridge:
       enabled: true
+    schemas:
+      enabled: true
+    signer:
+      enabled: true
     cloudmap:
       enabled: true
     emr:
@@ -347,6 +361,8 @@ floci:
     firehose:
       enabled: true
     fms:
+      enabled: true
+    shield:
       enabled: true
     organizations:
       enabled: true
@@ -524,6 +540,8 @@ floci:
       enabled: true
     healthlake:
       enabled: true
+    timestream:
+      enabled: true
     timestream-influxdb:
       enabled: true
     medical-imaging:
@@ -605,6 +623,8 @@ floci:
       enabled: true
     rum:
       enabled: true
+    synthetics:
+      enabled: true
     resource-explorer-2:
       enabled: true
     resource-groups:
@@ -649,9 +669,15 @@ floci:
       enabled: true
     appregistry:
       enabled: true
+    servicecatalog:
+      enabled: true
+    service-quotas:
+      enabled: true
     apprunner:
       enabled: true
     b2bi:
+      enabled: true
+    verifiedpermissions:
       enabled: true
     chatbot:
       enabled: true

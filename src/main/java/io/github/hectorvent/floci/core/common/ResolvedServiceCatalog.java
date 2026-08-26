@@ -22,6 +22,7 @@ import io.github.hectorvent.floci.services.inspector2.Inspector2Controller;
 import io.github.hectorvent.floci.services.macie2.Macie2Controller;
 import io.github.hectorvent.floci.services.securityhub.SecurityHubController;
 import io.github.hectorvent.floci.services.securitylake.SecurityLakeController;
+import io.github.hectorvent.floci.services.securitylake.SecurityLakeRoutingFilter;
 import io.github.hectorvent.floci.services.docdbelastic.DocDbElasticController;
 import io.github.hectorvent.floci.services.dsql.DsqlController;
 import io.github.hectorvent.floci.services.neptunegraph.NeptuneGraphController;
@@ -111,6 +112,15 @@ import io.github.hectorvent.floci.services.repostspace.RepostspaceController;
 import io.github.hectorvent.floci.services.repostspace.RepostspaceErrorHeaderFilter;
 import io.github.hectorvent.floci.services.repostspace.RepostspaceRoutingFilter;
 import io.github.hectorvent.floci.services.rum.RumController;
+import io.github.hectorvent.floci.services.synthetics.SyntheticsController;
+import io.github.hectorvent.floci.services.synthetics.SyntheticsErrorHeaderFilter;
+import io.github.hectorvent.floci.services.schemas.SchemasController;
+import io.github.hectorvent.floci.services.schemas.SchemasErrorHeaderFilter;
+import io.github.hectorvent.floci.services.signer.SignerController;
+import io.github.hectorvent.floci.services.signer.SignerErrorHeaderFilter;
+import io.github.hectorvent.floci.services.signer.SignerRoutingFilter;
+import io.github.hectorvent.floci.services.socialmessaging.SocialMessagingController;
+import io.github.hectorvent.floci.services.socialmessaging.SocialMessagingRoutingFilter;
 import io.github.hectorvent.floci.services.ssmincidents.SsmIncidentsController;
 import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerController;
 import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerErrorHeaderFilter;
@@ -207,6 +217,18 @@ public class ResolvedServiceCatalog {
                         config.storage().services().sns().flushIntervalMs(), AwsNamespaces.SNS, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY, ServiceProtocol.JSON, ServiceProtocol.CBOR),
                         Set.of("SNS_20100331."), Set.of("sns"), Set.of("SNS"), Set.of()),
+                descriptor("sdb", "simpledb", config.services().simpledb().enabled(), true,
+                        "simpledb", config.storage().mode(), 5000L, AwsNamespaces.SDB, ServiceProtocol.QUERY,
+                        protocols(ServiceProtocol.QUERY),
+                        Set.of(), Set.of("sdb"), Set.of(), Set.of()),
+                descriptor("social-messaging", "socialmessaging", config.services().socialMessaging().enabled(), true,
+                        "socialmessaging", storageMode(config.storage().services().socialMessaging().mode(),
+                                config.storage().mode()),
+                        config.storage().services().socialMessaging().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("social-messaging"), Set.of(),
+                        Set.of(SocialMessagingController.class, SocialMessagingRoutingFilter.class)),
                 descriptor("lambda", "lambda", config.services().lambda().enabled(), true,
                         "lambda", storageMode(config.storage().services().lambda().mode(), config.storage().mode()),
                         config.storage().services().lambda().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -342,6 +364,17 @@ public class ResolvedServiceCatalog {
                         "eventbridge", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSEvents."), Set.of("events"), Set.of(), Set.of()),
+                descriptor("schemas", "schemas", config.services().schemas().enabled(), true,
+                        "schemas", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("schemas"), Set.of(),
+                        Set.of(SchemasController.class, SchemasErrorHeaderFilter.class)),
+                descriptor("signer", "signer", config.services().signer().enabled(), true,
+                        "signer", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("signer"), Set.of(),
+                        Set.of(SignerController.class, SignerRoutingFilter.class,
+                                SignerErrorHeaderFilter.class)),
                 descriptor("servicediscovery", "cloudmap", config.services().cloudmap().enabled(), true,
                         "cloudmap", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -485,6 +518,10 @@ public class ResolvedServiceCatalog {
                         "fms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSFMS_20180101."), Set.of("fms"), Set.of(), Set.of()),
+                descriptor("shield", "shield", config.services().shield().enabled(), true,
+                        "shield", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSShield_20160616."), Set.of("shield"), Set.of(), Set.of()),
                 descriptor("network-firewall", "network-firewall", config.services().networkFirewall().enabled(), true,
                         "network-firewall", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -998,6 +1035,13 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
+                descriptor("synthetics", "synthetics", config.services().synthetics().enabled(), true,
+                        "synthetics", storageMode(config.storage().services().synthetics().mode(),
+                                config.storage().mode()),
+                        config.storage().services().synthetics().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("synthetics"), Set.of(),
+                        Set.of(SyntheticsController.class, SyntheticsErrorHeaderFilter.class)),
                 // Resource Explorer 2 restJson1 — index, view, and search
                 descriptor("resource-explorer-2", "resource-explorer-2",
                         config.services().resourceExplorer2().enabled(), true,
@@ -1130,6 +1174,14 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("servicecatalog", "servicecatalog-appregistry"), Set.of(),
                         Set.of(AppRegistryController.class)),
+                descriptor("servicecatalog", "servicecatalog", config.services().servicecatalog().enabled(), true,
+                        "servicecatalog", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWS242ServiceCatalogService."), Set.of("servicecatalog"), Set.of(), Set.of()),
+                descriptor("servicequotas", "servicequotas", config.services().serviceQuotas().enabled(), true,
+                        "servicequotas", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("ServiceQuotasV20190624."), Set.of("servicequotas"), Set.of(), Set.of()),
                 descriptor("apprunner", "apprunner", config.services().apprunner().enabled(), true,
                         "apprunner", storageMode(config.storage().services().apprunner().mode(),
                                 config.storage().mode()),
@@ -1142,6 +1194,14 @@ public class ResolvedServiceCatalog {
                         config.storage().services().b2bi().flushIntervalMs(), null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("B2BI."), Set.of("b2bi"), Set.of(), Set.of()),
+                descriptor("verifiedpermissions", "verifiedpermissions",
+                        config.services().verifiedpermissions().enabled(), true,
+                        "verifiedpermissions", storageMode(config.storage().services().verifiedpermissions().mode(),
+                                config.storage().mode()),
+                        config.storage().services().verifiedpermissions().flushIntervalMs(), null,
+                        ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("VerifiedPermissions."), Set.of("verifiedpermissions"), Set.of(), Set.of()),
                 descriptor("application-signals", "applicationsignals",
                         config.services().applicationSignals().enabled(), true,
                         "applicationsignals", storageMode(config.storage().services().applicationSignals().mode(),
@@ -1229,7 +1289,8 @@ public class ResolvedServiceCatalog {
                 descriptor("securitylake", "securitylake", config.services().securitylake().enabled(), true,
                         "securitylake", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("securitylake"), Set.of(), Set.of(SecurityLakeController.class)),
+                        Set.of(), Set.of("securitylake"), Set.of(),
+                        Set.of(SecurityLakeController.class, SecurityLakeRoutingFilter.class)),
                 descriptor("sso-admin", "ssoadmin", config.services().ssoAdmin().enabled(), true,
                         "ssoadmin", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

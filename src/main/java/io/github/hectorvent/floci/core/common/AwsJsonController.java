@@ -28,6 +28,7 @@ import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsJsonHandler;
 import io.github.hectorvent.floci.services.timestream.TimestreamJsonHandler;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.TimestreamInfluxDbJsonHandler;
+import io.github.hectorvent.floci.services.verifiedpermissions.VerifiedPermissionsJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -75,6 +76,7 @@ public class AwsJsonController {
     private final PaymentCryptographyJsonHandler paymentCryptographyJsonHandler;
     private final TimestreamJsonHandler timestreamJsonHandler;
     private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
+    private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -99,7 +101,8 @@ public class AwsJsonController {
                              OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler,
                              PaymentCryptographyJsonHandler paymentCryptographyJsonHandler,
                              TimestreamJsonHandler timestreamJsonHandler,
-                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler) {
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler,
+                             VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -126,6 +129,7 @@ public class AwsJsonController {
         this.paymentCryptographyJsonHandler = paymentCryptographyJsonHandler;
         this.timestreamJsonHandler = timestreamJsonHandler;
         this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
+        this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
     }
 
     @POST
@@ -188,6 +192,7 @@ public class AwsJsonController {
                 case "timestream" -> timestreamJsonHandler.handle(action, request, region,
                         httpHeaders.getHeaderString("Host"));
                 case "timestream-influxdb" -> timestreamInfluxDbJsonHandler.handle(action, request, region);
+                case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

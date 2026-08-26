@@ -174,12 +174,17 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/comprehend/ComprehendJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/comprehendmedical/ComprehendMedicalJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/transcribe/TranscribeJsonHandler.java }  # no standalone action table yet
-  - { path: src/main/java/io/github/hectorvent/floci/services/translate/TranslateJsonHandler.java }  # alchemy terminology coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/verifiedpermissions/VerifiedPermissionsJsonHandler.java }  # alchemy identity-source coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/translate/TranslateJsonHandler.java }  # alchemy parallel-data coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/transfer/TransferHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/dax/DaxJsonHandler.java }  # alchemy cluster coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/dms/DmsJsonHandler.java }  # alchemy bindings coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/directoryservice/DirectoryServiceJsonHandler.java }  # alchemy directory coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/fms/FmsJsonHandler.java }  # alchemy admin-account coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/shield/ShieldJsonHandler.java }  # alchemy shield bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/signer/SignerController.java }  # alchemy signer bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/servicecatalog/ServiceCatalogJsonHandler.java }  # alchemy association coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/servicequotas/ServiceQuotasJsonHandler.java }  # alchemy service-quotas bindings; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/ssmcontacts/SsmContactsJsonHandler.java }  # alchemy contacts/bindings coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/organizations/OrganizationsJsonHandler.java }  # alchemy organization coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/networkfirewall/NetworkFirewallJsonHandler.java }  # alchemy firewall-policy coverage; docs table later
@@ -190,4 +195,5 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/keyspaces/KeyspacesJsonHandler.java }  # alchemy keyspace coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/mwaaserverless/MwaaServerlessJsonHandler.java }  # alchemy workflow coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/smsvoice/SmsVoiceJsonHandler.java }  # alchemy opt-out/bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/socialmessaging/SocialMessagingController.java }  # alchemy socialmessaging bindings coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/ssmcontacts/SsmContactsJsonHandler.java }  # alchemy ssm-contacts coverage; docs table later
