@@ -39,6 +39,7 @@ class AppIntegrationsApplicationIntegrationTest {
                 .get("/applications/00000000-0000-0000-0000-000000000000")
                 .then()
                 .statusCode(404)
+                .header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"))
                 .body("__type", equalTo("ResourceNotFoundException"));
     }
 

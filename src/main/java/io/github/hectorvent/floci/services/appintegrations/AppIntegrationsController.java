@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.appintegrations.model.Application;
@@ -70,11 +71,15 @@ public class AppIntegrationsController {
     @POST
     @Path("/app-integrations/applications")
     public Response createApplication(@Context HttpHeaders headers, String body) {
-        Application application = service.createApplication(regionResolver.resolveRegion(headers), parse(body));
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("Arn", application.getArn());
-        response.put("Id", application.getId());
-        return Response.ok(response).build();
+        try {
+            Application application = service.createApplication(regionResolver.resolveRegion(headers), parse(body));
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("Arn", application.getArn());
+            response.put("Id", application.getId());
+            return Response.ok(response).build();
+        } catch (AwsException e) {
+            return error(e);
+        }
     }
 
     @GET
@@ -84,17 +89,21 @@ public class AppIntegrationsController {
             @Context HttpHeaders headers,
             @QueryParam("maxResults") String maxResults,
             @QueryParam("nextToken") String nextToken) {
-        AppIntegrationsService.Page<Application> page = service.listApplications(
-                regionResolver.resolveRegion(headers), maxResults, nextToken);
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode applications = response.putArray("Applications");
-        for (Application application : page.items()) {
-            applications.add(toSummary(application));
+        try {
+            AppIntegrationsService.Page<Application> page = service.listApplications(
+                    regionResolver.resolveRegion(headers), maxResults, nextToken);
+            ObjectNode response = objectMapper.createObjectNode();
+            ArrayNode applications = response.putArray("Applications");
+            for (Application application : page.items()) {
+                applications.add(toSummary(application));
+            }
+            if (page.nextToken() != null) {
+                response.put("NextToken", page.nextToken());
+            }
+            return Response.ok(response).build();
+        } catch (AwsException e) {
+            return error(e);
         }
-        if (page.nextToken() != null) {
-            response.put("NextToken", page.nextToken());
-        }
-        return Response.ok(response).build();
     }
 
     @GET
@@ -112,24 +121,36 @@ public class AppIntegrationsController {
     @Path("/app-integrations/applications/{arn: .+}")
     @Consumes(MediaType.WILDCARD)
     public Response getApplication(@Context HttpHeaders headers, @PathParam("arn") String arn) {
-        Application application = service.getApplication(regionResolver.resolveRegion(headers), arn);
-        return Response.ok(toDetail(application)).build();
+        try {
+            Application application = service.getApplication(regionResolver.resolveRegion(headers), arn);
+            return Response.ok(toDetail(application)).build();
+        } catch (AwsException e) {
+            return error(e);
+        }
     }
 
     @PATCH
     @Path("/app-integrations/applications/{arn: .+}")
     public Response updateApplication(
             @Context HttpHeaders headers, @PathParam("arn") String arn, String body) {
-        service.updateApplication(regionResolver.resolveRegion(headers), arn, parse(body));
-        return Response.ok(objectMapper.createObjectNode()).build();
+        try {
+            service.updateApplication(regionResolver.resolveRegion(headers), arn, parse(body));
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            return error(e);
+        }
     }
 
     @DELETE
     @Path("/app-integrations/applications/{arn: .+}")
     @Consumes(MediaType.WILDCARD)
     public Response deleteApplication(@Context HttpHeaders headers, @PathParam("arn") String arn) {
-        service.deleteApplication(regionResolver.resolveRegion(headers), arn);
-        return Response.ok(objectMapper.createObjectNode()).build();
+        try {
+            service.deleteApplication(regionResolver.resolveRegion(headers), arn);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            return error(e);
+        }
     }
 
     @POST
@@ -372,6 +393,14 @@ public class AppIntegrationsController {
             integration.getTags().forEach(tags::put);
         }
         return node;
+    }
+
+    private static Response error(AwsException exception) {
+        return Response.status(exception.getHttpStatus())
+                .type(MediaType.APPLICATION_JSON)
+                .header("X-Amzn-Errortype", exception.jsonType())
+                .entity(new AwsErrorResponse(exception.jsonType(), exception.getMessage()))
+                .build();
     }
 
     private static void putStringArray(ObjectNode parent, String field, List<String> values) {
