@@ -702,6 +702,8 @@ floci:
       enabled: true
     healthlake:
       enabled: true
+    timestream:
+      enabled: true
     medical-imaging:
       enabled: true
     omics:

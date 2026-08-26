@@ -1158,6 +1158,7 @@ public interface EmulatorConfig {
         Route53DomainsServiceConfig route53domains();
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
+        TimestreamServiceConfig timestream();
         RekognitionServiceConfig rekognition();
         ForecastServiceConfig forecast();
         PersonalizeServiceConfig personalize();
@@ -2437,6 +2438,11 @@ public interface EmulatorConfig {
     }
 
     interface TextractServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface TimestreamServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

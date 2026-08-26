@@ -26,6 +26,7 @@ import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamsJsonHandler;
 import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsJsonHandler;
+import io.github.hectorvent.floci.services.timestream.TimestreamJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -71,6 +72,7 @@ public class AwsJsonController {
     private final NetworkFirewallJsonHandler networkFirewallJsonHandler;
     private final OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler;
     private final PaymentCryptographyJsonHandler paymentCryptographyJsonHandler;
+    private final TimestreamJsonHandler timestreamJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -93,7 +95,8 @@ public class AwsJsonController {
                              MwaaServerlessJsonHandler mwaaServerlessJsonHandler,
                              NetworkFirewallJsonHandler networkFirewallJsonHandler,
                              OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler,
-                             PaymentCryptographyJsonHandler paymentCryptographyJsonHandler) {
+                             PaymentCryptographyJsonHandler paymentCryptographyJsonHandler,
+                             TimestreamJsonHandler timestreamJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -118,6 +121,7 @@ public class AwsJsonController {
         this.networkFirewallJsonHandler = networkFirewallJsonHandler;
         this.openSearchServerlessJsonHandler = openSearchServerlessJsonHandler;
         this.paymentCryptographyJsonHandler = paymentCryptographyJsonHandler;
+        this.timestreamJsonHandler = timestreamJsonHandler;
     }
 
     @POST
@@ -177,6 +181,8 @@ public class AwsJsonController {
                 case "network-firewall" -> networkFirewallJsonHandler.handle(action, request, region);
                 case "aoss" -> openSearchServerlessJsonHandler.handle(action, request, region);
                 case "payment-cryptography" -> paymentCryptographyJsonHandler.handle(action, request, region);
+                case "timestream" -> timestreamJsonHandler.handle(action, request, region,
+                        httpHeaders.getHeaderString("Host"));
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target
