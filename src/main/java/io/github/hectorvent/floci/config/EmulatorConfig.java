@@ -314,12 +314,15 @@ public interface EmulatorConfig {
         RbinStorageConfig rbin();
         RepostspaceStorageConfig repostspace();
         RumStorageConfig rum();
+        @WithName("vpc-lattice")
+        VpcLatticeStorageConfig vpcLattice();
         SyntheticsStorageConfig synthetics();
         @WithName("resource-explorer-2")
         ResourceExplorerStorageConfig resourceExplorer2();
         @WithName("resource-groups")
         ResourceGroupsStorageConfig resourceGroups();
         OamStorageConfig oam();
+        XrayStorageConfig xray();
         ObservabilityAdminStorageConfig observabilityadmin();
         InternetMonitorStorageConfig internetmonitor();
         FisStorageConfig fis();
@@ -766,6 +769,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface VpcLatticeStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface SyntheticsStorageConfig {
         Optional<String> mode();
 
@@ -788,6 +798,13 @@ public interface EmulatorConfig {
     }
 
     interface OamStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface XrayStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -1240,6 +1257,9 @@ public interface EmulatorConfig {
         RbinServiceConfig rbin();
         RepostspaceServiceConfig repostspace();
         RumServiceConfig rum();
+        @WithName("vpc-lattice")
+        VpcLatticeServiceConfig vpcLattice();
+        XrayServiceConfig xray();
         SyntheticsServiceConfig synthetics();
         @WithName("resource-explorer-2")
         ResourceExplorerServiceConfig resourceExplorer2();
@@ -1355,6 +1375,16 @@ public interface EmulatorConfig {
     }
 
     interface RumServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface VpcLatticeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface XrayServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

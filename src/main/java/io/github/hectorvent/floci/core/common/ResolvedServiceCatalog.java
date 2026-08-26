@@ -78,6 +78,7 @@ import io.github.hectorvent.floci.services.aiops.AiOpsController;
 import io.github.hectorvent.floci.services.accessanalyzer.AccessAnalyzerController;
 import io.github.hectorvent.floci.services.auditmanager.AuditManagerController;
 import io.github.hectorvent.floci.services.amplify.AmplifyController;
+import io.github.hectorvent.floci.services.amplify.AmplifyRoutingFilter;
 import io.github.hectorvent.floci.services.appflow.AppFlowController;
 import io.github.hectorvent.floci.services.appintegrations.AppIntegrationsController;
 import io.github.hectorvent.floci.services.qbusiness.QBusinessController;
@@ -112,6 +113,9 @@ import io.github.hectorvent.floci.services.repostspace.RepostspaceController;
 import io.github.hectorvent.floci.services.repostspace.RepostspaceErrorHeaderFilter;
 import io.github.hectorvent.floci.services.repostspace.RepostspaceRoutingFilter;
 import io.github.hectorvent.floci.services.rum.RumController;
+import io.github.hectorvent.floci.services.vpclattice.VpcLatticeController;
+import io.github.hectorvent.floci.services.vpclattice.VpcLatticeErrorHeaderFilter;
+import io.github.hectorvent.floci.services.vpclattice.VpcLatticeRoutingFilter;
 import io.github.hectorvent.floci.services.synthetics.SyntheticsController;
 import io.github.hectorvent.floci.services.synthetics.SyntheticsErrorHeaderFilter;
 import io.github.hectorvent.floci.services.schemas.SchemasController;
@@ -128,6 +132,8 @@ import io.github.hectorvent.floci.services.resourceexplorer.ResourceExplorerRout
 import io.github.hectorvent.floci.services.resourcegroups.ResourceGroupsController;
 import io.github.hectorvent.floci.services.resourcegroups.ResourceGroupsRoutingFilter;
 import io.github.hectorvent.floci.services.oam.OamController;
+import io.github.hectorvent.floci.services.xray.XRayController;
+import io.github.hectorvent.floci.services.xray.XRayRoutingFilter;
 import io.github.hectorvent.floci.services.observabilityadmin.ObservabilityAdminController;
 import io.github.hectorvent.floci.services.internetmonitor.InternetMonitorController;
 import io.github.hectorvent.floci.services.s3tables.S3TablesController;
@@ -1035,6 +1041,14 @@ public class ResolvedServiceCatalog {
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rum"), Set.of(), Set.of(RumController.class)),
+                descriptor("vpc-lattice", "vpclattice", config.services().vpcLattice().enabled(), true,
+                        "vpc-lattice", storageMode(config.storage().services().vpcLattice().mode(),
+                                config.storage().mode()),
+                        config.storage().services().vpcLattice().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("vpc-lattice"), Set.of(),
+                        Set.of(VpcLatticeController.class, VpcLatticeRoutingFilter.class,
+                                VpcLatticeErrorHeaderFilter.class)), // restJson1 /servicenetworks
                 descriptor("synthetics", "synthetics", config.services().synthetics().enabled(), true,
                         "synthetics", storageMode(config.storage().services().synthetics().mode(),
                                 config.storage().mode()),
@@ -1068,6 +1082,12 @@ public class ResolvedServiceCatalog {
                         config.storage().services().oam().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("oam"), Set.of(), Set.of(OamController.class)),
+                descriptor("xray", "xray", config.services().xray().enabled(), true,
+                        "xray", storageMode(config.storage().services().xray().mode(), config.storage().mode()),
+                        config.storage().services().xray().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("xray"), Set.of(),
+                        Set.of(XRayController.class, XRayRoutingFilter.class)),
                 descriptor("observabilityadmin", "observabilityadmin",
                         config.services().observabilityadmin().enabled(), true,
                         "observabilityadmin",
@@ -1155,7 +1175,8 @@ public class ResolvedServiceCatalog {
                         "amplify", storageMode(config.storage().services().amplify().mode(), config.storage().mode()),
                         config.storage().services().amplify().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("amplify"), Set.of(), Set.of(AmplifyController.class)),
+                        Set.of(), Set.of("amplify"), Set.of(),
+                        Set.of(AmplifyController.class, AmplifyRoutingFilter.class)),
                 descriptor("appflow", "appflow", config.services().appflow().enabled(), true,
                         "appflow", storageMode(config.storage().services().appflow().mode(), config.storage().mode()),
                         config.storage().services().appflow().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

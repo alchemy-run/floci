@@ -169,6 +169,8 @@ floci:
         flush-interval-ms: 5000
       rum:
         flush-interval-ms: 5000
+      vpc-lattice:
+        flush-interval-ms: 5000
       synthetics:
         flush-interval-ms: 5000
       resource-explorer-2:
@@ -176,6 +178,8 @@ floci:
       resource-groups:
         flush-interval-ms: 5000
       oam:
+        flush-interval-ms: 5000
+      xray:
         flush-interval-ms: 5000
       observabilityadmin:
         flush-interval-ms: 5000
@@ -814,6 +818,10 @@ floci:
     repostspace:
       enabled: true
     rum:
+      enabled: true
+    vpc-lattice:
+      enabled: true
+    xray:
       enabled: true
     synthetics:
       enabled: true

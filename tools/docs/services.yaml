@@ -197,3 +197,5 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/smsvoice/SmsVoiceJsonHandler.java }  # alchemy opt-out/bindings coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/socialmessaging/SocialMessagingController.java }  # alchemy socialmessaging bindings coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/ssmcontacts/SsmContactsJsonHandler.java }  # alchemy ssm-contacts coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/xray/XRayController.java }  # alchemy xray resource-policy coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/vpclattice/VpcLatticeController.java }  # alchemy vpc-lattice service-chain coverage; docs table later
