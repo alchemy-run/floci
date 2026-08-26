@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.dsql.model.Cluster;
 import io.github.hectorvent.floci.services.dsql.proxy.DsqlDataPlane;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -39,6 +40,8 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class DsqlService implements TagHandler {
+
+    private static final Logger LOG = Logger.getLogger(DsqlService.class);
 
     static final String SERVICE = "dsql";
     private static final String STATUS_ACTIVE = "ACTIVE";
@@ -117,10 +120,7 @@ public class DsqlService implements TagHandler {
             cluster.setPolicyVersion("1");
         }
         clusters.put(clusterKey(region, identifier), cluster);
-        if (dataPlane != null) {
-            dataPlane.ensureStarted();
-            dataPlane.registerEndpoint(cluster.getEndpoint());
-        }
+        attachDataPlane(cluster.getEndpoint());
         return cluster;
     }
 
@@ -167,6 +167,23 @@ public class DsqlService implements TagHandler {
             dataPlane.unregisterEndpoint(cluster.getEndpoint());
         }
         return cluster;
+    }
+
+    /**
+     * Registers the public hostname for Lambda extra-hosts and kicks the IAM
+     * postgres proxy. Failures are logged, not thrown: cluster create is the
+     * control plane, and Alchemy {@code DSQL.Connect} retries the data plane.
+     */
+    private void attachDataPlane(String endpoint) {
+        if (dataPlane == null) {
+            return;
+        }
+        try {
+            dataPlane.registerEndpoint(endpoint);
+            dataPlane.ensureStarted();
+        } catch (RuntimeException e) {
+            LOG.warnv("DSQL data plane not ready for {0}: {1}", endpoint, e.getMessage());
+        }
     }
 
     public ObjectNode getVpcEndpointServiceName(String region, String identifier) {

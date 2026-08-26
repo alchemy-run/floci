@@ -53,6 +53,43 @@ public final class SigV4TokenTestHelper {
                 "rds-db", timestamp, expiresSeconds, params);
     }
 
+    /**
+     * Aurora DSQL IAM tokens are host-only (no port in the signed Host header)
+     * and use {@code Action=DbConnect} or {@code Action=DbConnectAdmin}.
+     * Alchemy's {@code DSQL.Connect} mints these via aws4fetch, which always
+     * includes {@code X-Amz-Algorithm} and, for assumed-role Lambda creds,
+     * {@code X-Amz-Security-Token}.
+     */
+    public static String createDsqlToken(
+            String host,
+            String action,
+            String accessKeyId,
+            String secretKey,
+            Instant timestamp,
+            int expiresSeconds
+    ) throws Exception {
+        return createDsqlToken(host, action, accessKeyId, secretKey, timestamp, expiresSeconds, null);
+    }
+
+    public static String createDsqlToken(
+            String host,
+            String action,
+            String accessKeyId,
+            String secretKey,
+            Instant timestamp,
+            int expiresSeconds,
+            String sessionToken
+    ) throws Exception {
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("Action", action);
+        params.put("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
+        if (sessionToken != null && !sessionToken.isBlank()) {
+            params.put("X-Amz-Security-Token", sessionToken);
+        }
+        return signToken(host, null, host, accessKeyId, secretKey, "us-east-1",
+                "dsql", timestamp, expiresSeconds, params);
+    }
+
     private static String signToken(
             String host,
             Integer port,

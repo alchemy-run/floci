@@ -167,6 +167,21 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_dsqlHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("ac0a36b1677f42a68a3b84dde8.dsql.us-east-1.on.aws", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("abc.dsql.us-west-2.on.aws", "172.19.0.2").orElseThrow());
+        assertTrue(dns.resolveARecord("dsql.us-east-1.on.aws", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("abc.dsql.amazonaws.com", "172.19.0.2").isEmpty());
+        assertFalse(EmbeddedDnsServer.isDsqlHost("not-a-dsql-host"));
+        assertTrue(EmbeddedDnsServer.isDsqlHost("ac0a36b1677f42a68a3b84dde8.dsql.us-east-1.on.aws"));
+    }
+
+    @Test
     void resolveARecord_rumDataplaneHostsMapToFloci() {
         assertEquals(
                 "172.19.0.2",
