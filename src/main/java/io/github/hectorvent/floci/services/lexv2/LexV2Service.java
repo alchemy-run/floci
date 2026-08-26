@@ -261,6 +261,39 @@ public class LexV2Service implements TagHandler {
         return response;
     }
 
+    public ObjectNode listBotLocales(String region, String botId, String botVersion, JsonNode request) {
+        Bot bot = requireBot(region, botId);
+        Map<String, Locale> locales = bot.getLocales().get(botVersion);
+        if (locales == null) {
+            throw notFound("Bot version " + botVersion + " does not exist.");
+        }
+        List<Locale> all = new ArrayList<>(locales.values());
+        JsonNode filters = request == null ? null : request.get("filters");
+        if (filters != null && filters.isArray()) {
+            for (JsonNode filter : filters) {
+                String name = text(filter, "name");
+                String operator = text(filter, "operator");
+                List<String> values = stringList(filter.get("values"));
+                if ("BotLocaleId".equals(name) && !values.isEmpty()) {
+                    all = all.stream().filter(locale -> matches(locale.getLocaleId(), operator, values)).toList();
+                }
+            }
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("botId", botId);
+        response.put("botVersion", botVersion);
+        ArrayNode summaries = response.putArray("botLocaleSummaries");
+        for (Locale locale : all) {
+            ObjectNode summary = summaries.addObject();
+            summary.put("localeId", locale.getLocaleId());
+            putOptional(summary, "localeName", locale.getLocaleName());
+            putOptional(summary, "description", locale.getDescription());
+            summary.put("botLocaleStatus", locale.getBotLocaleStatus());
+            summary.put("lastUpdatedDateTime", locale.getLastUpdatedDateTime());
+        }
+        return response;
+    }
+
     public synchronized ObjectNode buildBotLocale(String region, String botId, String botVersion, String localeId) {
         requireDraft(botVersion);
         Bot bot = requireBot(region, botId);
@@ -514,6 +547,24 @@ public class LexV2Service implements TagHandler {
         return response;
     }
 
+    public ObjectNode listBotVersions(String region, String botId, JsonNode request) {
+        Bot bot = requireBot(region, botId);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("botId", botId);
+        ArrayNode summaries = response.putArray("botVersionSummaries");
+        List<Version> versions = new ArrayList<>(bot.getVersions().values());
+        versions.sort(Comparator.comparing(Version::getBotVersion, Comparator.nullsLast(String::compareTo)));
+        for (Version version : versions) {
+            ObjectNode summary = summaries.addObject();
+            summary.put("botName", bot.getBotName());
+            summary.put("botVersion", version.getBotVersion());
+            putOptional(summary, "description", version.getDescription());
+            summary.put("botStatus", version.getBotStatus());
+            summary.put("creationDateTime", version.getCreationDateTime());
+        }
+        return response;
+    }
+
     // --- Aliases ---
 
     public synchronized ObjectNode createBotAlias(String region, String botId, JsonNode request) {
@@ -630,7 +681,7 @@ public class LexV2Service implements TagHandler {
         intentNode.put("name", intent.getIntentName());
         intentNode.putObject("slots");
         intentNode.put("confirmationState", "None");
-        String state = intent.isFulfillmentCodeHook() ? "ReadyForFulfillment" : "ReadyForFulfillment";
+        String state = intent.isFulfillmentCodeHook() ? "ReadyForFulfillment" : "Fulfilled";
         intentNode.put("state", state);
 
         ArrayNode interpretations = objectMapper.createArrayNode();
@@ -963,18 +1014,28 @@ public class LexV2Service implements TagHandler {
                     objectMapper.writeValueAsBytes(event), InvocationType.RequestResponse);
             if (result.getFunctionError() != null) {
                 LOG.warnv("Lex fulfillment hook failed: {0}", result.getFunctionError());
+                fulfillLocally(sessionState);
                 return null;
             }
             byte[] payload = result.getPayload();
             if (payload == null || payload.length == 0) {
+                fulfillLocally(sessionState);
                 return null;
             }
             JsonNode parsed = objectMapper.readTree(payload);
             return parsed != null && parsed.isObject() ? (ObjectNode) parsed : null;
         } catch (Exception e) {
             LOG.warnv("Lex fulfillment hook invoke failed: {0}", e.getMessage());
+            fulfillLocally(sessionState);
             return null;
         }
+    }
+
+    private static void fulfillLocally(ObjectNode sessionState) {
+        if (sessionState.has("intent") && sessionState.get("intent").isObject()) {
+            ((ObjectNode) sessionState.get("intent")).put("state", "Fulfilled");
+        }
+        sessionState.putObject("dialogAction").put("type", "Close");
     }
 
     @SuppressWarnings("unchecked")

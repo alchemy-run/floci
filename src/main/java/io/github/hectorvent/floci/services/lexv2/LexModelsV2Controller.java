@@ -121,6 +121,17 @@ public class LexModelsV2Controller {
     }
 
     @POST
+    @Path("/bots/{botId}/botversions/{botVersion}/botlocales")
+    @Consumes(MediaType.WILDCARD)
+    public Response listBotLocales(@Context HttpHeaders headers,
+                                   @PathParam("botId") String botId,
+                                   @PathParam("botVersion") String botVersion,
+                                   String body) {
+        return handle(body, request -> Response.ok(
+                service.listBotLocales(regionResolver.resolveRegion(headers), botId, botVersion, request)).build());
+    }
+
+    @POST
     @Path("/bots/{botId}/botversions/{botVersion}/botlocales/{localeId}")
     @Consumes(MediaType.WILDCARD)
     public Response buildBotLocale(@Context HttpHeaders headers,
@@ -270,6 +281,16 @@ public class LexModelsV2Controller {
                                      String body) {
         return handle(body, request -> Response.ok(
                 service.createBotVersion(regionResolver.resolveRegion(headers), botId, request)).build());
+    }
+
+    @POST
+    @Path("/bots/{botId}/botversions")
+    @Consumes(MediaType.WILDCARD)
+    public Response listBotVersions(@Context HttpHeaders headers,
+                                    @PathParam("botId") String botId,
+                                    String body) {
+        return handle(body, request -> Response.ok(
+                service.listBotVersions(regionResolver.resolveRegion(headers), botId, request)).build());
     }
 
     @GET

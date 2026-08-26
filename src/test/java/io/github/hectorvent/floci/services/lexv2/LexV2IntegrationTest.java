@@ -236,6 +236,16 @@ class LexV2IntegrationTest {
         given()
                 .contentType("application/json")
                 .header("Authorization", authorization)
+                .body("{\"filters\":[{\"name\":\"BotLocaleId\",\"values\":[\"en_US\"],\"operator\":\"EQ\"}]}")
+                .when()
+                .post("/bots/" + botId + "/botversions/DRAFT/botlocales")
+                .then()
+                .statusCode(200)
+                .body("botLocaleSummaries[0].localeId", equalTo("en_US"));
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
                 .when()
                 .post("/bots/" + botId + "/botversions/DRAFT/botlocales/en_US")
                 .then()
@@ -256,6 +266,16 @@ class LexV2IntegrationTest {
                 .body("botStatus", equalTo("Available"))
                 .extract()
                 .path("botVersion");
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{}")
+                .when()
+                .post("/bots/" + botId + "/botversions")
+                .then()
+                .statusCode(200)
+                .body("botVersionSummaries[0].botVersion", equalTo(botVersion));
 
         String aliasId = given()
                 .contentType("application/json")
