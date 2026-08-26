@@ -64,6 +64,7 @@ import io.github.hectorvent.floci.services.rdsdata.RdsDataController;
 import io.github.hectorvent.floci.services.amp.AmpController;
 import io.github.hectorvent.floci.services.amp.AmpRuleController;
 import io.github.hectorvent.floci.services.grafana.GrafanaController;
+import io.github.hectorvent.floci.services.quicksight.QuickSightController;
 import io.github.hectorvent.floci.services.account.AccountController;
 import io.github.hectorvent.floci.services.account.AccountRegionController;
 import io.github.hectorvent.floci.services.aiops.AiOpsController;
@@ -72,6 +73,8 @@ import io.github.hectorvent.floci.services.auditmanager.AuditManagerController;
 import io.github.hectorvent.floci.services.amplify.AmplifyController;
 import io.github.hectorvent.floci.services.appflow.AppFlowController;
 import io.github.hectorvent.floci.services.appintegrations.AppIntegrationsController;
+import io.github.hectorvent.floci.services.qbusiness.QBusinessController;
+import io.github.hectorvent.floci.services.qbusiness.QBusinessRoutingFilter;
 import io.github.hectorvent.floci.services.appregistry.AppRegistryController;
 import io.github.hectorvent.floci.services.apprunner.AppRunnerProxyController;
 import io.github.hectorvent.floci.services.applicationsignals.ApplicationSignalsController;
@@ -91,6 +94,14 @@ import io.github.hectorvent.floci.services.finspace.FinSpaceController;
 import io.github.hectorvent.floci.services.finspace.FinSpaceDataController;
 import io.github.hectorvent.floci.services.geomaps.GeoMapsController;
 import io.github.hectorvent.floci.services.location.LocationController;
+import io.github.hectorvent.floci.services.qapps.QAppsController;
+import io.github.hectorvent.floci.services.qapps.QAppsRoutingFilter;
+import io.github.hectorvent.floci.services.ram.RamController;
+import io.github.hectorvent.floci.services.rbin.RbinController;
+import io.github.hectorvent.floci.services.rbin.RbinRoutingFilter;
+import io.github.hectorvent.floci.services.repostspace.RepostspaceController;
+import io.github.hectorvent.floci.services.repostspace.RepostspaceErrorHeaderFilter;
+import io.github.hectorvent.floci.services.repostspace.RepostspaceRoutingFilter;
 import io.github.hectorvent.floci.services.rum.RumController;
 import io.github.hectorvent.floci.services.oam.OamController;
 import io.github.hectorvent.floci.services.observabilityadmin.ObservabilityAdminController;
@@ -249,6 +260,21 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("rds-data"), Set.of(), Set.of(RdsDataController.class)),
+                descriptor("redshift", "redshift", config.services().redshift().enabled(), true,
+                        "redshift", config.storage().mode(),
+                        5000L, AwsNamespaces.REDSHIFT, ServiceProtocol.QUERY, // Query protocol
+                        protocols(ServiceProtocol.QUERY),
+                        Set.of(), Set.of("redshift"), Set.of(), Set.of()),
+                descriptor("redshift-serverless", "redshiftserverless",
+                        config.services().redshiftServerless().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("RedshiftServerless."), Set.of("redshift-serverless"), Set.of(), Set.of()),
+                descriptor("redshift-data", "redshiftdata",
+                        config.services().redshiftData().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("RedshiftData."), Set.of("redshift-data"), Set.of(), Set.of()),
                 descriptor("neptune", "neptune", config.services().neptune().enabled(), true,
                         "neptune", storageMode(config.storage().services().neptune().mode(), config.storage().mode()),
                         5000L, AwsNamespaces.RDS, ServiceProtocol.QUERY,
@@ -341,6 +367,13 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSKendraFrontendService."), Set.of("kendra"), Set.of(), Set.of()),
+                descriptor("qbusiness", "qbusiness", config.services().qbusiness().enabled(), true,
+                        "qbusiness", storageMode(config.storage().services().qbusiness().mode(),
+                                config.storage().mode()),
+                        config.storage().services().qbusiness().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("qbusiness"), Set.of(),
+                        Set.of(QBusinessController.class, QBusinessRoutingFilter.class)),
                 descriptor("cassandra", "keyspaces", config.services().keyspaces().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -844,6 +877,33 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("iotwireless"), Set.of(),
                         Set.of(IotWirelessController.class)),
+                // restJson1 Amazon Q Apps — dotted /apps.get paths via QAppsRoutingFilter
+                descriptor("qapps", "qapps", config.services().qapps().enabled(), true,
+                        "qapps", storageMode(config.storage().services().qapps().mode(), config.storage().mode()),
+                        config.storage().services().qapps().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("qapps"), Set.of(),
+                        Set.of(QAppsController.class, QAppsRoutingFilter.class)),
+                descriptor("ram", "ram", config.services().ram().enabled(), true,
+                        "ram", storageMode(config.storage().services().ram().mode(), config.storage().mode()),
+                        config.storage().services().ram().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ram"), Set.of(), Set.of(RamController.class)),
+                descriptor("rbin", "rbin", config.services().rbin().enabled(), true,
+                        "rbin", storageMode(config.storage().services().rbin().mode(), config.storage().mode()),
+                        config.storage().services().rbin().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("rbin"), Set.of(),
+                        Set.of(RbinController.class, RbinRoutingFilter.class)),
+                // AWS re:Post Private restJson1 space lifecycle
+                descriptor("repostspace", "repostspace", config.services().repostspace().enabled(), true,
+                        "repostspace", storageMode(config.storage().services().repostspace().mode(),
+                                config.storage().mode()),
+                        config.storage().services().repostspace().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("repostspace"), Set.of(),
+                        Set.of(RepostspaceController.class, RepostspaceRoutingFilter.class,
+                                RepostspaceErrorHeaderFilter.class)),
                 descriptor("rum", "rum", config.services().rum().enabled(), true,
                         "rum", storageMode(config.storage().services().rum().mode(), config.storage().mode()),
                         config.storage().services().rum().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -909,6 +969,11 @@ public class ResolvedServiceCatalog {
                         config.storage().services().grafana().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("grafana"), Set.of(), Set.of(GrafanaController.class)),
+                descriptor("quicksight", "quicksight", config.services().quicksight().enabled(), true,
+                        "quicksight", storageMode(config.storage().services().quicksight().mode(), config.storage().mode()),
+                        config.storage().services().quicksight().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("quicksight"), Set.of(), Set.of(QuickSightController.class)),
                 descriptor("aiops", "aiops", config.services().aiops().enabled(), true,
                         "aiops", storageMode(config.storage().services().aiops().mode(), config.storage().mode()),
                         config.storage().services().aiops().flushIntervalMs(), null, ServiceProtocol.REST_JSON,

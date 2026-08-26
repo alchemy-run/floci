@@ -62,6 +62,8 @@ import io.github.hectorvent.floci.services.forecast.ForecastJsonHandler;
 import io.github.hectorvent.floci.services.personalize.PersonalizeJsonHandler;
 import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
+import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataJsonHandler;
+import io.github.hectorvent.floci.services.redshiftserverless.RedshiftServerlessJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -145,6 +147,8 @@ public class AwsJson11Controller {
     private final PersonalizeJsonHandler personalizeJsonHandler;
     private final GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler;
     private final OrganizationsJsonHandler organizationsJsonHandler;
+    private final RedshiftServerlessJsonHandler redshiftServerlessJsonHandler;
+    private final RedshiftDataJsonHandler redshiftDataJsonHandler;
 
     @Inject
     public AwsJson11Controller(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -201,7 +205,9 @@ public class AwsJson11Controller {
                                ForecastJsonHandler forecastJsonHandler,
                                PersonalizeJsonHandler personalizeJsonHandler,
                                GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler,
-                               OrganizationsJsonHandler organizationsJsonHandler) {
+                               OrganizationsJsonHandler organizationsJsonHandler,
+                               RedshiftServerlessJsonHandler redshiftServerlessJsonHandler,
+                               RedshiftDataJsonHandler redshiftDataJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -263,6 +269,8 @@ public class AwsJson11Controller {
         this.personalizeJsonHandler = personalizeJsonHandler;
         this.globalAcceleratorJsonHandler = globalAcceleratorJsonHandler;
         this.organizationsJsonHandler = organizationsJsonHandler;
+        this.redshiftServerlessJsonHandler = redshiftServerlessJsonHandler;
+        this.redshiftDataJsonHandler = redshiftDataJsonHandler;
     }
 
     @POST
@@ -356,6 +364,8 @@ public class AwsJson11Controller {
                 case "personalize" -> personalizeJsonHandler.handle(action, request, region);
                 case "globalaccelerator" -> globalAcceleratorJsonHandler.handle(action, request, region);
                 case "organizations" -> organizationsJsonHandler.handle(action, request, region);
+                case "redshift-serverless" -> redshiftServerlessJsonHandler.handle(action, request, region);
+                case "redshift-data" -> redshiftDataJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.0 target

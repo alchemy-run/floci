@@ -71,6 +71,14 @@ floci:
       cloudfront:
       appsync:
         flush-interval-ms: 60000
+      qapps:
+        flush-interval-ms: 60000
+      ram:
+        flush-interval-ms: 60000
+      rbin:
+        flush-interval-ms: 60000
+      repostspace:
+        flush-interval-ms: 60000
       rum:
         flush-interval-ms: 60000
       oam:
@@ -86,6 +94,8 @@ floci:
       amp:
         flush-interval-ms: 60000
       grafana:
+        flush-interval-ms: 60000
+      quicksight:
         flush-interval-ms: 60000
       aiops:
         flush-interval-ms: 60000
@@ -138,6 +148,8 @@ floci:
       appflow:
         flush-interval-ms: 60000
       appintegrations:
+        flush-interval-ms: 60000
+      qbusiness:
         flush-interval-ms: 60000
       appregistry:
         flush-interval-ms: 60000
@@ -269,6 +281,12 @@ floci:
     rds-data:
       enabled: true
       transaction-ttl-seconds: 180
+    redshift:
+      enabled: true
+    redshift-serverless:
+      enabled: true
+    redshift-data:
+      enabled: true
     neptune:
       enabled: true
       proxy-base-port: 8182
@@ -301,6 +319,8 @@ floci:
       enabled: true
       default-recovery-window-days: 30
     kendra:
+      enabled: true
+    qbusiness:
       enabled: true
     keyspaces:
       enabled: true
@@ -535,6 +555,14 @@ floci:
       enabled: true
     iotwireless:
       enabled: true
+    qapps:
+      enabled: true
+    ram:
+      enabled: true
+    rbin:
+      enabled: true
+    repostspace:
+      enabled: true
     rum:
       enabled: true
     oam:
@@ -558,6 +586,8 @@ floci:
     amp:
       enabled: true
     grafana:
+      enabled: true
+    quicksight:
       enabled: true
     aiops:
       enabled: true

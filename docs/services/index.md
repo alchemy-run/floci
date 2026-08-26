@@ -36,7 +36,9 @@ Operation counts are exact. For dispatch-table services (Query and JSON 1.1) eac
 | [CloudWatch Logs](cloudwatch.md) | `POST /` + `X-Amz-Target: Logs.*` | JSON 1.1 | 17 |
 | [CloudWatch Metrics](cloudwatch.md#metrics) | `POST /` with `Action=` or JSON 1.1 | Query / JSON | 12 |
 | [CloudWatch RUM](rum.md) | `/appmonitor`, `/appmonitor/{name}`, `/appmonitors` | REST JSON | 5 |
+| [QuickSight](quicksight.md) | `/accounts/{id}/data-sets`, `/accounts/{id}/dashboards`, `/resources/{arn}/tags` | REST JSON | 24 |
 | [CloudWatch OAM](oam.md) | `/CreateSink`, `/GetSink`, `/ListSinks`, `/ListAttachedLinks`, `/tags/{arn}` | REST JSON | 15 |
+| [RAM](ram.md) | `/createresourceshare`, `/getresourceshares`, `/listpermissions`, `/getpermission` | REST JSON | 18 |
 | [Account Management](account.md) | `/getContactInformation`, `/putContactInformation`, `/getAlternateContact`, `/putAlternateContact`, `/deleteAlternateContact`, `/listRegions` | REST JSON | 11 |
 | [AMP](amp.md) | `/scrapers`, `/scrapers/{scraperId}`, `/scraperconfiguration`, `/workspaces`, `/tags/{resourceArn}` | REST JSON | 22 |
 | [CloudWatch investigations (AIOps)](aiops.md) | `/investigationGroups`, `/investigationGroups/{identifier}`, `/tags/{resourceArn}` | REST JSON | 11 |
@@ -45,6 +47,9 @@ Operation counts are exact. For dispatch-table services (Query and JSON 1.1) eac
 | [MemoryDB](memorydb.md) | `POST /` + `X-Amz-Target: AmazonMemoryDB.*` + TCP proxy | JSON 1.1 + RESP | 7 |
 | [RDS](rds.md) | `POST /` with `Action=` param + TCP proxy | Query + wire | 49 |
 | [RDS Data API](rds-data.md) | `/Execute`, `/BeginTransaction`, `/CommitTransaction`, `/RollbackTransaction` | REST JSON | 4 |
+| [Redshift](redshift.md) | `POST /` with `Action=` param | Query | 10 |
+| [Redshift Serverless](redshift-serverless.md) | `POST /` + `X-Amz-Target: RedshiftServerless.*` | JSON 1.1 | 14 |
+| [Redshift Data API](redshift-data.md) | `POST /` + `X-Amz-Target: RedshiftData.*` | JSON 1.1 | 5 |
 | [MSK](msk.md) | `/v1/clusters/...`, `/api/v2/clusters/...` + Redpanda broker | REST JSON + Kafka | 8 |
 | [Amazon MQ](amazonmq.md) | `/v1/brokers/...` + RabbitMQ broker | REST JSON + AMQP | 5 |
 | [Athena](athena.md) | `POST /` + `X-Amz-Target: AmazonAthena.*` | JSON 1.1 | 36 |

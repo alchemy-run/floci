@@ -96,6 +96,9 @@ nav:
     - DAX: services/dax.md
     - RDS: services/rds.md
     - RDS Data API: services/rds-data.md
+    - Redshift: services/redshift.md
+    - Redshift Serverless: services/redshift-serverless.md
+    - Redshift Data API: services/redshift-data.md
     - MSK (Kafka): services/msk.md
     - Glue: services/glue.md
     - Neptune: services/neptune.md
@@ -108,7 +111,9 @@ nav:
     - EventBridge Scheduler: services/scheduler.md
     - CloudWatch: services/cloudwatch.md
     - CloudWatch RUM: services/rum.md
+    - QuickSight: services/quicksight.md
     - CloudWatch OAM: services/oam.md
+    - RAM: services/ram.md
     - Account Management: services/account.md
     - AMP: services/amp.md
     - CloudWatch investigations (AIOps): services/aiops.md

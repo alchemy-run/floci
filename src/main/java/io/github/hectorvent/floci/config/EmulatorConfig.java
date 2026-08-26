@@ -301,6 +301,10 @@ public interface EmulatorConfig {
         TaggingStorageConfig tagging();
         ElasticBeanstalkStorageConfig elasticbeanstalk();
         CloudTrailStorageConfig cloudtrail();
+        QAppsStorageConfig qapps();
+        RamStorageConfig ram();
+        RbinStorageConfig rbin();
+        RepostspaceStorageConfig repostspace();
         RumStorageConfig rum();
         OamStorageConfig oam();
         ObservabilityAdminStorageConfig observabilityadmin();
@@ -309,6 +313,7 @@ public interface EmulatorConfig {
         FinSpaceStorageConfig finspace();
         AmpStorageConfig amp();
         GrafanaStorageConfig grafana();
+        QuickSightStorageConfig quicksight();
         AiOpsStorageConfig aiops();
         AccountStorageConfig account();
         AccessAnalyzerStorageConfig accessanalyzer();
@@ -316,6 +321,7 @@ public interface EmulatorConfig {
         AmplifyStorageConfig amplify();
         AppFlowStorageConfig appflow();
         AppIntegrationsStorageConfig appintegrations();
+        QBusinessStorageConfig qbusiness();
         AppRegistryStorageConfig appregistry();
         AppRunnerStorageConfig apprunner();
         B2biStorageConfig b2bi();
@@ -676,6 +682,34 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface QAppsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface RamStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface RbinStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface RepostspaceStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface RumStorageConfig {
         Optional<String> mode();
 
@@ -795,6 +829,13 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface QuickSightStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface AiOpsStorageConfig {
         Optional<String> mode();
 
@@ -838,6 +879,13 @@ public interface EmulatorConfig {
     }
 
     interface AppIntegrationsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface QBusinessStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -962,6 +1010,9 @@ public interface EmulatorConfig {
         DsServiceConfig ds();
         RdsServiceConfig rds();
         RdsDataServiceConfig rdsData();
+        RedshiftServiceConfig redshift();
+        RedshiftServerlessServiceConfig redshiftServerless();
+        RedshiftDataServiceConfig redshiftData();
         EventBridgeServiceConfig eventbridge();
         CloudMapServiceConfig cloudmap();
         EmrServiceConfig emr();
@@ -975,6 +1026,7 @@ public interface EmulatorConfig {
         SecretsManagerServiceConfig secretsmanager();
         ApiGatewayV2ServiceConfig apigatewayv2();
         KendraServiceConfig kendra();
+        QBusinessServiceConfig qbusiness();
         KeyspacesServiceConfig keyspaces();
         KinesisServiceConfig kinesis();
         KinesisVideoServiceConfig kinesisvideo();
@@ -1083,6 +1135,10 @@ public interface EmulatorConfig {
         IotSiteWiseServiceConfig iotsitewise();
         IotManagedIntegrationsServiceConfig iotmanagedintegrations();
         IotWirelessServiceConfig iotwireless();
+        QAppsServiceConfig qapps();
+        RamServiceConfig ram();
+        RbinServiceConfig rbin();
+        RepostspaceServiceConfig repostspace();
         RumServiceConfig rum();
         OamServiceConfig oam();
         ObservabilityAdminServiceConfig observabilityadmin();
@@ -1095,6 +1151,7 @@ public interface EmulatorConfig {
         FinSpaceServiceConfig finspace();
         AmpServiceConfig amp();
         GrafanaServiceConfig grafana();
+        QuickSightServiceConfig quicksight();
         AiOpsServiceConfig aiops();
         AccountServiceConfig account();
         AccessAnalyzerServiceConfig accessanalyzer();
@@ -1162,6 +1219,27 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface QAppsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RamServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** Recycle Bin (rbin) restJson1 retention rules. */
+    interface RbinServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RepostspaceServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface RumServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1218,6 +1296,11 @@ public interface EmulatorConfig {
     }
 
     interface GrafanaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface QuickSightServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1722,6 +1805,21 @@ public interface EmulatorConfig {
         long transactionTtlSeconds();
     }
 
+    interface RedshiftServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RedshiftServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RedshiftDataServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface NeptuneServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1879,6 +1977,11 @@ public interface EmulatorConfig {
     }
 
     interface KendraServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface QBusinessServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
