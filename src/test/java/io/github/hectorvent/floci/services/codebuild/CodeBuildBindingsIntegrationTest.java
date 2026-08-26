@@ -118,7 +118,9 @@ class CodeBuildBindingsIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("build.buildStatus", equalTo("STOPPED"));
+            // NO_SOURCE builds complete in-process; StopBuild may land on
+            // an already-terminal SUCCEEDED snapshot.
+            .body("build.buildStatus", is(oneOf("STOPPED", "SUCCEEDED", "FAILED")));
 
         given()
             .header("X-Amz-Target", "CodeBuild_20161006.RetryBuild")
@@ -139,6 +141,52 @@ class CodeBuildBindingsIntegrationTest {
         .then()
             .statusCode(200)
             .body("buildsNotDeleted[0].id", equalTo(buildId));
+    }
+
+    @Test
+    void noSourceBuildReachesTerminalAndListBatchesStaysEmpty() throws InterruptedException {
+        String name = unique("nosource");
+        createProject(name);
+
+        String buildId = given()
+            .header("X-Amz-Target", "CodeBuild_20161006.StartBuild")
+            .contentType(CONTENT_TYPE)
+            .body("{\"projectName\": \"" + name + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("build.id", containsString(name))
+            .extract().path("build.id");
+
+        String status = null;
+        for (int i = 0; i < 20; i++) {
+            status = given()
+                .header("X-Amz-Target", "CodeBuild_20161006.BatchGetBuilds")
+                .contentType(CONTENT_TYPE)
+                .body("{\"ids\": [\"" + buildId + "\"]}")
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .extract().path("builds[0].buildStatus");
+            if (status != null && !"IN_PROGRESS".equals(status) && !"STOPPING".equals(status)) {
+                break;
+            }
+            Thread.sleep(50);
+        }
+        org.hamcrest.MatcherAssert.assertThat(
+                status, org.hamcrest.Matchers.is(oneOf("SUCCEEDED", "STOPPED", "FAILED")));
+
+        given()
+            .header("X-Amz-Target", "CodeBuild_20161006.ListBuildBatchesForProject")
+            .contentType(CONTENT_TYPE)
+            .body("{\"projectName\": \"" + name + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ids", empty());
     }
 
     @Test
