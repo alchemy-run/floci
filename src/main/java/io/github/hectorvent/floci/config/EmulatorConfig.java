@@ -984,6 +984,7 @@ public interface EmulatorConfig {
         LicenseManagerServiceConfig licenseManager();
         FraudDetectorServiceConfig frauddetector();
         KmsServiceConfig kms();
+        PaymentCryptographyServiceConfig paymentCryptography();
         CognitoServiceConfig cognito();
         StepFunctionsServiceConfig stepfunctions();
         CloudFormationServiceConfig cloudformation();
@@ -1045,6 +1046,7 @@ public interface EmulatorConfig {
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
         ForecastServiceConfig forecast();
+        PersonalizeServiceConfig personalize();
         GlobalAcceleratorServiceConfig globalaccelerator();
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendmedical();
@@ -1052,6 +1054,7 @@ public interface EmulatorConfig {
         MedicalImagingServiceConfig medicalImaging();
         OmicsServiceConfig omics();
         MailManagerServiceConfig mailmanager();
+        SmsVoiceServiceConfig smsvoice();
         PricingServiceConfig pricing();
         DuckConfig duck();
         TranscribeServiceConfig transcribe();
@@ -1919,6 +1922,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface PaymentCryptographyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface CognitoServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -2198,6 +2206,11 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface PersonalizeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface GlobalAcceleratorServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -2229,6 +2242,11 @@ public interface EmulatorConfig {
     }
 
     interface MailManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SmsVoiceServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

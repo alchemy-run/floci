@@ -452,6 +452,8 @@ floci:
       enabled: true
     kms:
       enabled: true
+    payment-cryptography:
+      enabled: true
     cognito:
       enabled: true
     stepfunctions:
@@ -640,6 +642,8 @@ floci:
       enabled: true
     forecast:
       enabled: true
+    personalize:
+      enabled: true
     globalaccelerator:
       enabled: true  # JSON 1.1 GlobalAccelerator_V20180706.*
     comprehend:
@@ -653,6 +657,8 @@ floci:
     omics:
       enabled: true
     mailmanager:
+      enabled: true
+    smsvoice:
       enabled: true
     pricing:
       enabled: true

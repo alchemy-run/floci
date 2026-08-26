@@ -99,6 +99,10 @@ import io.github.hectorvent.floci.services.greengrassv2.GreengrassV2Controller;
 import io.github.hectorvent.floci.services.imagebuilder.ImageBuilderController;
 import io.github.hectorvent.floci.services.lakeformation.LakeFormationController;
 import io.github.hectorvent.floci.services.mediaconvert.MediaConvertController;
+import io.github.hectorvent.floci.services.paymentcryptography.PaymentCryptographyDataController;
+import io.github.hectorvent.floci.services.personalize.PersonalizeEventsController;
+import io.github.hectorvent.floci.services.personalize.PersonalizeRoutingFilter;
+import io.github.hectorvent.floci.services.personalize.PersonalizeRuntimeController;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -361,6 +365,13 @@ public class ResolvedServiceCatalog {
                         "kms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("TrentService."), Set.of("kms"), Set.of(), Set.of()),
+                descriptor("payment-cryptography", "payment-cryptography",
+                        config.services().paymentCryptography().enabled(), true,
+                        "payment-cryptography", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
+                        Set.of("PaymentCryptographyControlPlane."),
+                        Set.of("payment-cryptography"), Set.of(),
+                        Set.of(PaymentCryptographyDataController.class)),
                 descriptor("cognito-idp", "cognito", config.services().cognito().enabled(), true,
                         "cognito", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON, ServiceProtocol.JSON, ServiceProtocol.QUERY),
@@ -691,6 +702,13 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonForecast.", "AmazonForecastRuntime."),
                         Set.of("forecast", "forecastquery"), Set.of(), Set.of()),
+                descriptor("personalize", "personalize", config.services().personalize().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
+                        Set.of("AmazonPersonalize."),
+                        Set.of("personalize"), Set.of(),
+                        Set.of(PersonalizeEventsController.class, PersonalizeRuntimeController.class,
+                                PersonalizeRoutingFilter.class)),
                 descriptor("globalaccelerator", "globalaccelerator",
                         config.services().globalaccelerator().enabled(), true,
                         "globalaccelerator", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
@@ -721,6 +739,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("MailManagerSvc."), Set.of("mail-manager"), Set.of(), Set.of()),
+                descriptor("sms-voice", "smsvoice", config.services().smsvoice().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("PinpointSMSVoiceV2."), Set.of("sms-voice"), Set.of(), Set.of()),
                 descriptor("pricing", "pricing", config.services().pricing().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

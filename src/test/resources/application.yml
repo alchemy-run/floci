@@ -322,6 +322,8 @@ floci:
       enabled: true
     kms:
       enabled: true
+    payment-cryptography:
+      enabled: true
     cognito:
       enabled: true
     stepfunctions:
@@ -462,6 +464,8 @@ floci:
       enabled: true
     forecast:
       enabled: true
+    personalize:
+      enabled: true
     globalaccelerator:
       enabled: true
     comprehend:
@@ -475,6 +479,8 @@ floci:
     omics:
       enabled: true
     mailmanager:
+      enabled: true
+    smsvoice:
       enabled: true
     pricing:
       enabled: true

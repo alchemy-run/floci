@@ -10,12 +10,14 @@ import io.github.hectorvent.floci.services.b2bi.B2biJsonHandler;
 import io.github.hectorvent.floci.services.codeconnections.CodeConnectionsJsonHandler;
 import io.github.hectorvent.floci.services.healthlake.HealthLakeJsonHandler;
 import io.github.hectorvent.floci.services.mailmanager.MailManagerJsonHandler;
+import io.github.hectorvent.floci.services.smsvoice.SmsVoiceJsonHandler;
 import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseJsonHandler;
 import io.github.hectorvent.floci.services.keyspaces.KeyspacesJsonHandler;
 import io.github.hectorvent.floci.services.keyspacesstreams.KeyspacesStreamsJsonHandler;
 import io.github.hectorvent.floci.services.mwaaserverless.MwaaServerlessJsonHandler;
 import io.github.hectorvent.floci.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.github.hectorvent.floci.services.opensearchserverless.OpenSearchServerlessJsonHandler;
+import io.github.hectorvent.floci.services.paymentcryptography.PaymentCryptographyJsonHandler;
 import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
@@ -61,12 +63,14 @@ public class AwsJsonController {
     private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
     private final HealthLakeJsonHandler healthLakeJsonHandler;
     private final MailManagerJsonHandler mailManagerJsonHandler;
+    private final SmsVoiceJsonHandler smsVoiceJsonHandler;
     private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
     private final KeyspacesJsonHandler keyspacesJsonHandler;
     private final KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler;
     private final MwaaServerlessJsonHandler mwaaServerlessJsonHandler;
     private final NetworkFirewallJsonHandler networkFirewallJsonHandler;
     private final OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler;
+    private final PaymentCryptographyJsonHandler paymentCryptographyJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -82,12 +86,14 @@ public class AwsJsonController {
                              CodeConnectionsJsonHandler codeConnectionsJsonHandler,
                              HealthLakeJsonHandler healthLakeJsonHandler,
                              MailManagerJsonHandler mailManagerJsonHandler,
+                             SmsVoiceJsonHandler smsVoiceJsonHandler,
                              IotFleetWiseJsonHandler iotFleetWiseJsonHandler,
                              KeyspacesJsonHandler keyspacesJsonHandler,
                              KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler,
                              MwaaServerlessJsonHandler mwaaServerlessJsonHandler,
                              NetworkFirewallJsonHandler networkFirewallJsonHandler,
-                             OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler) {
+                             OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler,
+                             PaymentCryptographyJsonHandler paymentCryptographyJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -104,12 +110,14 @@ public class AwsJsonController {
         this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
         this.healthLakeJsonHandler = healthLakeJsonHandler;
         this.mailManagerJsonHandler = mailManagerJsonHandler;
+        this.smsVoiceJsonHandler = smsVoiceJsonHandler;
         this.iotFleetWiseJsonHandler = iotFleetWiseJsonHandler;
         this.keyspacesJsonHandler = keyspacesJsonHandler;
         this.keyspacesStreamsJsonHandler = keyspacesStreamsJsonHandler;
         this.mwaaServerlessJsonHandler = mwaaServerlessJsonHandler;
         this.networkFirewallJsonHandler = networkFirewallJsonHandler;
         this.openSearchServerlessJsonHandler = openSearchServerlessJsonHandler;
+        this.paymentCryptographyJsonHandler = paymentCryptographyJsonHandler;
     }
 
     @POST
@@ -161,12 +169,14 @@ public class AwsJsonController {
                 case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
                 case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
                 case "mailmanager" -> mailManagerJsonHandler.handle(action, request, region);
+                case "sms-voice" -> smsVoiceJsonHandler.handle(action, request, region);
                 case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
                 case "cassandra" -> keyspacesJsonHandler.handle(action, request, region);
                 case "keyspacesstreams" -> keyspacesStreamsJsonHandler.handle(action, request, region);
                 case "mwaaserverless" -> mwaaServerlessJsonHandler.handle(action, request, region);
                 case "network-firewall" -> networkFirewallJsonHandler.handle(action, request, region);
                 case "aoss" -> openSearchServerlessJsonHandler.handle(action, request, region);
+                case "payment-cryptography" -> paymentCryptographyJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target
