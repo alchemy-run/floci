@@ -785,9 +785,9 @@ public class LambdaService {
             throw new AwsException("InvalidParameterValueException", "EventSourceArn is required", 400);
         }
         if (!eventSourceArn.contains(":sqs:") && !eventSourceArn.contains(":kinesis:")
-                && !eventSourceArn.contains(":dynamodb:")) {
+                && !eventSourceArn.contains(":dynamodb:") && !eventSourceArn.contains(":kafka:")) {
             throw new AwsException("InvalidParameterValueException",
-                    "Only SQS, Kinesis, and DynamoDB Streams event sources are supported.", 400);
+                    "Only SQS, Kinesis, DynamoDB Streams, and Kafka event sources are supported.", 400);
         }
 
         // Resolve function — supports bare name, partial ARN, or full ARN
@@ -852,6 +852,10 @@ public class LambdaService {
         esm.setBisectBatchOnFunctionError(bisectBatchOnFunctionError);
         esm.setDestinationConfig(destinationConfig);
         esm.setTags(tags);
+        esm.setTopics(parseTopics(request.get("Topics")));
+        esm.setStartingPosition(textOrNull(request.get("StartingPosition")));
+        esm.setAmazonManagedKafkaEventSourceConfig(
+                parseAmazonManagedKafkaConfig(request.get("AmazonManagedKafkaEventSourceConfig")));
         esm.setLastModified(System.currentTimeMillis());
 
         esmStore.save(esm);
@@ -892,6 +896,45 @@ public class LambdaService {
         EventSourceMapping.DestinationConfig destinationConfig = new EventSourceMapping.DestinationConfig();
         destinationConfig.setOnFailure(onFailure);
         return destinationConfig;
+    }
+
+    private static List<String> parseTopics(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return new ArrayList<>();
+        }
+        List<String> topics = new ArrayList<>();
+        for (Object entry : list) {
+            if (entry != null && !String.valueOf(entry).isBlank()) {
+                topics.add(String.valueOf(entry));
+            }
+        }
+        return topics;
+    }
+
+    private static String textOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value);
+        return text.isBlank() ? null : text;
+    }
+
+    private static EventSourceMapping.AmazonManagedKafkaEventSourceConfig parseAmazonManagedKafkaConfig(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Object groupId = map.get("ConsumerGroupId");
+        if (groupId == null) {
+            return null;
+        }
+        String consumerGroupId = String.valueOf(groupId);
+        if (consumerGroupId.isBlank()) {
+            return null;
+        }
+        EventSourceMapping.AmazonManagedKafkaEventSourceConfig config =
+                new EventSourceMapping.AmazonManagedKafkaEventSourceConfig();
+        config.setConsumerGroupId(consumerGroupId);
+        return config;
     }
 
     /**
@@ -968,13 +1011,29 @@ public class LambdaService {
     }
 
     public List<EventSourceMapping> listEventSourceMappings(String functionArn) {
+        return listEventSourceMappings(functionArn, null);
+    }
+
+    public List<EventSourceMapping> listEventSourceMappings(String functionArn, String eventSourceArn) {
+        List<EventSourceMapping> mappings;
         if (functionArn != null && !functionArn.isBlank()) {
             // Accept bare name, partial ARN, or full ARN. The store matches
             // entries by their canonical short name, so normalize first.
             String shortName = LambdaArnUtils.resolve(functionArn).name();
-            return esmStore.listByFunction(shortName);
+            mappings = esmStore.listByFunction(shortName);
+        } else {
+            mappings = esmStore.list();
         }
-        return esmStore.list();
+        if (eventSourceArn == null || eventSourceArn.isBlank()) {
+            return mappings;
+        }
+        List<EventSourceMapping> filtered = new ArrayList<>();
+        for (EventSourceMapping mapping : mappings) {
+            if (eventSourceArn.equals(mapping.getEventSourceArn())) {
+                filtered.add(mapping);
+            }
+        }
+        return filtered;
     }
 
     public EventSourceMapping updateEventSourceMapping(String uuid, Map<String, Object> request) {

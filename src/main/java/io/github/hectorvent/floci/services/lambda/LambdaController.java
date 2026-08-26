@@ -308,8 +308,9 @@ public class LambdaController {
 
     @GET
     @Path("/event-source-mappings")
-    public Response listEventSourceMappings(@QueryParam("FunctionName") String functionArn) {
-        List<EventSourceMapping> esms = lambdaService.listEventSourceMappings(functionArn);
+    public Response listEventSourceMappings(@QueryParam("FunctionName") String functionArn,
+                                            @QueryParam("EventSourceArn") String eventSourceArn) {
+        List<EventSourceMapping> esms = lambdaService.listEventSourceMappings(functionArn, eventSourceArn);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("EventSourceMappings");
         for (EventSourceMapping esm : esms) {
@@ -375,6 +376,21 @@ public class LambdaController {
         if (maxConcurrency != null) {
             ObjectNode scaling = node.putObject("ScalingConfig");
             scaling.put("MaximumConcurrency", maxConcurrency.intValue());
+        }
+        if (esm.getTopics() != null && !esm.getTopics().isEmpty()) {
+            ArrayNode topics = node.putArray("Topics");
+            for (String topic : esm.getTopics()) {
+                topics.add(topic);
+            }
+        }
+        if (esm.getStartingPosition() != null) {
+            node.put("StartingPosition", esm.getStartingPosition());
+        }
+        if (esm.getAmazonManagedKafkaEventSourceConfig() != null
+                && esm.getAmazonManagedKafkaEventSourceConfig().getConsumerGroupId() != null) {
+            ObjectNode kafkaConfig = node.putObject("AmazonManagedKafkaEventSourceConfig");
+            kafkaConfig.put("ConsumerGroupId",
+                    esm.getAmazonManagedKafkaEventSourceConfig().getConsumerGroupId());
         }
         @SuppressWarnings("unchecked")
         Map<String, Object> result = objectMapper.convertValue(node, Map.class);

@@ -30,6 +30,9 @@ public class EventSourceMapping {
     private Boolean bisectBatchOnFunctionError;
     private DestinationConfig destinationConfig;
     private Map<String, String> tags = new HashMap<>();
+    private List<String> topics = new ArrayList<>();
+    private String startingPosition;
+    private AmazonManagedKafkaEventSourceConfig amazonManagedKafkaEventSourceConfig;
 
     public EventSourceMapping() {
     }
@@ -111,6 +114,48 @@ public class EventSourceMapping {
 
     public void setTags(Map<String, String> tags) {
         this.tags = tags != null ? tags : new HashMap<>();
+    }
+
+    public List<String> getTopics() {
+        return topics;
+    }
+
+    public void setTopics(List<String> topics) {
+        this.topics = topics != null ? topics : new ArrayList<>();
+    }
+
+    public String getStartingPosition() {
+        return startingPosition;
+    }
+
+    public void setStartingPosition(String startingPosition) {
+        this.startingPosition = startingPosition;
+    }
+
+    public AmazonManagedKafkaEventSourceConfig getAmazonManagedKafkaEventSourceConfig() {
+        return amazonManagedKafkaEventSourceConfig;
+    }
+
+    public void setAmazonManagedKafkaEventSourceConfig(
+            AmazonManagedKafkaEventSourceConfig amazonManagedKafkaEventSourceConfig) {
+        this.amazonManagedKafkaEventSourceConfig = amazonManagedKafkaEventSourceConfig;
+    }
+
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class AmazonManagedKafkaEventSourceConfig {
+        private String consumerGroupId;
+
+        public AmazonManagedKafkaEventSourceConfig() {
+        }
+
+        public String getConsumerGroupId() {
+            return consumerGroupId;
+        }
+
+        public void setConsumerGroupId(String consumerGroupId) {
+            this.consumerGroupId = consumerGroupId;
+        }
     }
 
     @RegisterForReflection
