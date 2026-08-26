@@ -59,6 +59,7 @@ import io.github.hectorvent.floci.services.datasync.DataSyncJsonHandler;
 import io.github.hectorvent.floci.services.fsx.FsxJsonHandler;
 import io.github.hectorvent.floci.services.directoryservice.DirectoryServiceJsonHandler;
 import io.github.hectorvent.floci.services.forecast.ForecastJsonHandler;
+import io.github.hectorvent.floci.services.personalize.PersonalizeJsonHandler;
 import io.github.hectorvent.floci.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.github.hectorvent.floci.services.organizations.OrganizationsJsonHandler;
 import jakarta.inject.Inject;
@@ -141,6 +142,7 @@ public class AwsJson11Controller {
     private final DirectoryServiceJsonHandler directoryServiceJsonHandler;
     private final DaxJsonHandler daxJsonHandler;
     private final ForecastJsonHandler forecastJsonHandler;
+    private final PersonalizeJsonHandler personalizeJsonHandler;
     private final GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler;
     private final OrganizationsJsonHandler organizationsJsonHandler;
 
@@ -197,6 +199,7 @@ public class AwsJson11Controller {
                                DirectoryServiceJsonHandler directoryServiceJsonHandler,
                                DaxJsonHandler daxJsonHandler,
                                ForecastJsonHandler forecastJsonHandler,
+                               PersonalizeJsonHandler personalizeJsonHandler,
                                GlobalAcceleratorJsonHandler globalAcceleratorJsonHandler,
                                OrganizationsJsonHandler organizationsJsonHandler) {
         this.objectMapper = objectMapper;
@@ -257,6 +260,7 @@ public class AwsJson11Controller {
         this.directoryServiceJsonHandler = directoryServiceJsonHandler;
         this.daxJsonHandler = daxJsonHandler;
         this.forecastJsonHandler = forecastJsonHandler;
+        this.personalizeJsonHandler = personalizeJsonHandler;
         this.globalAcceleratorJsonHandler = globalAcceleratorJsonHandler;
         this.organizationsJsonHandler = organizationsJsonHandler;
     }
@@ -349,6 +353,7 @@ public class AwsJson11Controller {
                 case "fsx" -> fsxJsonHandler.handle(action, request, region);
                 case "ds" -> directoryServiceJsonHandler.handle(action, request, region);
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
+                case "personalize" -> personalizeJsonHandler.handle(action, request, region);
                 case "globalaccelerator" -> globalAcceleratorJsonHandler.handle(action, request, region);
                 case "organizations" -> organizationsJsonHandler.handle(action, request, region);
                 default -> null;
