@@ -77,8 +77,12 @@ public class FlinkApplication {
     private String codeS3Key;
     private String codeS3ObjectVersion;
 
-    // FlinkApplicationConfiguration.ParallelismConfiguration.Parallelism (defaults to 1).
+    // FlinkApplicationConfiguration.ParallelismConfiguration. AWS defaults ConfigurationType to
+    // DEFAULT (service-managed); CUSTOM is stored when the caller supplies it.
     private int parallelism = 1;
+    private String parallelismConfigurationType = "DEFAULT";
+    private int parallelismPerKPU = 1;
+    private boolean autoScalingEnabled = true;
 
     // ApplicationSnapshotConfiguration.SnapshotsEnabled — real AWS defaults this to true when the
     // application is created without specifying it.
@@ -103,6 +107,12 @@ public class FlinkApplication {
     // CloudWatch logging options, keyed by CloudWatchLoggingOptionId. Echoed on DescribeApplication
     // as ApplicationDetail.CloudWatchLoggingOptionDescriptions (and on the add/delete responses).
     private Map<String, CloudWatchLoggingOption> cloudWatchLoggingOptions = new LinkedHashMap<>();
+
+    // ApplicationMaintenanceConfigurationDescription — set via UpdateApplicationMaintenanceConfiguration.
+    // Start is the caller-supplied HH:MM (UTC); End is start plus the eight-hour AWS window.
+    // Echoed on DescribeApplication as ApplicationMaintenanceConfigurationDescription.
+    private String maintenanceWindowStartTime;
+    private String maintenanceWindowEndTime;
 
     public FlinkApplication() {}
 
@@ -177,6 +187,18 @@ public class FlinkApplication {
     public int getParallelism() { return parallelism; }
     public void setParallelism(int parallelism) { this.parallelism = parallelism; }
 
+    public String getParallelismConfigurationType() { return parallelismConfigurationType; }
+    public void setParallelismConfigurationType(String parallelismConfigurationType) {
+        this.parallelismConfigurationType = parallelismConfigurationType != null && !parallelismConfigurationType.isBlank()
+                ? parallelismConfigurationType : "DEFAULT";
+    }
+
+    public int getParallelismPerKPU() { return parallelismPerKPU; }
+    public void setParallelismPerKPU(int parallelismPerKPU) { this.parallelismPerKPU = parallelismPerKPU; }
+
+    public boolean isAutoScalingEnabled() { return autoScalingEnabled; }
+    public void setAutoScalingEnabled(boolean autoScalingEnabled) { this.autoScalingEnabled = autoScalingEnabled; }
+
     public boolean isSnapshotsEnabled() { return snapshotsEnabled; }
     public void setSnapshotsEnabled(boolean snapshotsEnabled) { this.snapshotsEnabled = snapshotsEnabled; }
 
@@ -200,6 +222,16 @@ public class FlinkApplication {
     public void setCloudWatchLoggingOptions(Map<String, CloudWatchLoggingOption> cloudWatchLoggingOptions) {
         this.cloudWatchLoggingOptions = cloudWatchLoggingOptions != null
                 ? cloudWatchLoggingOptions : new LinkedHashMap<>();
+    }
+
+    public String getMaintenanceWindowStartTime() { return maintenanceWindowStartTime; }
+    public void setMaintenanceWindowStartTime(String maintenanceWindowStartTime) {
+        this.maintenanceWindowStartTime = maintenanceWindowStartTime;
+    }
+
+    public String getMaintenanceWindowEndTime() { return maintenanceWindowEndTime; }
+    public void setMaintenanceWindowEndTime(String maintenanceWindowEndTime) {
+        this.maintenanceWindowEndTime = maintenanceWindowEndTime;
     }
 
     /** True when the application has a code artifact to deploy (S3 JAR), i.e. a job should run. */

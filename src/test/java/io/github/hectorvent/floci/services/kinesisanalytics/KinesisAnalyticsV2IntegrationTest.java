@@ -94,6 +94,92 @@ class KinesisAnalyticsV2IntegrationTest {
     }
 
     @Test
+    void listApplicationVersionsIncludesInitialVersion() {
+        createApplication("it-versions");
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.ListApplicationVersions")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-versions"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationVersionSummaries.size()", equalTo(1))
+            .body("ApplicationVersionSummaries[0].ApplicationVersionId", equalTo(1))
+            .body("ApplicationVersionSummaries[0].ApplicationStatus", equalTo("READY"));
+    }
+
+    @Test
+    void describeApplicationVersionReturnsVersionOne() {
+        createApplication("it-describe-version");
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.DescribeApplicationVersion")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-describe-version", "ApplicationVersionId": 1}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationVersionDetail.ApplicationName", equalTo("it-describe-version"))
+            .body("ApplicationVersionDetail.ApplicationVersionId", equalTo(1));
+    }
+
+    @Test
+    void listApplicationOperationsReturnsEmptyList() {
+        createApplication("it-operations");
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.ListApplicationOperations")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-operations"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationOperationInfoList", equalTo(java.util.List.of()));
+    }
+
+    @Test
+    void describeApplicationOperationRejectsUnknownOperation() {
+        createApplication("it-operation");
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.DescribeApplicationOperation")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-operation", "OperationId": "aaaaaaaaaaaaaaaaaaaaaaaaaa"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400);
+    }
+
+    @Test
+    void rollbackApplicationRejectsFreshApplication() {
+        createApplication("it-rollback");
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.RollbackApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-rollback", "CurrentApplicationVersionId": 1}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400);
+    }
+
+    @Test
     void listApplicationsIncludesCreated() {
         createApplication("it-list");
 
@@ -195,6 +281,56 @@ class KinesisAnalyticsV2IntegrationTest {
             .statusCode(200)
             .body("Tags.Key", hasItem("team"))
             .body("Tags.Key", not(hasItem("env")));
+    }
+
+    @Test
+    void updateApplicationEnvironmentPropertiesAndParallelismRoundTripsThroughTheWireProtocol() {
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.CreateApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-env-update", "RuntimeEnvironment": "FLINK-1_18",
+                 "ServiceExecutionRole": "%s",
+                 "ApplicationConfiguration": {
+                     "ApplicationCodeConfiguration": {
+                         "CodeContent": {"S3ContentLocation": {
+                             "BucketARN": "arn:aws:s3:::flink-code", "FileKey": "app.jar"}},
+                         "CodeContentType": "ZIPFILE"},
+                     "EnvironmentProperties": {"PropertyGroups": [
+                         {"PropertyGroupId": "AppProperties", "PropertyMap": {"mode": "test"}}]}}}
+                """.formatted(ROLE))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.UpdateApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-env-update", "CurrentApplicationVersionId": 1,
+                 "ApplicationConfigurationUpdate": {
+                     "EnvironmentPropertyUpdates": {"PropertyGroups": [
+                         {"PropertyGroupId": "AppProperties",
+                          "PropertyMap": {"mode": "production", "region": "us-west-2"}}]},
+                     "FlinkApplicationConfigurationUpdate": {
+                         "ParallelismConfigurationUpdate": {
+                             "ConfigurationTypeUpdate": "CUSTOM",
+                             "ParallelismUpdate": 1,
+                             "ParallelismPerKPUUpdate": 1,
+                             "AutoScalingEnabledUpdate": false}}}}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationDetail.ApplicationVersionId", equalTo(2))
+            .body("ApplicationDetail.ApplicationConfigurationDescription"
+                    + ".EnvironmentPropertyDescriptions.PropertyGroupDescriptions[0].PropertyMap.mode",
+                    equalTo("production"))
+            .body("ApplicationDetail.ApplicationConfigurationDescription"
+                    + ".FlinkApplicationConfigurationDescription.ParallelismConfigurationDescription"
+                    + ".ConfigurationType", equalTo("CUSTOM"));
     }
 
     @Test
@@ -434,6 +570,44 @@ class KinesisAnalyticsV2IntegrationTest {
             .statusCode(200)
             .body("ApplicationDetail.ApplicationVersionId", equalTo(3))
             .body("ApplicationDetail.CloudWatchLoggingOptionDescriptions", equalTo(null));
+    }
+
+    @Test
+    void updateApplicationMaintenanceConfigurationRoundTripsThroughTheWireProtocol() {
+        createApplication("it-maint");
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.UpdateApplicationMaintenanceConfiguration")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-maint",
+                 "ApplicationMaintenanceConfigurationUpdate": {
+                     "ApplicationMaintenanceWindowStartTimeUpdate": "02:00"}}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationARN", startsWith("arn:aws:kinesisanalytics:"))
+            .body("ApplicationMaintenanceConfigurationDescription.ApplicationMaintenanceWindowStartTime",
+                    equalTo("02:00"))
+            .body("ApplicationMaintenanceConfigurationDescription.ApplicationMaintenanceWindowEndTime",
+                    equalTo("10:00"));
+
+        given()
+            .header("X-Amz-Target", "KinesisAnalytics_20180523.DescribeApplication")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ApplicationName": "it-maint"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ApplicationDetail.ApplicationMaintenanceConfigurationDescription"
+                    + ".ApplicationMaintenanceWindowStartTime", equalTo("02:00"))
+            .body("ApplicationDetail.ApplicationMaintenanceConfigurationDescription"
+                    + ".ApplicationMaintenanceWindowEndTime", equalTo("10:00"));
     }
 
     @Test
