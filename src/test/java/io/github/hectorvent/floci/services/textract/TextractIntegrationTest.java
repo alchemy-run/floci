@@ -230,7 +230,7 @@ class TextractIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("Blocks.findAll { it.BlockType == 'WORD' }.Text", hasItem("Floci"));
+            .body("Blocks.findAll { it.BlockType == 'WORD' }.Text", hasItem("HELLO"));
     }
 
     @Test
@@ -415,5 +415,300 @@ class TextractIntegrationTest {
         .then()
             .statusCode(200)
             .body("AnalyzeDocumentModelVersion", equalTo("1.0"));
+    }
+
+    @Test
+    void analyzeExpense_returnsExpenseDocuments() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.AnalyzeExpense")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"Document\":{\"Bytes\":\"aGVsbG8=\"}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DocumentMetadata.Pages", equalTo(1))
+            .body("ExpenseDocuments", hasSize(greaterThanOrEqualTo(0)));
+    }
+
+    @Test
+    void analyzeID_returnsIdentityDocuments() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.AnalyzeID")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"DocumentPages\":[{\"Bytes\":\"aGVsbG8=\"}]}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("IdentityDocuments", hasSize(greaterThanOrEqualTo(1)))
+            .body("AnalyzeIDModelVersion", equalTo("1.0"));
+    }
+
+    @Test
+    void analyzeDocument_lineTextIsHello() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.AnalyzeDocument")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"Document\":{\"Bytes\":\"aGVsbG8=\"},\"FeatureTypes\":[\"TABLES\",\"FORMS\"]}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DocumentMetadata.Pages", equalTo(1))
+            .body("Blocks.findAll { it.BlockType == 'LINE' }.Text", hasItem("HELLO"));
+    }
+
+    @Test
+    void asyncExpenseAnalysis_startAndGetSucceeded() {
+        String jobId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.StartExpenseAnalysis")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"receipt.png\"}}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("JobId", notNullValue())
+            .extract().path("JobId");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetExpenseAnalysis")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"JobId\":\"" + jobId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("JobStatus", equalTo("SUCCEEDED"))
+            .body("ExpenseDocuments", hasSize(greaterThanOrEqualTo(0)));
+    }
+
+    @Test
+    void asyncLendingAnalysis_startGetAndSummarySucceeded() {
+        String jobId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.StartLendingAnalysis")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"loan.pdf\"}}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("JobId", notNullValue())
+            .extract().path("JobId");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetLendingAnalysis")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"JobId\":\"" + jobId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("JobStatus", equalTo("SUCCEEDED"))
+            .body("Results", notNullValue());
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetLendingAnalysisSummary")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"JobId\":\"" + jobId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("JobStatus", equalTo("SUCCEEDED"))
+            .body("Summary.DocumentGroups", notNullValue());
+    }
+
+    @Test
+    void getDocumentTextDetection_canBePolledTwice() {
+        String jobId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.StartDocumentTextDetection")
+            .header("Authorization", AUTH_HEADER)
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("JobId");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetDocumentTextDetection")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"JobId\":\"" + jobId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("JobStatus", equalTo("SUCCEEDED"))
+            .body("Blocks.findAll { it.BlockType == 'LINE' }.Text", hasItem("HELLO"));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetDocumentTextDetection")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"JobId\":\"" + jobId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("JobStatus", equalTo("SUCCEEDED"));
+    }
+
+    @Test
+    void adapters_createGetListUpdateDelete() {
+        String name = "alchemy-textract-" + System.nanoTime();
+        String adapterId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.CreateAdapter")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterName\":\"" + name + "\",\"FeatureTypes\":[\"QUERIES\"],\"Description\":\"fixture\",\"AutoUpdate\":\"DISABLED\",\"Tags\":{\"owner\":\"floci\"}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("AdapterId", notNullValue())
+            .extract().path("AdapterId");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetAdapter")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterId\":\"" + adapterId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("AdapterName", equalTo(name))
+            .body("FeatureTypes", equalTo(java.util.List.of("QUERIES")))
+            .body("Tags.owner", equalTo("floci"));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.ListAdapters")
+            .header("Authorization", AUTH_HEADER)
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Adapters.AdapterName", hasItem(name));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.ListAdapterVersions")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterId\":\"" + adapterId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("AdapterVersions", hasSize(0));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.UpdateAdapter")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterId\":\"" + adapterId + "\",\"Description\":\"updated\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Description", equalTo("updated"));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.DeleteAdapter")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterId\":\"" + adapterId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void adapterVersion_missingManifest_invalidS3() {
+        String name = "alchemy-textract-ver-" + System.nanoTime();
+        String adapterId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.CreateAdapter")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterName\":\"" + name + "\",\"FeatureTypes\":[\"QUERIES\"]}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("AdapterId");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetAdapterVersion")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterId\":\"" + adapterId + "\",\"AdapterVersion\":\"999\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.DeleteAdapterVersion")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterId\":\"" + adapterId + "\",\"AdapterVersion\":\"999\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.CreateAdapterVersion")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterId\":\"" + adapterId + "\",\"DatasetConfig\":{\"ManifestS3Object\":{\"Bucket\":\"no-such-textract-bucket\",\"Name\":\"missing-manifest.jsonl\"}},\"OutputConfig\":{\"S3Bucket\":\"no-such-textract-bucket\",\"S3Prefix\":\"adapter-training/\"}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", anyOf(
+                    equalTo("InvalidS3ObjectException"),
+                    equalTo("InvalidParameterException"),
+                    equalTo("ValidationException")));
+    }
+
+    @Test
+    void createAdapter_duplicateName_conflict() {
+        String name = "alchemy-textract-dup-" + System.nanoTime();
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.CreateAdapter")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterName\":\"" + name + "\",\"FeatureTypes\":[\"QUERIES\"]}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.CreateAdapter")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"AdapterName\":\"" + name + "\",\"FeatureTypes\":[\"QUERIES\"]}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ConflictException"));
     }
 }
