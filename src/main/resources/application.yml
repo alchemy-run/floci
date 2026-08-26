@@ -704,6 +704,8 @@ floci:
       enabled: true
     timestream:
       enabled: true
+    timestream-influxdb:
+      enabled: true
     medical-imaging:
       enabled: true
     omics:

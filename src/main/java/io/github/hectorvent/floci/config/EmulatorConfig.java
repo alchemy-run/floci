@@ -1159,6 +1159,7 @@ public interface EmulatorConfig {
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
         TimestreamServiceConfig timestream();
+        TimestreamInfluxDbServiceConfig timestreamInfluxdb();
         RekognitionServiceConfig rekognition();
         ForecastServiceConfig forecast();
         PersonalizeServiceConfig personalize();
@@ -2443,6 +2444,11 @@ public interface EmulatorConfig {
     }
 
     interface TimestreamServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface TimestreamInfluxDbServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

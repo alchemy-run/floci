@@ -27,6 +27,7 @@ import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsJsonHandler;
 import io.github.hectorvent.floci.services.timestream.TimestreamJsonHandler;
+import io.github.hectorvent.floci.services.timestreaminfluxdb.TimestreamInfluxDbJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -73,6 +74,7 @@ public class AwsJsonController {
     private final OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler;
     private final PaymentCryptographyJsonHandler paymentCryptographyJsonHandler;
     private final TimestreamJsonHandler timestreamJsonHandler;
+    private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -96,7 +98,8 @@ public class AwsJsonController {
                              NetworkFirewallJsonHandler networkFirewallJsonHandler,
                              OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler,
                              PaymentCryptographyJsonHandler paymentCryptographyJsonHandler,
-                             TimestreamJsonHandler timestreamJsonHandler) {
+                             TimestreamJsonHandler timestreamJsonHandler,
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -122,6 +125,7 @@ public class AwsJsonController {
         this.openSearchServerlessJsonHandler = openSearchServerlessJsonHandler;
         this.paymentCryptographyJsonHandler = paymentCryptographyJsonHandler;
         this.timestreamJsonHandler = timestreamJsonHandler;
+        this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
     }
 
     @POST
@@ -183,6 +187,7 @@ public class AwsJsonController {
                 case "payment-cryptography" -> paymentCryptographyJsonHandler.handle(action, request, region);
                 case "timestream" -> timestreamJsonHandler.handle(action, request, region,
                         httpHeaders.getHeaderString("Host"));
+                case "timestream-influxdb" -> timestreamInfluxDbJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target
