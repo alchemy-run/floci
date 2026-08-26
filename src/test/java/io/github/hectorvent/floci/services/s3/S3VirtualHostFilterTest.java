@@ -115,6 +115,16 @@ class S3VirtualHostFilterTest {
     }
 
     @Test
+    void doesNotTreatLambdaFunctionUrlHostsAsBuckets() {
+        assertNull(S3VirtualHostFilter.extractBucket(
+                "abc123def456abc123def456abc123de.lambda-url.us-east-1.localhost:4566",
+                "localhost"));
+        assertNull(S3VirtualHostFilter.extractBucket(
+                "abc123.lambda-url.us-east-1.localhost",
+                "localhost"));
+    }
+
+    @Test
     void returnsNullForNullBaseHostname() {
         // path-style bare hostname (no subdomain) — must return null
         assertNull(S3VirtualHostFilter.extractBucket("localhost:4566", null));

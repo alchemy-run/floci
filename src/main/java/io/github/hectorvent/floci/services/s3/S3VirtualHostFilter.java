@@ -42,6 +42,9 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
         // browser negotiates HTTP/2 over HTTPS (where the Host header is absent).
         String host = resolveHost(requestContext.getHeaderString("Host"), uri);
         if (host == null) return;
+        if (host.toLowerCase().contains(".lambda-url.")) {
+            return;
+        }
 
         // Do not hijack requests meant for other AWS services
         String auth = requestContext.getHeaderString("Authorization");

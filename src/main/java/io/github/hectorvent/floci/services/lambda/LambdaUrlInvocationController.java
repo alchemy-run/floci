@@ -42,6 +42,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -80,6 +81,19 @@ public class LambdaUrlInvocationController {
         this.lambdaService = lambdaService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
+    }
+
+    @GET
+    public CompletionStage<Response> handleGetRoot(@PathParam("urlId") String urlId,
+                                                   @Context HttpHeaders headers, @Context UriInfo uriInfo) {
+        return invoke("GET", urlId, "", headers, uriInfo, null);
+    }
+
+    @GET
+    @Path("/info")
+    public CompletionStage<Response> handleGetInfo(@PathParam("urlId") String urlId,
+                                                   @Context HttpHeaders headers, @Context UriInfo uriInfo) {
+        return invoke("GET", urlId, "info", headers, uriInfo, null);
     }
 
     @GET
@@ -156,6 +170,12 @@ public class LambdaUrlInvocationController {
 
         boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
         byte[] eventBytes = event.getBytes();
+        // Bound the front-door wait: executor queue budget is up to 8x function
+        // timeout (minutes), which stalls Alchemy Bindings beforeAll probes
+        // (/info) when a brand-new container's runtime is still in INIT.
+        final int waitSeconds = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode())
+                ? 45
+                : 15;
         return CompletableFuture.supplyAsync(() -> {
             try {
                 InvokeResult result = lambdaService.invoke(region, functionName, eventBytes, InvocationType.RequestResponse);
@@ -166,7 +186,23 @@ public class LambdaUrlInvocationController {
             } catch (AwsException e) {
                 return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
             }
-        }, INVOKE_POOL);
+        }, INVOKE_POOL).orTimeout(waitSeconds, TimeUnit.SECONDS)
+                .exceptionally(ex -> {
+                    Throwable cause = ex instanceof java.util.concurrent.CompletionException && ex.getCause() != null
+                            ? ex.getCause() : ex;
+                    if (cause instanceof TimeoutException) {
+                        LOG.warnv("Function URL invocation timed out after {0}s: {1} {2}", waitSeconds, method, urlId);
+                        return Response.status(502)
+                                .entity("{\"Message\":\"Function URL invocation timed out\"}")
+                                .type(MediaType.APPLICATION_JSON)
+                                .build();
+                    }
+                    LOG.warnv(cause, "Function URL invocation failed: {0} {1}", method, urlId);
+                    return Response.status(502)
+                            .entity(jsonMessage(cause.getMessage() == null ? "invoke failed" : cause.getMessage()))
+                            .type(MediaType.APPLICATION_JSON)
+                            .build();
+                });
     }
 
     /** Visible for tests: AWS SigV4 via Authorization header or query-string signing. */
