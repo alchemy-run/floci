@@ -63,7 +63,12 @@ public class OrganizationsService implements Resettable {
             "AISERVICES_OPT_OUT_POLICY",
             "CHATBOT_POLICY",
             "DECLARATIVE_POLICY_EC2",
-            "SECURITYHUB_POLICY");
+            "SECURITYHUB_POLICY",
+            "INSPECTOR_POLICY",
+            "UPGRADE_ROLLOUT_POLICY",
+            "BEDROCK_POLICY",
+            "S3_POLICY",
+            "NETWORK_SECURITY_DIRECTOR_POLICY");
     private static final Pattern ACCOUNT_ID = Pattern.compile("\\d{12}");
     private static final Pattern HANDSHAKE_ID = Pattern.compile("^h-[a-z0-9]{8,32}$");
     private static final Pattern CAR_ID = Pattern.compile("^car-[a-z0-9]{8,32}$");
@@ -653,9 +658,6 @@ public class OrganizationsService implements Resettable {
         requireOrganization();
         ensureFullAwsAccessPolicy();
         String filter = requireText(request, "Filter");
-        if (!POLICY_TYPES.contains(filter)) {
-            throw new AwsException("InvalidInputException", "You specified an invalid value for Filter.", 400);
-        }
         List<OrganizationPolicy> matches = new ArrayList<>();
         for (OrganizationPolicy policy : policies.values()) {
             if (filter.equals(policy.getType())) {
