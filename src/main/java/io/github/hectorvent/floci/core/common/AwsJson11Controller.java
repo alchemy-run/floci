@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.transfer.TransferHandler;
 import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
 import io.github.hectorvent.floci.services.firehose.FirehoseJsonHandler;
 import io.github.hectorvent.floci.services.fms.FmsJsonHandler;
+import io.github.hectorvent.floci.services.shield.ShieldJsonHandler;
 import io.github.hectorvent.floci.services.licensemanager.LicenseManagerJsonHandler;
 import io.github.hectorvent.floci.services.frauddetector.FraudDetectorJsonHandler;
 import io.github.hectorvent.floci.services.glue.GlueJsonHandler;
@@ -125,6 +126,7 @@ public class AwsJson11Controller {
     private final AthenaJsonHandler athenaJsonHandler;
     private final FirehoseJsonHandler firehoseJsonHandler;
     private final FmsJsonHandler fmsJsonHandler;
+    private final ShieldJsonHandler shieldJsonHandler;
     private final LicenseManagerJsonHandler licenseManagerJsonHandler;
     private final FraudDetectorJsonHandler fraudDetectorJsonHandler;
     private final ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler;
@@ -194,6 +196,7 @@ public class AwsJson11Controller {
                                AthenaJsonHandler athenaJsonHandler,
                                FirehoseJsonHandler firehoseJsonHandler,
                                FmsJsonHandler fmsJsonHandler,
+                               ShieldJsonHandler shieldJsonHandler,
                                LicenseManagerJsonHandler licenseManagerJsonHandler,
                                FraudDetectorJsonHandler fraudDetectorJsonHandler,
                                ResourceGroupsTaggingJsonHandler resourceGroupsTaggingJsonHandler,
@@ -267,6 +270,7 @@ public class AwsJson11Controller {
         this.athenaJsonHandler = athenaJsonHandler;
         this.firehoseJsonHandler = firehoseJsonHandler;
         this.fmsJsonHandler = fmsJsonHandler;
+        this.shieldJsonHandler = shieldJsonHandler;
         this.licenseManagerJsonHandler = licenseManagerJsonHandler;
         this.fraudDetectorJsonHandler = fraudDetectorJsonHandler;
         this.resourceGroupsTaggingJsonHandler = resourceGroupsTaggingJsonHandler;
@@ -371,6 +375,7 @@ public class AwsJson11Controller {
                 case "athena" -> athenaJsonHandler.handle(action, request, region);
                 case "firehose" -> firehoseJsonHandler.handle(action, request, region);
                 case "fms" -> fmsJsonHandler.handle(action, request, region);
+                case "shield" -> shieldJsonHandler.handle(action, request, region);
                 case "license-manager" -> licenseManagerJsonHandler.handle(action, request, region);
                 case "frauddetector" -> fraudDetectorJsonHandler.handle(action, request, region);
                 case "tagging" -> resourceGroupsTaggingJsonHandler.handle(action, request, region);
