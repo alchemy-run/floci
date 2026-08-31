@@ -158,18 +158,19 @@ class TranscribeIntegrationTest {
     }
 
     @Test
-    void getTranscriptionJob_notFound_returns400() {
+    void getTranscriptionJob_notFound_returnsBadRequest() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Transcribe.GetTranscriptionJob")
             .header("Authorization", AUTH_HEADER)
             .body("""
-                {"TranscriptionJobName":"nonexistent-job"}""")
+                {"TranscriptionJobName":"alchemy-nonexistent-job-probe"}""")
         .when()
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("NotFoundException"));
+            .body("__type", equalTo("BadRequestException"))
+            .body("message", containsString("couldn't be found"));
     }
 
     // ── ListTranscriptionJobs ────────────────────────────────────────────────
@@ -241,7 +242,7 @@ class TranscribeIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("NotFoundException"));
+            .body("__type", equalTo("BadRequestException"));
     }
 
     @Test

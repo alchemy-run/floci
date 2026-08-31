@@ -22,7 +22,28 @@ sees those changes in the next `GetCostAndUsage` call.
 | `GetReservationUtilization` | Stub — returns zeroed totals |
 | `GetSavingsPlansCoverage` | Stub — returns empty list |
 | `GetSavingsPlansUtilization` | Stub — returns zeroed totals |
-| `GetCostCategories` | Stub — returns empty list (cost-category management not yet emulated) |
+| `GetCostCategories` | Names/values from stored cost-category definitions |
+| `CreateCostCategoryDefinition` | Persists rules, default value, split-charge rules, and resource tags |
+| `DescribeCostCategoryDefinition` | Full definition; missing ARN is `ResourceNotFoundException` |
+| `ListCostCategoryDefinitions` | Currently-effective definitions for the account |
+| `UpdateCostCategoryDefinition` | Mutates rules / default / split-charge in place (name is create-only) |
+| `DeleteCostCategoryDefinition` | Removes the definition; missing ARN is `ResourceNotFoundException` |
+| `ListCostCategoryResourceAssociations` | Stub — empty list (requires the ARN when supplied) |
+| `GetCostForecast` | Forecast buckets synthesized from current usage |
+| `GetApproximateUsageRecords` | Per-service usage-line counts over a 14-day lookback |
+| `GetRightsizingRecommendation` | Stub — empty recommendations |
+| `GetReservationPurchaseRecommendation` | Stub — empty recommendations |
+| `ListSavingsPlansPurchaseRecommendationGeneration` | Stub — empty generation list |
+| `ListCommitmentPurchaseAnalyses` | Stub — empty analysis list |
+| `ListCostAllocationTags` | Stub — empty tag list |
+| `ListCostAllocationTagBackfillHistory` | Stub — empty backfill list |
+| `GetAnomalies` | Stub — empty anomalies for the requested `DateInterval` |
+| `ProvideAnomalyFeedback` | Unknown anomaly ids raise `ValidationException` |
+| `CreateAnomalyMonitor` | CUSTOM and DIMENSIONAL monitors; names unique per account |
+| `GetAnomalyMonitors` | List or filter by `MonitorArnList` (unknown ARNs return an empty list) |
+| `UpdateAnomalyMonitor` | Rename in place; type/spec/dimension are create-only |
+| `DeleteAnomalyMonitor` | Idempotent not-found is `UnknownMonitorException` |
+| `ListTagsForResource` / `TagResource` / `UntagResource` | Resource tags on cost categories and anomaly monitors |
 
 ## Cost synthesis model
 
@@ -118,9 +139,6 @@ for result in resp["ResultsByTime"]:
 
 ## Out of Scope
 
-- Forecasting (`GetCostForecast`, `GetUsageForecast`).
-- Right-sizing recommendations (`GetRightsizingRecommendation`).
-- Anomaly detection management (`GetAnomalies`, `*AnomalyMonitor`, `*AnomalySubscription`) — separate PR planned per #791.
+- Usage forecasts (`GetUsageForecast`).
 - Real Reservation / Savings Plan utilization math — currently zeroed stubs.
-- Cost category management (`CreateCostCategoryDefinition` / `*Definition` / `ListCostCategoryDefinitions`).
 - Resource-level granularity beyond what `GetCostAndUsageWithResources` exposes today.

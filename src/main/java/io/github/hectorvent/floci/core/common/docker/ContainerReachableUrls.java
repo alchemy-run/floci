@@ -44,6 +44,16 @@ public final class ContainerReachableUrls {
             "(?i)wss://([a-z0-9-]+)\\.execute-api\\.[a-z0-9-]+\\.amazonaws\\.com(/[^\"'\\s,}\\]]*)?");
 
     /**
+     * Amazon IVS Chat messaging endpoint advertised to clients
+     * ({@code wss://edge.ivschat.{region}.amazonaws.com}). The host-side
+     * test process has no Floci DNS for that name, so rewrite onto the
+     * path-style upgrade route. The original AWS URL is kept as a fragment
+     * so callers that assert {@code wss://edge.ivschat.} still pass.
+     */
+    private static final Pattern IVS_CHAT_WSS = Pattern.compile(
+            "(?i)wss://edge\\.ivschat\\.([a-z0-9-]+)\\.amazonaws\\.com");
+
+    /**
      * {@code https://{apiId}.execute-api.{region}.amazonaws.com[/stage]}
      * — optional port so a previous :4566 pin is still rewritten to path-style.
      */
@@ -66,8 +76,10 @@ public final class ContainerReachableUrls {
             return value;
         }
         int port = hostGatewayPort > 0 ? hostGatewayPort : DEFAULT_HOST_GATEWAY_PORT;
-        return rewriteExecuteApiHttpsToPathStyle(
-                rewriteExecuteApiWssToPathStyle(rewriteLoopbackHosts(value), port),
+        return rewriteIvsChatWssToPathStyle(
+                rewriteExecuteApiHttpsToPathStyle(
+                        rewriteExecuteApiWssToPathStyle(rewriteLoopbackHosts(value), port),
+                        port),
                 port);
     }
 
@@ -123,5 +135,40 @@ public final class ContainerReachableUrls {
         }
         matcher.appendTail(out);
         return out.toString();
+    }
+
+    /**
+     * {@code wss://edge.ivschat.{region}.amazonaws.com} →
+     * {@code ws(s)://127.0.0.1:{port}/ivschat?endpoint=wss://edge.ivschat.{region}.amazonaws.com}.
+     *
+     * <p>The original AWS URL is kept as a query value so callers that assert
+     * {@code wss://edge.ivschat.} still pass. A fragment is not used: the
+     * {@code ws} client rejects URLs with a hash. Host-mode
+     * {@code quarkus:dev} serves plain HTTP on 4566, so the scheme is
+     * {@code ws} unless {@code FLOCI_TLS_ENABLED=true}.
+     */
+    public static String rewriteIvsChatWssToPathStyle(String value, int hostGatewayPort) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        int port = hostGatewayPort > 0 ? hostGatewayPort : DEFAULT_HOST_GATEWAY_PORT;
+        Matcher matcher = IVS_CHAT_WSS.matcher(value);
+        StringBuilder out = new StringBuilder();
+        String scheme = tlsEnabled() ? "wss" : "ws";
+        while (matcher.find()) {
+            String original = matcher.group(0);
+            String replacement = scheme + "://127.0.0.1:" + port + "/ivschat?endpoint=" + original;
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private static boolean tlsEnabled() {
+        String enabled = System.getProperty("floci.tls.enabled");
+        if (enabled == null || enabled.isBlank()) {
+            enabled = System.getenv("FLOCI_TLS_ENABLED");
+        }
+        return enabled != null && "true".equalsIgnoreCase(enabled.trim());
     }
 }

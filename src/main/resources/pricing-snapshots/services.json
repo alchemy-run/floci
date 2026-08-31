@@ -6,7 +6,8 @@
       "location",
       "tenancy",
       "operatingSystem",
-      "productFamily"
+      "productFamily",
+      "volumeType"
     ]
   },
   {

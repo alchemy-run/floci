@@ -25,6 +25,19 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `DeleteCacheCluster` | - |
 | `DescribeCacheSubnetGroups` | - |
 | `DescribeCacheParameterGroups` | - |
+| `CreateServerlessCache` | Create a serverless cache (in-memory, no container) |
+| `DescribeServerlessCaches` | List serverless caches; named miss → ServerlessCacheNotFoundFault |
+| `ModifyServerlessCache` | Update description, limits, security groups, engine |
+| `DeleteServerlessCache` | Delete a serverless cache |
+| `CreateServerlessCacheSnapshot` | Snapshot a serverless cache |
+| `DescribeServerlessCacheSnapshots` | List serverless cache snapshots |
+| `DeleteServerlessCacheSnapshot` | Delete a snapshot; named miss → ServerlessCacheSnapshotNotFoundFault |
+| `CopyServerlessCacheSnapshot` | Copy a snapshot; missing source → ServerlessCacheSnapshotNotFoundFault |
+| `ExportServerlessCacheSnapshot` | Export a snapshot; missing name → ServerlessCacheSnapshotNotFoundFault |
+| `DescribeEvents` | List cache/snapshot events |
+| `ListTagsForResource` | List tags on a serverless cache or snapshot |
+| `AddTagsToResource` | Add tags |
+| `RemoveTagsFromResource` | Remove tags |
 <!-- floci:actions:end -->
 
 ## Configuration

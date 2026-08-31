@@ -49,6 +49,8 @@ public class CloudFormationService {
     private final ConcurrentHashMap<String, DeletedStackEntry> deletedStacks = new ConcurrentHashMap<>();
     // Global exports registry: region:exportName -> exportValue
     private final ConcurrentHashMap<String, String> exports = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, DriftDetection> driftDetections = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, List<ResourceDrift>> stackResourceDrifts = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     private final CloudFormationResourceProvisioner provisioner;
@@ -148,23 +150,39 @@ public class CloudFormationService {
                                      Map<String, String> parameters, List<String> capabilities,
                                      Map<String, String> tags, String region) {
         String resolvedTemplate = resolveTemplate(templateBody, templateUrl);
+        boolean isCreateType = changeSetType == null || "CREATE".equalsIgnoreCase(changeSetType);
+        String canonicalName = canonicalStackName(stackName);
 
-        // Detect first creation atomically: the mapping function runs at most once per key, so the
-        // flag is only set for the thread that actually creates the stack (no double-recording under
-        // concurrent CreateChangeSet calls).
+        // AWS accepts StackName or StackId (ARN) on CreateChangeSet/UpdateStack. Looking up by
+        // name-or-ARN first keeps UpdateStack(StackId=ARN) on the original stack; keyed insert of
+        // the raw ARN used to mint a nested stackId (arn:…:stack/<arn>/<uuid>).
+        Stack existing = resolveStack(stackName, region);
         boolean[] stackCreated = {false};
-        Stack stack = stacks.computeIfAbsent(key(stackName, region), k -> {
-            stackCreated[0] = true;
-            Stack s = newStack(stackName, region);
-            if (tags != null) s.getTags().putAll(tags);
-            return s;
-        });
+        Stack stack;
+        if (existing != null) {
+            stack = existing;
+            if (tags != null && !tags.isEmpty()) {
+                stack.getTags().clear();
+                stack.getTags().putAll(tags);
+            }
+        } else if (!isCreateType) {
+            throw new AwsException("ValidationError",
+                    "Stack with id " + stackName + " does not exist", 400);
+        } else {
+            stack = stacks.computeIfAbsent(key(canonicalName, region), k -> {
+                stackCreated[0] = true;
+                Stack s = newStack(canonicalName, region);
+                if (tags != null) {
+                    s.getTags().putAll(tags);
+                }
+                return s;
+            });
+        }
 
         // A CREATE change set puts a brand-new stack into REVIEW_IN_PROGRESS. Record the matching
         // stack-level event (as AWS and LocalStack do) so DescribeStackEvents is non-empty straight
         // after change-set creation — tooling such as the AWS SAM CLI reads StackEvents[0] there and
         // otherwise fails with an IndexError. (CreateChangeSet defaults a null type to CREATE.)
-        boolean isCreateType = changeSetType == null || "CREATE".equalsIgnoreCase(changeSetType);
         if (stackCreated[0] && isCreateType) {
             addEvent(stack, stack.getStackName(), stack.getStackId(),
                     "AWS::CloudFormation::Stack", "REVIEW_IN_PROGRESS", "User Initiated");
@@ -173,7 +191,7 @@ public class CloudFormationService {
         ChangeSet cs = new ChangeSet();
         cs.setChangeSetId(AwsArnUtils.Arn.of("cloudformation", region, regionResolver.getAccountId(), "changeSet/" + changeSetName + "/" + UUID.randomUUID()).toString());
         cs.setChangeSetName(changeSetName);
-        cs.setStackName(stackName);
+        cs.setStackName(stack.getStackName());
         cs.setStackId(stack.getStackId());
         cs.setChangeSetType(changeSetType != null ? changeSetType : "CREATE");
         cs.setTemplateBody(resolvedTemplate);
@@ -367,6 +385,238 @@ public class CloudFormationService {
     }
 
     public record ExportEntry(String name, String value, String exportingStackId) {}
+
+    public record DriftDetection(
+            String detectionId,
+            String stackId,
+            String stackName,
+            String detectionStatus,
+            String stackDriftStatus,
+            Instant timestamp,
+            int driftedStackResourceCount) {}
+
+    public record ResourceDrift(
+            String stackId,
+            String logicalResourceId,
+            String physicalResourceId,
+            String resourceType,
+            String stackResourceDriftStatus,
+            Instant timestamp) {}
+
+    public record TemplateParameterInfo(
+            String parameterKey,
+            String defaultValue,
+            boolean noEcho,
+            String description) {}
+
+    public record ValidateTemplateResult(
+            List<TemplateParameterInfo> parameters,
+            List<String> capabilities,
+            String description) {}
+
+    // ── ListImports ─────────────────────────────────────────────────────────
+
+    /**
+     * Lists stack names that import {@code exportName} via {@code Fn::ImportValue}.
+     * AWS rejects an unused export with {@code ValidationError} rather than an empty list.
+     */
+    public List<String> listImports(String exportName, String region) {
+        if (exportName == null || exportName.isBlank()) {
+            throw new AwsException("ValidationError", "ExportName is a required parameter", 400);
+        }
+        List<String> importers = new ArrayList<>();
+        for (Stack stack : stacks.values()) {
+            if (!region.equals(stack.getRegion())) {
+                continue;
+            }
+            if (templateImportsExport(stack.getTemplateBody(), exportName)) {
+                importers.add(stack.getStackName());
+            }
+        }
+        if (importers.isEmpty()) {
+            throw new AwsException("ValidationError",
+                    "Export " + exportName + " is not imported by any stack.", 400);
+        }
+        return importers;
+    }
+
+    // ── ValidateTemplate ────────────────────────────────────────────────────
+
+    public ValidateTemplateResult validateTemplate(String templateBody, String templateUrl) {
+        if ((templateBody == null || templateBody.isBlank())
+                && (templateUrl == null || templateUrl.isBlank())) {
+            throw new AwsException("ValidationError",
+                    "Either Template URL or Template Body must be specified.", 400);
+        }
+        String resolved = resolveTemplate(templateBody, templateUrl);
+        JsonNode template;
+        try {
+            template = parseTemplate(resolved);
+        } catch (Exception e) {
+            throw new AwsException("ValidationError",
+                    "Template format error: JSON not well-formed. " + e.getMessage(), 400);
+        }
+        JsonNode resources = template.path("Resources");
+        if (!resources.isObject() || resources.isEmpty()) {
+            throw new AwsException("ValidationError",
+                    "Template format error: At least one Resources member must be defined.", 400);
+        }
+
+        List<TemplateParameterInfo> parameters = new ArrayList<>();
+        JsonNode paramDefs = template.path("Parameters");
+        if (paramDefs.isObject()) {
+            paramDefs.fields().forEachRemaining(e -> {
+                JsonNode def = e.getValue();
+                parameters.add(new TemplateParameterInfo(
+                        e.getKey(),
+                        def.has("Default") ? def.path("Default").asText() : null,
+                        def.path("NoEcho").asBoolean(false),
+                        def.has("Description") ? def.path("Description").asText() : null));
+            });
+        }
+
+        LinkedHashSet<String> capabilities = new LinkedHashSet<>();
+        resources.fields().forEachRemaining(e -> {
+            String type = e.getValue().path("Type").asText("");
+            if (type.startsWith("AWS::IAM::")) {
+                capabilities.add("CAPABILITY_IAM");
+                if (type.equals("AWS::IAM::User")
+                        || type.equals("AWS::IAM::Role")
+                        || type.equals("AWS::IAM::ManagedPolicy")
+                        || type.equals("AWS::IAM::Group")) {
+                    capabilities.add("CAPABILITY_NAMED_IAM");
+                }
+            }
+        });
+
+        String description = template.path("Description").isMissingNode()
+                ? null
+                : template.path("Description").asText(null);
+        return new ValidateTemplateResult(parameters, new ArrayList<>(capabilities), description);
+    }
+
+    // ── SignalResource ──────────────────────────────────────────────────────
+
+    /**
+     * Accepts a resource signal. AWS ignores signals for resources that are not
+     * waiting on a CreationPolicy / UpdatePolicy — success still proves the API.
+     */
+    public void signalResource(String stackName, String logicalResourceId, String uniqueId,
+                               String status, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        if (logicalResourceId == null || logicalResourceId.isBlank()) {
+            throw new AwsException("ValidationError", "LogicalResourceId is a required parameter", 400);
+        }
+        if (uniqueId == null || uniqueId.isBlank()) {
+            throw new AwsException("ValidationError", "UniqueId is a required parameter", 400);
+        }
+        if (status == null || status.isBlank()) {
+            throw new AwsException("ValidationError", "Status is a required parameter", 400);
+        }
+        if (!"SUCCESS".equals(status) && !"FAILURE".equals(status)) {
+            throw new AwsException("ValidationError",
+                    "Status must be SUCCESS or FAILURE", 400);
+        }
+        StackResource resource = stack.getResources().get(logicalResourceId);
+        if (resource == null) {
+            throw new AwsException("ValidationError",
+                    "Resource " + logicalResourceId + " does not exist for stack " + stack.getStackName(), 400);
+        }
+        addEvent(stack, logicalResourceId, resource.getPhysicalId(), resource.getResourceType(),
+                "SUCCESS".equals(status) ? "CREATE_COMPLETE" : "CREATE_FAILED",
+                "SignalResource " + uniqueId + " " + status);
+        persistStack(stack);
+    }
+
+    // ── Drift detection ─────────────────────────────────────────────────────
+
+    public String detectStackDrift(String stackName, List<String> logicalResourceIds, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        Instant now = now();
+        String detectionId = UUID.randomUUID().toString();
+        List<ResourceDrift> drifts = new ArrayList<>();
+        for (StackResource resource : stack.getResources().values()) {
+            if (logicalResourceIds != null && !logicalResourceIds.isEmpty()
+                    && !logicalResourceIds.contains(resource.getLogicalId())) {
+                continue;
+            }
+            drifts.add(new ResourceDrift(
+                    stack.getStackId(),
+                    resource.getLogicalId(),
+                    resource.getPhysicalId(),
+                    resource.getResourceType(),
+                    "IN_SYNC",
+                    now));
+        }
+        DriftDetection detection = new DriftDetection(
+                detectionId,
+                stack.getStackId(),
+                stack.getStackName(),
+                "DETECTION_COMPLETE",
+                "IN_SYNC",
+                now,
+                0);
+        driftDetections.put(detectionId, detection);
+        stackResourceDrifts.put(stack.getStackId(), List.copyOf(drifts));
+        return detectionId;
+    }
+
+    public DriftDetection describeStackDriftDetectionStatus(String detectionId) {
+        if (detectionId == null || detectionId.isBlank()) {
+            throw new AwsException("ValidationError",
+                    "StackDriftDetectionId is a required parameter", 400);
+        }
+        DriftDetection detection = driftDetections.get(detectionId);
+        if (detection == null) {
+            throw new AwsException("ValidationError",
+                    "Stack drift detection ID " + detectionId + " does not exist", 400);
+        }
+        return detection;
+    }
+
+    public List<ResourceDrift> describeStackResourceDrifts(String stackName, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        List<ResourceDrift> drifts = stackResourceDrifts.get(stack.getStackId());
+        return drifts != null ? drifts : List.of();
+    }
+
+    private boolean templateImportsExport(String templateBody, String exportName) {
+        if (templateBody == null || templateBody.isBlank()) {
+            return false;
+        }
+        try {
+            return containsImportValue(parseTemplate(templateBody), exportName);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean containsImportValue(JsonNode node, String exportName) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isObject()) {
+            JsonNode importValue = node.get("Fn::ImportValue");
+            if (importValue != null && importValue.isTextual() && exportName.equals(importValue.asText())) {
+                return true;
+            }
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                if (containsImportValue(fields.next().getValue(), exportName)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (containsImportValue(child, exportName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     // ── Private ───────────────────────────────────────────────────────────────
 
@@ -1079,6 +1329,20 @@ public class CloudFormationService {
             }
         }
         return null;
+    }
+
+    /**
+     * Stack name to store/key by. When {@code stackNameOrArn} is a stack ARN, this is the
+     * {@code stack/<name>/<uuid>} name segment — never the raw ARN.
+     */
+    private static String canonicalStackName(String stackNameOrArn) {
+        if (stackNameOrArn != null && stackNameOrArn.startsWith("arn:")) {
+            String extracted = extractStackNameFromArn(stackNameOrArn);
+            if (extracted != null && !extracted.isBlank()) {
+                return extracted;
+            }
+        }
+        return stackNameOrArn;
     }
 
     /**

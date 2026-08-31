@@ -9,6 +9,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import static io.restassured.RestAssured.given;
+import io.restassured.specification.RequestSpecification;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -26,6 +27,11 @@ class EksSubResourceListsIntegrationTest {
     private static final String JSON = "application/json";
     private static final String CLUSTER = "subres-it-cluster";
 
+    private static RequestSpecification eks() {
+        return given().header("Authorization",
+                "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/eks/aws4_request");
+    }
+
     @ParameterizedTest
     @Order(1)
     @CsvSource({
@@ -36,7 +42,7 @@ class EksSubResourceListsIntegrationTest {
             "pod-identity-associations, associations"
     })
     void missingClusterReturnsResourceNotFound(String path, String key) {
-        given()
+        eks()
         .when()
             .get("/clusters/no-such-cluster/" + path)
         .then()
@@ -49,7 +55,7 @@ class EksSubResourceListsIntegrationTest {
     @Test
     @Order(2)
     void createCluster() {
-        given().contentType(JSON)
+        eks().contentType(JSON)
                 .body("{\"name\":\"" + CLUSTER + "\",\"roleArn\":\"arn:aws:iam::000000000000:role/eks-role\","
                         + "\"version\":\"1.29\"}")
                 .when().post("/clusters")
@@ -67,7 +73,7 @@ class EksSubResourceListsIntegrationTest {
             "pod-identity-associations, associations"
     })
     void existingClusterReturnsEmptyListUnderModelKey(String path, String key) {
-        given()
+        eks()
         .when()
             .get("/clusters/" + CLUSTER + "/" + path)
         .then()
@@ -79,6 +85,6 @@ class EksSubResourceListsIntegrationTest {
     @Test
     @Order(4)
     void deleteCluster() {
-        given().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
+        eks().when().delete("/clusters/" + CLUSTER).then().statusCode(200);
     }
 }

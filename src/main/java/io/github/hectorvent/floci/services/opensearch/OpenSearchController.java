@@ -31,7 +31,7 @@ import java.util.UUID;
 
 @Path("/2021-01-01")
 @Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
+@Consumes({MediaType.APPLICATION_JSON, MediaType.WILDCARD})
 public class OpenSearchController {
 
     private static final Logger LOG = Logger.getLogger(OpenSearchController.class);
@@ -94,9 +94,11 @@ public class OpenSearchController {
     @Path("/opensearch/domain-info")
     public Response describeDomains(@Context HttpHeaders headers, String body) {
         try {
-            JsonNode req = objectMapper.readTree(body);
             List<String> names = new ArrayList<>();
-            req.path("DomainNames").forEach(n -> names.add(n.asText()));
+            if (body != null && !body.isBlank()) {
+                JsonNode req = objectMapper.readTree(body);
+                req.path("DomainNames").forEach(n -> names.add(n.asText()));
+            }
             List<Domain> domains = service.describeDomains(names);
 
             ObjectNode response = objectMapper.createObjectNode();
@@ -374,6 +376,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/progress")
     public Response describeDomainChangeProgress(@PathParam("domainName") String domainName) {
+        service.requireDomainOrBase(domainName, "No progress information found");
         ObjectNode response = objectMapper.createObjectNode();
         response.putObject("ChangeProgressStatus");
         return Response.ok(response).build();
@@ -382,6 +385,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/autoTunes")
     public Response describeDomainAutoTunes(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("AutoTunes");
         return Response.ok(response).build();
@@ -398,14 +402,70 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/domain/{domainName}/health")
     public Response describeDomainHealth(@PathParam("domainName") String domainName) {
+        service.requireDomainOrBase(domainName, "Domain not found: " + domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("ClusterHealth", "Green");
+        response.put("DomainState", "Active");
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/nodes")
+    public Response describeDomainNodes(@PathParam("domainName") String domainName) {
+        Domain domain = service.requireDomainOrBase(domainName, "Domain not found: " + domainName);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode nodes = response.putArray("DomainNodesStatusList");
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("NodeId", "node-1");
+        node.put("NodeType", "Data");
+        node.put("NodeStatus", "Active");
+        String instanceType = domain.getClusterConfig() != null
+                ? domain.getClusterConfig().getInstanceType() : "m5.large.search";
+        node.put("InstanceType", instanceType);
+        nodes.add(node);
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/scheduledActions")
+    public Response listScheduledActions(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("ScheduledActions");
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/opensearch/domain/{domainName}/domainMaintenance")
+    public Response startDomainMaintenance(@PathParam("domainName") String domainName, String body) {
+        service.describeDomain(domainName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("MaintenanceId", UUID.randomUUID().toString());
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/domainMaintenance")
+    public Response getDomainMaintenanceStatus(@PathParam("domainName") String domainName) {
+        service.requireDomainOrBase(domainName, "Domain not found: " + domainName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("Status", "COMPLETED");
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/domainMaintenances")
+    public Response listDomainMaintenances(@PathParam("domainName") String domainName) {
+        service.requireDomainOrBase(domainName, "Domain not found: " + domainName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("DomainMaintenances");
         return Response.ok(response).build();
     }
 
     @GET
     @Path("/opensearch/upgradeDomain/{domainName}/history")
     public Response getUpgradeHistory(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.putArray("UpgradeHistories");
         return Response.ok(response).build();
@@ -414,6 +474,7 @@ public class OpenSearchController {
     @GET
     @Path("/opensearch/upgradeDomain/{domainName}/status")
     public Response getUpgradeStatus(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
         ObjectNode response = objectMapper.createObjectNode();
         response.put("UpgradeStep", "UPGRADE");
         response.put("StepStatus", "SUCCEEDED");
@@ -455,6 +516,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/serviceSoftwareUpdate/start")
     public Response startServiceSoftwareUpdate(String body) {
+        requireDomainNameFromBody(body);
         ObjectNode response = objectMapper.createObjectNode();
         ObjectNode options = response.putObject("ServiceSoftwareOptions");
         options.put("UpdateAvailable", false);
@@ -469,6 +531,7 @@ public class OpenSearchController {
     @POST
     @Path("/opensearch/serviceSoftwareUpdate/cancel")
     public Response cancelServiceSoftwareUpdate(String body) {
+        requireDomainNameFromBody(body);
         ObjectNode response = objectMapper.createObjectNode();
         ObjectNode options = response.putObject("ServiceSoftwareOptions");
         options.put("UpdateAvailable", false);
@@ -787,6 +850,19 @@ public class OpenSearchController {
             opts.setCustomEndpointCertificateArn(node.get("CustomEndpointCertificateArn").asText());
         }
         return opts;
+    }
+
+    private void requireDomainNameFromBody(String body) {
+        try {
+            JsonNode req = body == null || body.isBlank()
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            service.describeDomain(req.path("DomainName").asText(null));
+        } catch (AwsException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new AwsException("ValidationException", e.getMessage(), 400);
+        }
     }
 
     private Map<String, String> parseTags(JsonNode node) {

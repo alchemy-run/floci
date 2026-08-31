@@ -496,8 +496,21 @@ class IotTopicRuleIntegrationTest {
         .when()
             .delete("/rules/mvp1Rule")
         .then()
-            .statusCode(404)
-            .body("__type", equalTo("ResourceNotFoundException"));
+            .statusCode(401)
+            .body("__type", equalTo("UnauthorizedException"))
+            .body("message", containsString("Access to topic rule"));
+    }
+
+    @Test
+    void getTopicRuleOnMissingRuleReturnsUnauthorizedException() {
+        given()
+        .when()
+            .get("/rules/definitelyMissingTopicRuleXyz")
+        .then()
+            .statusCode(401)
+            .body("__type", equalTo("UnauthorizedException"))
+            .body("message", containsString("Access to topic rule"))
+            .body("message", containsString("definitelyMissingTopicRuleXyz"));
     }
 
     private static String auth(String region, String service) {

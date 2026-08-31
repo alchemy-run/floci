@@ -14,6 +14,9 @@ Floci emulates the Amazon EMR (Elastic MapReduce) management API. Clusters (job 
 | `RunJobFlow` | Creates a new cluster (job flow) and returns its `JobFlowId` |
 | `DescribeCluster` | Returns the configuration and status of a cluster |
 | `ListClusters` | Lists clusters, filterable by state and creation time |
+| `ListReleaseLabels` | Lists EMR release labels, newest first, filterable by prefix or application |
+| `DescribeReleaseLabel` | Returns the applications and OS releases a release label ships |
+| `ListSupportedInstanceTypes` | Lists EC2 instance types a release label supports |
 | `TerminateJobFlows` | Terminates one or more clusters |
 | `SetTerminationProtection` | Enables or disables termination protection |
 | `SetVisibleToAllUsers` | Sets cluster visibility for the account |
@@ -33,8 +36,13 @@ Floci emulates the Amazon EMR (Elastic MapReduce) management API. Clusters (job 
 | `DescribeSecurityConfiguration` | Returns a security configuration |
 | `DeleteSecurityConfiguration` | Deletes a security configuration |
 | `ListSecurityConfigurations` | Lists all security configurations |
-| `AddTags` | Adds tags to a cluster |
-| `RemoveTags` | Removes tags from a cluster |
+| `AddTags` | Adds tags to a cluster or Studio |
+| `RemoveTags` | Removes tags from a cluster or Studio |
+| `CreateStudio` | Creates an EMR Studio and returns its `StudioId` and access URL |
+| `DescribeStudio` | Returns the configuration of a Studio |
+| `ListStudios` | Lists Studios in the account |
+| `UpdateStudio` | Updates a Studio's name, description, subnets, or default S3 location |
+| `DeleteStudio` | Deletes a Studio |
 <!-- floci:actions:end -->
 
 ## Example

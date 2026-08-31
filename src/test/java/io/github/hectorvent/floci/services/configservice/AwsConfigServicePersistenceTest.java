@@ -5,11 +5,13 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.configservice.model.AggregationAuthorization;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRule;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRuleSource;
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorder;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
 import io.github.hectorvent.floci.services.configservice.model.RecordingGroup;
+import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -39,6 +41,9 @@ class AwsConfigServicePersistenceTest {
                 "arn:aws:iam::000000000000:role/config", new RecordingGroup(true, false, null)));
         first.putDeliveryChannel(REGION,
                 new DeliveryChannel("default", "config-bucket", null, null, null, null));
+        first.putRetentionConfiguration(REGION, 90);
+        AggregationAuthorization auth = first.putAggregationAuthorization(REGION, "123456789012", "us-west-2",
+                List.of(Map.of("Key", "env", "Value", "prod")));
         first.tagResource(rule.configRuleArn(), List.of(Map.of("Key", "env", "Value", "prod")));
 
         AwsConfigService reloaded = serviceWithStorage(storage);
@@ -52,7 +57,14 @@ class AwsConfigServicePersistenceTest {
                 reloaded.describeConfigurationRecorders(REGION, null).getFirst().name());
         assertEquals("config-bucket",
                 reloaded.describeDeliveryChannels(REGION, null).getFirst().s3BucketName());
+        RetentionConfiguration retention = reloaded.describeRetentionConfigurations(REGION, null).getFirst();
+        assertEquals("default", retention.name());
+        assertEquals(90, retention.retentionPeriodInDays());
         assertEquals("prod", reloaded.listTagsForResource(rule.configRuleArn()).getFirst().get("Value"));
+        assertEquals(List.of("123456789012"),
+                reloaded.describeAggregationAuthorizations(REGION).stream()
+                        .map(AggregationAuthorization::authorizedAccountId).toList());
+        assertEquals("prod", reloaded.listTagsForResource(auth.aggregationAuthorizationArn()).getFirst().get("Value"));
     }
 
     @Test

@@ -139,6 +139,65 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_ampWorkspacesHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("aps-workspaces.us-east-1.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("aps-workspaces-fips.us-west-2.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertTrue(dns.resolveARecord("aps.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("aps-workspaces.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
+    void resolveARecord_openSearchHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("search-mydomain-a1b2c3.us-east-1.es.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("search-dp-songs-ffffff.us-west-2.aos.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertTrue(dns.resolveARecord("es.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("search-mydomain.es.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
+    void resolveARecord_dsqlHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("ac0a36b1677f42a68a3b84dde8.dsql.us-east-1.on.aws", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("abc.dsql.us-west-2.on.aws", "172.19.0.2").orElseThrow());
+        assertTrue(dns.resolveARecord("dsql.us-east-1.on.aws", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("abc.dsql.amazonaws.com", "172.19.0.2").isEmpty());
+        assertFalse(EmbeddedDnsServer.isDsqlHost("not-a-dsql-host"));
+        assertTrue(EmbeddedDnsServer.isDsqlHost("ac0a36b1677f42a68a3b84dde8.dsql.us-east-1.on.aws"));
+    }
+
+    @Test
+    void resolveARecord_rumDataplaneHostsMapToFloci() {
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("dataplane.rum.us-east-1.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertEquals(
+                "172.19.0.2",
+                dns.resolveARecord("dataplane.rum-fips.us-west-2.amazonaws.com", "172.19.0.2")
+                        .orElseThrow());
+        assertTrue(dns.resolveARecord("rum.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("dataplane.rum.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(EmbeddedDnsServer.isRumDataplaneHost("dataplane.rum.us-east-1.amazonaws.com"));
+        assertFalse(EmbeddedDnsServer.isRumDataplaneHost("rum.us-east-1.amazonaws.com"));
+    }
+
+    @Test
     void resolveARecord_prefersEc2PrivateDnsAddressOverFlociWildcard() {
         assertEquals(
                 "172.16.128.9",

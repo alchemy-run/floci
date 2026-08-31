@@ -179,7 +179,8 @@ public class EmbeddedDnsServer {
      * through {@code AWS_ENDPOINT_URL}).
      */
     static boolean isAwsDataPlaneHost(String name) {
-        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name);
+        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name)
+                || isAmpWorkspacesHost(name) || isOpenSearchHost(name) || isDsqlHost(name);
     }
 
     /**
@@ -222,6 +223,47 @@ public class EmbeddedDnsServer {
             return false;
         }
         return name.toLowerCase().matches("[a-z0-9-]+\\.execute-api\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * AMP Prometheus data-plane ({@code aps-workspaces.{region}.amazonaws.com}).
+     * Alchemy's RemoteWrite / QueryMetrics bindings {@code fetch()} the advertised
+     * {@code prometheusEndpoint}; {@code AWS_ENDPOINT_URL} is not applied.
+     */
+    static boolean isAmpWorkspacesHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches("aps-workspaces(-fips)?\\.[a-z0-9-]+\\.amazonaws\\.com");
+    }
+
+    /**
+     * OpenSearch domain data-plane ({@code search-{name}-{id}.{region}.es.amazonaws.com}
+     * and the {@code .aos.} dualstack variant). Alchemy's DomainRead/Write
+     * bindings {@code fetch()} the advertised {@code Endpoint}; {@code AWS_ENDPOINT_URL}
+     * is not applied because the client overrides the host with that hostname.
+     */
+    static boolean isOpenSearchHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        String lower = name.toLowerCase();
+        return lower.matches("[a-z0-9-]+\\.[a-z0-9-]+\\.es\\.amazonaws\\.com")
+                || lower.matches("[a-z0-9-]+\\.[a-z0-9-]+\\.aos\\.amazonaws\\.com");
+    }
+
+    /**
+     * Aurora DSQL public Postgres-wire endpoint
+     * ({@code {clusterId}.dsql.{region}.on.aws}). Alchemy's {@code DSQL.Connect}
+     * binding opens a TLS socket to this hostname; {@code AWS_ENDPOINT_URL} is
+     * not applied because the client overrides the host with the advertised
+     * cluster endpoint.
+     */
+    public static boolean isDsqlHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches("[a-z0-9-]+\\.dsql\\.[a-z0-9-]+\\.on\\.aws");
     }
 
     Optional<String> resolveEc2PrivateDnsName(String name) {

@@ -5,6 +5,19 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
+import io.github.hectorvent.floci.services.apprunner.AppRunnerJsonHandler;
+import io.github.hectorvent.floci.services.b2bi.B2biJsonHandler;
+import io.github.hectorvent.floci.services.codeconnections.CodeConnectionsJsonHandler;
+import io.github.hectorvent.floci.services.healthlake.HealthLakeJsonHandler;
+import io.github.hectorvent.floci.services.mailmanager.MailManagerJsonHandler;
+import io.github.hectorvent.floci.services.smsvoice.SmsVoiceJsonHandler;
+import io.github.hectorvent.floci.services.iotfleetwise.IotFleetWiseJsonHandler;
+import io.github.hectorvent.floci.services.keyspaces.KeyspacesJsonHandler;
+import io.github.hectorvent.floci.services.keyspacesstreams.KeyspacesStreamsJsonHandler;
+import io.github.hectorvent.floci.services.mwaaserverless.MwaaServerlessJsonHandler;
+import io.github.hectorvent.floci.services.networkfirewall.NetworkFirewallJsonHandler;
+import io.github.hectorvent.floci.services.opensearchserverless.OpenSearchServerlessJsonHandler;
+import io.github.hectorvent.floci.services.paymentcryptography.PaymentCryptographyJsonHandler;
 import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
@@ -13,6 +26,9 @@ import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamsJsonHandler;
 import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsJsonHandler;
+import io.github.hectorvent.floci.services.timestream.TimestreamJsonHandler;
+import io.github.hectorvent.floci.services.timestreaminfluxdb.TimestreamInfluxDbJsonHandler;
+import io.github.hectorvent.floci.services.verifiedpermissions.VerifiedPermissionsJsonHandler;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -45,6 +61,22 @@ public class AwsJsonController {
     private final StepFunctionsJsonHandler sfnJsonHandler;
     private final CloudWatchMetricsJsonHandler cloudWatchMetricsJsonHandler;
     private final CloudControlJsonHandler cloudControlJsonHandler;
+    private final AppRunnerJsonHandler appRunnerJsonHandler;
+    private final B2biJsonHandler b2biJsonHandler;
+    private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
+    private final HealthLakeJsonHandler healthLakeJsonHandler;
+    private final MailManagerJsonHandler mailManagerJsonHandler;
+    private final SmsVoiceJsonHandler smsVoiceJsonHandler;
+    private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
+    private final KeyspacesJsonHandler keyspacesJsonHandler;
+    private final KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler;
+    private final MwaaServerlessJsonHandler mwaaServerlessJsonHandler;
+    private final NetworkFirewallJsonHandler networkFirewallJsonHandler;
+    private final OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler;
+    private final PaymentCryptographyJsonHandler paymentCryptographyJsonHandler;
+    private final TimestreamJsonHandler timestreamJsonHandler;
+    private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
+    private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -54,7 +86,23 @@ public class AwsJsonController {
                              SqsJsonHandler sqsJsonHandler, SnsJsonHandler snsJsonHandler,
                              StepFunctionsJsonHandler sfnJsonHandler,
                              CloudWatchMetricsJsonHandler cloudWatchMetricsJsonHandler,
-                             CloudControlJsonHandler cloudControlJsonHandler) {
+                             CloudControlJsonHandler cloudControlJsonHandler,
+                             AppRunnerJsonHandler appRunnerJsonHandler,
+                             B2biJsonHandler b2biJsonHandler,
+                             CodeConnectionsJsonHandler codeConnectionsJsonHandler,
+                             HealthLakeJsonHandler healthLakeJsonHandler,
+                             MailManagerJsonHandler mailManagerJsonHandler,
+                             SmsVoiceJsonHandler smsVoiceJsonHandler,
+                             IotFleetWiseJsonHandler iotFleetWiseJsonHandler,
+                             KeyspacesJsonHandler keyspacesJsonHandler,
+                             KeyspacesStreamsJsonHandler keyspacesStreamsJsonHandler,
+                             MwaaServerlessJsonHandler mwaaServerlessJsonHandler,
+                             NetworkFirewallJsonHandler networkFirewallJsonHandler,
+                             OpenSearchServerlessJsonHandler openSearchServerlessJsonHandler,
+                             PaymentCryptographyJsonHandler paymentCryptographyJsonHandler,
+                             TimestreamJsonHandler timestreamJsonHandler,
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler,
+                             VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -66,6 +114,22 @@ public class AwsJsonController {
         this.sfnJsonHandler = sfnJsonHandler;
         this.cloudWatchMetricsJsonHandler = cloudWatchMetricsJsonHandler;
         this.cloudControlJsonHandler = cloudControlJsonHandler;
+        this.appRunnerJsonHandler = appRunnerJsonHandler;
+        this.b2biJsonHandler = b2biJsonHandler;
+        this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
+        this.healthLakeJsonHandler = healthLakeJsonHandler;
+        this.mailManagerJsonHandler = mailManagerJsonHandler;
+        this.smsVoiceJsonHandler = smsVoiceJsonHandler;
+        this.iotFleetWiseJsonHandler = iotFleetWiseJsonHandler;
+        this.keyspacesJsonHandler = keyspacesJsonHandler;
+        this.keyspacesStreamsJsonHandler = keyspacesStreamsJsonHandler;
+        this.mwaaServerlessJsonHandler = mwaaServerlessJsonHandler;
+        this.networkFirewallJsonHandler = networkFirewallJsonHandler;
+        this.openSearchServerlessJsonHandler = openSearchServerlessJsonHandler;
+        this.paymentCryptographyJsonHandler = paymentCryptographyJsonHandler;
+        this.timestreamJsonHandler = timestreamJsonHandler;
+        this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
+        this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
     }
 
     @POST
@@ -112,6 +176,23 @@ public class AwsJsonController {
                 case "states" -> sfnJsonHandler.handle(action, request, region);
                 case "monitoring" -> cloudWatchMetricsJsonHandler.handle(action, request, region);
                 case "cloudcontrol" -> cloudControlJsonHandler.handle(action, request, region);
+                case "apprunner" -> appRunnerJsonHandler.handle(action, request, region);
+                case "b2bi" -> b2biJsonHandler.handle(action, request, region);
+                case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
+                case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
+                case "mailmanager" -> mailManagerJsonHandler.handle(action, request, region);
+                case "sms-voice" -> smsVoiceJsonHandler.handle(action, request, region);
+                case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
+                case "cassandra" -> keyspacesJsonHandler.handle(action, request, region);
+                case "keyspacesstreams" -> keyspacesStreamsJsonHandler.handle(action, request, region);
+                case "mwaaserverless" -> mwaaServerlessJsonHandler.handle(action, request, region);
+                case "network-firewall" -> networkFirewallJsonHandler.handle(action, request, region);
+                case "aoss" -> openSearchServerlessJsonHandler.handle(action, request, region);
+                case "payment-cryptography" -> paymentCryptographyJsonHandler.handle(action, request, region);
+                case "timestream" -> timestreamJsonHandler.handle(action, request, region,
+                        httpHeaders.getHeaderString("Host"));
+                case "timestream-influxdb" -> timestreamInfluxDbJsonHandler.handle(action, request, region);
+                case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

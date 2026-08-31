@@ -7,12 +7,16 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.codebuild.model.Build;
+import io.github.hectorvent.floci.services.codebuild.model.BuildBatch;
 import io.github.hectorvent.floci.services.codebuild.model.BuildPhase;
+import io.github.hectorvent.floci.services.codebuild.model.CommandExecution;
 import io.github.hectorvent.floci.services.codebuild.model.Project;
 import io.github.hectorvent.floci.services.codebuild.model.ProjectArtifacts;
 import io.github.hectorvent.floci.services.codebuild.model.ProjectEnvironment;
 import io.github.hectorvent.floci.services.codebuild.model.ProjectSource;
+import io.github.hectorvent.floci.services.codebuild.model.Report;
 import io.github.hectorvent.floci.services.codebuild.model.ReportGroup;
+import io.github.hectorvent.floci.services.codebuild.model.Sandbox;
 import io.github.hectorvent.floci.services.codebuild.model.SourceCredential;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,6 +24,7 @@ import jakarta.inject.Inject;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -37,10 +42,20 @@ public class CodeBuildService {
     private Map<String, Map<String, ReportGroup>> reportGroups = new ConcurrentHashMap<>();
     // key: region -> arn -> source credential (token is stored but never returned)
     private Map<String, Map<String, SourceCredential>> sourceCredentials = new ConcurrentHashMap<>();
+    // key: region -> arn -> resource policy document
+    private Map<String, Map<String, String>> resourcePolicies = new ConcurrentHashMap<>();
     // key: region -> buildId -> build (transient: builds are runtime state)
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, Build>> builds = new ConcurrentHashMap<>();
     // key: region:projectName -> build counter (transient)
     private final ConcurrentHashMap<String, AtomicLong> buildCounters = new ConcurrentHashMap<>();
+    // key: region -> batchId -> batch (transient)
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, BuildBatch>> buildBatches = new ConcurrentHashMap<>();
+    // key: region -> sandboxId -> sandbox (transient)
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, Sandbox>> sandboxes = new ConcurrentHashMap<>();
+    // key: region -> commandId -> command execution (transient)
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, CommandExecution>> commandExecutions = new ConcurrentHashMap<>();
+    // key: region -> reportArn -> report (transient)
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, Report>> reports = new ConcurrentHashMap<>();
 
     private final CodeBuildRunner runner;
     private final EmulatorConfig config;
@@ -64,9 +79,12 @@ public class CodeBuildService {
                 new TypeReference<Map<String, Map<String, ReportGroup>>>() {});
         this.sourceCredentials = storageBacked("codebuild-source-credentials.json",
                 new TypeReference<Map<String, Map<String, SourceCredential>>>() {});
+        this.resourcePolicies = storageBacked("codebuild-resource-policies.json",
+                new TypeReference<Map<String, Map<String, String>>>() {});
         normalizeRegionMaps(projects);
         normalizeRegionMaps(reportGroups);
         normalizeRegionMaps(sourceCredentials);
+        normalizeRegionMaps(resourcePolicies);
     }
 
     private <V> Map<String, V> storageBacked(String fileName, TypeReference<Map<String, V>> typeReference) {
@@ -104,8 +122,28 @@ public class CodeBuildService {
         return sourceCredentials.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
     }
 
+    private Map<String, String> resourcePoliciesFor(String region) {
+        return resourcePolicies.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
     private Map<String, Build> buildsFor(String region) {
         return builds.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, BuildBatch> buildBatchesFor(String region) {
+        return buildBatches.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, Sandbox> sandboxesFor(String region) {
+        return sandboxes.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, CommandExecution> commandExecutionsFor(String region) {
+        return commandExecutions.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, Report> reportsFor(String region) {
+        return reports.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
     }
 
     // ---- Projects ----
@@ -160,7 +198,8 @@ public class CodeBuildService {
         project.setTags(tags);
         project.setCreated(now);
         project.setLastModified(now);
-        project.setLogsConfig(logsConfig);
+        applyEnvironmentDefaults(environment);
+        project.setLogsConfig(logsConfig != null ? logsConfig : defaultLogsConfig());
         project.setVpcConfig(vpcConfig);
         project.setConcurrentBuildLimit(concurrentBuildLimit);
         project.setProjectVisibility("PRIVATE");
@@ -195,7 +234,10 @@ public class CodeBuildService {
         if (sourceVersion != null) { project.setSourceVersion(sourceVersion); }
         if (artifacts != null) { project.setArtifacts(artifacts); }
         if (secondaryArtifacts != null) { project.setSecondaryArtifacts(secondaryArtifacts); }
-        if (environment != null) { project.setEnvironment(environment); }
+        if (environment != null) {
+            applyEnvironmentDefaults(environment);
+            project.setEnvironment(environment);
+        }
         if (serviceRole != null) { project.setServiceRole(serviceRole); }
         if (timeoutInMinutes != null) { project.setTimeoutInMinutes(timeoutInMinutes); }
         if (queuedTimeoutInMinutes != null) { project.setQueuedTimeoutInMinutes(queuedTimeoutInMinutes); }
@@ -212,8 +254,13 @@ public class CodeBuildService {
 
     public void deleteProject(String region, String name) {
         Map<String, Project> store = projectsFor(region);
-        if (store.remove(name) == null) {
+        Project removed = store.remove(name);
+        if (removed == null) {
             throw new AwsException("ResourceNotFoundException", "Project not found: " + name, 400);
+        }
+        if (removed.getArn() != null) {
+            resourcePoliciesFor(region).remove(removed.getArn());
+            persistRegion(resourcePolicies, region);
         }
         persistRegion(projects, region);
     }
@@ -285,6 +332,8 @@ public class CodeBuildService {
         if (store.remove(arn) == null) {
             throw new AwsException("ResourceNotFoundException", "Report group not found: " + arn, 400);
         }
+        resourcePoliciesFor(region).remove(arn);
+        persistRegion(resourcePolicies, region);
         persistRegion(reportGroups, region);
     }
 
@@ -393,6 +442,32 @@ public class CodeBuildService {
         }
     }
 
+    private static Map<String, Object> defaultLogsConfig() {
+        Map<String, Object> logs = new LinkedHashMap<>();
+        logs.put("cloudWatchLogs", Map.of("status", "ENABLED"));
+        logs.put("s3Logs", Map.of("status", "DISABLED"));
+        return logs;
+    }
+
+    private static void applyEnvironmentDefaults(ProjectEnvironment environment) {
+        if (environment == null) {
+            return;
+        }
+        if (environment.getType() == null || environment.getType().isBlank()) {
+            environment.setType("LINUX_CONTAINER");
+        }
+        if (environment.getComputeType() == null || environment.getComputeType().isBlank()) {
+            environment.setComputeType("BUILD_GENERAL1_SMALL");
+        }
+        if (environment.getEnvironmentVariables() != null) {
+            for (Map<String, String> variable : environment.getEnvironmentVariables()) {
+                if (variable.get("type") == null || variable.get("type").isBlank()) {
+                    variable.put("type", "PLAINTEXT");
+                }
+            }
+        }
+    }
+
     // ---- Builds ----
 
     public Build startBuild(String region, String account, String projectName,
@@ -490,12 +565,22 @@ public class CodeBuildService {
                 .collect(Collectors.toList());
     }
 
-    public void stopBuild(String region, String buildId) {
+    public Build stopBuild(String region, String buildId) {
         Build build = buildsFor(region).get(buildId);
         if (build == null) {
             throw new AwsException("ResourceNotFoundException", "Build not found: " + buildId, 400);
         }
         runner.stopBuild(buildId);
+        // AWS StopBuild returns a terminal/stopping snapshot immediately; the
+        // container teardown happens in the background and must not leave the
+        // build stuck IN_PROGRESS if Docker is slow or the image is missing.
+        if (!Boolean.TRUE.equals(build.getBuildComplete())) {
+            build.setBuildStatus("STOPPED");
+            build.setBuildComplete(true);
+            build.setCurrentPhase("COMPLETED");
+            build.setEndTime(Instant.now().toEpochMilli() / 1000.0);
+        }
+        return build;
     }
 
     public Build retryBuild(String region, String account, String buildId) {
@@ -503,6 +588,316 @@ public class CodeBuildService {
         return startBuild(region, account, original.getProjectName(),
                 null, original.getEnvironment(), original.getArtifacts(),
                 null, original.getTimeoutInMinutes(), null, null);
+    }
+
+    public void applyProjectOptionalFields(String region, String name,
+                                           Map<String, Object> cache,
+                                           Map<String, Object> buildBatchConfig) {
+        Project project = projectsFor(region).get(name);
+        if (project == null) {
+            return;
+        }
+        if (cache != null) {
+            project.setCache(cache);
+        }
+        if (buildBatchConfig != null) {
+            project.setBuildBatchConfig(buildBatchConfig);
+        }
+        persistRegion(projects, region);
+    }
+
+    public Map<String, Object> batchDeleteBuilds(String region, List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new AwsException("InvalidInputException", "ids is required", 400);
+        }
+        List<String> deleted = new ArrayList<>();
+        List<Map<String, String>> notDeleted = new ArrayList<>();
+        Map<String, Build> store = buildsFor(region);
+        for (String id : ids) {
+            // Standalone (non-batch) builds cannot be deleted — AWS reports them
+            // in buildsNotDeleted with INVALID_INPUT_EXCEPTION.
+            Map<String, String> entry = new java.util.HashMap<>();
+            entry.put("id", id);
+            entry.put("statusCode", store.containsKey(id) ? "INVALID_INPUT_EXCEPTION" : "BUILD_NOT_FOUND");
+            notDeleted.add(entry);
+        }
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("buildsDeleted", deleted);
+        result.put("buildsNotDeleted", notDeleted);
+        return result;
+    }
+
+    public void invalidateProjectCache(String region, String projectName) {
+        requireProject(region, projectName);
+    }
+
+    public BuildBatch startBuildBatch(String region, String account, String projectName) {
+        Project project = requireProject(region, projectName);
+        if (project.getBuildBatchConfig() == null || project.getBuildBatchConfig().isEmpty()) {
+            throw new AwsException("InvalidInputException",
+                    "Batch build is not configured for this project", 400);
+        }
+        String id = projectName + ":" + UUID.randomUUID();
+        BuildBatch batch = new BuildBatch();
+        batch.setId(id);
+        batch.setArn(AwsArnUtils.Arn.of("codebuild", region, account, "build-batch/" + id).toString());
+        batch.setProjectName(projectName);
+        batch.setBuildBatchStatus("IN_PROGRESS");
+        batch.setComplete(false);
+        batch.setCurrentPhase("SUBMITTED");
+        batch.setStartTime(Instant.now().toEpochMilli() / 1000.0);
+        batch.setBuildBatchNumber(1L);
+        buildBatchesFor(region).put(id, batch);
+        return batch;
+    }
+
+    public List<BuildBatch> batchGetBuildBatches(String region, List<String> ids) {
+        Map<String, BuildBatch> store = buildBatchesFor(region);
+        return ids.stream().map(store::get).filter(b -> b != null).collect(Collectors.toList());
+    }
+
+    public List<String> listBuildBatches(String region) {
+        return new ArrayList<>(buildBatchesFor(region).keySet());
+    }
+
+    public List<String> listBuildBatchesForProject(String region, String projectName) {
+        requireProject(region, projectName);
+        return buildBatchesFor(region).values().stream()
+                .filter(b -> projectName.equals(b.getProjectName()))
+                .map(BuildBatch::getId)
+                .collect(Collectors.toList());
+    }
+
+    public BuildBatch stopBuildBatch(String region, String id) {
+        BuildBatch batch = buildBatchesFor(region).get(id);
+        if (batch == null) {
+            throw new AwsException("ResourceNotFoundException", "Build batch not found: " + id, 400);
+        }
+        batch.setBuildBatchStatus("STOPPED");
+        batch.setComplete(true);
+        batch.setCurrentPhase("STOPPED");
+        batch.setEndTime(Instant.now().toEpochMilli() / 1000.0);
+        return batch;
+    }
+
+    public BuildBatch retryBuildBatch(String region, String account, String id) {
+        BuildBatch original = buildBatchesFor(region).get(id);
+        if (original == null) {
+            throw new AwsException("ResourceNotFoundException", "Build batch not found: " + id, 400);
+        }
+        return startBuildBatch(region, account, original.getProjectName());
+    }
+
+    public Map<String, Object> deleteBuildBatch(String region, String id) {
+        BuildBatch batch = buildBatchesFor(region).remove(id);
+        if (batch == null) {
+            throw new AwsException("InvalidInputException", "Build batch not found: " + id, 400);
+        }
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("statusCode", "SUCCEEDED");
+        result.put("buildsDeleted", List.of());
+        result.put("buildsNotDeleted", List.of());
+        return result;
+    }
+
+    public Sandbox startSandbox(String region, String account, String projectName) {
+        requireProject(region, projectName);
+        String id = projectName + ":" + UUID.randomUUID();
+        double now = Instant.now().toEpochMilli() / 1000.0;
+        Sandbox sandbox = new Sandbox();
+        sandbox.setId(id);
+        sandbox.setArn(AwsArnUtils.Arn.of("codebuild", region, account, "sandbox/" + id).toString());
+        sandbox.setProjectName(projectName);
+        sandbox.setStatus("RUNNING");
+        sandbox.setRequestTime(now);
+        sandbox.setStartTime(now);
+        sandboxesFor(region).put(id, sandbox);
+        return sandbox;
+    }
+
+    public Sandbox stopSandbox(String region, String id) {
+        Sandbox sandbox = sandboxesFor(region).get(id);
+        if (sandbox == null) {
+            throw new AwsException("ResourceNotFoundException", "Sandbox not found: " + id, 400);
+        }
+        sandbox.setStatus("STOPPED");
+        sandbox.setEndTime(Instant.now().toEpochMilli() / 1000.0);
+        return sandbox;
+    }
+
+    public List<Sandbox> batchGetSandboxes(String region, List<String> ids) {
+        Map<String, Sandbox> store = sandboxesFor(region);
+        return ids.stream().map(store::get).filter(s -> s != null).collect(Collectors.toList());
+    }
+
+    public List<String> listSandboxes(String region) {
+        return new ArrayList<>(sandboxesFor(region).keySet());
+    }
+
+    public List<String> listSandboxesForProject(String region, String projectName) {
+        requireProject(region, projectName);
+        return sandboxesFor(region).values().stream()
+                .filter(s -> projectName.equals(s.getProjectName()))
+                .map(Sandbox::getId)
+                .collect(Collectors.toList());
+    }
+
+    public CommandExecution startCommandExecution(String region, String sandboxId, String command, String type) {
+        Sandbox sandbox = sandboxesFor(region).get(sandboxId);
+        if (sandbox == null) {
+            throw new AwsException("ResourceNotFoundException", "Sandbox not found: " + sandboxId, 400);
+        }
+        if (command == null || command.isBlank()) {
+            throw new AwsException("InvalidInputException", "command is required", 400);
+        }
+        double now = Instant.now().toEpochMilli() / 1000.0;
+        CommandExecution execution = new CommandExecution();
+        execution.setId(UUID.randomUUID().toString());
+        execution.setSandboxId(sandboxId);
+        execution.setSandboxArn(sandbox.getArn());
+        execution.setCommand(command);
+        execution.setType(type != null ? type : "SHELL");
+        execution.setStatus("SUCCEEDED");
+        execution.setSubmitTime(now);
+        execution.setStartTime(now);
+        execution.setEndTime(now);
+        execution.setExitCode("0");
+        commandExecutionsFor(region).put(execution.getId(), execution);
+        return execution;
+    }
+
+    public List<CommandExecution> batchGetCommandExecutions(String region, String sandboxId, List<String> ids) {
+        Map<String, CommandExecution> store = commandExecutionsFor(region);
+        return ids.stream()
+                .map(store::get)
+                .filter(c -> c != null && (sandboxId == null || sandboxId.equals(c.getSandboxId())))
+                .collect(Collectors.toList());
+    }
+
+    public List<CommandExecution> listCommandExecutionsForSandbox(String region, String sandboxId) {
+        Sandbox sandbox = sandboxesFor(region).get(sandboxId);
+        if (sandbox == null) {
+            throw new AwsException("ResourceNotFoundException", "Sandbox not found: " + sandboxId, 400);
+        }
+        return commandExecutionsFor(region).values().stream()
+                .filter(c -> sandboxId.equals(c.getSandboxId()))
+                .collect(Collectors.toList());
+    }
+
+    public List<String> listReportsForReportGroup(String region, String reportGroupArn) {
+        if (reportGroupsFor(region).get(reportGroupArn) == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Report group not found: " + reportGroupArn, 400);
+        }
+        return reportsFor(region).values().stream()
+                .filter(r -> reportGroupArn.equals(r.getReportGroupArn()))
+                .map(Report::getArn)
+                .collect(Collectors.toList());
+    }
+
+    public List<Report> batchGetReports(String region, List<String> arns) {
+        Map<String, Report> store = reportsFor(region);
+        return arns.stream().map(store::get).filter(r -> r != null).collect(Collectors.toList());
+    }
+
+    public void describeTestCases(String region, String reportArn) {
+        // Unknown reports return an empty list (AWS DescribeTestCases is
+        // report-scoped; missing reports are not a hard error here).
+        if (reportArn == null || reportArn.isBlank()) {
+            throw new AwsException("InvalidInputException", "reportArn is required", 400);
+        }
+    }
+
+    public void describeCodeCoverages(String region, String reportArn) {
+        if (reportArn == null || reportArn.isBlank()) {
+            throw new AwsException("InvalidInputException", "reportArn is required", 400);
+        }
+    }
+
+    public Map<String, Object> getReportGroupTrend(String region, String reportGroupArn, String trendField) {
+        if (reportGroupArn == null || reportGroupArn.isBlank()) {
+            throw new AwsException("InvalidInputException", "reportGroupArn is required", 400);
+        }
+        if (reportGroupsFor(region).get(reportGroupArn) == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Report group not found: " + reportGroupArn, 400);
+        }
+        if (trendField == null || trendField.isBlank()) {
+            throw new AwsException("InvalidInputException", "trendField is required", 400);
+        }
+        Map<String, Object> stats = new java.util.HashMap<>();
+        stats.put("average", "0");
+        stats.put("max", "0");
+        stats.put("min", "0");
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("stats", stats);
+        result.put("rawData", List.of());
+        return result;
+    }
+
+    public void deleteReport(String region, String arn) {
+        if (arn == null || arn.isBlank()) {
+            throw new AwsException("InvalidInputException", "arn is required", 400);
+        }
+        reportsFor(region).remove(arn);
+    }
+
+    public String getResourcePolicy(String region, String resourceArn) {
+        requirePolicyResource(region, resourceArn);
+        String policy = resourcePoliciesFor(region).get(resourceArn);
+        if (policy == null || policy.isBlank()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Resource policy not found for " + resourceArn, 400);
+        }
+        return policy;
+    }
+
+    public String putResourcePolicy(String region, String resourceArn, String policy) {
+        requirePolicyResource(region, resourceArn);
+        if (policy == null || policy.isBlank()) {
+            throw new AwsException("InvalidInputException", "policy is required", 400);
+        }
+        resourcePoliciesFor(region).put(resourceArn, policy);
+        persistRegion(resourcePolicies, region);
+        return resourceArn;
+    }
+
+    public void deleteResourcePolicy(String region, String resourceArn) {
+        requirePolicyResource(region, resourceArn);
+        String removed = resourcePoliciesFor(region).remove(resourceArn);
+        if (removed == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Resource policy not found for " + resourceArn, 400);
+        }
+        persistRegion(resourcePolicies, region);
+    }
+
+    private Project requireProject(String region, String projectName) {
+        if (projectName == null || projectName.isBlank()) {
+            throw new AwsException("InvalidInputException", "projectName is required", 400);
+        }
+        Project project = projectsFor(region).get(projectName);
+        if (project == null) {
+            throw new AwsException("ResourceNotFoundException", "Project not found: " + projectName, 400);
+        }
+        return project;
+    }
+
+    private void requirePolicyResource(String region, String resourceArn) {
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("InvalidInputException", "resourceArn is required", 400);
+        }
+        int projectIdx = resourceArn.indexOf(":project/");
+        if (projectIdx >= 0) {
+            String name = resourceArn.substring(projectIdx + ":project/".length());
+            if (projectsFor(region).containsKey(name)) {
+                return;
+            }
+        }
+        if (resourceArn.contains(":report-group/") && reportGroupsFor(region).containsKey(resourceArn)) {
+            return;
+        }
+        throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 400);
     }
 
     private Build copyBuild(Build source) {

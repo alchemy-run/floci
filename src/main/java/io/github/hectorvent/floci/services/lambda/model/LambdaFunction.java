@@ -51,6 +51,11 @@ public class LambdaFunction {
     private Map<String, Object> vpcConfig;
     /** Hyperplane ENIs created for this function's VpcConfig; released on delete. */
     private List<String> vpcEniIds = new ArrayList<>();
+    /**
+     * EFS access-point mounts ({@code Arn} + {@code LocalMountPath}) applied when the
+     * function container is launched. Empty means no mounts.
+     */
+    private List<Map<String, Object>> fileSystemConfigs = new ArrayList<>();
     private String codeSha256;
 
     /** Non-null only for hot-reload functions. Holds the Docker-host path bind-mounted into /var/task. */
@@ -173,6 +178,11 @@ public class LambdaFunction {
     public List<String> getVpcEniIds() { return vpcEniIds; }
     public void setVpcEniIds(List<String> vpcEniIds) {
         this.vpcEniIds = vpcEniIds != null ? vpcEniIds : new ArrayList<>();
+    }
+
+    public List<Map<String, Object>> getFileSystemConfigs() { return fileSystemConfigs; }
+    public void setFileSystemConfigs(List<Map<String, Object>> fileSystemConfigs) {
+        this.fileSystemConfigs = fileSystemConfigs != null ? fileSystemConfigs : new ArrayList<>();
     }
 
     public String getCodeSha256() { return codeSha256; }

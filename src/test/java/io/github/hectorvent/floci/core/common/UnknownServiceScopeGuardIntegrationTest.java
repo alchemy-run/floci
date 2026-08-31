@@ -39,9 +39,9 @@ class UnknownServiceScopeGuardIntegrationTest {
     }
 
     @Test
-    void securityhubScopedRestRequestGetsUnknownOperation() {
+    void connectScopedRestRequestGetsUnknownOperation() {
         given()
-            .header("Authorization", authorization("securityhub"))
+            .header("Authorization", authorization("connect"))
         .when()
             .get("/accounts")
         .then()

@@ -62,6 +62,16 @@ class EventBridgeListRuleNamesByTargetIntegrationTest {
         .then()
             .statusCode(200)
             .body("RuleNames", hasItem("list-by-target-rule"));
+
+        given()
+            .contentType(CT)
+            .header("X-Amz-Target", "AWSEvents.ListRuleNamesByTarget")
+            .body("{\"TargetArn\":\"%s:$LATEST\"}".formatted(TARGET))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("RuleNames", hasItem("list-by-target-rule"));
     }
 
     @Test

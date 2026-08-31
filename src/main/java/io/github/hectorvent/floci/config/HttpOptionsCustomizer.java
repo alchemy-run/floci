@@ -19,6 +19,12 @@ import jakarta.enterprise.context.ApplicationScoped;
  *       defaults to 64 KB per frame, which causes Netty to silently reject larger
  *       frames before the application-level size check in
  *       {@code WebSocketHandler} can fire.</li>
+ *   <li>Enables TCP keepalive. Vert.x defaults to {@code tcpKeepAlive=false}, so
+ *       Netty applies {@code SO_KEEPALIVE=false} on every accept. On some accepted
+ *       sockets (IPv4-mapped IPv6 / Docker, remote port 0) that {@code setsockopt}
+ *       throws {@code Invalid argument}, Netty refuses to register the channel, and
+ *       the client hangs — Lambda nested calls such as Textract {@code AnalyzeExpense}
+ *       never reach the JSON 1.1 handler.</li>
  * </ul>
  *
  * The overall request body size is still bounded by
@@ -46,6 +52,7 @@ public class HttpOptionsCustomizer implements HttpServerOptionsCustomizer {
         options.setMaxFormAttributeSize(-1);
         options.setMaxWebSocketFrameSize(MAX_WS_FRAME_SIZE);
         options.setMaxWebSocketMessageSize(MAX_WS_MESSAGE_SIZE);
+        options.setTcpKeepAlive(true);
     }
 
     @Override
@@ -53,5 +60,6 @@ public class HttpOptionsCustomizer implements HttpServerOptionsCustomizer {
         options.setMaxFormAttributeSize(-1);
         options.setMaxWebSocketFrameSize(MAX_WS_FRAME_SIZE);
         options.setMaxWebSocketMessageSize(MAX_WS_MESSAGE_SIZE);
+        options.setTcpKeepAlive(true);
     }
 }

@@ -13,6 +13,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,22 +36,20 @@ public class CurService {
 
     private static final Logger LOG = Logger.getLogger(CurService.class);
 
-    /** AWS hard limit per account: 5 report definitions. */
-    private static final int MAX_REPORTS_PER_ACCOUNT = 5;
+    /** AWS hard limit per account: 10 report definitions. */
+    private static final int MAX_REPORTS_PER_ACCOUNT = 10;
     /** AWS allows the report name to contain alphanumerics, hyphens, and underscores. */
     private static final java.util.regex.Pattern REPORT_NAME_PATTERN =
             java.util.regex.Pattern.compile("[A-Za-z0-9_-]+");
 
     private static final Set<String> ALLOWED_TIME_UNITS = Set.of("HOURLY", "DAILY", "MONTHLY");
     /**
-     * Floci only emits Parquet at the moment. Real CUR also accepts
-     * {@code textORcsv} but Floci's emission engine writes Parquet
-     * unconditionally, so accepting {@code textORcsv} would let a definition
-     * persist that no consumer can read. Reject it explicitly until CSV
-     * support lands in a follow-up PR.
+     * AWS CUR accepts {@code textORcsv} (ZIP/GZIP) and {@code Parquet}
+     * (Parquet compression). Emission still writes Parquet only; CSV
+     * definitions are management-plane only until a CSV emitter lands.
      */
-    private static final Set<String> ALLOWED_FORMATS = Set.of("Parquet");
-    private static final Set<String> ALLOWED_COMPRESSIONS = Set.of("Parquet");
+    private static final Set<String> ALLOWED_FORMATS = Set.of("textORcsv", "Parquet");
+    private static final Set<String> ALLOWED_COMPRESSIONS = Set.of("ZIP", "GZIP", "Parquet");
     private static final Set<String> ALLOWED_VERSIONING = Set.of("CREATE_NEW_REPORT", "OVERWRITE_REPORT");
     private static final Set<String> ALLOWED_ARTIFACTS = Set.of("REDSHIFT", "QUICKSIGHT", "ATHENA");
     private static final Set<String> ALLOWED_SCHEMA_ELEMENTS = Set.of("RESOURCES", "SPLIT_COST_ALLOCATION_DATA", "MANUAL_DISCOUNT_COMPATIBILITY");
@@ -115,6 +114,7 @@ public class CurService {
         incoming.setReportStatus(existing.getReportStatus() == null ? "PENDING" : existing.getReportStatus());
         incoming.setOwnerAccountId(existing.getOwnerAccountId() != null
                 ? existing.getOwnerAccountId() : regionResolver.getAccountId());
+        incoming.setTags(existing.getTags());
         store.put(key, incoming);
         LOG.infov("Modified CUR report: {0}", reportName);
         return incoming;
@@ -146,7 +146,7 @@ public class CurService {
         } else {
             all = store.scan(key -> true);
         }
-        Map<String, List<ReportDefinition>> result = new java.util.LinkedHashMap<>();
+        Map<String, List<ReportDefinition>> result = new LinkedHashMap<>();
         for (ReportDefinition def : all) {
             String accountId = def.getOwnerAccountId();
             if (accountId == null || accountId.isEmpty()) {
@@ -211,6 +211,48 @@ public class CurService {
         });
     }
 
+    /**
+     * {@code ListTagsForResource} — tags attached to the named report.
+     * Throws {@code ResourceNotFoundException} when the report does not exist.
+     */
+    public Map<String, String> listTagsForResource(String reportName, String region) {
+        requireNonEmpty(reportName, "ReportName");
+        return new LinkedHashMap<>(requireReport(region, reportName).getTags());
+    }
+
+    /**
+     * {@code TagResource} — upserts the given tags onto the named report.
+     */
+    public void tagResource(String reportName, Map<String, String> incoming, String region) {
+        requireNonEmpty(reportName, "ReportName");
+        if (incoming == null || incoming.isEmpty()) {
+            throw new AwsException("ValidationException", "Tags is required.", 400);
+        }
+        ReportDefinition existing = requireReport(region, reportName);
+        existing.getTags().putAll(incoming);
+        existing.setLastUpdatedDate(Instant.now());
+        store.put(compositeKey(region, reportName), existing);
+    }
+
+    /**
+     * {@code UntagResource} — removes the given keys from the named report.
+     * Missing keys are ignored (AWS is idempotent on unknown tag keys).
+     */
+    public void untagResource(String reportName, List<String> tagKeys, String region) {
+        requireNonEmpty(reportName, "ReportName");
+        ReportDefinition existing = requireReport(region, reportName);
+        if (tagKeys != null) {
+            Map<String, String> tags = existing.getTags();
+            for (String key : tagKeys) {
+                if (key != null) {
+                    tags.remove(key);
+                }
+            }
+        }
+        existing.setLastUpdatedDate(Instant.now());
+        store.put(compositeKey(region, reportName), existing);
+    }
+
     /** {@code DeleteReportDefinition} — removes a report; idempotent (returns null when absent). */
     public ReportDefinition deleteReportDefinition(String reportName, String region) {
         requireNonEmpty(reportName, "ReportName");
@@ -221,6 +263,12 @@ public class CurService {
             LOG.infov("Deleted CUR report: {0}", reportName);
         }
         return existing;
+    }
+
+    private ReportDefinition requireReport(String region, String reportName) {
+        return store.get(compositeKey(region, reportName)).orElseThrow(() -> new AwsException(
+                "ResourceNotFoundException",
+                "Report " + reportName + " not found.", 400));
     }
 
     private long countForCurrentAccount() {
@@ -243,6 +291,14 @@ public class CurService {
         requireOneOf(d.getTimeUnit(), ALLOWED_TIME_UNITS, "TimeUnit");
         requireOneOf(d.getFormat(), ALLOWED_FORMATS, "Format");
         requireOneOf(d.getCompression(), ALLOWED_COMPRESSIONS, "Compression");
+        if ("Parquet".equals(d.getFormat()) && !"Parquet".equals(d.getCompression())) {
+            throw new AwsException("ValidationException",
+                    "Compression must be Parquet when Format is Parquet.", 400);
+        }
+        if ("textORcsv".equals(d.getFormat()) && "Parquet".equals(d.getCompression())) {
+            throw new AwsException("ValidationException",
+                    "Compression must be ZIP or GZIP when Format is textORcsv.", 400);
+        }
         requireNonEmpty(d.getS3Bucket(), "S3Bucket");
         requireValidBucketName(d.getS3Bucket(), "S3Bucket");
         if (d.getS3Prefix() != null) {

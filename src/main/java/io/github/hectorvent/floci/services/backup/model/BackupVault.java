@@ -34,6 +34,9 @@ public class BackupVault {
     @JsonProperty("Tags")
     private Map<String, String> tags = new HashMap<>();
 
+    @JsonProperty("AccessPolicy")
+    private String accessPolicy;
+
     public BackupVault() {}
 
     public String getBackupVaultName() { return backupVaultName; }
@@ -56,4 +59,7 @@ public class BackupVault {
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? tags : new HashMap<>(); }
+
+    public String getAccessPolicy() { return accessPolicy; }
+    public void setAccessPolicy(String accessPolicy) { this.accessPolicy = accessPolicy; }
 }

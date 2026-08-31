@@ -193,6 +193,51 @@ class S3VirtualHostIntegrationTest {
 
     @Test
     @Order(13)
+    void bucketTaggingViaVirtualHostRootPath() {
+        given()
+            .header("Host", HOST)
+            .contentType("application/xml")
+            .body("<Tagging><TagSet><Tag><Key>env</Key><Value>test</Value></Tag></TagSet></Tagging>")
+        .when()
+            .put("/?tagging")
+        .then()
+            .statusCode(204);
+
+        given()
+            .header("Host", HOST)
+        .when()
+            .get("/?tagging")
+        .then()
+            .statusCode(200)
+            .body(containsString("<Key>env</Key>"))
+            .body(containsString("<Value>test</Value>"));
+    }
+
+    @Test
+    @Order(14)
+    void bucketTaggingViaDistilledVirtualHostPath() {
+        // Distilled S3 keeps `/{Bucket}?tagging` on the virtual-hosted URL.
+        given()
+            .header("Host", HOST)
+            .contentType("application/xml")
+            .body("<Tagging><TagSet><Tag><Key>distilled</Key><Value>yes</Value></Tag></TagSet></Tagging>")
+        .when()
+            .put("/" + BUCKET + "?tagging")
+        .then()
+            .statusCode(204);
+
+        given()
+            .header("Host", HOST)
+        .when()
+            .get("/" + BUCKET + "?tagging")
+        .then()
+            .statusCode(200)
+            .body(containsString("<Key>distilled</Key>"))
+            .body(containsString("<Value>yes</Value>"));
+    }
+
+    @Test
+    @Order(15)
     void headBucketReturns404ForMissingRegionQualifiedHost() {
         given()
             .header("Host", REGION_HOST)
@@ -203,7 +248,7 @@ class S3VirtualHostIntegrationTest {
     }
 
     @Test
-    @Order(14)
+    @Order(16)
     void createBucketViaRegionQualifiedVirtualHost() {
         given()
             .header("Host", REGION_HOST)
@@ -215,7 +260,7 @@ class S3VirtualHostIntegrationTest {
     }
 
     @Test
-    @Order(15)
+    @Order(17)
     void headBucketViaRegionQualifiedVirtualHost() {
         given()
             .header("Host", REGION_HOST)
@@ -227,7 +272,7 @@ class S3VirtualHostIntegrationTest {
     }
 
     @Test
-    @Order(16)
+    @Order(18)
     void putAndGetObjectViaRegionQualifiedVirtualHost() {
         given()
             .header("Host", REGION_HOST)
@@ -248,7 +293,7 @@ class S3VirtualHostIntegrationTest {
     }
 
     @Test
-    @Order(17)
+    @Order(19)
     void listBucketsViaLocalStackS3ServiceHost() {
         given()
             .header("Host", "s3.localhost.localstack.cloud")
@@ -261,7 +306,7 @@ class S3VirtualHostIntegrationTest {
     }
 
     @Test
-    @Order(18)
+    @Order(20)
     void listBucketsViaFlociS3ServiceHost() {
         given()
             .header("Host", "s3.localhost.floci.io")
@@ -274,7 +319,7 @@ class S3VirtualHostIntegrationTest {
     }
 
     @Test
-    @Order(20)
+    @Order(21)
     void cleanupAndDeleteBucket() {
         given().header("Host", HOST).delete("/hello.txt");
         given().header("Host", HOST).delete("/path/to/nested.json");

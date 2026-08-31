@@ -20,10 +20,13 @@ import io.github.hectorvent.floci.services.lambda.zip.CodeStore;
 import io.github.hectorvent.floci.services.lambda.zip.ZipExtractor;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
+import io.github.hectorvent.floci.services.efs.EfsService;
+import io.github.hectorvent.floci.services.efs.model.EfsAccessPoint;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.services.s3.model.S3ObjectUpdatedEvent;
 import io.github.hectorvent.floci.services.sqs.SqsService;
+import io.github.hectorvent.floci.services.xray.XRayService;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -39,9 +42,12 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -96,6 +102,17 @@ public class LambdaService {
     @Inject
     Instance<LambdaDurableService> durableServiceInstance;
     private LambdaDurableService durableService;
+
+    /** Optional: Active tracing records a function-level X-Ray segment on invoke. */
+    @Inject
+    Instance<XRayService> xrayServiceInstance;
+
+    /**
+     * Optional: validates FileSystemConfigs access-point ARNs against the EFS store.
+     * Absent in unit tests that construct LambdaService without CDI.
+     */
+    @Inject
+    Instance<EfsService> efsServiceInstance;
 
     /**
      * Package-private constructor for testing without CDI. Config defaults
@@ -345,6 +362,10 @@ public class LambdaService {
             syncVpcEnis(region, fn);
         }
 
+        if (request.containsKey("FileSystemConfigs")) {
+            fn.setFileSystemConfigs(parseFileSystemConfigs(region, request.get("FileSystemConfigs")));
+        }
+
         // ImageConfig (PackageType=Image overrides)
         if (request.get("ImageConfig") instanceof Map<?, ?> ic) {
             @SuppressWarnings("unchecked")
@@ -565,6 +586,10 @@ public class LambdaService {
             }
         }
 
+        if (request.containsKey("FileSystemConfigs")) {
+            fn.setFileSystemConfigs(parseFileSystemConfigs(region, request.get("FileSystemConfigs")));
+        }
+
         if (request.containsKey("ImageConfig")) {
             if (request.get("ImageConfig") instanceof Map<?, ?> ic) {
                 @SuppressWarnings("unchecked")
@@ -682,7 +707,28 @@ public class LambdaService {
         LambdaFunction fn = resolveInvokeTarget(region, name, qualifier);
         InvokeResult result = executorService.invoke(fn, payload, type);
         result.setExecutedVersion(fn.getVersion());
+        recordActiveTrace(fn);
         return result;
+    }
+
+    private void recordActiveTrace(LambdaFunction fn) {
+        if (fn == null || !"Active".equals(fn.getTracingMode())) {
+            return;
+        }
+        if (xrayServiceInstance == null || !xrayServiceInstance.isResolvable()) {
+            return;
+        }
+        try {
+            String region;
+            try {
+                region = AwsArnUtils.parse(fn.getFunctionArn()).region();
+            } catch (RuntimeException e) {
+                region = regionResolver.getRegion();
+            }
+            xrayServiceInstance.get().recordLambdaInvocation(region, fn.getFunctionName(), fn.getFunctionArn());
+        } catch (RuntimeException e) {
+            LOG.debugv("Skipping X-Ray segment for {0}: {1}", fn.getFunctionName(), e.getMessage());
+        }
     }
 
     /**
@@ -759,9 +805,9 @@ public class LambdaService {
             throw new AwsException("InvalidParameterValueException", "EventSourceArn is required", 400);
         }
         if (!eventSourceArn.contains(":sqs:") && !eventSourceArn.contains(":kinesis:")
-                && !eventSourceArn.contains(":dynamodb:")) {
+                && !eventSourceArn.contains(":dynamodb:") && !eventSourceArn.contains(":kafka:")) {
             throw new AwsException("InvalidParameterValueException",
-                    "Only SQS, Kinesis, and DynamoDB Streams event sources are supported.", 400);
+                    "Only SQS, Kinesis, DynamoDB Streams, and Kafka event sources are supported.", 400);
         }
 
         // Resolve function — supports bare name, partial ARN, or full ARN
@@ -826,6 +872,10 @@ public class LambdaService {
         esm.setBisectBatchOnFunctionError(bisectBatchOnFunctionError);
         esm.setDestinationConfig(destinationConfig);
         esm.setTags(tags);
+        esm.setTopics(parseTopics(request.get("Topics")));
+        esm.setStartingPosition(textOrNull(request.get("StartingPosition")));
+        esm.setAmazonManagedKafkaEventSourceConfig(
+                parseAmazonManagedKafkaConfig(request.get("AmazonManagedKafkaEventSourceConfig")));
         esm.setLastModified(System.currentTimeMillis());
 
         esmStore.save(esm);
@@ -866,6 +916,45 @@ public class LambdaService {
         EventSourceMapping.DestinationConfig destinationConfig = new EventSourceMapping.DestinationConfig();
         destinationConfig.setOnFailure(onFailure);
         return destinationConfig;
+    }
+
+    private static List<String> parseTopics(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return new ArrayList<>();
+        }
+        List<String> topics = new ArrayList<>();
+        for (Object entry : list) {
+            if (entry != null && !String.valueOf(entry).isBlank()) {
+                topics.add(String.valueOf(entry));
+            }
+        }
+        return topics;
+    }
+
+    private static String textOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value);
+        return text.isBlank() ? null : text;
+    }
+
+    private static EventSourceMapping.AmazonManagedKafkaEventSourceConfig parseAmazonManagedKafkaConfig(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Object groupId = map.get("ConsumerGroupId");
+        if (groupId == null) {
+            return null;
+        }
+        String consumerGroupId = String.valueOf(groupId);
+        if (consumerGroupId.isBlank()) {
+            return null;
+        }
+        EventSourceMapping.AmazonManagedKafkaEventSourceConfig config =
+                new EventSourceMapping.AmazonManagedKafkaEventSourceConfig();
+        config.setConsumerGroupId(consumerGroupId);
+        return config;
     }
 
     /**
@@ -942,13 +1031,29 @@ public class LambdaService {
     }
 
     public List<EventSourceMapping> listEventSourceMappings(String functionArn) {
+        return listEventSourceMappings(functionArn, null);
+    }
+
+    public List<EventSourceMapping> listEventSourceMappings(String functionArn, String eventSourceArn) {
+        List<EventSourceMapping> mappings;
         if (functionArn != null && !functionArn.isBlank()) {
             // Accept bare name, partial ARN, or full ARN. The store matches
             // entries by their canonical short name, so normalize first.
             String shortName = LambdaArnUtils.resolve(functionArn).name();
-            return esmStore.listByFunction(shortName);
+            mappings = esmStore.listByFunction(shortName);
+        } else {
+            mappings = esmStore.list();
         }
-        return esmStore.list();
+        if (eventSourceArn == null || eventSourceArn.isBlank()) {
+            return mappings;
+        }
+        List<EventSourceMapping> filtered = new ArrayList<>();
+        for (EventSourceMapping mapping : mappings) {
+            if (eventSourceArn.equals(mapping.getEventSourceArn())) {
+                filtered.add(mapping);
+            }
+        }
+        return filtered;
     }
 
     public EventSourceMapping updateEventSourceMapping(String uuid, Map<String, Object> request) {
@@ -1044,6 +1149,7 @@ public class LambdaService {
         snapshot.setHotReloadHostPath(fn.getHotReloadHostPath());
         snapshot.setS3Bucket(fn.getS3Bucket());
         snapshot.setS3Key(fn.getS3Key());
+        snapshot.setFileSystemConfigs(fn.getFileSystemConfigs());
         snapshot.setLastModified(System.currentTimeMillis());
         snapshot.setRevisionId(UUID.randomUUID().toString());
 
@@ -1903,6 +2009,81 @@ public class LambdaService {
             }
         }
         return out;
+    }
+
+    /**
+     * Normalizes Create/UpdateFunctionConfiguration {@code FileSystemConfigs} to
+     * {@code [{Arn, LocalMountPath}, ...]}. An empty list clears mounts. When EFS is
+     * available, each Arn must name an existing access point.
+     */
+    List<Map<String, Object>> parseFileSystemConfigs(String region, Object raw) {
+        if (raw == null) {
+            return new ArrayList<>();
+        }
+        if (!(raw instanceof List<?> list)) {
+            throw new AwsException("InvalidParameterValueException",
+                    "FileSystemConfigs must be a list", 400);
+        }
+        List<Map<String, Object>> parsed = new ArrayList<>();
+        Set<String> mountPaths = new LinkedHashSet<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) {
+                throw new AwsException("InvalidParameterValueException",
+                        "Each FileSystemConfigs entry must be an object", 400);
+            }
+            Object arnObj = map.get("Arn");
+            Object pathObj = map.get("LocalMountPath");
+            if (arnObj == null || arnObj.toString().isBlank()) {
+                throw new AwsException("InvalidParameterValueException",
+                        "FileSystemConfigs entry is missing Arn", 400);
+            }
+            if (pathObj == null || pathObj.toString().isBlank()) {
+                throw new AwsException("InvalidParameterValueException",
+                        "FileSystemConfigs entry is missing LocalMountPath", 400);
+            }
+            String arn = arnObj.toString();
+            String localMountPath = pathObj.toString();
+            if (!localMountPath.startsWith("/mnt/")) {
+                throw new AwsException("InvalidParameterValueException",
+                        "LocalMountPath must start with /mnt/", 400);
+            }
+            if (!mountPaths.add(localMountPath)) {
+                throw new AwsException("InvalidParameterValueException",
+                        "LocalMountPath '" + localMountPath + "' is used more than once", 400);
+            }
+            validateEfsAccessPoint(region, arn);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("Arn", arn);
+            entry.put("LocalMountPath", localMountPath);
+            parsed.add(entry);
+        }
+        return parsed;
+    }
+
+    private void validateEfsAccessPoint(String region, String arn) {
+        if (efsServiceInstance == null) {
+            return;
+        }
+        EfsService efs;
+        try {
+            if (efsServiceInstance.isUnsatisfied()) {
+                return;
+            }
+            efs = efsServiceInstance.get();
+        } catch (RuntimeException e) {
+            LOG.debugv("EFS service unavailable for FileSystemConfigs validation: {0}", e.getMessage());
+            return;
+        }
+        String accessPointId = EfsService.accessPointIdFromArn(arn);
+        if (accessPointId == null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "FileSystemConfigs Arn must be an EFS access point ARN", 400);
+        }
+        Optional<EfsAccessPoint> accessPoint = efs.findAccessPoint(region, accessPointId);
+        if (accessPoint.isEmpty()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Access point " + arn + " does not exist", 400);
+        }
     }
 
     /**

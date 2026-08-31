@@ -48,6 +48,10 @@ class CodeDeployServicePersistenceTest {
                 "arn:aws:sts::000000000000:session/s", "arn:aws:iam::000000000000:user/u");
         first.tagResource(first.applicationArn(REGION, "web-app"),
                 List.of(Map.of("Key", "env", "Value", "prod")));
+        first.registerApplicationRevision(REGION, "web-app",
+                Map.of("revisionType", "S3",
+                        "s3Location", Map.of("bucket", "rev-bucket", "key", "app.zip")),
+                "persisted revision");
 
         CodeDeployService reloaded = serviceWithStorage(storage);
 
@@ -65,6 +69,11 @@ class CodeDeployServicePersistenceTest {
                 .stream().collect(java.util.stream.Collectors.toMap(t -> t.get("Key"), t -> t.get("Value")));
         assertEquals("prod", appTags.get("env"));   // tagResource
         assertEquals("platform", appTags.get("team")); // createApplication tags
+        Map<String, Object> gotRev = reloaded.getApplicationRevision(REGION, "web-app",
+                Map.of("revisionType", "S3",
+                        "s3Location", Map.of("bucket", "rev-bucket", "key", "app.zip")));
+        assertEquals("persisted revision",
+                ((Map<?, ?>) gotRev.get("revisionInfo")).get("description"));
     }
 
     @Test

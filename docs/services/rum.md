@@ -14,6 +14,18 @@ Floci implements the CloudWatch RUM app-monitor management lifecycle for local S
 | `UpdateAppMonitor` | `PATCH /appmonitor/{name}` | Update the supplied configuration fields |
 | `DeleteAppMonitor` | `DELETE /appmonitor/{name}` | Delete an app monitor |
 | `ListAppMonitors` | `POST /appmonitors` | List app-monitor summaries with pagination |
+| `PutRumEvents` | `POST /appmonitors/{Id}/` | Ingest a session's telemetry events (data plane; host prefix `dataplane.`) |
+| `GetAppMonitorData` | `POST /appmonitor/{Name}/data` | Read ingested events in a time range |
+| `PutResourcePolicy` | `PUT /appmonitor/{name}/policy` | Attach or replace the app-monitor resource policy |
+| `GetResourcePolicy` | `GET /appmonitor/{name}/policy` | Return the current resource policy and revision |
+| `DeleteResourcePolicy` | `DELETE /appmonitor/{name}/policy` | Remove the app-monitor resource policy |
+| `PutRumMetricsDestination` | `POST /rummetrics/{name}/metricsdestination` | Create or update a CloudWatch or Evidently destination |
+| `ListRumMetricsDestinations` | `GET /rummetrics/{name}/metricsdestination` | List metrics destinations |
+| `DeleteRumMetricsDestination` | `DELETE /rummetrics/{name}/metricsdestination` | Delete a metrics destination |
+| `BatchCreateRumMetricDefinitions` | `POST /rummetrics/{name}/metrics` | Create extended or custom metric definitions |
+| `BatchGetRumMetricDefinitions` | `GET /rummetrics/{name}/metrics` | List metric definitions for a destination |
+| `UpdateRumMetricDefinition` | `PATCH /rummetrics/{name}/metrics` | Update one metric definition in place |
+| `BatchDeleteRumMetricDefinitions` | `DELETE /rummetrics/{name}/metrics` | Delete metric definitions by id |
 
 `ListAppMonitors` returns monitors in name order. Its default page size is 50 and its maximum page size is 100.
 
@@ -50,10 +62,10 @@ aws rum delete-app-monitor --name local-app
 
 ## Current Scope
 
-- App-monitor configuration, domains, platforms, create-time tags, state, timestamps, and pagination are modeled.
+- App-monitor configuration, domains, platforms, tags, state, timestamps, and pagination are modeled.
 - `CwLogEnabled` is retained as control-plane configuration; Floci does not create a CloudWatch Logs group or copy RUM telemetry.
-- Event and data-plane APIs are not implemented: `PutRumEvents` and `GetAppMonitorData`.
-- Tag-management APIs are not implemented: `TagResource`, `UntagResource`, and `ListTagsForResource`.
-- Resource-policy APIs are not implemented: `PutResourcePolicy`, `GetResourcePolicy`, and `DeleteResourcePolicy`.
-- Metric-definition APIs are not implemented: `BatchCreateRumMetricDefinitions`, `BatchDeleteRumMetricDefinitions`, `BatchGetRumMetricDefinitions`, and `UpdateRumMetricDefinition`.
-- Metric-destination APIs are not implemented: `PutRumMetricsDestination`, `DeleteRumMetricsDestination`, and `ListRumMetricsDestinations`.
+- Event data-plane APIs store ingested batches in the configured RUM storage mode: `PutRumEvents` and `GetAppMonitorData`.
+- Tag-management APIs are implemented via the shared `/tags/{arn}` dispatcher: `TagResource` (`POST`), `UntagResource` (`DELETE`), and `ListTagsForResource` (`GET`). The JSON key is `Tags`.
+- Resource-policy APIs are implemented: `PutResourcePolicy`, `GetResourcePolicy`, and `DeleteResourcePolicy`. Optimistic concurrency uses `PolicyRevisionId`; a missing policy is `PolicyNotFoundException`.
+- Metric-destination APIs are implemented: `PutRumMetricsDestination`, `ListRumMetricsDestinations`, and `DeleteRumMetricsDestination`.
+- Metric-definition APIs are implemented: `BatchCreateRumMetricDefinitions`, `BatchGetRumMetricDefinitions`, `UpdateRumMetricDefinition`, and `BatchDeleteRumMetricDefinitions`. Per-definition create/delete failures are returned in `Errors` without failing valid siblings.

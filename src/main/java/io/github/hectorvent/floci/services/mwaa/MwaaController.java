@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.mwaa;
 
 import io.github.hectorvent.floci.services.mwaa.model.CreateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.model.Environment;
+import io.github.hectorvent.floci.services.mwaa.model.InvokeRestApiRequest;
 import io.github.hectorvent.floci.services.mwaa.model.UpdateEnvironmentRequest;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -84,5 +85,11 @@ public class MwaaController {
     @Path("/clitoken/{name}")
     public Response createCliToken(@PathParam("name") String name) {
         return Response.ok(mwaaService.createCliToken(name)).build();
+    }
+
+    @POST
+    @Path("/restapi/{name}")
+    public Response invokeRestApi(@PathParam("name") String name, InvokeRestApiRequest request) {
+        return Response.ok(mwaaService.invokeRestApi(name, request)).build();
     }
 }

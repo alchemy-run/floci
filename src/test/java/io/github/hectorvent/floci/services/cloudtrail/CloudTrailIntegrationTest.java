@@ -14,6 +14,7 @@ import java.util.zip.GZIPInputStream;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -167,6 +168,294 @@ class CloudTrailIntegrationTest {
         assertTrue(sawGet, "Expected a successful GetObject record");
         assertTrue(sawDelete, "Expected a DeleteObject record");
         assertTrue(sawNoSuchKey, "Expected a GetObject NoSuchKey record");
+    }
+
+    @Test
+    void getTrailReturnsCreatedTrailByNameAndArn() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "gt-" + suffix;
+        String destBucket = "gt-logs-" + suffix;
+
+        createBucket(destBucket);
+        String created = invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s"}
+                """, trailName, destBucket))
+            .then().statusCode(200)
+            .extract().asString();
+
+        invokeCloudTrail("GetTrail", String.format("{\"Name\":\"%s\"}", trailName))
+            .then()
+                .statusCode(200)
+                .body("Trail.Name", equalTo(trailName))
+                .body("Trail.S3BucketName", equalTo(destBucket))
+                .body("Trail.TrailARN", containsString("trail/" + trailName))
+                .body("Trail.HomeRegion", equalTo("us-east-1"))
+                .body("Trail.IncludeGlobalServiceEvents", equalTo(true))
+                .body("Trail.IsMultiRegionTrail", equalTo(false))
+                .body("Trail.LogFileValidationEnabled", equalTo(false));
+
+        String arn = created.replaceAll(".*\"TrailARN\":\"([^\"]+)\".*", "$1");
+        invokeCloudTrail("GetTrail", String.format("{\"Name\":\"%s\"}", arn))
+            .then()
+                .statusCode(200)
+                .body("Trail.Name", equalTo(trailName))
+                .body("Trail.TrailARN", equalTo(arn));
+    }
+
+    @Test
+    void getTrailUnknownName_rejectsWithTrailNotFoundException() {
+        invokeCloudTrail("GetTrail", "{\"Name\":\"does-not-exist-xyz\"}")
+            .then()
+                .statusCode(400)
+                .body(containsString("TrailNotFoundException"));
+    }
+
+    @Test
+    void addTagsRoundTripsThroughListTagsAndRemoveTags() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "tg-" + suffix;
+        String destBucket = "tg-logs-" + suffix;
+
+        createBucket(destBucket);
+        String created = invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s"}
+                """, trailName, destBucket))
+            .then().statusCode(200)
+            .extract().asString();
+        String arn = created.replaceAll(".*\"TrailARN\":\"([^\"]+)\".*", "$1");
+
+        invokeCloudTrail("AddTags", String.format("""
+                {"ResourceId":"%s","TagsList":[{"Key":"env","Value":"test"},{"Key":"owner","Value":"floci"}]}
+                """, arn))
+            .then().statusCode(200);
+
+        invokeCloudTrail("ListTags", String.format("{\"ResourceIdList\":[\"%s\"]}", arn))
+            .then()
+                .statusCode(200)
+                .body("ResourceTagList[0].ResourceId", equalTo(arn))
+                .body("ResourceTagList[0].TagsList.Key", org.hamcrest.Matchers.hasItems("env", "owner"));
+
+        invokeCloudTrail("RemoveTags", String.format("""
+                {"ResourceId":"%s","TagsList":[{"Key":"owner"}]}
+                """, arn))
+            .then().statusCode(200);
+
+        invokeCloudTrail("ListTags", String.format("{\"ResourceIdList\":[\"%s\"]}", arn))
+            .then()
+                .statusCode(200)
+                .body("ResourceTagList[0].TagsList.Key", org.hamcrest.Matchers.hasItem("env"))
+                .body("ResourceTagList[0].TagsList.Key", org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.hasItem("owner")));
+    }
+
+    @Test
+    void lookupEventsReturnsCreateTrailFromEventHistory() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "lu-" + suffix;
+        String destBucket = "lu-logs-" + suffix;
+
+        createBucket(destBucket);
+        invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s"}
+                """, trailName, destBucket))
+            .then().statusCode(200);
+
+        invokeCloudTrail("LookupEvents", """
+                {"MaxResults": 50}
+                """)
+            .then()
+                .statusCode(200)
+                .body("Events", org.hamcrest.Matchers.not(hasSize(0)))
+                .body("Events.EventName", org.hamcrest.Matchers.hasItem("CreateTrail"));
+    }
+
+    @Test
+    void listPublicKeysAndInsightsReturnEmptyCollections() {
+        invokeCloudTrail("ListPublicKeys", "{}")
+            .then()
+                .statusCode(200)
+                .body("PublicKeyList", hasSize(0));
+
+        invokeCloudTrail("ListInsightsMetricData", """
+                {
+                  "EventSource": "s3.amazonaws.com",
+                  "EventName": "PutObject",
+                  "InsightType": "ApiCallRateInsight",
+                  "MaxResults": 5
+                }
+                """)
+            .then()
+                .statusCode(200)
+                .body("Timestamps", hasSize(0))
+                .body("Values", hasSize(0));
+
+        invokeCloudTrail("ListInsightsData", """
+                {
+                  "InsightSource": "s3.amazonaws.com",
+                  "DataType": "InsightsEvents",
+                  "MaxResults": 5
+                }
+                """)
+            .then()
+                .statusCode(200)
+                .body("Events", hasSize(0));
+    }
+
+    @Test
+    void putBucketTaggingIsLookedUpAfterLoggingStarts() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "tag-ev-" + suffix;
+        String destBucket = "tag-ev-logs-" + suffix;
+        String sourceBucket = "tag-ev-src-" + suffix;
+
+        createBucket(destBucket);
+        createBucket(sourceBucket);
+        invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s"}
+                """, trailName, destBucket))
+            .then().statusCode(200);
+        invokeCloudTrail("StartLogging", String.format("{\"Name\":\"%s\"}", trailName))
+            .then().statusCode(200);
+
+        given()
+            .contentType("application/xml")
+            .body("<Tagging><TagSet><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>")
+            .when().put("/" + sourceBucket + "?tagging")
+            .then().statusCode(204);
+
+        invokeCloudTrail("LookupEvents", """
+                {
+                  "LookupAttributes": [
+                    {"AttributeKey": "EventName", "AttributeValue": "PutBucketTagging"}
+                  ],
+                  "MaxResults": 10
+                }
+                """)
+            .then()
+                .statusCode(200)
+                .body("Events", org.hamcrest.Matchers.not(hasSize(0)))
+                .body("Events[0].EventName", equalTo("PutBucketTagging"))
+                .body("Events[0].EventSource", equalTo("s3.amazonaws.com"));
+    }
+
+    @Test
+    void addTagsUnknownResource_rejectsWithResourceNotFoundException() {
+        invokeCloudTrail("AddTags", """
+                {"ResourceId":"arn:aws:cloudtrail:us-east-1:000000000000:trail/missing","TagsList":[{"Key":"k","Value":"v"}]}
+                """)
+            .then()
+                .statusCode(400)
+                .body(containsString("ResourceNotFoundException"));
+    }
+
+    @Test
+    void createTrailStoresTagsListForListTags() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "ctags-" + suffix;
+        String destBucket = "ctags-logs-" + suffix;
+
+        createBucket(destBucket);
+        String created = invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s","TagsList":[{"Key":"fixture","Value":"cloudtrail-trail"}]}
+                """, trailName, destBucket))
+            .then().statusCode(200)
+            .extract().asString();
+        String arn = created.replaceAll(".*\"TrailARN\":\"([^\"]+)\".*", "$1");
+
+        invokeCloudTrail("ListTags", String.format("{\"ResourceIdList\":[\"%s\"]}", arn))
+            .then()
+                .statusCode(200)
+                .body("ResourceTagList[0].ResourceId", equalTo(arn))
+                .body("ResourceTagList[0].TagsList[0].Key", equalTo("fixture"))
+                .body("ResourceTagList[0].TagsList[0].Value", equalTo("cloudtrail-trail"));
+    }
+
+    @Test
+    void getInsightSelectorsWithoutInsights_rejectsWithInsightNotEnabledException() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "ins-" + suffix;
+        String destBucket = "ins-logs-" + suffix;
+
+        createBucket(destBucket);
+        invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s"}
+                """, trailName, destBucket))
+            .then().statusCode(200);
+
+        invokeCloudTrail("GetInsightSelectors", String.format("{\"TrailName\":\"%s\"}", trailName))
+            .then()
+                .statusCode(400)
+                .body(containsString("InsightNotEnabledException"));
+    }
+
+    @Test
+    void putInsightSelectorsRoundTripsAndEmptyDisables() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "pins-" + suffix;
+        String destBucket = "pins-logs-" + suffix;
+
+        createBucket(destBucket);
+        invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s"}
+                """, trailName, destBucket))
+            .then().statusCode(200);
+
+        invokeCloudTrail("PutInsightSelectors", String.format("""
+                {"TrailName":"%s","InsightSelectors":[{"InsightType":"ApiCallRateInsight"}]}
+                """, trailName))
+            .then()
+                .statusCode(200)
+                .body("InsightSelectors[0].InsightType", equalTo("ApiCallRateInsight"));
+
+        invokeCloudTrail("GetInsightSelectors", String.format("{\"TrailName\":\"%s\"}", trailName))
+            .then()
+                .statusCode(200)
+                .body("InsightSelectors[0].InsightType", equalTo("ApiCallRateInsight"));
+
+        invokeCloudTrail("PutInsightSelectors", String.format("""
+                {"TrailName":"%s","InsightSelectors":[]}
+                """, trailName))
+            .then().statusCode(200);
+
+        invokeCloudTrail("GetInsightSelectors", String.format("{\"TrailName\":\"%s\"}", trailName))
+            .then()
+                .statusCode(400)
+                .body(containsString("InsightNotEnabledException"));
+    }
+
+    @Test
+    void putAdvancedEventSelectorsRoundTripsThroughGetEventSelectors() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String trailName = "aes-" + suffix;
+        String destBucket = "aes-logs-" + suffix;
+
+        createBucket(destBucket);
+        invokeCloudTrail("CreateTrail", String.format("""
+                {"Name":"%s","S3BucketName":"%s"}
+                """, trailName, destBucket))
+            .then().statusCode(200);
+
+        invokeCloudTrail("PutEventSelectors", String.format("""
+                {
+                  "TrailName":"%s",
+                  "AdvancedEventSelectors":[
+                    {
+                      "Name":"Management events",
+                      "FieldSelectors":[{"Field":"eventCategory","Equals":["Management"]}]
+                    }
+                  ]
+                }
+                """, trailName))
+            .then()
+                .statusCode(200)
+                .body("AdvancedEventSelectors[0].Name", equalTo("Management events"));
+
+        invokeCloudTrail("GetEventSelectors", String.format("{\"TrailName\":\"%s\"}", trailName))
+            .then()
+                .statusCode(200)
+                .body("AdvancedEventSelectors[0].Name", equalTo("Management events"))
+                .body("AdvancedEventSelectors[0].FieldSelectors[0].Field", equalTo("eventCategory"))
+                .body("AdvancedEventSelectors[0].FieldSelectors[0].Equals[0]", equalTo("Management"));
     }
 
     @Test

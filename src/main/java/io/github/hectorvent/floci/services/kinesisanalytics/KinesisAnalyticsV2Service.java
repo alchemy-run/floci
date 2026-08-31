@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.ApplicationStatus;
+import io.github.hectorvent.floci.services.kinesisanalytics.model.CloudWatchLoggingOption;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.FlinkApplication;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus;
@@ -20,6 +21,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +29,7 @@ import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Control plane for Managed Service for Apache Flink (Kinesis Analytics V2). Holds the
@@ -50,6 +53,11 @@ public class KinesisAnalyticsV2Service {
     // CreateApplicationPresignedUrl's SessionExpirationDurationInSeconds valid range (30 min - 12 hr).
     private static final long MIN_SESSION_EXPIRATION_SECONDS = 1800;
     private static final long MAX_SESSION_EXPIRATION_SECONDS = 43200;
+
+    // ApplicationMaintenanceWindowStartTime is UTC HH:MM. AWS's maintenance window is eight hours.
+    private static final Pattern MAINTENANCE_WINDOW_HH_MM =
+            Pattern.compile("([01][0-9]|2[0-3]):[0-5][0-9]");
+    private static final int MAINTENANCE_WINDOW_HOURS = 8;
 
     private final StorageBackend<String, FlinkApplication> storage;
     private final EmulatorConfig config;
@@ -195,6 +203,78 @@ public class KinesisAnalyticsV2Service {
         return storage.scan(k -> true);
     }
 
+    /**
+     * Every version from 1 through the current {@code ApplicationVersionId}. Newest first,
+     * matching AWS {@code ListApplicationVersions}. Historical (superseded) versions are
+     * reported {@code READY}; the current version reports the live {@code ApplicationStatus}.
+     */
+    public record ApplicationVersionSummary(long applicationVersionId, ApplicationStatus applicationStatus) {}
+
+    public List<ApplicationVersionSummary> listApplicationVersions(String applicationName) {
+        if (applicationName == null || applicationName.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ApplicationName is required", 400);
+        }
+        FlinkApplication app = describeApplication(applicationName);
+        List<ApplicationVersionSummary> versions = new ArrayList<>();
+        long current = app.getApplicationVersionId();
+        for (long i = current; i >= 1; i--) {
+            ApplicationStatus status = i == current ? app.getApplicationStatus() : ApplicationStatus.READY;
+            versions.add(new ApplicationVersionSummary(i, status));
+        }
+        return versions;
+    }
+
+    public FlinkApplication describeApplicationVersion(String applicationName, Long applicationVersionId) {
+        if (applicationVersionId == null) {
+            throw new AwsException("InvalidArgumentException", "ApplicationVersionId is required", 400);
+        }
+        FlinkApplication app = describeApplication(applicationName);
+        if (applicationVersionId < 1 || applicationVersionId > app.getApplicationVersionId()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Application version not found: " + applicationVersionId, 400);
+        }
+        return app;
+    }
+
+    /**
+     * Control-plane operation history. Floci does not persist a full operation log; a freshly
+     * created application therefore lists as empty. Describe of an unknown OperationId is
+     * ResourceNotFoundException, matching AWS.
+     */
+    public record ApplicationOperationInfo(String operation, String operationId, String operationStatus,
+                                           Instant startTime, Instant endTime) {}
+
+    public List<ApplicationOperationInfo> listApplicationOperations(String applicationName) {
+        if (applicationName == null || applicationName.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ApplicationName is required", 400);
+        }
+        describeApplication(applicationName);
+        return List.of();
+    }
+
+    public ApplicationOperationInfo describeApplicationOperation(String applicationName, String operationId) {
+        if (applicationName == null || applicationName.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ApplicationName is required", 400);
+        }
+        if (operationId == null || operationId.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "OperationId is required", 400);
+        }
+        describeApplication(applicationName);
+        throw new AwsException("ResourceNotFoundException",
+                "Operation not found: " + operationId, 400);
+    }
+
+    /**
+     * AWS RollbackApplication reverts to the previous running version. A freshly created
+     * application (version 1, READY) has nothing to roll back to.
+     */
+    public FlinkApplication rollbackApplication(String applicationName, Long currentApplicationVersionId) {
+        FlinkApplication app = describeApplication(applicationName);
+        requireCurrentVersion(app, currentApplicationVersionId);
+        throw new AwsException("InvalidRequestException",
+                "There is no previous version to roll back to for application " + applicationName, 400);
+    }
+
     public FlinkApplication startApplication(String applicationName) {
         FlinkApplication app = describeApplication(applicationName);
         if (app.getApplicationStatus() != ApplicationStatus.READY) {
@@ -273,6 +353,18 @@ public class KinesisAnalyticsV2Service {
                                               String serviceExecutionRole, String codeS3Bucket,
                                               String codeS3Key, String codeS3ObjectVersion,
                                               Integer parallelism, Boolean snapshotsEnabled) {
+        return updateApplication(applicationName, currentApplicationVersionId, serviceExecutionRole,
+                codeS3Bucket, codeS3Key, codeS3ObjectVersion, parallelism, snapshotsEnabled,
+                null, null, null, null);
+    }
+
+    public FlinkApplication updateApplication(String applicationName, Long currentApplicationVersionId,
+                                              String serviceExecutionRole, String codeS3Bucket,
+                                              String codeS3Key, String codeS3ObjectVersion,
+                                              Integer parallelism, Boolean snapshotsEnabled,
+                                              Map<String, Map<String, String>> environmentProperties,
+                                              String parallelismConfigurationType,
+                                              Integer parallelismPerKPU, Boolean autoScalingEnabled) {
         FlinkApplication app = describeApplication(applicationName);
         // AWS requires CurrentApplicationVersionId and rejects a stale value with
         // ConcurrentModificationException (optimistic concurrency on the application version).
@@ -300,6 +392,19 @@ public class KinesisAnalyticsV2Service {
         }
         if (snapshotsEnabled != null) {
             app.setSnapshotsEnabled(snapshotsEnabled);
+        }
+        // EnvironmentPropertyUpdates.PropertyGroups is a full replacement, not a merge.
+        if (environmentProperties != null) {
+            app.setEnvironmentProperties(new LinkedHashMap<>(environmentProperties));
+        }
+        if (parallelismConfigurationType != null && !parallelismConfigurationType.isBlank()) {
+            app.setParallelismConfigurationType(parallelismConfigurationType);
+        }
+        if (parallelismPerKPU != null && parallelismPerKPU > 0) {
+            app.setParallelismPerKPU(parallelismPerKPU);
+        }
+        if (autoScalingEnabled != null) {
+            app.setAutoScalingEnabled(autoScalingEnabled);
         }
 
         if (codeChanged && app.getApplicationStatus() == ApplicationStatus.RUNNING
@@ -474,6 +579,104 @@ public class KinesisAnalyticsV2Service {
         putApplication(app);
         LOG.infov("Deleted Kinesis Analytics V2 snapshot {0} for application {1}",
                 snapshotName, applicationName);
+    }
+
+    /**
+     * Attaches a CloudWatch Logs destination to the application. AWS assigns a
+     * {@code CloudWatchLoggingOptionId} of the form {@code {version}.1} at the version this
+     * add lands on, and bumps {@code ApplicationVersionId}.
+     */
+    public FlinkApplication addApplicationCloudWatchLoggingOption(String applicationName,
+                                                                  Long currentApplicationVersionId,
+                                                                  String logStreamArn) {
+        FlinkApplication app = describeApplication(applicationName);
+        requireCurrentVersion(app, currentApplicationVersionId);
+        if (logStreamArn == null || logStreamArn.isBlank()) {
+            throw new AwsException("InvalidArgumentException",
+                    "CloudWatchLoggingOption.LogStreamARN is required", 400);
+        }
+        for (CloudWatchLoggingOption existing : app.getCloudWatchLoggingOptions().values()) {
+            if (logStreamArn.equals(existing.getLogStreamArn())) {
+                throw new AwsException("InvalidArgumentException",
+                        "A CloudWatch logging option already exists for LogStreamARN " + logStreamArn, 400);
+            }
+        }
+        app.setApplicationVersionId(app.getApplicationVersionId() + 1);
+        String optionId = app.getApplicationVersionId() + ".1";
+        app.getCloudWatchLoggingOptions().put(optionId, new CloudWatchLoggingOption(optionId, logStreamArn));
+        app.setLastUpdateTimestamp(Instant.now());
+        putApplication(app);
+        LOG.infov("Added CloudWatch logging option {0} to application {1}", optionId, applicationName);
+        return app;
+    }
+
+    public FlinkApplication deleteApplicationCloudWatchLoggingOption(String applicationName,
+                                                                     Long currentApplicationVersionId,
+                                                                     String cloudWatchLoggingOptionId) {
+        FlinkApplication app = describeApplication(applicationName);
+        requireCurrentVersion(app, currentApplicationVersionId);
+        if (cloudWatchLoggingOptionId == null || cloudWatchLoggingOptionId.isBlank()) {
+            throw new AwsException("InvalidArgumentException",
+                    "CloudWatchLoggingOptionId is required", 400);
+        }
+        CloudWatchLoggingOption removed = app.getCloudWatchLoggingOptions().remove(cloudWatchLoggingOptionId);
+        if (removed == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "CloudWatch logging option not found: " + cloudWatchLoggingOptionId, 400);
+        }
+        app.setApplicationVersionId(app.getApplicationVersionId() + 1);
+        app.setLastUpdateTimestamp(Instant.now());
+        putApplication(app);
+        LOG.infov("Deleted CloudWatch logging option {0} from application {1}",
+                cloudWatchLoggingOptionId, applicationName);
+        return app;
+    }
+
+    private static void requireCurrentVersion(FlinkApplication app, Long currentApplicationVersionId) {
+        if (currentApplicationVersionId == null) {
+            throw new AwsException("InvalidArgumentException",
+                    "CurrentApplicationVersionId is required", 400);
+        }
+        if (currentApplicationVersionId != app.getApplicationVersionId()) {
+            throw new AwsException("ConcurrentModificationException",
+                    "Provided CurrentApplicationVersionId " + currentApplicationVersionId
+                            + " does not match the current version " + app.getApplicationVersionId(), 400);
+        }
+    }
+
+    /**
+     * Updates the daily UTC maintenance window. AWS allows this only while the application is
+     * {@code READY} or {@code RUNNING}; any other state is {@code ResourceInUseException}. The end
+     * time is derived (start + 8 hours) — callers never supply it. Does not bump
+     * {@code ApplicationVersionId} (this is a separate API from {@code UpdateApplication}).
+     */
+    public FlinkApplication updateApplicationMaintenanceConfiguration(String applicationName,
+                                                                      String startTime) {
+        FlinkApplication app = describeApplication(applicationName);
+        if (app.getApplicationStatus() != ApplicationStatus.READY
+                && app.getApplicationStatus() != ApplicationStatus.RUNNING) {
+            throw new AwsException("ResourceInUseException",
+                    "Application " + applicationName + " cannot update its maintenance configuration "
+                            + "while in state " + app.getApplicationStatus()
+                            + "; it must be READY or RUNNING", 400);
+        }
+        if (startTime == null || !MAINTENANCE_WINDOW_HH_MM.matcher(startTime).matches()) {
+            throw new AwsException("InvalidArgumentException",
+                    "ApplicationMaintenanceWindowStartTimeUpdate must match HH:MM (00:00-23:59)", 400);
+        }
+        app.setMaintenanceWindowStartTime(startTime);
+        app.setMaintenanceWindowEndTime(maintenanceWindowEndTime(startTime));
+        app.setLastUpdateTimestamp(Instant.now());
+        putApplication(app);
+        LOG.infov("Updated Kinesis Analytics V2 application {0} maintenance window to {1}-{2}",
+                applicationName, startTime, app.getMaintenanceWindowEndTime());
+        return app;
+    }
+
+    static String maintenanceWindowEndTime(String startTime) {
+        int hours = Integer.parseInt(startTime.substring(0, 2));
+        int minutes = Integer.parseInt(startTime.substring(3, 5));
+        return String.format("%02d:%02d", (hours + MAINTENANCE_WINDOW_HOURS) % 24, minutes);
     }
 
     /**

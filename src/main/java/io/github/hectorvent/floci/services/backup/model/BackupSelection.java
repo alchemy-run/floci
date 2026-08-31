@@ -31,6 +31,9 @@ public class BackupSelection {
     @JsonProperty("NotResources")
     private List<String> notResources = new ArrayList<>();
 
+    @JsonProperty("ListOfTags")
+    private List<Condition> listOfTags = new ArrayList<>();
+
     @JsonProperty("CreationDate")
     private long creationDate;
 
@@ -56,6 +59,9 @@ public class BackupSelection {
 
     public List<String> getNotResources() { return notResources; }
     public void setNotResources(List<String> notResources) { this.notResources = notResources != null ? notResources : new ArrayList<>(); }
+
+    public List<Condition> getListOfTags() { return listOfTags; }
+    public void setListOfTags(List<Condition> listOfTags) { this.listOfTags = listOfTags != null ? listOfTags : new ArrayList<>(); }
 
     public long getCreationDate() { return creationDate; }
     public void setCreationDate(long creationDate) { this.creationDate = creationDate; }

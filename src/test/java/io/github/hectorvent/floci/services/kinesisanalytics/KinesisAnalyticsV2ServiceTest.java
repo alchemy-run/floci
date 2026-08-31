@@ -119,6 +119,69 @@ class KinesisAnalyticsV2ServiceTest {
     }
 
     @Test
+    void listApplicationVersionsIncludesInitialVersion() {
+        create("demo");
+        var versions = service.listApplicationVersions("demo");
+        assertEquals(1, versions.size());
+        assertEquals(1L, versions.get(0).applicationVersionId());
+        assertEquals(ApplicationStatus.READY, versions.get(0).applicationStatus());
+    }
+
+    @Test
+    void listApplicationVersionsIncludesUpdatedVersionsNewestFirst() {
+        create("demo");
+        service.updateApplication("demo", 1L, null);
+        var versions = service.listApplicationVersions("demo");
+        assertEquals(2, versions.size());
+        assertEquals(2L, versions.get(0).applicationVersionId());
+        assertEquals(1L, versions.get(1).applicationVersionId());
+        assertEquals(ApplicationStatus.READY, versions.get(1).applicationStatus());
+    }
+
+    @Test
+    void listApplicationVersionsRejectsUnknownApplication() {
+        AwsException ex = assertThrows(AwsException.class, () -> service.listApplicationVersions("nope"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void describeApplicationVersionReturnsExistingVersion() {
+        create("demo");
+        FlinkApplication version = service.describeApplicationVersion("demo", 1L);
+        assertEquals("demo", version.getApplicationName());
+        assertEquals(1L, version.getApplicationVersionId());
+    }
+
+    @Test
+    void describeApplicationVersionRejectsUnknownVersion() {
+        create("demo");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.describeApplicationVersion("demo", 99L));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void listApplicationOperationsReturnsEmptyForFreshApplication() {
+        create("demo");
+        assertTrue(service.listApplicationOperations("demo").isEmpty());
+    }
+
+    @Test
+    void describeApplicationOperationRejectsUnknownOperation() {
+        create("demo");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.describeApplicationOperation("demo", "aaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void rollbackApplicationRejectsWhenNothingToRollBack() {
+        create("demo");
+        AwsException ex = assertThrows(AwsException.class, () -> service.rollbackApplication("demo", 1L));
+        assertEquals("InvalidRequestException", ex.getErrorCode());
+    }
+
+    @Test
     void updateApplicationBumpsVersion() {
         create("demo");
         FlinkApplication updated = service.updateApplication("demo", 1L, "arn:aws:iam::000000000000:role/y");
@@ -429,6 +492,73 @@ class KinesisAnalyticsV2ServiceTest {
     }
 
     @Test
+    void updateApplicationReplacesEnvironmentProperties() {
+        Map<String, Map<String, String>> initial = Map.of("AppProperties", Map.of("mode", "test"));
+        service.createApplication("demo", "FLINK-1_18", ROLE, null, null,
+                "bucket", "app.jar", null, 1, null, initial);
+        Map<String, Map<String, String>> updatedGroups = Map.of(
+                "AppProperties", Map.of("mode", "production", "region", "us-west-2"));
+        FlinkApplication updated = service.updateApplication("demo", 1L, null, null, null, null, null,
+                null, updatedGroups, null, null, null);
+        assertEquals("production", updated.getEnvironmentProperties().get("AppProperties").get("mode"));
+        assertEquals("us-west-2", updated.getEnvironmentProperties().get("AppProperties").get("region"));
+        assertEquals(2L, updated.getApplicationVersionId());
+    }
+
+    @Test
+    void updateApplicationStoresCustomParallelismConfiguration() {
+        create("demo");
+        FlinkApplication updated = service.updateApplication("demo", 1L, null, null, null, null, 1,
+                null, null, "CUSTOM", 1, false);
+        assertEquals("CUSTOM", updated.getParallelismConfigurationType());
+        assertEquals(1, updated.getParallelism());
+        assertEquals(1, updated.getParallelismPerKPU());
+        assertFalse(updated.isAutoScalingEnabled());
+    }
+
+    @Test
+    void updateApplicationMaintenanceConfigurationStoresEightHourWindow() {
+        create("demo");
+        FlinkApplication updated = service.updateApplicationMaintenanceConfiguration("demo", "02:00");
+        assertEquals("02:00", updated.getMaintenanceWindowStartTime());
+        assertEquals("10:00", updated.getMaintenanceWindowEndTime());
+        // Separate API from UpdateApplication — does not bump ApplicationVersionId.
+        assertEquals(1L, updated.getApplicationVersionId());
+    }
+
+    @Test
+    void updateApplicationMaintenanceConfigurationWrapsMidnight() {
+        create("demo");
+        FlinkApplication updated = service.updateApplicationMaintenanceConfiguration("demo", "20:00");
+        assertEquals("20:00", updated.getMaintenanceWindowStartTime());
+        assertEquals("04:00", updated.getMaintenanceWindowEndTime());
+    }
+
+    @Test
+    void updateApplicationMaintenanceConfigurationRejectsInvalidTime() {
+        create("demo");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.updateApplicationMaintenanceConfiguration("demo", "25:00"));
+        assertEquals("InvalidArgumentException", ex.getErrorCode());
+    }
+
+    @Test
+    void updateApplicationMaintenanceConfigurationRejectsWhenStarting() {
+        create("demo");
+        FlinkApplication app = service.describeApplication("demo");
+        app.setApplicationStatus(ApplicationStatus.STARTING);
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.updateApplicationMaintenanceConfiguration("demo", "02:00"));
+        assertEquals("ResourceInUseException", ex.getErrorCode());
+    }
+
+    @Test
+    void updateApplicationMaintenanceConfigurationRejectsUnknownApplication() {
+        assertThrows(AwsException.class,
+                () -> service.updateApplicationMaintenanceConfiguration("nope", "02:00"));
+    }
+
+    @Test
     void updateApplicationRedeploysCodeInPlaceWhenRunningInRealMode() {
         FlinkContainerManager manager = Mockito.mock(FlinkContainerManager.class);
         KinesisAnalyticsV2Service realMode = buildService(false, manager);
@@ -537,6 +667,54 @@ class KinesisAnalyticsV2ServiceTest {
         AwsException ex = assertThrows(AwsException.class,
                 () -> realMode.createApplicationPresignedUrl("demo", "FLINK_DASHBOARD_URL", 100L));
         assertEquals("InvalidArgumentException", ex.getErrorCode());
+    }
+
+    @Test
+    void addCloudWatchLoggingOptionBumpsVersionAndAssignsId() {
+        create("demo");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+        FlinkApplication app = service.addApplicationCloudWatchLoggingOption("demo", 1L, logStreamArn);
+        assertEquals(2L, app.getApplicationVersionId());
+        assertEquals(1, app.getCloudWatchLoggingOptions().size());
+        var option = app.getCloudWatchLoggingOptions().get("2.1");
+        assertEquals("2.1", option.getCloudWatchLoggingOptionId());
+        assertEquals(logStreamArn, option.getLogStreamArn());
+    }
+
+    @Test
+    void addCloudWatchLoggingOptionRejectsDuplicateLogStream() {
+        create("demo");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+        service.addApplicationCloudWatchLoggingOption("demo", 1L, logStreamArn);
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.addApplicationCloudWatchLoggingOption("demo", 2L, logStreamArn));
+        assertEquals("InvalidArgumentException", ex.getErrorCode());
+    }
+
+    @Test
+    void addCloudWatchLoggingOptionRejectsStaleVersion() {
+        create("demo");
+        assertThrows(AwsException.class,
+                () -> service.addApplicationCloudWatchLoggingOption("demo", 5L,
+                        "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s"));
+    }
+
+    @Test
+    void deleteCloudWatchLoggingOptionRemovesItAndBumpsVersion() {
+        create("demo");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+        service.addApplicationCloudWatchLoggingOption("demo", 1L, logStreamArn);
+        FlinkApplication app = service.deleteApplicationCloudWatchLoggingOption("demo", 2L, "2.1");
+        assertEquals(3L, app.getApplicationVersionId());
+        assertTrue(app.getCloudWatchLoggingOptions().isEmpty());
+    }
+
+    @Test
+    void deleteCloudWatchLoggingOptionRejectsUnknownId() {
+        create("demo");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.deleteApplicationCloudWatchLoggingOption("demo", 1L, "missing"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
     }
 
     @Test

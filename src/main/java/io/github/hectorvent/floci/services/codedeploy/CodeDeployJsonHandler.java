@@ -54,11 +54,16 @@ public class CodeDeployJsonHandler {
             case "GetDeployment" -> getDeployment(request, region);
             case "ListDeployments" -> listDeployments(request, region);
             case "StopDeployment" -> stopDeployment(request, region);
-            case "ContinueDeployment" -> Response.ok(Map.of()).build();
+            case "ContinueDeployment" -> continueDeployment(request, region);
             case "BatchGetDeployments" -> batchGetDeployments(request, region);
             case "ListDeploymentTargets" -> listDeploymentTargets(request, region);
+            case "GetDeploymentTarget" -> getDeploymentTarget(request, region);
             case "BatchGetDeploymentTargets" -> batchGetDeploymentTargets(request, region);
-            case "PutLifecycleEventHookExecutionStatus" -> putLifecycleEventHookExecutionStatus(request);
+            case "PutLifecycleEventHookExecutionStatus" -> putLifecycleEventHookExecutionStatus(request, region);
+            case "RegisterApplicationRevision" -> registerApplicationRevision(request, region);
+            case "GetApplicationRevision" -> getApplicationRevision(request, region);
+            case "ListApplicationRevisions" -> listApplicationRevisions(request, region);
+            case "BatchGetApplicationRevisions" -> batchGetApplicationRevisions(request, region);
             case "RegisterOnPremisesInstance" -> registerOnPremisesInstance(request, region);
             case "DeregisterOnPremisesInstance" -> deregisterOnPremisesInstance(request, region);
             case "GetOnPremisesInstance" -> getOnPremisesInstance(request, region);
@@ -116,6 +121,10 @@ public class CodeDeployJsonHandler {
         Map<String, Object> fields = extractGroupFields(req);
         DeploymentGroup group = service.createDeploymentGroup(region, appName, groupName,
                 deploymentConfigName, serviceRoleArn, fields);
+        List<Map<String, String>> tags = parseTags(req, "tags");
+        if (!tags.isEmpty()) {
+            service.tagResource(service.deploymentGroupArn(region, appName, groupName), tags);
+        }
         return Response.ok(Map.of("deploymentGroupId", group.getDeploymentGroupId())).build();
     }
 
@@ -244,6 +253,12 @@ public class CodeDeployJsonHandler {
         return Response.ok(result).build();
     }
 
+    private Response continueDeployment(JsonNode req, String region) {
+        String id = req.path("deploymentId").asText(null);
+        service.continueDeployment(region, id);
+        return Response.ok(Map.of()).build();
+    }
+
     private Response batchGetDeployments(JsonNode req, String region) {
         List<String> ids = new ArrayList<>();
         req.path("deploymentIds").forEach(n -> ids.add(n.asText()));
@@ -257,6 +272,13 @@ public class CodeDeployJsonHandler {
         return Response.ok(Map.of("targetIds", targetIds)).build();
     }
 
+    private Response getDeploymentTarget(JsonNode req, String region) {
+        String deploymentId = req.path("deploymentId").asText(null);
+        String targetId = req.path("targetId").asText(null);
+        Map<String, Object> target = service.getDeploymentTarget(region, deploymentId, targetId);
+        return Response.ok(Map.of("deploymentTarget", target)).build();
+    }
+
     private Response batchGetDeploymentTargets(JsonNode req, String region) {
         String deploymentId = req.path("deploymentId").asText(null);
         List<String> targetIds = new ArrayList<>();
@@ -265,12 +287,47 @@ public class CodeDeployJsonHandler {
         return Response.ok(Map.of("deploymentTargets", targets)).build();
     }
 
-    private Response putLifecycleEventHookExecutionStatus(JsonNode req) {
+    private Response putLifecycleEventHookExecutionStatus(JsonNode req, String region) {
         String deploymentId = req.path("deploymentId").asText(null);
         String executionId = req.path("lifecycleEventHookExecutionId").asText(null);
         String status = req.path("status").asText("Succeeded");
-        String id = service.putLifecycleEventHookExecutionStatus(deploymentId, executionId, status);
+        String id = service.putLifecycleEventHookExecutionStatus(region, deploymentId, executionId, status);
         return Response.ok(Map.of("lifecycleEventHookExecutionId", id)).build();
+    }
+
+    private Response registerApplicationRevision(JsonNode req, String region) throws Exception {
+        String appName = req.path("applicationName").asText(null);
+        String description = req.has("description") ? req.path("description").asText() : null;
+        Map<String, Object> revision = req.has("revision")
+                ? mapper.treeToValue(req.get("revision"), Map.class) : null;
+        service.registerApplicationRevision(region, appName, revision, description);
+        return Response.ok(Map.of()).build();
+    }
+
+    private Response getApplicationRevision(JsonNode req, String region) throws Exception {
+        String appName = req.path("applicationName").asText(null);
+        Map<String, Object> revision = req.has("revision")
+                ? mapper.treeToValue(req.get("revision"), Map.class) : null;
+        return Response.ok(service.getApplicationRevision(region, appName, revision)).build();
+    }
+
+    private Response listApplicationRevisions(JsonNode req, String region) {
+        String appName = req.path("applicationName").asText(null);
+        String s3Bucket = req.has("s3Bucket") ? req.path("s3Bucket").asText() : null;
+        String s3KeyPrefix = req.has("s3KeyPrefix") ? req.path("s3KeyPrefix").asText() : null;
+        List<Map<String, Object>> revisions = service.listApplicationRevisions(region, appName, s3Bucket, s3KeyPrefix);
+        return Response.ok(Map.of("revisions", revisions)).build();
+    }
+
+    private Response batchGetApplicationRevisions(JsonNode req, String region) throws Exception {
+        String appName = req.path("applicationName").asText(null);
+        List<Map<String, Object>> revisions = new ArrayList<>();
+        if (req.has("revisions") && req.get("revisions").isArray()) {
+            for (JsonNode n : req.get("revisions")) {
+                revisions.add(mapper.treeToValue(n, Map.class));
+            }
+        }
+        return Response.ok(service.batchGetApplicationRevisions(region, appName, revisions)).build();
     }
 
     private Response registerOnPremisesInstance(JsonNode req, String region) {

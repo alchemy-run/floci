@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ContainerReachableUrlsTest {
 
@@ -73,5 +74,21 @@ class ContainerReachableUrlsTest {
         assertEquals("wss://127.0.0.1:4566/ws/abc123/test",
                 ContainerReachableUrls.rewriteFunctionEnv(
                         "wss://abc123.execute-api.us-east-1.amazonaws.com/test", 4566));
+    }
+
+    @Test
+    void rewritesIvsChatWssOntoPathStyleGatewayKeepingAwsFragment() {
+        String rewritten = ContainerReachableUrls.rewriteIvsChatWssToPathStyle(
+                "wss://edge.ivschat.us-east-1.amazonaws.com", 4566);
+        assertEquals("ws://127.0.0.1:4566/ivschat?endpoint=wss://edge.ivschat.us-east-1.amazonaws.com", rewritten);
+        assertTrue(rewritten.contains("wss://edge.ivschat."));
+    }
+
+    @Test
+    void rewriteFunctionEnvRewritesIvsChatWssInsideJson() {
+        String rewritten = ContainerReachableUrls.rewriteFunctionEnv(
+                "{\"endpoint\":\"wss://edge.ivschat.us-west-2.amazonaws.com\"}", 4566);
+        assertEquals("{\"endpoint\":\"ws://127.0.0.1:4566/ivschat?endpoint=wss://edge.ivschat.us-west-2.amazonaws.com\"}",
+                rewritten);
     }
 }

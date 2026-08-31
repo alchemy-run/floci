@@ -216,4 +216,45 @@ class ConfigurationRecorderIntegrationTest {
             .statusCode(200)
             .body("DeliveryChannels", hasSize(1));
     }
+
+    @Test
+    @Order(10)
+    void deleteConfigurationRecorder() {
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DeleteConfigurationRecorder")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ConfigurationRecorderName": "default"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DescribeConfigurationRecorders")
+            .contentType(CONTENT_TYPE)
+            .body("{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ConfigurationRecorders", hasSize(0));
+    }
+
+    @Test
+    @Order(11)
+    void deleteNonexistentConfigurationRecorder() {
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DeleteConfigurationRecorder")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {"ConfigurationRecorderName": "no-such-recorder"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("NoSuchConfigurationRecorderException"));
+    }
 }

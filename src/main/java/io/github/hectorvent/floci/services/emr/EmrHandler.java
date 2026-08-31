@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.services.emr.model.EmrCluster;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceFleet;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceGroup;
 import io.github.hectorvent.floci.services.emr.model.EmrStep;
+import io.github.hectorvent.floci.services.emr.model.EmrStudio;
 import io.github.hectorvent.floci.services.emr.model.SecurityConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -48,6 +49,9 @@ public class EmrHandler {
                 case "RunJobFlow" -> handleRunJobFlow(request, region);
                 case "DescribeCluster" -> handleDescribeCluster(request);
                 case "ListClusters" -> handleListClusters(request, region);
+                case "ListReleaseLabels" -> handleListReleaseLabels(request);
+                case "DescribeReleaseLabel" -> handleDescribeReleaseLabel(request);
+                case "ListSupportedInstanceTypes" -> handleListSupportedInstanceTypes(request);
                 case "TerminateJobFlows" -> handleTerminateJobFlows(request);
                 case "SetTerminationProtection" -> handleSetTerminationProtection(request);
                 case "SetVisibleToAllUsers" -> handleSetVisibleToAllUsers(request);
@@ -69,6 +73,11 @@ public class EmrHandler {
                 case "ListSecurityConfigurations" -> handleListSecurityConfigurations();
                 case "AddTags" -> handleAddTags(request);
                 case "RemoveTags" -> handleRemoveTags(request);
+                case "CreateStudio" -> handleCreateStudio(request, region);
+                case "DescribeStudio" -> handleDescribeStudio(request);
+                case "ListStudios" -> handleListStudios(region);
+                case "UpdateStudio" -> handleUpdateStudio(request);
+                case "DeleteStudio" -> handleDeleteStudio(request);
                 default -> Response.status(400)
                         .entity(new AwsErrorResponse("InvalidRequestException",
                                 "Operation " + action + " is not supported."))
@@ -135,6 +144,71 @@ public class EmrHandler {
         ArrayNode arr = response.putArray("Clusters");
         for (EmrCluster c : service.listClusters(region, states)) {
             arr.add(clusterSummaryNode(c));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListReleaseLabels(JsonNode request) {
+        JsonNode filters = request.path("Filters");
+        String prefix = text(filters, "Prefix");
+        String application = text(filters, "Application");
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("ReleaseLabels");
+        EmrReleaseCatalog.listLabels(prefix, application).forEach(arr::add);
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeReleaseLabel(JsonNode request) {
+        String requested = text(request, "ReleaseLabel");
+        String label = (requested == null || requested.isEmpty())
+                ? EmrReleaseCatalog.latestLabel()
+                : requested;
+        EmrReleaseCatalog.Release release = EmrReleaseCatalog.find(label)
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "Release label '" + label + "' is not a valid EMR release.", 400));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ReleaseLabel", release.label());
+        ArrayNode apps = response.putArray("Applications");
+        for (EmrReleaseCatalog.Application app : release.applications()) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("Name", app.name());
+            node.put("Version", app.version());
+            apps.add(node);
+        }
+        ArrayNode os = response.putArray("AvailableOSReleases");
+        for (String osLabel : release.osReleases()) {
+            os.add(objectMapper.createObjectNode().put("Label", osLabel));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListSupportedInstanceTypes(JsonNode request) {
+        String label = text(request, "ReleaseLabel");
+        if (label == null || label.isEmpty()) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value null at 'releaseLabel' failed to satisfy constraint: "
+                            + "Member must not be null", 400);
+        }
+        if (EmrReleaseCatalog.find(label).isEmpty()) {
+            throw new AwsException("InvalidRequestException",
+                    "Release label '" + label + "' is not a valid EMR release.", 400);
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("SupportedInstanceTypes");
+        for (EmrReleaseCatalog.SupportedInstanceType type : EmrReleaseCatalog.instanceTypes()) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("Type", type.type());
+            node.put("MemoryGB", type.memoryGb());
+            node.put("StorageGB", type.storageGb());
+            node.put("VCPU", type.vcpu());
+            node.put("Is64BitsOnly", type.is64BitsOnly());
+            node.put("InstanceFamilyId", type.instanceFamilyId());
+            node.put("EbsOptimizedAvailable", type.ebsOptimizedAvailable());
+            node.put("EbsOptimizedByDefault", type.ebsOptimizedByDefault());
+            node.put("NumberOfDisks", type.numberOfDisks());
+            node.put("EbsStorageOnly", type.ebsStorageOnly());
+            node.put("Architecture", type.architecture());
+            arr.add(node);
         }
         return Response.ok(response).build();
     }
@@ -322,6 +396,62 @@ public class EmrHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    // ──────────────────────────── Studios ────────────────────────────
+
+    private Response handleCreateStudio(JsonNode request, String region) {
+        EmrStudio studio = new EmrStudio();
+        studio.setName(text(request, "Name"));
+        studio.setDescription(text(request, "Description"));
+        studio.setAuthMode(text(request, "AuthMode"));
+        studio.setVpcId(text(request, "VpcId"));
+        studio.setSubnetIds(stringList(request.path("SubnetIds")));
+        studio.setServiceRole(text(request, "ServiceRole"));
+        studio.setUserRole(text(request, "UserRole"));
+        studio.setWorkspaceSecurityGroupId(text(request, "WorkspaceSecurityGroupId"));
+        studio.setEngineSecurityGroupId(text(request, "EngineSecurityGroupId"));
+        studio.setDefaultS3Location(text(request, "DefaultS3Location"));
+        studio.setIdpAuthUrl(text(request, "IdpAuthUrl"));
+        studio.setIdpRelayStateParameterName(text(request, "IdpRelayStateParameterName"));
+        studio.setTags(parseTags(request.path("Tags")));
+        studio.setTrustedIdentityPropagationEnabled(boolOrNull(request, "TrustedIdentityPropagationEnabled"));
+        studio.setIdcUserAssignment(text(request, "IdcUserAssignment"));
+        studio.setIdcInstanceArn(text(request, "IdcInstanceArn"));
+        studio.setEncryptionKeyArn(text(request, "EncryptionKeyArn"));
+        EmrStudio created = service.createStudio(studio, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("StudioId", created.getStudioId());
+        response.put("Url", created.getUrl());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeStudio(JsonNode request) {
+        EmrStudio studio = service.describeStudio(text(request, "StudioId"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("Studio", studioNode(studio));
+        return Response.ok(response).build();
+    }
+
+    private Response handleListStudios(String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("Studios");
+        for (EmrStudio studio : service.listStudios(region)) {
+            arr.add(studioSummaryNode(studio));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateStudio(JsonNode request) {
+        List<String> subnetIds = request.has("SubnetIds") ? stringList(request.path("SubnetIds")) : null;
+        service.updateStudio(text(request, "StudioId"), text(request, "Name"), text(request, "Description"),
+                subnetIds, text(request, "DefaultS3Location"), text(request, "EncryptionKeyArn"));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleDeleteStudio(JsonNode request) {
+        service.deleteStudio(text(request, "StudioId"));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     // ──────────────────────────── Builders ────────────────────────────
 
     private ObjectNode clusterNode(EmrCluster c) {
@@ -458,6 +588,89 @@ public class EmrHandler {
         return node;
     }
 
+    private ObjectNode studioNode(EmrStudio s) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("StudioId", s.getStudioId());
+        if (s.getStudioArn() != null) {
+            node.put("StudioArn", s.getStudioArn());
+        }
+        if (s.getName() != null) {
+            node.put("Name", s.getName());
+        }
+        if (s.getDescription() != null) {
+            node.put("Description", s.getDescription());
+        }
+        if (s.getAuthMode() != null) {
+            node.put("AuthMode", s.getAuthMode());
+        }
+        if (s.getVpcId() != null) {
+            node.put("VpcId", s.getVpcId());
+        }
+        ArrayNode subnets = node.putArray("SubnetIds");
+        s.getSubnetIds().forEach(subnets::add);
+        if (s.getServiceRole() != null) {
+            node.put("ServiceRole", s.getServiceRole());
+        }
+        if (s.getUserRole() != null) {
+            node.put("UserRole", s.getUserRole());
+        }
+        if (s.getWorkspaceSecurityGroupId() != null) {
+            node.put("WorkspaceSecurityGroupId", s.getWorkspaceSecurityGroupId());
+        }
+        if (s.getEngineSecurityGroupId() != null) {
+            node.put("EngineSecurityGroupId", s.getEngineSecurityGroupId());
+        }
+        if (s.getUrl() != null) {
+            node.put("Url", s.getUrl());
+        }
+        putEpoch(node, "CreationTime", s.getCreationTime());
+        if (s.getDefaultS3Location() != null) {
+            node.put("DefaultS3Location", s.getDefaultS3Location());
+        }
+        if (s.getIdpAuthUrl() != null) {
+            node.put("IdpAuthUrl", s.getIdpAuthUrl());
+        }
+        if (s.getIdpRelayStateParameterName() != null) {
+            node.put("IdpRelayStateParameterName", s.getIdpRelayStateParameterName());
+        }
+        node.set("Tags", tagArray(s.getTags()));
+        if (s.getIdcInstanceArn() != null) {
+            node.put("IdcInstanceArn", s.getIdcInstanceArn());
+        }
+        if (s.getTrustedIdentityPropagationEnabled() != null) {
+            node.put("TrustedIdentityPropagationEnabled", s.getTrustedIdentityPropagationEnabled());
+        }
+        if (s.getIdcUserAssignment() != null) {
+            node.put("IdcUserAssignment", s.getIdcUserAssignment());
+        }
+        if (s.getEncryptionKeyArn() != null) {
+            node.put("EncryptionKeyArn", s.getEncryptionKeyArn());
+        }
+        return node;
+    }
+
+    private ObjectNode studioSummaryNode(EmrStudio s) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("StudioId", s.getStudioId());
+        if (s.getName() != null) {
+            node.put("Name", s.getName());
+        }
+        if (s.getVpcId() != null) {
+            node.put("VpcId", s.getVpcId());
+        }
+        if (s.getDescription() != null) {
+            node.put("Description", s.getDescription());
+        }
+        if (s.getUrl() != null) {
+            node.put("Url", s.getUrl());
+        }
+        if (s.getAuthMode() != null) {
+            node.put("AuthMode", s.getAuthMode());
+        }
+        putEpoch(node, "CreationTime", s.getCreationTime());
+        return node;
+    }
+
     private ObjectNode syntheticInstanceNode(EmrCluster cluster, EmrInstanceGroup group, int index) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("Id", "ci-" + index + cluster.getId());
@@ -591,6 +804,14 @@ public class EmrHandler {
     private String text(JsonNode request, String field) {
         JsonNode node = request.path(field);
         return node.isMissingNode() || node.isNull() ? null : node.asText(null);
+    }
+
+    private Boolean boolOrNull(JsonNode request, String field) {
+        JsonNode node = request.get(field);
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return null;
+        }
+        return node.asBoolean();
     }
 
     private String rawArray(JsonNode node) {

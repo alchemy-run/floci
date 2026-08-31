@@ -91,11 +91,9 @@ public class PricingService {
         List<ServiceEntry> slice;
         if (serviceCode != null && !serviceCode.isEmpty()) {
             ServiceEntry entry = servicesByCode.get(serviceCode);
-            if (entry == null) {
-                throw new AwsException("InvalidParameterException",
-                        "Invalid ServiceCode: " + serviceCode, 400);
-            }
-            slice = List.of(entry);
+            // Live AWS returns an empty Services list for unknown codes
+            // rather than InvalidParameterException / NotFoundException.
+            slice = entry == null ? List.of() : List.of(entry);
         } else {
             slice = servicesOrdered;
         }
@@ -125,10 +123,14 @@ public class PricingService {
         requireNonEmpty(attributeName, "AttributeName");
         requireSafePathSegment(serviceCode, "ServiceCode");
         requireSafePathSegment(attributeName, "AttributeName");
+        requireMaxResults(maxResults);
 
+        // Live AWS returns an empty AttributeValues list for unknown
+        // ServiceCodes rather than InvalidParameterException.
         if (!servicesByCode.containsKey(serviceCode)) {
-            throw new AwsException("InvalidParameterException",
-                    "Invalid ServiceCode: " + serviceCode, 400);
+            ObjectNode response = objectMapper.createObjectNode();
+            response.putArray("AttributeValues");
+            return response;
         }
 
         String resource = ATTRIBUTE_VALUES_DIR + "/" + serviceCode + "/" + attributeName + ".json";
@@ -172,9 +174,15 @@ public class PricingService {
                                    String nextToken, Integer maxResults) {
         requireNonEmpty(serviceCode, "ServiceCode");
         requireSafePathSegment(serviceCode, "ServiceCode");
+        requireMaxResults(maxResults);
+        // Live AWS does not reject unknown ServiceCodes: GetProducts
+        // succeeds with an empty PriceList (the documented NotFoundException
+        // is not reachable via a bogus code).
         if (!servicesByCode.containsKey(serviceCode)) {
-            throw new AwsException("InvalidParameterException",
-                    "Invalid ServiceCode: " + serviceCode, 400);
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("FormatVersion", resolveFormatVersion(formatVersion));
+            response.putArray("PriceList");
+            return response;
         }
 
         String region = resolveRegionFromFilters(filters);
@@ -385,6 +393,25 @@ public class PricingService {
         if (value == null || value.isEmpty()) {
             throw new AwsException("ValidationException",
                     "1 validation error detected: Value at '" + field + "' failed to satisfy constraint: Member must not be null.", 400);
+        }
+    }
+
+    /**
+     * AWS Price List Query APIs constrain {@code MaxResults} to 1–100.
+     * Live AWS returns {@code InvalidParameterException} for 0 (and other
+     * out-of-range values); the emulator used to treat {@code <= 0} as
+     * "return everything".
+     */
+    private static void requireMaxResults(Integer maxResults) {
+        if (maxResults == null) {
+            return;
+        }
+        if (maxResults < 1 || maxResults > 100) {
+            throw new AwsException("InvalidParameterException",
+                    "1 validation error detected: Value '" + maxResults
+                    + "' at 'maxResults' failed to satisfy constraint: "
+                    + "Member must have value greater than or equal to 1 and less than or equal to 100.",
+                    400);
         }
     }
 

@@ -36,7 +36,7 @@
 - **Certificate Types:** `AMAZON_ISSUED` (default) and `PRIVATE` (when `CertificateAuthorityArn` is provided)
 - **Export:** `PRIVATE`, `IMPORTED`, or `Options.Export=ENABLED` certificates can be exported. `UpdateCertificateOptions` cannot change Export (`InvalidStateException`).
 - **Revoke:** only certificates that have been exported at least once can be revoked (`ConflictException` otherwise).
-- **ACMPCA:** there is no Floci ACM PCA service. `CertificateAuthorityArn` is stored as an opaque string so ACM private-cert emulation works; PCA APIs stay remote-only.
+- **ACMPCA:** Private CAs are emulated by the [ACM PCA](acm-pca.md) service. `CertificateAuthorityArn` is still stored as an opaque string on ACM certificates.
 
 ## Configuration
 

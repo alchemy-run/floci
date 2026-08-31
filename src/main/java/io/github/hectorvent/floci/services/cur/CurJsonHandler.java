@@ -13,7 +13,9 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * JSON 1.1 handler for AWS CUR operations.
@@ -43,14 +45,9 @@ public class CurJsonHandler {
             case "ModifyReportDefinition" -> handleModifyReportDefinition(request, region);
             case "DescribeReportDefinitions" -> handleDescribeReportDefinitions();
             case "DeleteReportDefinition" -> handleDeleteReportDefinition(request, region);
-            // Tag endpoints are not yet emulated; respond with empty bodies so SDK
-            // clients that probe for them don't trip on UnknownOperationException.
-            case "TagResource", "UntagResource" -> Response.ok(objectMapper.createObjectNode()).build();
-            case "ListTagsForResource" -> {
-                ObjectNode body = objectMapper.createObjectNode();
-                body.putArray("Tags");
-                yield Response.ok(body).build();
-            }
+            case "TagResource" -> handleTagResource(request, region);
+            case "UntagResource" -> handleUntagResource(request, region);
+            case "ListTagsForResource" -> handleListTagsForResource(request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: AWSOrigamiServiceGatewayService." + action))
@@ -60,14 +57,11 @@ public class CurJsonHandler {
 
     private Response handlePutReportDefinition(JsonNode request, String region) {
         ReportDefinition def = parseReportDefinition(request.path("ReportDefinition"));
+        def.setTags(parseTags(request.path("Tags")));
         ReportDefinition created = service.putReportDefinition(def, region);
         // Emission failures must not roll back the management mutation — match AWS
         // semantics where the definition is created even if the first run errors.
-        try {
-            scheduler.emitForReportSync(created, region);
-        } catch (RuntimeException e) {
-            LOG.warnv(e, "Synchronous emission failed for {0}; report still created.", created.getReportName());
-        }
+        maybeEmit(created, region, "created");
         // Re-read after emission so the response reflects the post-emit ReportStatus.
         return Response.ok(serialize(service.getReportDefinitionOrSelf(created, region))).build();
     }
@@ -76,12 +70,17 @@ public class CurJsonHandler {
         String reportName = stringOrNull(request, "ReportName");
         ReportDefinition def = parseReportDefinition(request.path("ReportDefinition"));
         ReportDefinition updated = service.modifyReportDefinition(reportName, def, region);
-        try {
-            scheduler.emitForReportSync(updated, region);
-        } catch (RuntimeException e) {
-            LOG.warnv(e, "Synchronous emission failed for {0}; report still updated.", updated.getReportName());
-        }
+        maybeEmit(updated, region, "updated");
         return Response.ok(serialize(service.getReportDefinitionOrSelf(updated, region))).build();
+    }
+
+    private void maybeEmit(ReportDefinition definition, String region, String verb) {
+        try {
+            scheduler.emitForReportSync(definition, region);
+        } catch (RuntimeException e) {
+            LOG.warnv(e, "Synchronous emission failed for {0}; report still {1}.",
+                    definition.getReportName(), verb);
+        }
     }
 
     private Response handleDescribeReportDefinitions() {
@@ -92,6 +91,29 @@ public class CurJsonHandler {
             arr.add(serialize(d));
         }
         return Response.ok(response).build();
+    }
+
+    private Response handleTagResource(JsonNode request, String region) {
+        service.tagResource(stringOrNull(request, "ReportName"), parseTags(request.path("Tags")), region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleUntagResource(JsonNode request, String region) {
+        service.untagResource(stringOrNull(request, "ReportName"),
+                parseStringList(request.path("TagKeys")), region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleListTagsForResource(JsonNode request, String region) {
+        Map<String, String> tags = service.listTagsForResource(stringOrNull(request, "ReportName"), region);
+        ObjectNode body = objectMapper.createObjectNode();
+        ArrayNode arr = body.putArray("Tags");
+        for (Map.Entry<String, String> entry : tags.entrySet()) {
+            ObjectNode tag = arr.addObject();
+            tag.put("Key", entry.getKey());
+            tag.put("Value", entry.getValue() == null ? "" : entry.getValue());
+        }
+        return Response.ok(body).build();
     }
 
     private Response handleDeleteReportDefinition(JsonNode request, String region) {
@@ -156,6 +178,24 @@ public class CurJsonHandler {
         if (d.getReportStatus() != null) {
             ObjectNode status = out.putObject("ReportStatus");
             status.put("LastStatus", d.getReportStatus());
+        }
+        return out;
+    }
+
+    private static Map<String, String> parseTags(JsonNode node) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (node == null || !node.isArray()) {
+            return out;
+        }
+        for (JsonNode t : node) {
+            if (t == null || !t.isObject()) {
+                continue;
+            }
+            String key = stringOrNull(t, "Key");
+            String value = stringOrNull(t, "Value");
+            if (key != null && !key.isEmpty()) {
+                out.put(key, value == null ? "" : value);
+            }
         }
         return out;
     }

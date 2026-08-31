@@ -103,6 +103,13 @@ public class Environment {
     @JsonIgnore
     private String dbPassword;
 
+    /** Airflow webserver basic-auth user created at container start. Used by InvokeRestApi. */
+    @JsonIgnore
+    private String webserverUsername;
+
+    @JsonIgnore
+    private String webserverPassword;
+
     public Environment() {}
 
     public String getName() { return name; }
@@ -191,6 +198,12 @@ public class Environment {
 
     public String getDbPassword() { return dbPassword; }
     public void setDbPassword(String dbPassword) { this.dbPassword = dbPassword; }
+
+    public String getWebserverUsername() { return webserverUsername; }
+    public void setWebserverUsername(String webserverUsername) { this.webserverUsername = webserverUsername; }
+
+    public String getWebserverPassword() { return webserverPassword; }
+    public void setWebserverPassword(String webserverPassword) { this.webserverPassword = webserverPassword; }
 
     @RegisterForReflection
     @JsonIgnoreProperties(ignoreUnknown = true)

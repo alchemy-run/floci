@@ -23,6 +23,8 @@ import java.util.concurrent.TimeUnit;
 @ApplicationScoped
 public class BackupService {
 
+    static final String SERVICE = "backup";
+
     private static final Logger LOG = Logger.getLogger(BackupService.class);
 
     private static final List<String> SUPPORTED_RESOURCE_TYPES = List.of(
@@ -35,6 +37,8 @@ public class BackupService {
     private final StorageBackend<String, BackupSelection> selectionStore;
     private final StorageBackend<String, BackupJob>       jobStore;
     private final StorageBackend<String, RecoveryPoint>   recoveryStore;
+    private final StorageBackend<String, RestoreJob>      restoreStore;
+    private final StorageBackend<String, CopyJob>         copyStore;
 
     private final RegionResolver regionResolver;
     private final int jobCompletionDelaySeconds;
@@ -52,6 +56,8 @@ public class BackupService {
         this.selectionStore = storageFactory.create("backup", "backup-selections.json", new TypeReference<>() {});
         this.jobStore       = storageFactory.create("backup", "backup-jobs.json",       new TypeReference<>() {});
         this.recoveryStore  = storageFactory.create("backup", "backup-recovery-points.json", new TypeReference<>() {});
+        this.restoreStore   = storageFactory.create("backup", "backup-restore-jobs.json", new TypeReference<>() {});
+        this.copyStore      = storageFactory.create("backup", "backup-copy-jobs.json", new TypeReference<>() {});
         this.regionResolver = regionResolver;
         this.jobCompletionDelaySeconds = config.services().backup().jobCompletionDelaySeconds();
     }
@@ -102,10 +108,32 @@ public class BackupService {
         return vaultStore.scan(k -> k.startsWith(prefix));
     }
 
+    public void putBackupVaultAccessPolicy(String vaultName, String policy, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        vault.setAccessPolicy(policy);
+        vaultStore.put(vaultKey(region, vaultName), vault);
+    }
+
+    public BackupVault requireVaultAccessPolicy(String vaultName, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        if (vault.getAccessPolicy() == null || vault.getAccessPolicy().isBlank()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "No access policy found for backup vault: " + vaultName, 400);
+        }
+        return vault;
+    }
+
+    public void deleteBackupVaultAccessPolicy(String vaultName, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        vault.setAccessPolicy(null);
+        vaultStore.put(vaultKey(region, vaultName), vault);
+    }
+
     // ── Plan ───────────────────────────────────────────────────────────────────
 
     public BackupPlan createBackupPlan(String planName, List<BackupRule> rules,
-                                       String creatorRequestId, String region) {
+                                       String creatorRequestId, Map<String, String> tags,
+                                       String region) {
         String planId = UUID.randomUUID().toString();
         BackupPlan plan = new BackupPlan();
         plan.setBackupPlanId(planId);
@@ -115,6 +143,7 @@ public class BackupService {
         plan.setVersionId(shortId());
         assignRuleIds(rules);
         plan.setRules(rules);
+        plan.setTags(tags);
         planStore.put(planId, plan);
         return plan;
     }
@@ -156,7 +185,8 @@ public class BackupService {
 
     public BackupSelection createBackupSelection(String planId, String selectionName,
                                                   String iamRoleArn, List<String> resources,
-                                                  List<String> notResources, String creatorRequestId) {
+                                                  List<String> notResources, List<Condition> listOfTags,
+                                                  String creatorRequestId) {
         getBackupPlan(planId);
         String selectionId = UUID.randomUUID().toString();
         BackupSelection selection = new BackupSelection();
@@ -166,6 +196,7 @@ public class BackupService {
         selection.setIamRoleArn(iamRoleArn);
         selection.setResources(resources);
         selection.setNotResources(notResources);
+        selection.setListOfTags(listOfTags);
         selection.setCreationDate(Instant.now().getEpochSecond());
         selection.setCreatorRequestId(creatorRequestId);
         selectionStore.put(selectionId, selection);
@@ -273,6 +304,152 @@ public class BackupService {
         decrementVaultCount(vaultName, region);
     }
 
+    public Map<String, String> getRecoveryPointRestoreMetadata(String vaultName, String recoveryPointArn, String region) {
+        RecoveryPoint rp = describeRecoveryPoint(vaultName, recoveryPointArn, region);
+        Map<String, String> metadata = new LinkedHashMap<>();
+        if (rp.getResourceType() != null) {
+            metadata.put("resourceType", rp.getResourceType());
+        }
+        if (rp.getResourceArn() != null) {
+            metadata.put("aws:backup:source-resource-arn", rp.getResourceArn());
+        }
+        return metadata;
+    }
+
+    public List<RecoveryPoint> listRecoveryPointsByResource(String resourceArn) {
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "Missing parameter: ResourceArn", 400);
+        }
+        return recoveryStore.scan(k -> true).stream()
+                .filter(rp -> resourceArn.equals(rp.getResourceArn()))
+                .toList();
+    }
+
+    // ── Restore jobs ───────────────────────────────────────────────────────────
+
+    public RestoreJob startRestoreJob(String recoveryPointArn, String iamRoleArn,
+                                      Map<String, String> metadata, String resourceType, String region) {
+        if (recoveryPointArn == null || recoveryPointArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "Missing parameter: RecoveryPointArn", 400);
+        }
+        RecoveryPoint rp = recoveryStore.get(recoveryPointArn)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Recovery point not found: " + recoveryPointArn, 400));
+        if (iamRoleArn == null || iamRoleArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "Missing parameter: IamRoleArn", 400);
+        }
+
+        String jobId = UUID.randomUUID().toString();
+        long now = Instant.now().getEpochSecond();
+        RestoreJob job = new RestoreJob();
+        job.setRestoreJobId(jobId);
+        job.setRecoveryPointArn(recoveryPointArn);
+        job.setSourceResourceArn(rp.getResourceArn());
+        job.setBackupVaultArn(rp.getBackupVaultArn());
+        job.setIamRoleArn(iamRoleArn);
+        job.setStatus("PENDING");
+        job.setPercentDone("0.0");
+        job.setCreationDate(now);
+        job.setResourceType(resourceType != null ? resourceType : rp.getResourceType());
+        job.setAccountId(regionResolver.getAccountId());
+        job.setMetadata(metadata);
+        restoreStore.put(jobId, job);
+        return job;
+    }
+
+    public RestoreJob describeRestoreJob(String jobId) {
+        return restoreStore.get(jobId)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Restore job not found: " + jobId, 400));
+    }
+
+    public List<RestoreJob> listRestoreJobs() {
+        return restoreStore.scan(k -> true);
+    }
+
+    public Map<String, String> getRestoreJobMetadata(String jobId) {
+        RestoreJob job = describeRestoreJob(jobId);
+        return job.getMetadata() != null ? job.getMetadata() : Map.of();
+    }
+
+    public void putRestoreValidationResult(String jobId, String validationStatus, String validationStatusMessage) {
+        RestoreJob job = describeRestoreJob(jobId);
+        job.setValidationStatus(validationStatus);
+        job.setValidationStatusMessage(validationStatusMessage);
+        restoreStore.put(jobId, job);
+    }
+
+    // ── Copy jobs ──────────────────────────────────────────────────────────────
+
+    public CopyJob startCopyJob(String recoveryPointArn, String sourceBackupVaultName,
+                                String destinationBackupVaultArn, String iamRoleArn, String region) {
+        if (recoveryPointArn == null || recoveryPointArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "Missing parameter: RecoveryPointArn", 400);
+        }
+        RecoveryPoint rp = describeRecoveryPoint(sourceBackupVaultName, recoveryPointArn, region);
+        if (iamRoleArn == null || iamRoleArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "Missing parameter: IamRoleArn", 400);
+        }
+        String jobId = UUID.randomUUID().toString();
+        long now = Instant.now().getEpochSecond();
+        CopyJob job = new CopyJob();
+        job.setCopyJobId(jobId);
+        job.setAccountId(regionResolver.getAccountId());
+        job.setSourceBackupVaultArn(rp.getBackupVaultArn());
+        job.setSourceRecoveryPointArn(recoveryPointArn);
+        job.setDestinationBackupVaultArn(destinationBackupVaultArn);
+        job.setResourceArn(rp.getResourceArn());
+        job.setResourceType(rp.getResourceType());
+        job.setIamRoleArn(iamRoleArn);
+        job.setState("CREATED");
+        job.setCreationDate(now);
+        copyStore.put(jobId, job);
+        return job;
+    }
+
+    public CopyJob describeCopyJob(String jobId) {
+        return copyStore.get(jobId)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Copy job not found: " + jobId, 400));
+    }
+
+    public List<CopyJob> listCopyJobs() {
+        return copyStore.scan(k -> true);
+    }
+
+    // ── Protected resources ────────────────────────────────────────────────────
+
+    public List<ProtectedResource> listProtectedResources() {
+        Map<String, ProtectedResource> byArn = new LinkedHashMap<>();
+        for (RecoveryPoint rp : recoveryStore.scan(k -> true)) {
+            if (rp.getResourceArn() == null) {
+                continue;
+            }
+            ProtectedResource existing = byArn.get(rp.getResourceArn());
+            if (existing == null || rp.getCreationDate() >= (existing.getLastBackupTime() == null ? 0 : existing.getLastBackupTime())) {
+                ProtectedResource resource = new ProtectedResource();
+                resource.setResourceArn(rp.getResourceArn());
+                resource.setResourceType(rp.getResourceType());
+                resource.setLastBackupTime(rp.getCreationDate());
+                resource.setLastBackupVaultArn(rp.getBackupVaultArn());
+                resource.setLastRecoveryPointArn(rp.getRecoveryPointArn());
+                byArn.put(rp.getResourceArn(), resource);
+            }
+        }
+        return new ArrayList<>(byArn.values());
+    }
+
+    public ProtectedResource describeProtectedResource(String resourceArn) {
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "Missing parameter: ResourceArn", 400);
+        }
+        return listProtectedResources().stream()
+                .filter(r -> resourceArn.equals(r.getResourceArn()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Protected resource not found: " + resourceArn, 400));
+    }
+
     // ── Tags ───────────────────────────────────────────────────────────────────
 
     public Map<String, String> listTags(String resourceArn) {
@@ -376,7 +553,7 @@ public class BackupService {
                 .filter(p -> arn.equals(p.getBackupPlanArn()))
                 .findFirst();
         if (plan.isPresent()) {
-            return new HashMap<>();
+            return plan.get().getTags();
         }
         throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
     }
@@ -391,6 +568,15 @@ public class BackupService {
             vaultStore.put(vaultKey(vault), vault);
             return;
         }
+        Optional<BackupPlan> planOpt = planStore.scan(k -> true).stream()
+                .filter(p -> arn.equals(p.getBackupPlanArn()))
+                .findFirst();
+        if (planOpt.isPresent()) {
+            BackupPlan plan = planOpt.get();
+            plan.getTags().putAll(newTags);
+            planStore.put(plan.getBackupPlanId(), plan);
+            return;
+        }
         throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
     }
 
@@ -402,6 +588,15 @@ public class BackupService {
             BackupVault vault = vaultOpt.get();
             tagKeys.forEach(vault.getTags()::remove);
             vaultStore.put(vaultKey(vault), vault);
+            return;
+        }
+        Optional<BackupPlan> planOpt = planStore.scan(k -> true).stream()
+                .filter(p -> arn.equals(p.getBackupPlanArn()))
+                .findFirst();
+        if (planOpt.isPresent()) {
+            BackupPlan plan = planOpt.get();
+            tagKeys.forEach(plan.getTags()::remove);
+            planStore.put(plan.getBackupPlanId(), plan);
             return;
         }
         throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);

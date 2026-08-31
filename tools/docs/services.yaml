@@ -14,10 +14,18 @@ services:
     doc: docs/services/acm.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/acm/AcmJsonHandler.java, mode: switch }
+  - service: acmpca
+    doc: docs/services/acm-pca.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/acmpca/AcmPcaJsonHandler.java, mode: switch }
   - service: applicationautoscaling
     doc: docs/services/applicationautoscaling.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/applicationautoscaling/ApplicationAutoScalingJsonHandler.java, mode: switch }
+  - service: apprunner
+    doc: docs/services/apprunner.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/apprunner/AppRunnerJsonHandler.java, mode: switch }
   - service: athena
     doc: docs/services/athena.md
     sources:
@@ -66,6 +74,14 @@ services:
     doc: docs/services/memorydb.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/memorydb/MemoryDbHandler.java, mode: switch }
+  - service: dax
+    doc: docs/services/dax.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/dax/DaxJsonHandler.java, mode: switch }
+  - service: ds
+    doc: docs/services/ds.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/directoryservice/DirectoryServiceJsonHandler.java, mode: switch }
   - service: neptune
     doc: docs/services/neptune.md
     sources:
@@ -75,6 +91,18 @@ services:
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/rds/RdsQueryHandler.java, mode: switch }
     exclude_actions: [SubnetIds, VpcSecurityGroupIds]
+  - service: redshift
+    doc: docs/services/redshift.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/redshift/RedshiftQueryHandler.java, mode: switch }
+  - service: redshift-serverless
+    doc: docs/services/redshift-serverless.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/redshiftserverless/RedshiftServerlessJsonHandler.java, mode: switch }
+  - service: redshift-data
+    doc: docs/services/redshift-data.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/redshiftdata/RedshiftDataJsonHandler.java, mode: switch }
   - service: secretsmanager
     doc: docs/services/secrets-manager.md
     sources:
@@ -99,6 +127,7 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/apigatewayv2/ApiGatewayV2JsonHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/autoscaling/AutoScalingQueryHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/bcmdataexports/BcmDataExportsJsonHandler.java }  # no standalone action table yet
+  - { path: src/main/java/io/github/hectorvent/floci/services/budgets/BudgetsJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/ce/CostExplorerJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/cloudcontrol/CloudControlJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/cloudmap/CloudMapHandler.java }  # non-tabular doc (grouped/inline)
@@ -115,6 +144,7 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/dynamodb/DynamoDbStreamsJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/ec2/Ec2QueryHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/ecr/EcrJsonHandler.java }  # doc packs multiple actions per row (`A` / `B`) + REST endpoints; needs de-grouping
+  - { path: src/main/java/io/github/hectorvent/floci/services/ecrpublic/EcrPublicJsonHandler.java }
   - { path: src/main/java/io/github/hectorvent/floci/services/ecs/EcsJsonHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/elasticbeanstalk/ElasticBeanstalkQueryHandler.java }  # non-tabular doc (grouped/inline)
   - { path: src/main/java/io/github/hectorvent/floci/services/elbv2/ElbV2QueryHandler.java }  # non-tabular doc (grouped/inline)
@@ -131,5 +161,41 @@ deferred_handlers:
   - { path: src/main/java/io/github/hectorvent/floci/services/ssm/Ec2MessagesJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/ssm/SsmJsonHandler.java }  # multi-table doc
   - { path: src/main/java/io/github/hectorvent/floci/services/textract/TextractJsonHandler.java }  # no standalone action table yet
+  - { path: src/main/java/io/github/hectorvent/floci/services/timestream/TimestreamJsonHandler.java }  # alchemy timestream bindings; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/timestreaminfluxdb/TimestreamInfluxDbJsonHandler.java }  # alchemy timestream-influxdb db instance; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/rekognition/RekognitionJsonHandler.java }  # no standalone action table yet
+  - { path: src/main/java/io/github/hectorvent/floci/services/forecast/ForecastJsonHandler.java }  # alchemy dataset/group coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/route53domains/Route53DomainsJsonHandler.java }  # alchemy route53domains bindings; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/route53resolver/Route53ResolverJsonHandler.java }  # alchemy resolver-endpoint coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/personalize/PersonalizeJsonHandler.java }  # alchemy schema/dataset-group coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/sagemaker/SageMakerJsonHandler.java }  # alchemy feature-group coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/paymentcryptography/PaymentCryptographyJsonHandler.java }  # alchemy payment-cryptography coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/globalaccelerator/GlobalAcceleratorJsonHandler.java }  # alchemy accelerator/listener/group coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/comprehend/ComprehendJsonHandler.java }  # no standalone action table yet
+  - { path: src/main/java/io/github/hectorvent/floci/services/comprehendmedical/ComprehendMedicalJsonHandler.java }  # no standalone action table yet
   - { path: src/main/java/io/github/hectorvent/floci/services/transcribe/TranscribeJsonHandler.java }  # no standalone action table yet
+  - { path: src/main/java/io/github/hectorvent/floci/services/verifiedpermissions/VerifiedPermissionsJsonHandler.java }  # alchemy identity-source coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/translate/TranslateJsonHandler.java }  # alchemy parallel-data coverage; docs table later
   - { path: src/main/java/io/github/hectorvent/floci/services/transfer/TransferHandler.java }  # multi-table doc
+  - { path: src/main/java/io/github/hectorvent/floci/services/dax/DaxJsonHandler.java }  # alchemy cluster coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/dms/DmsJsonHandler.java }  # alchemy bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/directoryservice/DirectoryServiceJsonHandler.java }  # alchemy directory coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/fms/FmsJsonHandler.java }  # alchemy admin-account coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/shield/ShieldJsonHandler.java }  # alchemy shield bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/signer/SignerController.java }  # alchemy signer bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/servicecatalog/ServiceCatalogJsonHandler.java }  # alchemy association coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/servicequotas/ServiceQuotasJsonHandler.java }  # alchemy service-quotas bindings; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/ssmcontacts/SsmContactsJsonHandler.java }  # alchemy contacts/bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/organizations/OrganizationsJsonHandler.java }  # alchemy organization coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/networkfirewall/NetworkFirewallJsonHandler.java }  # alchemy firewall-policy coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/frauddetector/FraudDetectorJsonHandler.java }  # alchemy detector/list/event coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/fsx/FsxJsonHandler.java }  # alchemy fsx bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/kendra/KendraJsonHandler.java }  # alchemy index/datasource coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/qbusiness/QBusinessController.java }  # alchemy application coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/keyspaces/KeyspacesJsonHandler.java }  # alchemy keyspace coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/mwaaserverless/MwaaServerlessJsonHandler.java }  # alchemy workflow coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/smsvoice/SmsVoiceJsonHandler.java }  # alchemy opt-out/bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/socialmessaging/SocialMessagingController.java }  # alchemy socialmessaging bindings coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/ssmcontacts/SsmContactsJsonHandler.java }  # alchemy ssm-contacts coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/xray/XRayController.java }  # alchemy xray resource-policy coverage; docs table later
+  - { path: src/main/java/io/github/hectorvent/floci/services/vpclattice/VpcLatticeController.java }  # alchemy vpc-lattice service-chain coverage; docs table later

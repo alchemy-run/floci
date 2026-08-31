@@ -89,6 +89,65 @@ class KinesisAnalyticsV2JsonHandlerTest {
     }
 
     @Test
+    void listApplicationVersionsIncludesInitialVersion() {
+        createApplication("demo");
+
+        ObjectNode req = MAPPER.createObjectNode();
+        req.put("ApplicationName", "demo");
+        Response resp = handler.handle("ListApplicationVersions", req, REGION);
+        assertThat(resp.getStatus(), is(200));
+        var summaries = entity(resp).get("ApplicationVersionSummaries");
+        assertEquals(1, summaries.size());
+        assertEquals(1, summaries.get(0).get("ApplicationVersionId").asLong());
+        assertEquals("READY", summaries.get(0).get("ApplicationStatus").asText());
+    }
+
+    @Test
+    void describeApplicationVersionReturnsVersionDetail() {
+        createApplication("demo");
+
+        ObjectNode req = MAPPER.createObjectNode();
+        req.put("ApplicationName", "demo");
+        req.put("ApplicationVersionId", 1);
+        Response resp = handler.handle("DescribeApplicationVersion", req, REGION);
+        assertThat(resp.getStatus(), is(200));
+        ObjectNode detail = (ObjectNode) entity(resp).get("ApplicationVersionDetail");
+        assertEquals("demo", detail.get("ApplicationName").asText());
+        assertEquals(1, detail.get("ApplicationVersionId").asLong());
+    }
+
+    @Test
+    void listApplicationOperationsReturnsEmptyList() {
+        createApplication("demo");
+
+        ObjectNode req = MAPPER.createObjectNode();
+        req.put("ApplicationName", "demo");
+        Response resp = handler.handle("ListApplicationOperations", req, REGION);
+        assertThat(resp.getStatus(), is(200));
+        assertEquals(0, entity(resp).get("ApplicationOperationInfoList").size());
+    }
+
+    @Test
+    void describeApplicationOperationRejectsUnknownId() {
+        createApplication("demo");
+
+        ObjectNode req = MAPPER.createObjectNode();
+        req.put("ApplicationName", "demo");
+        req.put("OperationId", "aaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assertThrows(AwsException.class, () -> handler.handle("DescribeApplicationOperation", req, REGION));
+    }
+
+    @Test
+    void rollbackApplicationRejectsFreshApplication() {
+        createApplication("demo");
+
+        ObjectNode req = MAPPER.createObjectNode();
+        req.put("ApplicationName", "demo");
+        req.put("CurrentApplicationVersionId", 1);
+        assertThrows(AwsException.class, () -> handler.handle("RollbackApplication", req, REGION));
+    }
+
+    @Test
     void listApplicationsIncludesCreated() {
         createApplication("demo-a");
         createApplication("demo-b");
@@ -254,6 +313,61 @@ class KinesisAnalyticsV2JsonHandlerTest {
     }
 
     @Test
+    void updateApplicationEnvironmentPropertiesAndParallelismEchoOnDescribe() {
+        ObjectNode s3 = MAPPER.createObjectNode();
+        s3.put("BucketARN", "arn:aws:s3:::flink-code");
+        s3.put("FileKey", "app.jar");
+        ObjectNode propertyGroup = MAPPER.createObjectNode();
+        propertyGroup.put("PropertyGroupId", "AppProperties");
+        propertyGroup.set("PropertyMap", MAPPER.createObjectNode().put("mode", "test"));
+        ObjectNode envProps = MAPPER.createObjectNode();
+        envProps.putArray("PropertyGroups").add(propertyGroup);
+        ObjectNode appCfg = MAPPER.createObjectNode();
+        appCfg.set("ApplicationCodeConfiguration",
+                MAPPER.createObjectNode().set("CodeContent",
+                        MAPPER.createObjectNode().set("S3ContentLocation", s3)));
+        appCfg.set("EnvironmentProperties", envProps);
+
+        ObjectNode req = MAPPER.createObjectNode();
+        req.put("ApplicationName", "env-update");
+        req.put("RuntimeEnvironment", "FLINK-1_18");
+        req.put("ServiceExecutionRole", ROLE);
+        req.set("ApplicationConfiguration", appCfg);
+        assertThat(handler.handle("CreateApplication", req, REGION).getStatus(), is(200));
+
+        ObjectNode updatedGroup = MAPPER.createObjectNode();
+        updatedGroup.put("PropertyGroupId", "AppProperties");
+        updatedGroup.set("PropertyMap", MAPPER.createObjectNode()
+                .put("mode", "production").put("region", "us-west-2"));
+        ObjectNode envUpdate = MAPPER.createObjectNode();
+        envUpdate.putArray("PropertyGroups").add(updatedGroup);
+        ObjectNode parUpdate = MAPPER.createObjectNode();
+        parUpdate.put("ConfigurationTypeUpdate", "CUSTOM");
+        parUpdate.put("ParallelismUpdate", 1);
+        parUpdate.put("ParallelismPerKPUUpdate", 1);
+        parUpdate.put("AutoScalingEnabledUpdate", false);
+        ObjectNode appCfgUpdate = MAPPER.createObjectNode();
+        appCfgUpdate.set("EnvironmentPropertyUpdates", envUpdate);
+        appCfgUpdate.set("FlinkApplicationConfigurationUpdate",
+                MAPPER.createObjectNode().set("ParallelismConfigurationUpdate", parUpdate));
+
+        ObjectNode updateReq = MAPPER.createObjectNode();
+        updateReq.put("ApplicationName", "env-update");
+        updateReq.put("CurrentApplicationVersionId", 1L);
+        updateReq.set("ApplicationConfigurationUpdate", appCfgUpdate);
+        Response updated = handler.handle("UpdateApplication", updateReq, REGION);
+        assertThat(updated.getStatus(), is(200));
+        ObjectNode detail = (ObjectNode) entity(updated).get("ApplicationDetail");
+        assertEquals(2L, detail.get("ApplicationVersionId").asLong());
+        assertEquals("production", detail.get("ApplicationConfigurationDescription")
+                .get("EnvironmentPropertyDescriptions").get("PropertyGroupDescriptions")
+                .get(0).get("PropertyMap").get("mode").asText());
+        assertEquals("CUSTOM", detail.get("ApplicationConfigurationDescription")
+                .get("FlinkApplicationConfigurationDescription")
+                .get("ParallelismConfigurationDescription").get("ConfigurationType").asText());
+    }
+
+    @Test
     void updateApplicationWithNewCodeLocationEchoesItOnDescribe() {
         createRunningCodedApplication("redeploy-target");
 
@@ -285,6 +399,33 @@ class KinesisAnalyticsV2JsonHandlerTest {
     void unsupportedActionReturns400() {
         Response resp = handler.handle("BogusAction", MAPPER.createObjectNode(), REGION);
         assertThat(resp.getStatus(), is(400));
+    }
+
+    @Test
+    void updateApplicationMaintenanceConfigurationEchoesOnDescribe() {
+        createApplication("maint");
+
+        ObjectNode update = MAPPER.createObjectNode();
+        update.put("ApplicationName", "maint");
+        update.set("ApplicationMaintenanceConfigurationUpdate",
+                MAPPER.createObjectNode().put("ApplicationMaintenanceWindowStartTimeUpdate", "02:00"));
+        Response updated = handler.handle("UpdateApplicationMaintenanceConfiguration", update, REGION);
+        assertThat(updated.getStatus(), is(200));
+        ObjectNode body = entity(updated);
+        assertThat(body.get("ApplicationARN").asText().contains(":kinesisanalytics:"), is(true));
+        assertEquals("02:00", body.get("ApplicationMaintenanceConfigurationDescription")
+                .get("ApplicationMaintenanceWindowStartTime").asText());
+        assertEquals("10:00", body.get("ApplicationMaintenanceConfigurationDescription")
+                .get("ApplicationMaintenanceWindowEndTime").asText());
+
+        ObjectNode describe = MAPPER.createObjectNode();
+        describe.put("ApplicationName", "maint");
+        ObjectNode detail = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
+                .get("ApplicationDetail");
+        assertEquals("02:00", detail.get("ApplicationMaintenanceConfigurationDescription")
+                .get("ApplicationMaintenanceWindowStartTime").asText());
+        assertEquals("10:00", detail.get("ApplicationMaintenanceConfigurationDescription")
+                .get("ApplicationMaintenanceWindowEndTime").asText());
     }
 
     @Test
@@ -369,6 +510,47 @@ class KinesisAnalyticsV2JsonHandlerTest {
         var afterDelete = entity(handler.handle("ListApplicationSnapshots",
                 MAPPER.createObjectNode().put("ApplicationName", "streaming"), REGION)).get("SnapshotSummaries");
         assertEquals(0, afterDelete.size());
+    }
+
+    @Test
+    void addThenDescribeThenDeleteCloudWatchLoggingOptionRoundTrips() {
+        createApplication("logged");
+        String logStreamArn = "arn:aws:logs:us-east-1:000000000000:log-group:g:log-stream:s";
+
+        ObjectNode add = MAPPER.createObjectNode();
+        add.put("ApplicationName", "logged");
+        add.put("CurrentApplicationVersionId", 1L);
+        add.set("CloudWatchLoggingOption", MAPPER.createObjectNode().put("LogStreamARN", logStreamArn));
+        Response added = handler.handle("AddApplicationCloudWatchLoggingOption", add, REGION);
+        assertThat(added.getStatus(), is(200));
+        ObjectNode addBody = entity(added);
+        assertEquals(2L, addBody.get("ApplicationVersionId").asLong());
+        assertEquals(1, addBody.get("CloudWatchLoggingOptionDescriptions").size());
+        assertEquals(logStreamArn, addBody.get("CloudWatchLoggingOptionDescriptions")
+                .get(0).get("LogStreamARN").asText());
+        assertEquals("2.1", addBody.get("CloudWatchLoggingOptionDescriptions")
+                .get(0).get("CloudWatchLoggingOptionId").asText());
+
+        ObjectNode describe = MAPPER.createObjectNode();
+        describe.put("ApplicationName", "logged");
+        ObjectNode detail = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
+                .get("ApplicationDetail");
+        assertEquals(2L, detail.get("ApplicationVersionId").asLong());
+        assertEquals(logStreamArn, detail.get("CloudWatchLoggingOptionDescriptions")
+                .get(0).get("LogStreamARN").asText());
+
+        ObjectNode del = MAPPER.createObjectNode();
+        del.put("ApplicationName", "logged");
+        del.put("CurrentApplicationVersionId", 2L);
+        del.put("CloudWatchLoggingOptionId", "2.1");
+        Response deleted = handler.handle("DeleteApplicationCloudWatchLoggingOption", del, REGION);
+        assertThat(deleted.getStatus(), is(200));
+        assertEquals(3L, entity(deleted).get("ApplicationVersionId").asLong());
+        assertEquals(0, entity(deleted).get("CloudWatchLoggingOptionDescriptions").size());
+
+        ObjectNode after = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
+                .get("ApplicationDetail");
+        assertThat(after.has("CloudWatchLoggingOptionDescriptions"), is(false));
     }
 
     @Test

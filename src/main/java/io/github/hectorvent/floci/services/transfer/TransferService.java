@@ -45,6 +45,7 @@ public class TransferService {
 
     public Server createServer(String region,
                                List<String> protocols,
+                               String domain,
                                String endpointType,
                                Map<String, Object> endpointDetails,
                                String identityProviderType,
@@ -59,6 +60,7 @@ public class TransferService {
         server.setServerId(serverId);
         server.setArn(arn);
         server.setState("ONLINE");
+        server.setDomain(domain != null ? domain : "S3");
         server.setProtocols(protocols != null && !protocols.isEmpty() ? protocols : List.of("SFTP"));
         server.setEndpointType(endpointType != null ? endpointType : "PUBLIC");
         server.setEndpointDetails(endpointDetails);
@@ -67,7 +69,7 @@ public class TransferService {
         server.setLoggingRole(loggingRole);
         server.setSecurityPolicyName(securityPolicyName != null ? securityPolicyName : "TransferSecurityPolicy-2020-06");
         server.setHostKeyFingerprint("SHA256:AAAAflociemulatedkey" + serverId.substring(2, 10));
-        server.setTags(tags != null ? tags : new HashMap<>());
+        server.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
         server.setCreationTime(Instant.now());
 
         serverStore.put(serverId, server);
@@ -80,17 +82,14 @@ public class TransferService {
     }
 
     public Server getServer(String serverId) {
-        return serverStore.get(serverId).orElseThrow(() ->
-                new AwsException("ResourceNotFoundException",
-                        "Server " + serverId + " does not exist.", 404));
+        return serverStore.get(serverId).orElseThrow(() -> notFound(serverId, "Server",
+                "Unknown server"));
     }
 
     public synchronized void deleteServer(String serverId) {
-        Server server = getServer(serverId);
-        if (!"OFFLINE".equals(server.getState())) {
-            throw new AwsException("ConflictException",
-                    "Server must be in OFFLINE state to be deleted.", 409);
-        }
+        getServer(serverId);
+        // AWS DeleteServer stops a running server and deletes it; there is no
+        // requirement that the caller StopServer first.
         serverStore.delete(serverId);
         tagStore.delete("server/" + serverId);
         for (User user : userStore.scan(k -> k.startsWith(serverId + "/"))) {
@@ -177,7 +176,8 @@ public class TransferService {
         String key = serverId + "/" + userName;
         if (userStore.get(key).isPresent()) {
             throw new AwsException("ResourceExistsException",
-                    "User " + userName + " already exists on server " + serverId + ".", 400);
+                    "User " + userName + " already exists on server " + serverId + ".", 409,
+                    Map.of("Resource", userName, "ResourceType", "User"));
         }
 
         String arn = regionResolver.buildArn("transfer", region, "user/" + serverId + "/" + userName);
@@ -203,8 +203,7 @@ public class TransferService {
     public User getUser(String serverId, String userName) {
         getServer(serverId);
         return userStore.get(serverId + "/" + userName).orElseThrow(() ->
-                new AwsException("ResourceNotFoundException",
-                        "User " + userName + " does not exist on server " + serverId + ".", 404));
+                notFound(userName, "User", "Unknown user"));
     }
 
     public void deleteUser(String serverId, String userName) {
@@ -264,11 +263,45 @@ public class TransferService {
         List<SshPublicKey> keys = new ArrayList<>(user.getSshPublicKeys() != null ? user.getSshPublicKeys() : List.of());
         boolean removed = keys.removeIf(k -> k.getSshPublicKeyId().equals(sshPublicKeyId));
         if (!removed) {
-            throw new AwsException("ResourceNotFoundException",
-                    "SSH public key " + sshPublicKeyId + " does not exist.", 404);
+            throw notFound(sshPublicKeyId, "SshPublicKey", "Unknown SSH public key");
         }
         user.setSshPublicKeys(keys);
         userStore.put(serverId + "/" + userName, user);
+    }
+
+    /** Missing server → ResourceNotFoundException; SERVICE_MANAGED → InvalidRequestException. */
+    public String testIdentityProvider(String serverId) {
+        Server server = getServer(serverId);
+        String type = server.getIdentityProviderType();
+        if (type == null || "SERVICE_MANAGED".equals(type)) {
+            throw new AwsException("InvalidRequestException",
+                    serverId + " not configured for external auth", 400);
+        }
+        Map<String, String> details = server.getIdentityProviderDetails();
+        if (details != null) {
+            String url = details.get("Url");
+            if (url != null && !url.isBlank()) {
+                return url;
+            }
+        }
+        return "https://idp.example.invalid/transfer";
+    }
+
+    /** Unknown workflow → ResourceNotFoundException. Workflows are not persisted. */
+    public void sendWorkflowStepState(String workflowId, String executionId, String token, String status) {
+        if (isBlank(workflowId) || isBlank(executionId) || isBlank(token) || isBlank(status)) {
+            throw new AwsException("InvalidRequestException",
+                    "WorkflowId, ExecutionId, Token, and Status are required.", 400);
+        }
+        if (!"SUCCESS".equals(status) && !"FAILURE".equals(status)) {
+            throw new AwsException("InvalidRequestException",
+                    "Status must be SUCCESS or FAILURE.", 400);
+        }
+        throw notFound(workflowId, "Workflow", "Unknown workflow");
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────────
@@ -331,5 +364,10 @@ public class TransferService {
 
     public int countUsers(String serverId) {
         return (int) userStore.scan(k -> k.startsWith(serverId + "/")).stream().count();
+    }
+
+    private static AwsException notFound(String resource, String resourceType, String message) {
+        return new AwsException("ResourceNotFoundException", message, 404,
+                Map.of("Resource", resource, "ResourceType", resourceType));
     }
 }

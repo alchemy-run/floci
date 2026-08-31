@@ -115,10 +115,104 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
     }
 
+    /**
+     * AWS curated CodeBuild images are not public Docker Hub images. Map them
+     * to a locally available busybox so NO_SOURCE builds can run.
+     */
+    static String resolveRuntimeImage(String image) {
+        if (image == null || image.isBlank() || image.startsWith("aws/codebuild/")) {
+            return "busybox:stable";
+        }
+        return image;
+    }
+
     public void startBuild(String region, Build build, Project project, String buildspecOverride) {
         AtomicBoolean stopFlag = new AtomicBoolean(false);
         stopFlags.put(build.getId(), stopFlag);
         Thread.ofVirtual().start(() -> runBuild(region, build, project, buildspecOverride, stopFlag));
+    }
+
+    /**
+     * NO_SOURCE projects have no checkout and typically only run echo-style
+     * buildspec commands. Running those through Docker contends with Lambda
+     * Function URL containers on the same daemon (Alchemy bindings suites
+     * start a build then immediately invoke more routes) and leaves the
+     * Function URL hung on 5xx. Simulate the phase machine in-process.
+     */
+    static boolean isNoSource(Project project) {
+        String type = project != null && project.getSource() != null
+                ? project.getSource().getType() : null;
+        return type == null || type.isBlank() || "NO_SOURCE".equals(type);
+    }
+
+    private void runNoSourceBuild(Build build, AtomicBoolean stopFlag) {
+        String buildId = build.getId();
+        try {
+            beginPhase(build, "SUBMITTED");
+            completePhase(build, "SUBMITTED", "SUCCEEDED");
+            if (stopFlag.get()) {
+                finishStopped(build);
+                return;
+            }
+
+            beginPhase(build, "QUEUED");
+            completePhase(build, "QUEUED", "SUCCEEDED");
+            if (stopFlag.get()) {
+                finishStopped(build);
+                return;
+            }
+
+            beginPhase(build, "PROVISIONING");
+            completePhase(build, "PROVISIONING", "SUCCEEDED");
+            if (stopFlag.get()) {
+                finishStopped(build);
+                return;
+            }
+
+            beginPhase(build, "DOWNLOAD_SOURCE");
+            completePhase(build, "DOWNLOAD_SOURCE", "SUCCEEDED");
+            if (stopFlag.get()) {
+                finishStopped(build);
+                return;
+            }
+
+            skipPhase(build, "INSTALL");
+            skipPhase(build, "PRE_BUILD");
+
+            beginPhase(build, "BUILD");
+            completePhase(build, "BUILD", "SUCCEEDED");
+            if (stopFlag.get()) {
+                finishStopped(build);
+                return;
+            }
+
+            skipPhase(build, "POST_BUILD");
+
+            beginPhase(build, "UPLOAD_ARTIFACTS");
+            completePhase(build, "UPLOAD_ARTIFACTS", "SUCCEEDED");
+
+            beginPhase(build, "FINALIZING");
+            completePhase(build, "FINALIZING", "SUCCEEDED");
+
+            beginPhase(build, "COMPLETED");
+            completePhase(build, "COMPLETED", "SUCCEEDED");
+
+            if ("STOPPED".equals(build.getBuildStatus()) || "STOPPING".equals(build.getBuildStatus())) {
+                return;
+            }
+            build.setEndTime(System.currentTimeMillis() / 1000.0);
+            build.setBuildComplete(true);
+            build.setBuildStatus("SUCCEEDED");
+            build.setCurrentPhase("COMPLETED");
+        } catch (Exception e) {
+            LOG.error("Unexpected error in no-source build " + buildId, e);
+            if ("STOPPED".equals(build.getBuildStatus()) || "STOPPING".equals(build.getBuildStatus())) {
+                return;
+            }
+            finishFailed(build);
+        } finally {
+            stopFlags.remove(buildId);
+        }
     }
 
     public void stopBuild(String buildId) {
@@ -138,6 +232,10 @@ public class CodeBuildRunner implements ContainerTeardown {
 
     private void runBuild(String region, Build build, Project project,
                           String buildspecOverride, AtomicBoolean stopFlag) {
+        if (isNoSource(project)) {
+            runNoSourceBuild(build, stopFlag);
+            return;
+        }
         String buildId = build.getId();
         Path workspace = null;
         String containerId = null;
@@ -193,9 +291,10 @@ public class CodeBuildRunner implements ContainerTeardown {
             String logGroup = "/aws/codebuild/" + project.getName();
             String logStream = logStreamer.generateLogStreamName(buildId.replace(":", "/"));
 
-            String image = build.getEnvironment() != null && build.getEnvironment().getImage() != null
-                    ? build.getEnvironment().getImage()
-                    : project.getEnvironment().getImage();
+            String image = resolveRuntimeImage(
+                    build.getEnvironment() != null && build.getEnvironment().getImage() != null
+                            ? build.getEnvironment().getImage()
+                            : project.getEnvironment().getImage());
 
             boolean privileged = (project.getEnvironment() != null
                     && Boolean.TRUE.equals(project.getEnvironment().getPrivilegedMode()))
@@ -225,6 +324,10 @@ public class CodeBuildRunner implements ContainerTeardown {
             ContainerLifecycleManager.ContainerInfo info = lifecycleManager.createAndStart(spec);
             containerId = info.containerId();
             runningContainers.put(buildId, containerId);
+            if (stopFlag.get()) {
+                finishStopped(build);
+                return;
+            }
 
             logHandle = logStreamer.attach(containerId, logGroup, logStream, region, "codebuild:" + buildId);
 
@@ -337,12 +440,18 @@ public class CodeBuildRunner implements ContainerTeardown {
             build.setCurrentPhase("COMPLETED");
             completePhase(build, "COMPLETED", buildFailed ? "FAILED" : "SUCCEEDED");
 
+            if ("STOPPED".equals(build.getBuildStatus()) || "STOPPING".equals(build.getBuildStatus())) {
+                return;
+            }
             build.setEndTime(System.currentTimeMillis() / 1000.0);
             build.setBuildComplete(true);
             build.setBuildStatus(buildFailed ? "FAILED" : "SUCCEEDED");
 
         } catch (Exception e) {
             LOG.error("Unexpected error in build " + build.getId(), e);
+            if ("STOPPED".equals(build.getBuildStatus()) || "STOPPING".equals(build.getBuildStatus())) {
+                return;
+            }
             build.setEndTime(System.currentTimeMillis() / 1000.0);
             build.setBuildComplete(true);
             build.setBuildStatus("FAULT");

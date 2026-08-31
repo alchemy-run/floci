@@ -199,6 +199,14 @@ public class CurEmissionScheduler {
     }
 
     private void emitForReport(String accountId, ReportDefinition definition, String region) {
+        // CSV reports are accepted on the management plane (AWS textORcsv /
+        // ZIP|GZIP) but Floci only emits Parquet artifacts. Skip emission so
+        // a CSV definition does not get a Parquet object it never asked for.
+        if (!"Parquet".equals(definition.getFormat())) {
+            LOG.debugv("Skipping Parquet emission for {0} (Format={1})",
+                    definition.getReportName(), definition.getFormat());
+            return;
+        }
         try {
             engine.emitForCurrentMonth(
                     definition.getReportName(),

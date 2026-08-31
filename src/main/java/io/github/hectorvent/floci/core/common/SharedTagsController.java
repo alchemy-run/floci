@@ -21,6 +21,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,8 +67,10 @@ public class SharedTagsController {
 
     @GET
     public Response listTagsByQuery(@Context HttpHeaders headers,
-                                    @QueryParam("resourceArn") String arn) {
-        return listTagsForArn(headers, arn);
+                                    @QueryParam("resourceArn") String arn,
+                                    @QueryParam("ResourceArn") String resourceArn) {
+        String resolved = (arn != null && !arn.isBlank()) ? arn : resourceArn;
+        return listTagsForArn(headers, resolved);
     }
 
     @GET
@@ -76,6 +80,7 @@ public class SharedTagsController {
     }
 
     private Response listTagsForArn(HttpHeaders headers, String arn) {
+        arn = decodeArn(arn);
         TagHandler handler = resolveHandler(arn);
         String region = regionResolver.resolveRegion(headers);
         Map<String, String> tags = handler.listTags(region, arn);
@@ -84,10 +89,17 @@ public class SharedTagsController {
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    public Response tagResourceByBody(@Context HttpHeaders headers, String body) {
-        String arn = readResourceArn(body);
-        TagHandler handler = resolveHandler(arn);
-        return doTagResource(headers, handler, arn, body, Response.ok(objectMapper.createObjectNode()).build());
+    public Response tagResourceByBody(@Context HttpHeaders headers,
+                                      @QueryParam("resourceArn") String arn,
+                                      @QueryParam("ResourceArn") String resourceArn,
+                                      String body) {
+        String resolved = (arn != null && !arn.isBlank()) ? arn : resourceArn;
+        if (resolved == null || resolved.isBlank()) {
+            resolved = readResourceArn(body);
+        }
+        TagHandler handler = resolveHandler(resolved);
+        return doTagResource(headers, handler, resolved, body,
+                Response.ok(objectMapper.createObjectNode()).build());
     }
 
     @POST
@@ -119,6 +131,7 @@ public class SharedTagsController {
     }
 
     private Response doTagResource(HttpHeaders headers, TagHandler handler, String arn, String body, Response successResponse) {
+        arn = decodeArn(arn);
         String region = regionResolver.resolveRegion(headers);
         String effectiveBody = (body == null || body.isBlank()) ? "{}" : body;
         try {
@@ -150,6 +163,7 @@ public class SharedTagsController {
     }
 
     private Response untagResourceForArn(HttpHeaders headers, UriInfo uriInfo, String arn, Response successResponse) {
+        arn = decodeArn(arn);
         TagHandler handler = resolveHandler(arn);
         String region = regionResolver.resolveRegion(headers);
         List<String> tagKeys = readTagKeys(handler, uriInfo);
@@ -241,7 +255,32 @@ public class SharedTagsController {
         }
     }
 
+    /**
+     * Distilled restJson1 percent-encodes ARN labels. Some clients (and RestAssured
+     * when a test pre-encodes the path) leave {@code %3A}/{@code %2F} in the path
+     * parameter. Decode until stable so {@link AwsArnUtils#parse} sees a real ARN.
+     */
+    private static String decodeArn(String arn) {
+        if (arn == null || arn.isEmpty()) {
+            return arn;
+        }
+        try {
+            String decoded = arn;
+            for (int i = 0; i < 2; i++) {
+                String next = URLDecoder.decode(decoded, StandardCharsets.UTF_8);
+                if (next.equals(decoded)) {
+                    break;
+                }
+                decoded = next;
+            }
+            return decoded;
+        } catch (IllegalArgumentException e) {
+            return arn;
+        }
+    }
+
     private TagHandler resolveHandler(String arn) {
+        arn = decodeArn(arn);
         String serviceKey;
         try {
             serviceKey = AwsArnUtils.parse(arn).service();

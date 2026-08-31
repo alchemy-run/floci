@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheCont
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerManager;
 import io.github.hectorvent.floci.services.elasticache.model.AuthMode;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroup;
+import io.github.hectorvent.floci.services.elasticache.model.ServerlessCache;
 import io.github.hectorvent.floci.services.elasticache.proxy.ElastiCacheProxyManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,6 +53,8 @@ class ElastiCacheServiceTest {
         when(ecConfig.proxyMaxPort()).thenReturn(16399);
         when(ecConfig.defaultImage()).thenReturn("valkey/valkey:8");
         when(config.hostname()).thenReturn(java.util.Optional.of("localhost"));
+        when(config.defaultRegion()).thenReturn("us-east-1");
+        when(config.defaultAccountId()).thenReturn("000000000000");
 
         when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> new InMemoryStorage<>());
         when(containerManager.start(anyString(), anyString()))
@@ -183,5 +186,58 @@ class ElastiCacheServiceTest {
         firstRequest.join(5000);
 
         assertEquals("grp", service.getReplicationGroup("grp").getReplicationGroupId());
+    }
+
+    @Test
+    void serverlessCacheDescribeMissingThrowsNotFound() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.listServerlessCaches("alchemy-elasticache-nonexistent-probe"));
+        assertEquals("ServerlessCacheNotFoundFault", ex.getErrorCode());
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void serverlessSnapshotMutationsOnMissingThrowNotFound() {
+        AwsException delete = assertThrows(AwsException.class,
+                () -> service.deleteServerlessCacheSnapshot("alchemy-elasticache-nonexistent-probe"));
+        assertEquals("ServerlessCacheSnapshotNotFoundFault", delete.getErrorCode());
+
+        AwsException copy = assertThrows(AwsException.class,
+                () -> service.copyServerlessCacheSnapshot(
+                        "alchemy-elasticache-nonexistent-probe",
+                        "alchemy-elasticache-nonexistent-probe-copy",
+                        null, null));
+        assertEquals("ServerlessCacheSnapshotNotFoundFault", copy.getErrorCode());
+
+        AwsException export = assertThrows(AwsException.class,
+                () -> service.exportServerlessCacheSnapshot(
+                        "alchemy-elasticache-nonexistent-probe",
+                        "alchemy-elasticache-export-probe"));
+        assertEquals("ServerlessCacheSnapshotNotFoundFault", export.getErrorCode());
+    }
+
+    @Test
+    void serverlessCacheCreateDescribeSnapshotRoundTrip() {
+        ServerlessCache cache = new ServerlessCache();
+        cache.setServerlessCacheName("svc-cache");
+        cache.setEngine("valkey");
+        cache.setDataStorageMaximum(1);
+        cache.setEcpuPerSecondMaximum(1000);
+
+        ServerlessCache created = service.createServerlessCache(cache);
+        assertEquals("available", created.getStatus());
+        assertEquals(6379, created.getEndpoint().port());
+        assertEquals("svc-cache", service.listServerlessCaches("svc-cache").iterator().next()
+                .getServerlessCacheName());
+
+        var snapshot = service.createServerlessCacheSnapshot("svc-cache", "svc-snap", null, null);
+        assertEquals("available", snapshot.getStatus());
+        assertEquals("svc-snap", service.listServerlessCacheSnapshots(null, "svc-snap", null)
+                .iterator().next().getServerlessCacheSnapshotName());
+
+        service.deleteServerlessCacheSnapshot("svc-snap");
+        service.deleteServerlessCache("svc-cache", null);
+        AwsException gone = assertThrows(AwsException.class, () -> service.getServerlessCache("svc-cache"));
+        assertEquals("ServerlessCacheNotFoundFault", gone.getErrorCode());
     }
 }

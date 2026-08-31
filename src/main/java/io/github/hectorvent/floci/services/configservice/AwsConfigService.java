@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.configservice.model.AggregationAuthorization;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRule;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRuleEvaluationStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConfigRuleSource;
@@ -13,7 +14,10 @@ import io.github.hectorvent.floci.services.configservice.model.ConfigurationReco
 import io.github.hectorvent.floci.services.configservice.model.ConfigurationRecorderStatus;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePack;
 import io.github.hectorvent.floci.services.configservice.model.ConformancePackStatusDetail;
+import io.github.hectorvent.floci.services.configservice.model.CustomResourceConfig;
 import io.github.hectorvent.floci.services.configservice.model.DeliveryChannel;
+import io.github.hectorvent.floci.services.configservice.model.RetentionConfiguration;
+import io.github.hectorvent.floci.services.configservice.model.StoredResourceEvaluation;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,10 +40,13 @@ public class AwsConfigService {
     private Map<String, Map<String, ConfigRule>> configRules = new ConcurrentHashMap<>();
     // region -> packName -> pack (nested)
     private Map<String, Map<String, ConformancePack>> conformancePacks = new ConcurrentHashMap<>();
+    // region -> authorizedAccountId/authorizedAwsRegion -> authorization (nested)
+    private Map<String, Map<String, AggregationAuthorization>> aggregationAuthorizations = new ConcurrentHashMap<>();
 
-    // region -> recorder / channel (flat)
+    // region -> recorder / channel / retention (flat singletons)
     private Map<String, ConfigurationRecorder> configurationRecorders = new ConcurrentHashMap<>();
     private Map<String, DeliveryChannel> deliveryChannels = new ConcurrentHashMap<>();
+    private Map<String, RetentionConfiguration> retentionConfigurations = new ConcurrentHashMap<>();
 
     // recorder run-state is transient runtime state (not persisted)
     private final ConcurrentHashMap<String, Boolean> recorderRunning = new ConcurrentHashMap<>();
@@ -48,6 +55,12 @@ public class AwsConfigService {
 
     // resourceArn -> {tagKey -> tagValue} (flat outer, mutable inner)
     private Map<String, Map<String, String>> tags = new ConcurrentHashMap<>();
+
+    // region -> type/id -> custom resource recorded via PutResourceConfig
+    private Map<String, Map<String, CustomResourceConfig>> customResources = new ConcurrentHashMap<>();
+    // region -> evaluationId -> proactive evaluation (transient)
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, StoredResourceEvaluation>> resourceEvaluations =
+            new ConcurrentHashMap<>();
 
     @Inject
     public AwsConfigService(RegionResolver regionResolver, StorageFactory storageFactory) {
@@ -64,15 +77,23 @@ public class AwsConfigService {
                 new TypeReference<Map<String, Map<String, ConfigRule>>>() {});
         this.conformancePacks = storageBacked("config-conformance-packs.json",
                 new TypeReference<Map<String, Map<String, ConformancePack>>>() {});
+        this.aggregationAuthorizations = storageBacked("config-aggregation-authorizations.json",
+                new TypeReference<Map<String, Map<String, AggregationAuthorization>>>() {});
         this.configurationRecorders = storageBacked("config-recorders.json",
                 new TypeReference<Map<String, ConfigurationRecorder>>() {});
         this.deliveryChannels = storageBacked("config-delivery-channels.json",
                 new TypeReference<Map<String, DeliveryChannel>>() {});
+        this.retentionConfigurations = storageBacked("config-retention-configurations.json",
+                new TypeReference<Map<String, RetentionConfiguration>>() {});
         this.tags = storageBacked("config-tags.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
+        this.customResources = storageBacked("config-custom-resources.json",
+                new TypeReference<Map<String, Map<String, CustomResourceConfig>>>() {});
         normalizeRegionMaps(configRules);
         normalizeRegionMaps(conformancePacks);
+        normalizeRegionMaps(aggregationAuthorizations);
         normalizeRegionMaps(tags);
+        normalizeRegionMaps(customResources);
     }
 
     private <V> Map<String, V> storageBacked(String fileName, TypeReference<Map<String, V>> typeReference) {
@@ -101,11 +122,28 @@ public class AwsConfigService {
     // --- Config Rules ---
 
     public ConfigRule putConfigRule(String region, String ruleName, ConfigRuleSource source) {
+        return putConfigRule(region, new ConfigRule(ruleName, null, null, null, source, null, null), List.of());
+    }
+
+    public ConfigRule putConfigRule(String region, ConfigRule incoming, List<Map<String, String>> tagList) {
+        String ruleName = incoming.configRuleName();
+        if (ruleName == null || ruleName.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ConfigRuleName is required.", 400);
+        }
         Map<String, ConfigRule> store = rulesFor(region);
         ConfigRule existing = store.get(ruleName);
         if (existing != null) {
-            ConfigRule updated = new ConfigRule(existing.configRuleName(), existing.configRuleArn(),
-                    existing.configRuleId(), existing.configRuleState(), source);
+            // Put is an upsert of rule config. Create-time Tags on a subsequent
+            // Put are ignored (callers use TagResource / UntagResource).
+            ConfigRule updated = new ConfigRule(
+                    existing.configRuleName(),
+                    existing.configRuleArn(),
+                    existing.configRuleId(),
+                    existing.configRuleState(),
+                    incoming.source() != null ? incoming.source() : existing.source(),
+                    incoming.description(),
+                    incoming.scope());
             store.put(ruleName, updated);
             persistRegion(configRules, region);
             return updated;
@@ -113,20 +151,28 @@ public class AwsConfigService {
         String ruleId = "config-rule-" + shortId();
         String ruleArn = AwsArnUtils.Arn.of("config", region, regionResolver.getAccountId(),
                 "config-rule/" + ruleId).toString();
-        ConfigRule rule = new ConfigRule(ruleName, ruleArn, ruleId, "ACTIVE", source);
+        ConfigRule rule = new ConfigRule(ruleName, ruleArn, ruleId, "ACTIVE",
+                incoming.source(), incoming.description(), incoming.scope());
         store.put(ruleName, rule);
         persistRegion(configRules, region);
+        if (tagList != null && !tagList.isEmpty()) {
+            tagResource(ruleArn, tagList);
+        }
         return rule;
     }
 
     public void deleteConfigRule(String region, String ruleName) {
         Map<String, ConfigRule> store = rulesFor(region);
-        if (store.remove(ruleName) == null) {
+        ConfigRule removed = store.remove(ruleName);
+        if (removed == null) {
             throw new AwsException("NoSuchConfigRuleException",
                     "The ConfigRule provided in the request is invalid. " +
                             "Please check the configRule name.", 400);
         }
         persistRegion(configRules, region);
+        if (removed.configRuleArn() != null) {
+            tags.remove(removed.configRuleArn());
+        }
     }
 
     public List<ConfigRule> describeConfigRules(String region, List<String> ruleNames) {
@@ -137,9 +183,12 @@ public class AwsConfigService {
         List<ConfigRule> result = new ArrayList<>();
         for (String name : ruleNames) {
             ConfigRule rule = store.get(name);
-            if (rule != null) {
-                result.add(rule);
+            if (rule == null) {
+                throw new AwsException("NoSuchConfigRuleException",
+                        "The ConfigRule '" + name + "' provided in the request is invalid. " +
+                                "Please check the configRule name.", 400);
             }
+            result.add(rule);
         }
         return result;
     }
@@ -174,6 +223,18 @@ public class AwsConfigService {
         String name = (recorder.name() == null || recorder.name().isEmpty()) ? "default" : recorder.name();
         ConfigurationRecorder stored = new ConfigurationRecorder(name, recorder.roleARN(), recorder.recordingGroup());
         configurationRecorders.put(region, stored);
+    }
+
+    public void deleteConfigurationRecorder(String region, String name) {
+        ConfigurationRecorder recorder = configurationRecorders.get(region);
+        if (recorder == null || (name != null && !name.isEmpty() && !name.equals(recorder.name()))) {
+            throw new AwsException("NoSuchConfigurationRecorderException",
+                    "Cannot find configuration recorder with the specified name.", 400);
+        }
+        configurationRecorders.remove(region);
+        recorderRunning.remove(region);
+        recorderLastStartTime.remove(region);
+        recorderLastStopTime.remove(region);
     }
 
     public List<ConfigurationRecorder> describeConfigurationRecorders(String region, List<String> names) {
@@ -275,6 +336,61 @@ public class AwsConfigService {
         return List.of(channel);
     }
 
+    // --- Retention Configuration (account-region singleton named "default") ---
+
+    public static final String DEFAULT_RETENTION_NAME = "default";
+    public static final int MIN_RETENTION_DAYS = 30;
+    public static final int MAX_RETENTION_DAYS = 2557;
+
+    public RetentionConfiguration putRetentionConfiguration(String region, int retentionPeriodInDays) {
+        validateRetentionPeriod(retentionPeriodInDays);
+        RetentionConfiguration stored = new RetentionConfiguration(DEFAULT_RETENTION_NAME, retentionPeriodInDays);
+        retentionConfigurations.put(region, stored);
+        return stored;
+    }
+
+    public List<RetentionConfiguration> describeRetentionConfigurations(String region, List<String> names) {
+        RetentionConfiguration retention = retentionConfigurations.get(region);
+        if (names != null && !names.isEmpty()) {
+            if (names.size() > 1) {
+                throw new AwsException("InvalidParameterValueException",
+                        "RetentionConfigurationNames must contain at most one name.", 400);
+            }
+            String name = names.getFirst();
+            validateRetentionName(name);
+            if (retention == null || !name.equals(retention.name())) {
+                throw new AwsException("NoSuchRetentionConfigurationException",
+                        "You have specified a retention configuration that does not exist.", 400);
+            }
+            return List.of(retention);
+        }
+        return retention == null ? Collections.emptyList() : List.of(retention);
+    }
+
+    public void deleteRetentionConfiguration(String region, String name) {
+        validateRetentionName(name);
+        RetentionConfiguration retention = retentionConfigurations.get(region);
+        if (retention == null || !name.equals(retention.name())) {
+            throw new AwsException("NoSuchRetentionConfigurationException",
+                    "You have specified a retention configuration that does not exist.", 400);
+        }
+        retentionConfigurations.remove(region);
+    }
+
+    private static void validateRetentionPeriod(int days) {
+        if (days < MIN_RETENTION_DAYS || days > MAX_RETENTION_DAYS) {
+            throw new AwsException("InvalidParameterValueException",
+                    "RetentionPeriodInDays must be between 30 and 2557.", 400);
+        }
+    }
+
+    private static void validateRetentionName(String name) {
+        if (name == null || name.isBlank() || name.length() > 256 || !name.matches("[\\w\\-]+")) {
+            throw new AwsException("InvalidParameterValueException",
+                    "RetentionConfigurationName is invalid.", 400);
+        }
+    }
+
     // --- Conformance Packs ---
 
     public ConformancePack putConformancePack(String region, String packName,
@@ -337,6 +453,197 @@ public class AwsConfigService {
         return result;
     }
 
+    // --- Aggregation Authorizations ---
+
+    public AggregationAuthorization putAggregationAuthorization(String region,
+                                                                String authorizedAccountId,
+                                                                String authorizedAwsRegion,
+                                                                List<Map<String, String>> tagList) {
+        requireAccountId(authorizedAccountId);
+        requireAuthorizedRegion(authorizedAwsRegion);
+        Map<String, AggregationAuthorization> store = authorizationsFor(region);
+        String key = authorizationKey(authorizedAccountId, authorizedAwsRegion);
+        AggregationAuthorization existing = store.get(key);
+        if (existing != null) {
+            // Put is idempotent: a subsequent request does not create a duplicate
+            // and create-time tags on an existing authorization are ignored.
+            return existing;
+        }
+        String arn = AwsArnUtils.Arn.of("config", region, regionResolver.getAccountId(),
+                "aggregation-authorization/" + authorizedAccountId + "/" + authorizedAwsRegion).toString();
+        AggregationAuthorization auth = new AggregationAuthorization(
+                arn, authorizedAccountId, authorizedAwsRegion, System.currentTimeMillis() / 1000);
+        store.put(key, auth);
+        persistRegion(aggregationAuthorizations, region);
+        if (tagList != null && !tagList.isEmpty()) {
+            tagResource(arn, tagList);
+        }
+        return auth;
+    }
+
+    public List<AggregationAuthorization> describeAggregationAuthorizations(String region) {
+        return new ArrayList<>(authorizationsFor(region).values());
+    }
+
+    public void deleteAggregationAuthorization(String region, String authorizedAccountId,
+                                               String authorizedAwsRegion) {
+        requireAccountId(authorizedAccountId);
+        requireAuthorizedRegion(authorizedAwsRegion);
+        Map<String, AggregationAuthorization> store = authorizationsFor(region);
+        AggregationAuthorization removed = store.remove(authorizationKey(authorizedAccountId, authorizedAwsRegion));
+        persistRegion(aggregationAuthorizations, region);
+        if (removed != null) {
+            tags.remove(removed.aggregationAuthorizationArn());
+        }
+    }
+
+    // --- Discovered / custom resources ---
+
+    public boolean isRecorderRunning(String region) {
+        return recorderRunning.getOrDefault(region, false);
+    }
+
+    public void requireRunningRecorder(String region) {
+        if (!isRecorderRunning(region)) {
+            throw new AwsException("NoRunningConfigurationRecorderException",
+                    "There is no configuration recorder running.", 400);
+        }
+    }
+
+    public List<CustomResourceConfig> listDiscoveredResources(String region, String resourceType) {
+        if (resourceType == null || resourceType.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "resourceType is required.", 400);
+        }
+        List<CustomResourceConfig> result = new ArrayList<>();
+        for (CustomResourceConfig resource : customResourcesFor(region).values()) {
+            if (resourceType.equals(resource.resourceType())) {
+                result.add(resource);
+            }
+        }
+        return result;
+    }
+
+    public List<CustomResourceConfig> allCustomResources(String region) {
+        return new ArrayList<>(customResourcesFor(region).values());
+    }
+
+    public CustomResourceConfig getCustomResource(String region, String resourceType, String resourceId) {
+        return customResourcesFor(region).get(customResourceKey(resourceType, resourceId));
+    }
+
+    public CustomResourceConfig putResourceConfig(String region, String resourceType, String schemaVersionId,
+                                                  String resourceId, String resourceName, String configuration,
+                                                  Map<String, String> resourceTags) {
+        requireRunningRecorder(region);
+        if (resourceType == null || resourceType.isBlank()) {
+            throw new AwsException("ValidationException", "ResourceType is required.", 400);
+        }
+        if (resourceType.startsWith("AWS::")) {
+            throw new AwsException("ValidationException",
+                    "PutResourceConfig only supports custom resource types.", 400);
+        }
+        if (schemaVersionId == null || schemaVersionId.isBlank()) {
+            throw new AwsException("ValidationException", "SchemaVersionId is required.", 400);
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            throw new AwsException("ValidationException", "ResourceId is required.", 400);
+        }
+        if (configuration == null) {
+            throw new AwsException("ValidationException", "Configuration is required.", 400);
+        }
+        CustomResourceConfig stored = new CustomResourceConfig(
+                resourceType, resourceId, resourceName, schemaVersionId, configuration,
+                resourceTags == null ? Map.of() : new ConcurrentHashMap<>(resourceTags));
+        Map<String, CustomResourceConfig> store = customResourcesFor(region);
+        store.put(customResourceKey(resourceType, resourceId), stored);
+        persistRegion(customResources, region);
+        return stored;
+    }
+
+    public void deleteResourceConfig(String region, String resourceType, String resourceId) {
+        requireRunningRecorder(region);
+        if (resourceType == null || resourceType.isBlank() || resourceId == null || resourceId.isBlank()) {
+            throw new AwsException("ValidationException",
+                    "ResourceType and ResourceId are required.", 400);
+        }
+        Map<String, CustomResourceConfig> store = customResourcesFor(region);
+        store.remove(customResourceKey(resourceType, resourceId));
+        persistRegion(customResources, region);
+    }
+
+    // --- Proactive resource evaluations ---
+
+    public StoredResourceEvaluation startResourceEvaluation(String region, String evaluationMode,
+                                                            String resourceId, String resourceType,
+                                                            String resourceConfiguration,
+                                                            String schemaType, String clientToken) {
+        if (evaluationMode == null || evaluationMode.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "EvaluationMode is required.", 400);
+        }
+        if (resourceId == null || resourceId.isBlank() || resourceType == null || resourceType.isBlank()
+                || resourceConfiguration == null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ResourceDetails.ResourceId, ResourceType and ResourceConfiguration are required.", 400);
+        }
+        String evaluationId = clientToken != null && !clientToken.isBlank()
+                ? "re-" + Integer.toHexString(clientToken.hashCode())
+                : "re-" + shortId();
+        StoredResourceEvaluation evaluation = new StoredResourceEvaluation(
+                evaluationId,
+                evaluationMode,
+                System.currentTimeMillis() / 1000,
+                "SUCCEEDED",
+                resourceId,
+                resourceType,
+                resourceConfiguration,
+                schemaType);
+        evaluationsFor(region).put(evaluationId, evaluation);
+        return evaluation;
+    }
+
+    public StoredResourceEvaluation getResourceEvaluation(String region, String evaluationId) {
+        if (evaluationId == null || evaluationId.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ResourceEvaluationId is required.", 400);
+        }
+        StoredResourceEvaluation evaluation = evaluationsFor(region).get(evaluationId);
+        if (evaluation == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "Resource evaluation '" + evaluationId + "' was not found.", 400);
+        }
+        return evaluation;
+    }
+
+    public List<StoredResourceEvaluation> listResourceEvaluations(String region, String evaluationMode) {
+        List<StoredResourceEvaluation> result = new ArrayList<>();
+        for (StoredResourceEvaluation evaluation : evaluationsFor(region).values()) {
+            if (evaluationMode == null || evaluationMode.equals(evaluation.evaluationMode())) {
+                result.add(evaluation);
+            }
+        }
+        return result;
+    }
+
+    public void putExternalEvaluation(String region, String configRuleName) {
+        if (configRuleName == null || configRuleName.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "ConfigRuleName is required.", 400);
+        }
+        ConfigRule rule = rulesFor(region).get(configRuleName);
+        if (rule == null) {
+            throw new AwsException("NoSuchConfigRuleException",
+                    "The ConfigRule provided in the request is invalid. " +
+                            "Please check the configRule name.", 400);
+        }
+        String owner = rule.source() != null ? rule.source().owner() : null;
+        if (!"CUSTOM_LAMBDA".equals(owner) && !"CUSTOM_POLICY".equals(owner)) {
+            throw new AwsException("InvalidParameterValueException",
+                    "PutExternalEvaluation is only valid for custom rules.", 400);
+        }
+    }
+
     // --- Tagging ---
 
     public void tagResource(String arn, List<Map<String, String>> tagList) {
@@ -370,6 +677,40 @@ public class AwsConfigService {
 
     private Map<String, ConformancePack> packsFor(String region) {
         return conformancePacks.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, AggregationAuthorization> authorizationsFor(String region) {
+        return aggregationAuthorizations.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private Map<String, CustomResourceConfig> customResourcesFor(String region) {
+        return customResources.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private ConcurrentHashMap<String, StoredResourceEvaluation> evaluationsFor(String region) {
+        return resourceEvaluations.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+    }
+
+    private static String customResourceKey(String resourceType, String resourceId) {
+        return resourceType + "/" + resourceId;
+    }
+
+    private static String authorizationKey(String authorizedAccountId, String authorizedAwsRegion) {
+        return authorizedAccountId + "/" + authorizedAwsRegion;
+    }
+
+    private static void requireAccountId(String accountId) {
+        if (accountId == null || !accountId.matches("\\d{12}")) {
+            throw new AwsException("InvalidParameterValueException",
+                    "AuthorizedAccountId must be a 12-digit AWS account ID.", 400);
+        }
+    }
+
+    private static void requireAuthorizedRegion(String authorizedAwsRegion) {
+        if (authorizedAwsRegion == null || authorizedAwsRegion.isBlank() || authorizedAwsRegion.length() > 64) {
+            throw new AwsException("InvalidParameterValueException",
+                    "AuthorizedAwsRegion is invalid.", 400);
+        }
     }
 
     private static String shortId() {

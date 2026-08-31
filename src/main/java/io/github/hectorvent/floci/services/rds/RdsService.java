@@ -1045,12 +1045,19 @@ public class RdsService implements Resettable {
     }
 
     public DbSubnetGroup modifyDbSubnetGroup(String name, List<String> subnetIds, String region) {
+        return modifyDbSubnetGroup(name, null, subnetIds, region);
+    }
+
+    public DbSubnetGroup modifyDbSubnetGroup(String name, String description, List<String> subnetIds, String region) {
         DbSubnetGroup existing = getDbSubnetGroup(name);
         if (subnetIds == null || subnetIds.isEmpty()) {
             throw new AwsException("InvalidParameterValue",
                     "SubnetIds must contain at least one subnet.", 400);
         }
-        DbSubnetGroup group = buildSubnetGroup(name, existing.getDescription(), subnetIds, effectiveRegion(region));
+        String resolvedDescription = (description != null && !description.isBlank())
+                ? description
+                : existing.getDescription();
+        DbSubnetGroup group = buildSubnetGroup(name, resolvedDescription, subnetIds, effectiveRegion(region));
         group.setTags(existing.getTags());
         subnetGroups.put(name, group);
         return group;

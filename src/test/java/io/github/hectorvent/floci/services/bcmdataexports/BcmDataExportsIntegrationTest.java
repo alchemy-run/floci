@@ -330,18 +330,168 @@ class BcmDataExportsIntegrationTest {
     }
 
     @Test
-    void createExport_textOrCsvFormat_returnsValidation() {
+    void createExport_textOrCsvGzip_succeeds() {
         String body = "{\"Export\":{" +
-                "\"Name\":\"csv-attempt\"," +
+                "\"Name\":\"csv-gzip-export\"," +
+                "\"DataQuery\":{\"QueryStatement\":\"SELECT 1\"}," +
+                "\"DestinationConfigurations\":{\"S3Destination\":{" +
+                  "\"S3Bucket\":\"valid-bucket\",\"S3Prefix\":\"cur2\",\"S3Region\":\"us-east-1\"," +
+                  "\"S3OutputConfigurations\":{\"Format\":\"TEXT_OR_CSV\",\"Compression\":\"GZIP\",\"OutputType\":\"CUSTOM\",\"Overwrite\":\"OVERWRITE_REPORT\"}}}," +
+                "\"RefreshCadence\":{\"Frequency\":\"SYNCHRONOUS\"}}}";
+        String arn = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.CreateExport")
+            .header("Authorization", AUTH).body(body)
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body("ExportArn", containsString("export/csv-gzip-export"))
+            .extract().path("ExportArn");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.GetExport")
+            .header("Authorization", AUTH).body("{\"ExportArn\":\"" + arn + "\"}")
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body("Export.DestinationConfigurations.S3Destination.S3OutputConfigurations.Format",
+                    equalTo("TEXT_OR_CSV"))
+            .body("Export.DestinationConfigurations.S3Destination.S3OutputConfigurations.Compression",
+                    equalTo("GZIP"));
+    }
+
+    @Test
+    void createExport_mismatchedFormatCompression_returnsValidation() {
+        String body = "{\"Export\":{" +
+                "\"Name\":\"csv-parquet-mismatch\"," +
                 "\"DataQuery\":{\"QueryStatement\":\"SELECT 1\"}," +
                 "\"DestinationConfigurations\":{\"S3Destination\":{" +
                   "\"S3Bucket\":\"valid-bucket\",\"S3Region\":\"us-east-1\"," +
-                  "\"S3OutputConfigurations\":{\"Format\":\"TEXT_OR_CSV\",\"Compression\":\"GZIP\",\"OutputType\":\"CUSTOM\"}}}," +
+                  "\"S3OutputConfigurations\":{\"Format\":\"TEXT_OR_CSV\",\"Compression\":\"PARQUET\",\"OutputType\":\"CUSTOM\"}}}," +
                 "\"RefreshCadence\":{\"Frequency\":\"SYNCHRONOUS\"}}}";
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.CreateExport")
             .header("Authorization", AUTH).body(body)
+        .when().post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void createExport_withResourceTags_roundTripsViaListTags() {
+        String body = "{\"Export\":{" +
+                "\"Name\":\"tagged-export\"," +
+                "\"DataQuery\":{\"QueryStatement\":\"SELECT 1\"}," +
+                "\"DestinationConfigurations\":{\"S3Destination\":{" +
+                  "\"S3Bucket\":\"valid-bucket\",\"S3Prefix\":\"cur2\",\"S3Region\":\"us-east-1\"," +
+                  "\"S3OutputConfigurations\":{\"Format\":\"TEXT_OR_CSV\",\"Compression\":\"GZIP\",\"OutputType\":\"CUSTOM\",\"Overwrite\":\"OVERWRITE_REPORT\"}}}," +
+                "\"RefreshCadence\":{\"Frequency\":\"SYNCHRONOUS\"}}," +
+                "\"ResourceTags\":[{\"Key\":\"fixture\",\"Value\":\"bcm-data-exports\"},{\"Key\":\"alchemy::id\",\"Value\":\"CurExport\"}]}";
+        String arn = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.CreateExport")
+            .header("Authorization", AUTH).body(body)
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("ExportArn");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ResourceArn\":\"" + arn + "\"}")
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body("ResourceTags.Key", hasItems("fixture", "alchemy::id"))
+            .body("ResourceTags.Value", hasItems("bcm-data-exports", "CurExport"));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.TagResource")
+            .header("Authorization", AUTH)
+            .body("{\"ResourceArn\":\"" + arn + "\",\"ResourceTags\":[{\"Key\":\"phase\",\"Value\":\"two\"}]}")
+        .when().post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ResourceArn\":\"" + arn + "\"}")
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body("ResourceTags.Key", hasItems("fixture", "phase"));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.UntagResource")
+            .header("Authorization", AUTH)
+            .body("{\"ResourceArn\":\"" + arn + "\",\"ResourceTagKeys\":[\"fixture\"]}")
+        .when().post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ResourceArn\":\"" + arn + "\"}")
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body("ResourceTags.Key", not(hasItem("fixture")))
+            .body("ResourceTags.Key", hasItem("phase"));
+    }
+
+    @Test
+    void listTagsForResource_unknownArn_returns400() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ResourceArn\":\"arn:aws:bcm-data-exports:us-east-1:000000000000:export/missing\"}")
+        .when().post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void listTables_includesCostAndUsageReport() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.ListTables")
+            .header("Authorization", AUTH).body("{\"MaxResults\":100}")
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body("Tables.TableName", hasItem("COST_AND_USAGE_REPORT"));
+    }
+
+    @Test
+    void getTable_returnsCostAndUsageReportSchema() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.GetTable")
+            .header("Authorization", AUTH).body("{\"TableName\":\"COST_AND_USAGE_REPORT\"}")
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body("TableName", equalTo("COST_AND_USAGE_REPORT"))
+            .body("Schema", not(empty()))
+            .body("Schema.Name", hasItems("identity_line_item_id", "identity_time_interval",
+                    "line_item_unblended_cost"));
+    }
+
+    @Test
+    void getTable_unknownTable_returnsValidation() {
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSBillingAndCostManagementDataExports.GetTable")
+            .header("Authorization", AUTH).body("{\"TableName\":\"NOT_A_TABLE\"}")
         .when().post("/")
         .then()
             .statusCode(400)

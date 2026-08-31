@@ -265,12 +265,43 @@ class CurIntegrationTest {
     }
 
     @Test
-    void putReportDefinition_textCsvFormat_returnsValidation() {
-        // Floci only emits Parquet today; accepting textORcsv would let a
-        // report persist that the emitter can't actually fulfill.
+    void putReportDefinition_textCsvGzip_succeeds() {
         String body = "{\"ReportDefinition\":{" +
-                "\"ReportName\":\"csv-attempt\"," +
+                "\"ReportName\":\"csv-gzip\"," +
                 "\"TimeUnit\":\"DAILY\",\"Format\":\"textORcsv\",\"Compression\":\"GZIP\"," +
+                "\"AdditionalSchemaElements\":[\"RESOURCES\"]," +
+                "\"S3Bucket\":\"valid-bucket\",\"S3Prefix\":\"cur\"," +
+                "\"S3Region\":\"us-east-1\"}}";
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.PutReportDefinition")
+            .header("Authorization", AUTH).body(body)
+            .when().post("/").then()
+            .statusCode(200)
+            .body("ReportName", equalTo("csv-gzip"))
+            .body("Format", equalTo("textORcsv"))
+            .body("Compression", equalTo("GZIP"));
+    }
+
+    @Test
+    void putReportDefinition_textCsvZip_succeeds() {
+        String body = "{\"ReportDefinition\":{" +
+                "\"ReportName\":\"csv-zip\"," +
+                "\"TimeUnit\":\"HOURLY\",\"Format\":\"textORcsv\",\"Compression\":\"ZIP\"," +
+                "\"AdditionalSchemaElements\":[]," +
+                "\"S3Bucket\":\"valid-bucket\",\"S3Region\":\"us-east-1\"}}";
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.PutReportDefinition")
+            .header("Authorization", AUTH).body(body)
+            .when().post("/").then()
+            .statusCode(200)
+            .body("Compression", equalTo("ZIP"));
+    }
+
+    @Test
+    void putReportDefinition_parquetGzip_returnsValidation() {
+        String body = "{\"ReportDefinition\":{" +
+                "\"ReportName\":\"parquet-gzip\"," +
+                "\"TimeUnit\":\"DAILY\",\"Format\":\"Parquet\",\"Compression\":\"GZIP\"," +
                 "\"AdditionalSchemaElements\":[]," +
                 "\"S3Bucket\":\"valid-bucket\",\"S3Region\":\"us-east-1\"}}";
         given().contentType(CONTENT_TYPE)
@@ -279,6 +310,79 @@ class CurIntegrationTest {
             .when().post("/").then()
             .statusCode(400)
             .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void putReportDefinition_withTags_listsThem() {
+        String body = "{\"ReportDefinition\":{" +
+                "\"ReportName\":\"tagged-report\"," +
+                "\"TimeUnit\":\"DAILY\",\"Format\":\"textORcsv\",\"Compression\":\"GZIP\"," +
+                "\"AdditionalSchemaElements\":[]," +
+                "\"S3Bucket\":\"valid-bucket\",\"S3Region\":\"us-east-1\"}," +
+                "\"Tags\":[{\"Key\":\"fixture\",\"Value\":\"cur-report\"}," +
+                "{\"Key\":\"alchemy:id\",\"Value\":\"logical-1\"}]}";
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.PutReportDefinition")
+            .header("Authorization", AUTH).body(body)
+            .when().post("/").then()
+            .statusCode(200);
+
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ReportName\":\"tagged-report\"}")
+            .when().post("/")
+            .then()
+            .statusCode(200)
+            .body("Tags.Key", hasItems("fixture", "alchemy:id"))
+            .body("Tags.Value", hasItems("cur-report", "logical-1"));
+    }
+
+    @Test
+    void tagResource_upsertsAndUntagRemoves() {
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.PutReportDefinition")
+            .header("Authorization", AUTH).body(validReportBody("tag-target"))
+            .when().post("/").then().statusCode(200);
+
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.TagResource")
+            .header("Authorization", AUTH)
+            .body("{\"ReportName\":\"tag-target\",\"Tags\":[{\"Key\":\"env\",\"Value\":\"test\"}]}")
+            .when().post("/").then().statusCode(200);
+
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ReportName\":\"tag-target\"}")
+            .when().post("/")
+            .then()
+            .statusCode(200)
+            .body("Tags.Key", hasItem("env"))
+            .body("Tags.Value", hasItem("test"));
+
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.UntagResource")
+            .header("Authorization", AUTH)
+            .body("{\"ReportName\":\"tag-target\",\"TagKeys\":[\"env\"]}")
+            .when().post("/").then().statusCode(200);
+
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ReportName\":\"tag-target\"}")
+            .when().post("/")
+            .then()
+            .statusCode(200)
+            .body("Tags.Key", not(hasItem("env")));
+    }
+
+    @Test
+    void listTagsForResource_missingReport_returnsNotFound() {
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.ListTagsForResource")
+            .header("Authorization", AUTH).body("{\"ReportName\":\"does-not-exist\"}")
+            .when().post("/")
+            .then()
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
     }
 
     @Test

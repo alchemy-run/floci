@@ -110,6 +110,13 @@ public class LambdaController {
             code.put("RepositoryType", "S3");
         }
 
+        // AWS GetFunction returns Tags at the root (not in Configuration). Alchemy
+        // uses them to decide whether an existing function is safe to update.
+        if (fn.getTags() != null && !fn.getTags().isEmpty()) {
+            ObjectNode tagsNode = root.putObject("Tags");
+            fn.getTags().forEach(tagsNode::put);
+        }
+
         return Response.ok(root).build();
     }
 
@@ -308,8 +315,9 @@ public class LambdaController {
 
     @GET
     @Path("/event-source-mappings")
-    public Response listEventSourceMappings(@QueryParam("FunctionName") String functionArn) {
-        List<EventSourceMapping> esms = lambdaService.listEventSourceMappings(functionArn);
+    public Response listEventSourceMappings(@QueryParam("FunctionName") String functionArn,
+                                            @QueryParam("EventSourceArn") String eventSourceArn) {
+        List<EventSourceMapping> esms = lambdaService.listEventSourceMappings(functionArn, eventSourceArn);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("EventSourceMappings");
         for (EventSourceMapping esm : esms) {
@@ -375,6 +383,21 @@ public class LambdaController {
         if (maxConcurrency != null) {
             ObjectNode scaling = node.putObject("ScalingConfig");
             scaling.put("MaximumConcurrency", maxConcurrency.intValue());
+        }
+        if (esm.getTopics() != null && !esm.getTopics().isEmpty()) {
+            ArrayNode topics = node.putArray("Topics");
+            for (String topic : esm.getTopics()) {
+                topics.add(topic);
+            }
+        }
+        if (esm.getStartingPosition() != null) {
+            node.put("StartingPosition", esm.getStartingPosition());
+        }
+        if (esm.getAmazonManagedKafkaEventSourceConfig() != null
+                && esm.getAmazonManagedKafkaEventSourceConfig().getConsumerGroupId() != null) {
+            ObjectNode kafkaConfig = node.putObject("AmazonManagedKafkaEventSourceConfig");
+            kafkaConfig.put("ConsumerGroupId",
+                    esm.getAmazonManagedKafkaEventSourceConfig().getConsumerGroupId());
         }
         @SuppressWarnings("unchecked")
         Map<String, Object> result = objectMapper.convertValue(node, Map.class);
@@ -657,8 +680,50 @@ public class LambdaController {
             fn.getEnvironment().forEach(vars::put);
         }
 
+        // VpcConfig — AWS always includes this (empty lists when not VPC-attached)
+        ObjectNode vpcNode = node.putObject("VpcConfig");
+        ArrayNode subnetIds = vpcNode.putArray("SubnetIds");
+        ArrayNode securityGroupIds = vpcNode.putArray("SecurityGroupIds");
+        Map<String, Object> vpc = fn.getVpcConfig();
+        if (vpc != null) {
+            appendStringValues(subnetIds, vpc.get("SubnetIds"));
+            appendStringValues(securityGroupIds, vpc.get("SecurityGroupIds"));
+            Object vpcId = vpc.get("VpcId");
+            vpcNode.put("VpcId", vpcId != null ? vpcId.toString() : "");
+        } else {
+            vpcNode.put("VpcId", "");
+        }
+        vpcNode.put("Ipv6AllowedForDualStack", false);
+
+        // FileSystemConfigs — omitted when empty, matching AWS
+        if (fn.getFileSystemConfigs() != null && !fn.getFileSystemConfigs().isEmpty()) {
+            ArrayNode fsc = node.putArray("FileSystemConfigs");
+            for (Map<String, Object> entry : fn.getFileSystemConfigs()) {
+                ObjectNode item = fsc.addObject();
+                Object arn = entry.get("Arn");
+                Object mount = entry.get("LocalMountPath");
+                if (arn != null) {
+                    item.put("Arn", arn.toString());
+                }
+                if (mount != null) {
+                    item.put("LocalMountPath", mount.toString());
+                }
+            }
+        }
+
         @SuppressWarnings("unchecked")
         Map<String, Object> result = objectMapper.convertValue(node, Map.class);
         return result;
+    }
+
+    private static void appendStringValues(ArrayNode array, Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return;
+        }
+        for (Object item : list) {
+            if (item != null) {
+                array.add(item.toString());
+            }
+        }
     }
 }

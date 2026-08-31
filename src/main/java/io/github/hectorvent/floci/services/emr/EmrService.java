@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.services.emr.model.EmrCluster;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceFleet;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceGroup;
 import io.github.hectorvent.floci.services.emr.model.EmrStep;
+import io.github.hectorvent.floci.services.emr.model.EmrStudio;
 import io.github.hectorvent.floci.services.emr.model.SecurityConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,6 +35,7 @@ public class EmrService {
 
     private final StorageBackend<String, EmrCluster> clusterStore;
     private final StorageBackend<String, SecurityConfiguration> secConfigStore;
+    private final StorageBackend<String, EmrStudio> studioStore;
     private final RegionResolver regionResolver;
     private final String defaultReleaseLabel;
 
@@ -43,6 +45,8 @@ public class EmrService {
                 new TypeReference<Map<String, EmrCluster>>() {});
         this.secConfigStore = storageFactory.create("emr", "emr-security-configs.json",
                 new TypeReference<Map<String, SecurityConfiguration>>() {});
+        this.studioStore = storageFactory.create("emr", "emr-studios.json",
+                new TypeReference<Map<String, EmrStudio>>() {});
         this.regionResolver = regionResolver;
         this.defaultReleaseLabel = config.services().emr().defaultReleaseLabel();
     }
@@ -108,6 +112,14 @@ public class EmrService {
     }
 
     public void terminateJobFlows(List<String> ids) {
+        // AWS rejects the request with ValidationException when any job-flow id is unknown
+        // (distilled maps this to JobFlowNotFound). Missing ids fail before mutation.
+        for (String id : ids) {
+            if (clusterStore.get(id).isEmpty()) {
+                throw new AwsException("ValidationException",
+                        "Specified job flow ID not valid.", 400);
+            }
+        }
         // AWS terminates the unprotected clusters in the request and then fails it with a
         // ValidationException if any were termination protected.
         boolean anyProtected = false;
@@ -275,8 +287,10 @@ public class EmrService {
             throw new AwsException("InvalidRequestException", "Name is required.", 400);
         }
         if (secConfigStore.get(name).isPresent()) {
+            // Live EMR overloads InvalidRequestException; distilled remaps this message to
+            // SecurityConfigurationAlreadyExists.
             throw new AwsException("InvalidRequestException",
-                    "Security configuration already exists: " + name, 400);
+                    "SecurityConfiguration with name " + name + " already exists", 400);
         }
         SecurityConfiguration sc = new SecurityConfiguration();
         sc.setName(name);
@@ -288,13 +302,14 @@ public class EmrService {
 
     public SecurityConfiguration describeSecurityConfiguration(String name) {
         return secConfigStore.get(name).orElseThrow(() -> new AwsException(
-                "InvalidRequestException", "Security configuration does not exist: " + name, 400));
+                "InvalidRequestException",
+                "Security configuration with name " + name + " does not exist", 400));
     }
 
     public void deleteSecurityConfiguration(String name) {
-        if (secConfigStore.get(name).isEmpty()) {
+        if (name == null || secConfigStore.get(name).isEmpty()) {
             throw new AwsException("InvalidRequestException",
-                    "Security configuration does not exist: " + name, 400);
+                    "Security configuration with name " + name + " does not exist", 400);
         }
         secConfigStore.delete(name);
     }
@@ -303,15 +318,88 @@ public class EmrService {
         return new ArrayList<>(secConfigStore.scan(k -> true));
     }
 
+    // ──────────────────────────── Studios ────────────────────────────
+
+    public EmrStudio createStudio(EmrStudio studio, String region) {
+        if (studio.getName() == null) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value null at 'name' failed to satisfy constraint: "
+                            + "Member must not be null", 400);
+        }
+        if (studio.getAuthMode() == null) {
+            studio.setAuthMode("IAM");
+        }
+        String id = "es-" + randomId(25);
+        studio.setStudioId(id);
+        studio.setRegion(region);
+        studio.setStudioArn(regionResolver.buildArn("elasticmapreduce", region, "studio/" + id));
+        studio.setUrl("https://" + id + ".emrstudio-prod." + region + ".amazonaws.com");
+        studio.setCreationTime(Instant.now());
+        studioStore.put(id, studio);
+        return studio;
+    }
+
+    public EmrStudio describeStudio(String studioId) {
+        return requireStudio(studioId);
+    }
+
+    public List<EmrStudio> listStudios(String region) {
+        List<EmrStudio> result = new ArrayList<>();
+        for (EmrStudio studio : studioStore.scan(k -> true)) {
+            if (region == null || region.equals(studio.getRegion())) {
+                result.add(studio);
+            }
+        }
+        return result;
+    }
+
+    public void updateStudio(String studioId, String name, String description, List<String> subnetIds,
+                             String defaultS3Location, String encryptionKeyArn) {
+        EmrStudio studio = requireStudio(studioId);
+        if (name != null) {
+            studio.setName(name);
+        }
+        if (description != null) {
+            studio.setDescription(description);
+        }
+        if (subnetIds != null) {
+            studio.setSubnetIds(subnetIds);
+        }
+        if (defaultS3Location != null) {
+            studio.setDefaultS3Location(defaultS3Location);
+        }
+        if (encryptionKeyArn != null) {
+            studio.setEncryptionKeyArn(encryptionKeyArn);
+        }
+        studioStore.put(studioId, studio);
+    }
+
+    public void deleteStudio(String studioId) {
+        requireStudio(studioId);
+        studioStore.delete(studioId);
+    }
+
     // ──────────────────────────── Tags ────────────────────────────
 
     public void addTags(String resourceId, Map<String, String> tags) {
+        if (isStudioId(resourceId)) {
+            EmrStudio studio = requireStudio(resourceId);
+            studio.getTags().putAll(tags);
+            studioStore.put(resourceId, studio);
+            return;
+        }
         EmrCluster cluster = requireCluster(resourceId);
         cluster.getTags().putAll(tags);
         clusterStore.put(resourceId, cluster);
     }
 
     public void removeTags(String resourceId, List<String> keys) {
+        if (isStudioId(resourceId)) {
+            EmrStudio studio = requireStudio(resourceId);
+            keys.forEach(studio.getTags()::remove);
+            studioStore.put(resourceId, studio);
+            return;
+        }
         EmrCluster cluster = requireCluster(resourceId);
         keys.forEach(cluster.getTags()::remove);
         clusterStore.put(resourceId, cluster);
@@ -325,6 +413,19 @@ public class EmrService {
         }
         return clusterStore.get(id).orElseThrow(() -> new AwsException(
                 "InvalidRequestException", "Cluster id '" + id + "' is not valid.", 400));
+    }
+
+    private EmrStudio requireStudio(String id) {
+        if (id == null) {
+            throw new AwsException("InvalidRequestException", "StudioId is required.", 400);
+        }
+        // Live EMR overloads InvalidRequestException; distilled remaps this message to StudioNotFound.
+        return studioStore.get(id).orElseThrow(() -> new AwsException(
+                "InvalidRequestException", "Studio does not exist.", 400));
+    }
+
+    private static boolean isStudioId(String resourceId) {
+        return resourceId != null && resourceId.startsWith("es-");
     }
 
     private void mutateClusters(List<String> ids, java.util.function.Consumer<EmrCluster> mutation) {

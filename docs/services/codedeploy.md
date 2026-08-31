@@ -11,7 +11,7 @@ Floci implements the CodeDeploy API — stored-state management for applications
 - `arn:aws:codedeploy:<region>:<account>:deploymentconfig:<name>`
 - `arn:aws:codedeploy:<region>:<account>:deployment:<id>`
 
-## Supported Operations (30 total)
+## Supported Operations (35 total)
 
 ### Applications
 
@@ -48,15 +48,25 @@ Floci implements the CodeDeploy API — stored-state management for applications
 
 | Operation | Notes |
 |---|---|
-| `CreateDeployment` | Starts a real Lambda or ECS blue/green deployment; shifts traffic via alias weights (Lambda) or ELB listener rules (ECS); invokes lifecycle hooks |
+| `CreateDeployment` | Starts a real Lambda or ECS blue/green deployment; shifts traffic via alias weights (Lambda) or ELB listener rules (ECS); invokes lifecycle hooks. Missing `revision` returns typed `RevisionRequiredException` |
 | `GetDeployment` | Returns current deployment state; poll `status` until `Succeeded`, `Failed`, or `Stopped` |
 | `StopDeployment` | Signals an in-progress deployment to stop; transitions to `Stopped` |
-| `ContinueDeployment` | Accepted (no-op for fully automated deployments) |
+| `ContinueDeployment` | Continues a ready blue/green deployment; unknown ids return `DeploymentDoesNotExistException` |
 | `ListDeployments` | Returns deployment IDs filtered by application, group, or status |
 | `BatchGetDeployments` | Returns info for multiple deployments |
+| `GetDeploymentTarget` | Returns one target; unknown deployment/target ids are typed |
 | `ListDeploymentTargets` | Returns target IDs for a deployment |
 | `BatchGetDeploymentTargets` | Returns target details including lifecycle event status |
 | `PutLifecycleEventHookExecutionStatus` | Called by lifecycle hook Lambda to report `Succeeded` or `Failed`; failure triggers auto-rollback |
+
+### Application revisions
+
+| Operation | Notes |
+|---|---|
+| `RegisterApplicationRevision` | Stores S3 / GitHub / AppSpec revision metadata (bundle is not fetched) |
+| `GetApplicationRevision` | Returns registered revision info |
+| `ListApplicationRevisions` | Lists revision locations for an application |
+| `BatchGetApplicationRevisions` | Returns info for multiple revision locations |
 
 ### Tagging
 

@@ -10,6 +10,11 @@ import io.github.hectorvent.floci.core.common.AwsJson11Controller;
 import io.github.hectorvent.floci.services.memorydb.model.Acl;
 import io.github.hectorvent.floci.services.memorydb.model.AuthMode;
 import io.github.hectorvent.floci.services.memorydb.model.Cluster;
+import io.github.hectorvent.floci.services.memorydb.model.EngineVersion;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbEvent;
+import io.github.hectorvent.floci.services.memorydb.model.ParameterGroup;
+import io.github.hectorvent.floci.services.memorydb.model.Snapshot;
+import io.github.hectorvent.floci.services.memorydb.model.SubnetGroup;
 import io.github.hectorvent.floci.services.memorydb.model.User;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -48,10 +53,29 @@ public class MemoryDbHandler {
                 case "DeleteCluster" -> handleDeleteCluster(request);
                 case "CreateUser" -> handleCreateUser(request, region);
                 case "DescribeUsers" -> handleDescribeUsers(request, region);
+                case "UpdateUser" -> handleUpdateUser(request);
                 case "DeleteUser" -> handleDeleteUser(request);
                 case "CreateACL" -> handleCreateAcl(request, region);
                 case "DescribeACLs" -> handleDescribeAcls(request, region);
+                case "UpdateACL" -> handleUpdateAcl(request);
                 case "DeleteACL" -> handleDeleteAcl(request);
+                case "CreateParameterGroup" -> handleCreateParameterGroup(request, region);
+                case "DescribeParameterGroups" -> handleDescribeParameterGroups(request);
+                case "DescribeParameters" -> handleDescribeParameters(request);
+                case "UpdateParameterGroup" -> handleUpdateParameterGroup(request);
+                case "ResetParameterGroup" -> handleResetParameterGroup(request);
+                case "DeleteParameterGroup" -> handleDeleteParameterGroup(request);
+                case "CreateSubnetGroup" -> handleCreateSubnetGroup(request, region);
+                case "DescribeSubnetGroups" -> handleDescribeSubnetGroups(request);
+                case "UpdateSubnetGroup" -> handleUpdateSubnetGroup(request, region);
+                case "DeleteSubnetGroup" -> handleDeleteSubnetGroup(request);
+                case "DescribeSnapshots" -> handleDescribeSnapshots(request);
+                case "DescribeEvents" -> handleDescribeEvents(request);
+                case "DescribeServiceUpdates" -> handleDescribeServiceUpdates();
+                case "DescribeEngineVersions" -> handleDescribeEngineVersions(request);
+                case "BatchUpdateCluster" -> handleBatchUpdateCluster(request);
+                case "DeleteSnapshot" -> handleDeleteSnapshot(request);
+                case "CopySnapshot" -> handleCopySnapshot(request, region);
                 case "ListTags" -> handleListTags(request);
                 case "TagResource" -> handleTagResource(request);
                 case "UntagResource" -> handleUntagResource(request);
@@ -80,10 +104,20 @@ public class MemoryDbHandler {
         if (request.hasNonNull("NumShards")) {
             spec.setNumberOfShards(request.get("NumShards").asInt());
         }
+        if (request.hasNonNull("NumReplicasPerShard")) {
+            spec.setNumReplicasPerShard(request.get("NumReplicasPerShard").asInt());
+        }
         spec.setEngine(text(request, "Engine"));
         spec.setEngineVersion(text(request, "EngineVersion"));
         spec.setAclName(text(request, "ACLName"));
-        spec.setTlsEnabled(request.path("TLSEnabled").asBoolean(false));
+        spec.setSubnetGroupName(text(request, "SubnetGroupName"));
+        if (request.has("SecurityGroupIds")) {
+            spec.setSecurityGroupIds(parseStringList(request.path("SecurityGroupIds")));
+        }
+        spec.setParameterGroupName(text(request, "ParameterGroupName"));
+        spec.setTlsEnabled(request.has("TLSEnabled") && !request.get("TLSEnabled").isNull()
+                ? request.get("TLSEnabled").asBoolean()
+                : true);
         spec.setTags(parseTags(request.path("Tags")));
         Cluster created = service.createCluster(spec, region);
         ObjectNode response = objectMapper.createObjectNode();
@@ -101,7 +135,20 @@ public class MemoryDbHandler {
     }
 
     private Response handleUpdateCluster(JsonNode request) {
-        Cluster updated = service.updateCluster(text(request, "ClusterName"), text(request, "Description"));
+        Cluster patch = new Cluster();
+        patch.setName(text(request, "ClusterName"));
+        patch.setDescription(text(request, "Description"));
+        if (request.has("SecurityGroupIds")) {
+            patch.setSecurityGroupIds(parseStringList(request.path("SecurityGroupIds")));
+        }
+        patch.setAclName(text(request, "ACLName"));
+        patch.setNodeType(text(request, "NodeType"));
+        patch.setEngineVersion(text(request, "EngineVersion"));
+        patch.setParameterGroupName(text(request, "ParameterGroupName"));
+        if (request.path("ShardConfiguration").hasNonNull("ShardCount")) {
+            patch.setNumberOfShards(request.path("ShardConfiguration").get("ShardCount").asInt());
+        }
+        Cluster updated = service.updateCluster(patch);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("Cluster", clusterNode(updated));
         return Response.ok(response).build();
@@ -121,6 +168,7 @@ public class MemoryDbHandler {
         JsonNode authNode = request.path("AuthenticationMode");
         spec.setAuthMode(parseAuthMode(authNode));
         spec.setPasswords(parsePasswords(authNode.path("Passwords")));
+        spec.setTags(parseTags(request.path("Tags")));
         User created = service.createUser(spec, region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("User", userNode(created));
@@ -136,6 +184,18 @@ public class MemoryDbHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleUpdateUser(JsonNode request) {
+        JsonNode authNode = request.path("AuthenticationMode");
+        User updated = service.updateUser(
+                text(request, "UserName"),
+                text(request, "AccessString"),
+                parseAuthMode(authNode),
+                parsePasswords(authNode.path("Passwords")));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("User", userNode(updated));
+        return Response.ok(response).build();
+    }
+
     private Response handleDeleteUser(JsonNode request) {
         User deleted = service.deleteUser(text(request, "UserName"));
         ObjectNode response = objectMapper.createObjectNode();
@@ -147,6 +207,7 @@ public class MemoryDbHandler {
         Acl spec = new Acl();
         spec.setName(text(request, "ACLName"));
         spec.setUserNames(parseStringList(request.path("UserNames")));
+        spec.setTags(parseTags(request.path("Tags")));
         Acl created = service.createAcl(spec, region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("ACL", aclNode(created));
@@ -162,10 +223,200 @@ public class MemoryDbHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleUpdateAcl(JsonNode request) {
+        Acl updated = service.updateAcl(
+                text(request, "ACLName"),
+                parseStringList(request.path("UserNamesToAdd")),
+                parseStringList(request.path("UserNamesToRemove")));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ACL", aclNode(updated));
+        return Response.ok(response).build();
+    }
+
     private Response handleDeleteAcl(JsonNode request) {
         Acl deleted = service.deleteAcl(text(request, "ACLName"));
         ObjectNode response = objectMapper.createObjectNode();
         response.set("ACL", aclNode(deleted));
+        return Response.ok(response).build();
+    }
+
+    private Response handleCreateParameterGroup(JsonNode request, String region) {
+        ParameterGroup spec = new ParameterGroup();
+        spec.setName(text(request, "ParameterGroupName"));
+        spec.setFamily(text(request, "Family"));
+        spec.setDescription(text(request, "Description"));
+        spec.setTags(parseTags(request.path("Tags")));
+        ParameterGroup created = service.createParameterGroup(spec, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ParameterGroup", parameterGroupNode(created));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeParameterGroups(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("ParameterGroups");
+        for (ParameterGroup group : service.describeParameterGroups(text(request, "ParameterGroupName"))) {
+            arr.add(parameterGroupNode(group));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeParameters(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("Parameters");
+        service.describeParameters(text(request, "ParameterGroupName")).forEach((name, value) ->
+                arr.add(parameterNode(name, value)));
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateParameterGroup(JsonNode request) {
+        Map<String, String> updates = new LinkedHashMap<>();
+        for (JsonNode node : request.path("ParameterNameValues")) {
+            String parameterName = text(node, "ParameterName");
+            if (parameterName != null) {
+                updates.put(parameterName, text(node, "ParameterValue"));
+            }
+        }
+        ParameterGroup updated = service.updateParameterGroup(text(request, "ParameterGroupName"), updates);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ParameterGroup", parameterGroupNode(updated));
+        return Response.ok(response).build();
+    }
+
+    private Response handleResetParameterGroup(JsonNode request) {
+        List<String> names = new java.util.ArrayList<>();
+        request.path("ParameterNames").forEach(n -> names.add(n.asText()));
+        ParameterGroup reset = service.resetParameterGroup(
+                text(request, "ParameterGroupName"),
+                request.path("AllParameters").asBoolean(false),
+                names);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ParameterGroup", parameterGroupNode(reset));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteParameterGroup(JsonNode request) {
+        ParameterGroup deleted = service.deleteParameterGroup(text(request, "ParameterGroupName"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ParameterGroup", parameterGroupNode(deleted));
+        return Response.ok(response).build();
+    }
+
+    private Response handleCreateSubnetGroup(JsonNode request, String region) {
+        SubnetGroup spec = new SubnetGroup();
+        spec.setName(text(request, "SubnetGroupName"));
+        spec.setDescription(text(request, "Description"));
+        spec.setTags(parseTags(request.path("Tags")));
+        List<SubnetGroup.SubnetRef> members = new java.util.ArrayList<>();
+        for (String id : parseStringList(request.path("SubnetIds"))) {
+            members.add(new SubnetGroup.SubnetRef(id, null));
+        }
+        spec.setSubnets(members);
+        SubnetGroup created = service.createSubnetGroup(spec, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("SubnetGroup", subnetGroupNode(created));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeSubnetGroups(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("SubnetGroups");
+        for (SubnetGroup group : service.describeSubnetGroups(text(request, "SubnetGroupName"))) {
+            arr.add(subnetGroupNode(group));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateSubnetGroup(JsonNode request, String region) {
+        SubnetGroup updated = service.updateSubnetGroup(
+                text(request, "SubnetGroupName"),
+                text(request, "Description"),
+                parseStringList(request.path("SubnetIds")),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("SubnetGroup", subnetGroupNode(updated));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteSubnetGroup(JsonNode request) {
+        SubnetGroup deleted = service.deleteSubnetGroup(text(request, "SubnetGroupName"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("SubnetGroup", subnetGroupNode(deleted));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeSnapshots(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("Snapshots");
+        for (Snapshot snapshot : service.describeSnapshots(
+                text(request, "ClusterName"), text(request, "SnapshotName"))) {
+            arr.add(snapshotNode(snapshot));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeEvents(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("Events");
+        for (MemoryDbEvent event : service.describeEvents(
+                text(request, "SourceName"), text(request, "SourceType"))) {
+            ObjectNode node = arr.addObject();
+            node.put("SourceName", event.getSourceName());
+            node.put("SourceType", event.getSourceType());
+            node.put("Message", event.getMessage());
+            node.put("Date", event.getDate());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeServiceUpdates() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("ServiceUpdates");
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeEngineVersions(JsonNode request) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("EngineVersions");
+        for (EngineVersion version : service.describeEngineVersions(
+                text(request, "Engine"),
+                text(request, "EngineVersion"),
+                text(request, "ParameterGroupFamily"),
+                request.path("DefaultOnly").asBoolean(false))) {
+            ObjectNode node = arr.addObject();
+            node.put("Engine", version.getEngine());
+            node.put("EngineVersion", version.getEngineVersion());
+            node.put("EnginePatchVersion", version.getEnginePatchVersion());
+            node.put("ParameterGroupFamily", version.getParameterGroupFamily());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleBatchUpdateCluster(JsonNode request) {
+        List<String> clusterNames = parseStringList(request.path("ClusterNames"));
+        String serviceUpdateName = text(request.path("ServiceUpdate"), "ServiceUpdateNameToApply");
+        service.batchUpdateCluster(clusterNames, serviceUpdateName);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("ProcessedClusters");
+        response.putArray("UnprocessedClusters");
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteSnapshot(JsonNode request) {
+        Snapshot deleted = service.deleteSnapshot(text(request, "SnapshotName"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("Snapshot", snapshotNode(deleted));
+        return Response.ok(response).build();
+    }
+
+    private Response handleCopySnapshot(JsonNode request, String region) {
+        Snapshot copied = service.copySnapshot(
+                text(request, "SourceSnapshotName"),
+                text(request, "TargetSnapshotName"),
+                text(request, "KmsKeyId"),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("Snapshot", snapshotNode(copied));
         return Response.ok(response).build();
     }
 
@@ -203,6 +454,18 @@ public class MemoryDbHandler {
         node.put("ACLName", cluster.getAclName());
         node.put("TLSEnabled", cluster.isTlsEnabled());
         node.put("ARN", cluster.getArn());
+        if (cluster.getSubnetGroupName() != null) {
+            node.put("SubnetGroupName", cluster.getSubnetGroupName());
+        }
+        if (cluster.getParameterGroupName() != null) {
+            node.put("ParameterGroupName", cluster.getParameterGroupName());
+        }
+        ArrayNode securityGroups = node.putArray("SecurityGroups");
+        for (String groupId : cluster.getSecurityGroupIds()) {
+            ObjectNode membership = securityGroups.addObject();
+            membership.put("SecurityGroupId", groupId);
+            membership.put("Status", "active");
+        }
         if (cluster.getClusterEndpoint() != null) {
             ObjectNode endpoint = node.putObject("ClusterEndpoint");
             endpoint.put("Address", cluster.getClusterEndpoint().address());
@@ -247,6 +510,92 @@ public class MemoryDbHandler {
         service.clustersUsingAcl(acl.getName()).forEach(clustersArr::add);
         if (acl.getArn() != null) {
             node.put("ARN", acl.getArn());
+        }
+        return node;
+    }
+
+    private ObjectNode parameterGroupNode(ParameterGroup group) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Name", group.getName());
+        node.put("Family", group.getFamily());
+        if (group.getDescription() != null) {
+            node.put("Description", group.getDescription());
+        }
+        if (group.getArn() != null) {
+            node.put("ARN", group.getArn());
+        }
+        return node;
+    }
+
+    private ObjectNode subnetGroupNode(SubnetGroup group) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Name", group.getName());
+        if (group.getDescription() != null) {
+            node.put("Description", group.getDescription());
+        }
+        if (group.getVpcId() != null) {
+            node.put("VpcId", group.getVpcId());
+        }
+        ArrayNode subnets = node.putArray("Subnets");
+        for (SubnetGroup.SubnetRef subnet : group.getSubnets()) {
+            ObjectNode member = subnets.addObject();
+            member.put("Identifier", subnet.getIdentifier());
+            if (subnet.getAvailabilityZone() != null) {
+                member.putObject("AvailabilityZone").put("Name", subnet.getAvailabilityZone());
+            }
+        }
+        if (group.getArn() != null) {
+            node.put("ARN", group.getArn());
+        }
+        return node;
+    }
+
+    private ObjectNode snapshotNode(Snapshot snapshot) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Name", snapshot.getName());
+        node.put("Status", snapshot.getStatus());
+        if (snapshot.getSource() != null) {
+            node.put("Source", snapshot.getSource());
+        }
+        if (snapshot.getKmsKeyId() != null) {
+            node.put("KmsKeyId", snapshot.getKmsKeyId());
+        }
+        if (snapshot.getArn() != null) {
+            node.put("ARN", snapshot.getArn());
+        }
+        ObjectNode config = node.putObject("ClusterConfiguration");
+        if (snapshot.getClusterName() != null) {
+            config.put("Name", snapshot.getClusterName());
+        }
+        if (snapshot.getClusterDescription() != null) {
+            config.put("Description", snapshot.getClusterDescription());
+        }
+        if (snapshot.getNodeType() != null) {
+            config.put("NodeType", snapshot.getNodeType());
+        }
+        if (snapshot.getEngine() != null) {
+            config.put("Engine", snapshot.getEngine());
+        }
+        if (snapshot.getEngineVersion() != null) {
+            config.put("EngineVersion", snapshot.getEngineVersion());
+        }
+        if (snapshot.getNumberOfShards() > 0) {
+            config.put("NumShards", snapshot.getNumberOfShards());
+        }
+        return node;
+    }
+
+    private ObjectNode parameterNode(String name, String value) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Name", name);
+        node.put("Value", value);
+        if ("maxmemory-policy".equals(name)) {
+            node.put("Description", "Eviction policy used when maxmemory is reached.");
+            node.put("DataType", "string");
+            node.put("AllowedValues",
+                    "volatile-lru,allkeys-lru,volatile-lfu,allkeys-lfu,volatile-random,allkeys-random,volatile-ttl,noeviction");
+        } else {
+            node.put("DataType", "string");
         }
         return node;
     }

@@ -26,29 +26,37 @@ public class LambdaUrlRoutingFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) throws IOException {
+        URI originalUri = requestContext.getUriInfo().getRequestUri();
+        String path = originalUri == null || originalUri.getRawPath() == null
+                ? "/"
+                : originalUri.getRawPath();
+        // Already rewritten (or a client used path-style /lambda-url/{urlId}/...).
+        if ("/lambda-url".equals(path) || path.startsWith("/lambda-url/")) {
+            return;
+        }
+
         String host = requestContext.getHeaderString("Host");
-        if (host == null) return;
+        if (host == null || !host.contains(".lambda-url.")) {
+            String uriHost = originalUri == null ? null : originalUri.getHost();
+            if (uriHost != null && uriHost.contains(".lambda-url.")) {
+                host = uriHost;
+            }
+        }
+        if (host == null || !host.contains(".lambda-url.")) {
+            return;
+        }
 
         // Pattern: <urlId>.lambda-url.<region>.<anything>
-        if (host.contains(".lambda-url.")) {
-            String[] parts = host.split("\\.");
-            if (parts.length >= 3) {
-                String urlId = parts[0];
-                // We don't strictly need region here because urlId is enough to find the target,
-                // but we could extract it if needed.
+        String[] parts = host.split("\\.");
+        if (parts.length >= 3) {
+            String urlId = parts[0];
+            URI newUri = UriBuilder.fromUri(originalUri)
+                    .host("localhost") // Normalize host
+                    .replacePath("/lambda-url/" + urlId + path)
+                    .build();
 
-                URI originalUri = requestContext.getUriInfo().getRequestUri();
-                String path = originalUri.getRawPath();
-                if (path == null) path = "/";
-
-                URI newUri = UriBuilder.fromUri(originalUri)
-                        .host("localhost") // Normalize host
-                        .replacePath("/lambda-url/" + urlId + path)
-                        .build();
-
-                LOG.debugv("Routing Lambda URL: {0} -> {1}", host, newUri.getPath());
-                requestContext.setRequestUri(newUri);
-            }
+            LOG.debugv("Routing Lambda URL: {0} -> {1}", host, newUri.getPath());
+            requestContext.setRequestUri(newUri);
         }
     }
 }

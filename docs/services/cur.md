@@ -12,18 +12,18 @@ real Parquet artifacts in Floci's S3 service via the `floci-duck` sidecar.
 
 | Operation | Notes |
 |-----------|-------|
-| `PutReportDefinition` | Creates a new report; rejects duplicates with `DuplicateReportNameException`; enforces a 5-report-per-account limit |
-| `ModifyReportDefinition` | Replaces an existing report's mutable fields |
+| `PutReportDefinition` | Creates a new report; rejects duplicates with `DuplicateReportNameException`; enforces a 10-report-per-account limit. Optional `Tags` persist onto the report. |
+| `ModifyReportDefinition` | Replaces an existing report's mutable fields (tags are preserved) |
 | `DescribeReportDefinitions` | Returns every report owned by the calling account |
 | `DeleteReportDefinition` | Idempotent; removing a missing report returns 200 |
-| `TagResource` / `UntagResource` / `ListTagsForResource` | Stub responses (empty bodies) so SDK clients that probe for them succeed |
+| `TagResource` / `UntagResource` / `ListTagsForResource` | Persist tags keyed by `ReportName`; missing reports raise `ResourceNotFoundException` |
 
 ## Validation rules
 
 - `ReportName`: alphanumerics + `-_`, max 256 chars
 - `TimeUnit`: `HOURLY` / `DAILY` / `MONTHLY`
-- `Format`: `Parquet` (CSV emission not yet implemented; `textORcsv` returns `ValidationException`)
-- `Compression`: `Parquet` (`ZIP` / `GZIP` not yet implemented)
+- `Format`: `textORcsv` or `Parquet`
+- `Compression`: `ZIP` / `GZIP` with `textORcsv`; `Parquet` with `Parquet` format. CSV reports persist on the management plane; emission still writes Parquet only and is skipped for CSV.
 - `ReportVersioning`: `CREATE_NEW_REPORT` / `OVERWRITE_REPORT`
 - `AdditionalArtifacts`: subset of `REDSHIFT` / `QUICKSIGHT` / `ATHENA`
 - `AdditionalSchemaElements`: subset of `RESOURCES` / `SPLIT_COST_ALLOCATION_DATA` / `MANUAL_DISCOUNT_COMPATIBILITY`

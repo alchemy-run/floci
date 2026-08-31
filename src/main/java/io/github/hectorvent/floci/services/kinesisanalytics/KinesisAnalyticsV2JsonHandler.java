@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.services.kinesisanalytics.model.CloudWatchLoggingOption;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.FlinkApplication;
 import io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -39,10 +40,17 @@ public class KinesisAnalyticsV2JsonHandler {
             case "CreateApplication" -> handleCreateApplication(request);
             case "CreateApplicationPresignedUrl" -> handleCreateApplicationPresignedUrl(request);
             case "DescribeApplication" -> handleDescribeApplication(request);
+            case "DescribeApplicationVersion" -> handleDescribeApplicationVersion(request);
             case "ListApplications" -> handleListApplications(request);
+            case "ListApplicationVersions" -> handleListApplicationVersions(request);
+            case "ListApplicationOperations" -> handleListApplicationOperations(request);
+            case "DescribeApplicationOperation" -> handleDescribeApplicationOperation(request);
+            case "RollbackApplication" -> handleRollbackApplication(request);
             case "StartApplication" -> handleStartApplication(request);
             case "StopApplication" -> handleStopApplication(request);
             case "UpdateApplication" -> handleUpdateApplication(request);
+            case "UpdateApplicationMaintenanceConfiguration" ->
+                    handleUpdateApplicationMaintenanceConfiguration(request);
             case "DeleteApplication" -> handleDeleteApplication(request);
             case "TagResource" -> handleTagResource(request);
             case "UntagResource" -> handleUntagResource(request);
@@ -51,6 +59,8 @@ public class KinesisAnalyticsV2JsonHandler {
             case "DescribeApplicationSnapshot" -> handleDescribeApplicationSnapshot(request);
             case "ListApplicationSnapshots" -> handleListApplicationSnapshots(request);
             case "DeleteApplicationSnapshot" -> handleDeleteApplicationSnapshot(request);
+            case "AddApplicationCloudWatchLoggingOption" -> handleAddApplicationCloudWatchLoggingOption(request);
+            case "DeleteApplicationCloudWatchLoggingOption" -> handleDeleteApplicationCloudWatchLoggingOption(request);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation",
                             "Operation " + action + " is not supported."))
@@ -113,6 +123,66 @@ public class KinesisAnalyticsV2JsonHandler {
         return applicationDetailResponse(service.describeApplication(applicationName));
     }
 
+    private Response handleDescribeApplicationVersion(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        Long applicationVersionId = request.hasNonNull("ApplicationVersionId")
+                ? request.path("ApplicationVersionId").asLong()
+                : null;
+        FlinkApplication app = service.describeApplicationVersion(applicationName, applicationVersionId);
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode detail = applicationDetailNode(app);
+        // Echo the requested version, not the live current — AWS returns the snapshot of that
+        // version. Floci does not persist per-version config, so the rest of ApplicationDetail
+        // is the live application with ApplicationVersionId rewritten.
+        detail.put("ApplicationVersionId", applicationVersionId);
+        response.set("ApplicationVersionDetail", detail);
+        return Response.ok(response).build();
+    }
+
+    private Response handleListApplicationOperations(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode infos = response.putArray("ApplicationOperationInfoList");
+        for (var op : service.listApplicationOperations(applicationName)) {
+            ObjectNode node = infos.addObject();
+            node.put("Operation", op.operation());
+            node.put("OperationId", op.operationId());
+            node.put("OperationStatus", op.operationStatus());
+            if (op.startTime() != null) {
+                node.put("StartTime", op.startTime().toEpochMilli() / 1000.0);
+            }
+            if (op.endTime() != null) {
+                node.put("EndTime", op.endTime().toEpochMilli() / 1000.0);
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeApplicationOperation(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        String operationId = request.path("OperationId").asText(null);
+        var op = service.describeApplicationOperation(applicationName, operationId);
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode details = response.putObject("ApplicationOperationInfoDetails");
+        details.put("Operation", op.operation());
+        details.put("OperationStatus", op.operationStatus());
+        if (op.startTime() != null) {
+            details.put("StartTime", op.startTime().toEpochMilli() / 1000.0);
+        }
+        if (op.endTime() != null) {
+            details.put("EndTime", op.endTime().toEpochMilli() / 1000.0);
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleRollbackApplication(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        Long currentVersionId = request.hasNonNull("CurrentApplicationVersionId")
+                ? request.path("CurrentApplicationVersionId").asLong()
+                : null;
+        return applicationDetailResponse(service.rollbackApplication(applicationName, currentVersionId));
+    }
+
     private Response handleListApplications(JsonNode request) {
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode summaries = response.putArray("ApplicationSummaries");
@@ -126,6 +196,18 @@ public class KinesisAnalyticsV2JsonHandler {
             if (app.getApplicationMode() != null) {
                 summary.put("ApplicationMode", app.getApplicationMode());
             }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleListApplicationVersions(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode summaries = response.putArray("ApplicationVersionSummaries");
+        for (var version : service.listApplicationVersions(applicationName)) {
+            ObjectNode summary = summaries.addObject();
+            summary.put("ApplicationVersionId", version.applicationVersionId());
+            summary.put("ApplicationStatus", version.applicationStatus().name());
         }
         return Response.ok(response).build();
     }
@@ -161,17 +243,40 @@ public class KinesisAnalyticsV2JsonHandler {
         String codeBucket = bucketFromArn(s3Update.path("BucketARNUpdate").asText(null));
         String codeKey = s3Update.path("FileKeyUpdate").asText(null);
         String codeVersion = s3Update.path("ObjectVersionUpdate").asText(null);
-        JsonNode parallelismUpdate = appCfgUpdate.path("FlinkApplicationConfigurationUpdate")
-                .path("ParallelismConfigurationUpdate").path("ParallelismUpdate");
+        JsonNode parCfgUpdate = appCfgUpdate.path("FlinkApplicationConfigurationUpdate")
+                .path("ParallelismConfigurationUpdate");
+        JsonNode parallelismUpdate = parCfgUpdate.path("ParallelismUpdate");
         Integer parallelism = parallelismUpdate.isMissingNode() || parallelismUpdate.isNull()
                 ? null : parallelismUpdate.asInt();
+        String parallelismConfigurationType = parCfgUpdate.path("ConfigurationTypeUpdate").asText(null);
+        JsonNode parallelismPerKpuUpdate = parCfgUpdate.path("ParallelismPerKPUUpdate");
+        Integer parallelismPerKPU = parallelismPerKpuUpdate.isMissingNode() || parallelismPerKpuUpdate.isNull()
+                ? null : parallelismPerKpuUpdate.asInt();
+        JsonNode autoScalingUpdate = parCfgUpdate.path("AutoScalingEnabledUpdate");
+        Boolean autoScalingEnabled = autoScalingUpdate.isMissingNode() || autoScalingUpdate.isNull()
+                ? null : autoScalingUpdate.asBoolean();
         JsonNode snapshotsEnabledUpdate = appCfgUpdate.path("ApplicationSnapshotConfigurationUpdate")
                 .path("SnapshotsEnabledUpdate");
         Boolean snapshotsEnabled = snapshotsEnabledUpdate.isMissingNode() || snapshotsEnabledUpdate.isNull()
                 ? null : snapshotsEnabledUpdate.asBoolean();
+        JsonNode envUpdates = appCfgUpdate.path("EnvironmentPropertyUpdates").path("PropertyGroups");
+        Map<String, Map<String, String>> environmentProperties = envUpdates.isArray()
+                ? parsePropertyGroups(envUpdates) : null;
 
         return applicationDetailResponse(service.updateApplication(applicationName, currentVersionId,
-                serviceExecutionRole, codeBucket, codeKey, codeVersion, parallelism, snapshotsEnabled));
+                serviceExecutionRole, codeBucket, codeKey, codeVersion, parallelism, snapshotsEnabled,
+                environmentProperties, parallelismConfigurationType, parallelismPerKPU, autoScalingEnabled));
+    }
+
+    private Response handleUpdateApplicationMaintenanceConfiguration(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        String startTime = request.path("ApplicationMaintenanceConfigurationUpdate")
+                .path("ApplicationMaintenanceWindowStartTimeUpdate").asText(null);
+        FlinkApplication app = service.updateApplicationMaintenanceConfiguration(applicationName, startTime);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ApplicationARN", app.getApplicationArn());
+        response.set("ApplicationMaintenanceConfigurationDescription", maintenanceConfigurationNode(app));
+        return Response.ok(response).build();
     }
 
     private Response handleDeleteApplication(JsonNode request) {
@@ -211,6 +316,46 @@ public class KinesisAnalyticsV2JsonHandler {
             summaries.add(snapshotDetailNode(snapshot));
         }
         return Response.ok(response).build();
+    }
+
+    private Response handleAddApplicationCloudWatchLoggingOption(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        Long currentVersionId = request.hasNonNull("CurrentApplicationVersionId")
+                ? request.path("CurrentApplicationVersionId").asLong()
+                : null;
+        String logStreamArn = request.path("CloudWatchLoggingOption").path("LogStreamARN").asText(null);
+        FlinkApplication app = service.addApplicationCloudWatchLoggingOption(
+                applicationName, currentVersionId, logStreamArn);
+        return cloudWatchLoggingOptionResponse(app);
+    }
+
+    private Response handleDeleteApplicationCloudWatchLoggingOption(JsonNode request) {
+        String applicationName = request.path("ApplicationName").asText(null);
+        Long currentVersionId = request.hasNonNull("CurrentApplicationVersionId")
+                ? request.path("CurrentApplicationVersionId").asLong()
+                : null;
+        String optionId = request.path("CloudWatchLoggingOptionId").asText(null);
+        FlinkApplication app = service.deleteApplicationCloudWatchLoggingOption(
+                applicationName, currentVersionId, optionId);
+        return cloudWatchLoggingOptionResponse(app);
+    }
+
+    private Response cloudWatchLoggingOptionResponse(FlinkApplication app) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ApplicationARN", app.getApplicationArn());
+        response.put("ApplicationVersionId", app.getApplicationVersionId());
+        ArrayNode options = response.putArray("CloudWatchLoggingOptionDescriptions");
+        for (CloudWatchLoggingOption option : app.getCloudWatchLoggingOptions().values()) {
+            options.add(cloudWatchLoggingOptionNode(option));
+        }
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode cloudWatchLoggingOptionNode(CloudWatchLoggingOption option) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("CloudWatchLoggingOptionId", option.getCloudWatchLoggingOptionId());
+        node.put("LogStreamARN", option.getLogStreamArn());
+        return node;
     }
 
     private Response handleDeleteApplicationSnapshot(JsonNode request) {
@@ -319,7 +464,23 @@ public class KinesisAnalyticsV2JsonHandler {
         if (app.hasCode()) {
             detail.set("ApplicationConfigurationDescription", applicationConfigurationNode(app));
         }
+        if (!app.getCloudWatchLoggingOptions().isEmpty()) {
+            ArrayNode options = detail.putArray("CloudWatchLoggingOptionDescriptions");
+            for (CloudWatchLoggingOption option : app.getCloudWatchLoggingOptions().values()) {
+                options.add(cloudWatchLoggingOptionNode(option));
+            }
+        }
+        if (app.getMaintenanceWindowStartTime() != null) {
+            detail.set("ApplicationMaintenanceConfigurationDescription", maintenanceConfigurationNode(app));
+        }
         return detail;
+    }
+
+    private ObjectNode maintenanceConfigurationNode(FlinkApplication app) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("ApplicationMaintenanceWindowStartTime", app.getMaintenanceWindowStartTime());
+        node.put("ApplicationMaintenanceWindowEndTime", app.getMaintenanceWindowEndTime());
+        return node;
     }
 
     private ObjectNode applicationConfigurationNode(FlinkApplication app) {
@@ -337,8 +498,11 @@ public class KinesisAnalyticsV2JsonHandler {
 
         config.putObject("FlinkApplicationConfigurationDescription")
                 .putObject("ParallelismConfigurationDescription")
+                .put("ConfigurationType", app.getParallelismConfigurationType())
                 .put("Parallelism", app.getParallelism())
-                .put("CurrentParallelism", app.getParallelism());
+                .put("CurrentParallelism", app.getParallelism())
+                .put("ParallelismPerKPU", app.getParallelismPerKPU())
+                .put("AutoScalingEnabled", app.isAutoScalingEnabled());
 
         if (!app.getEnvironmentProperties().isEmpty()) {
             ArrayNode groups = config.putObject("EnvironmentPropertyDescriptions")

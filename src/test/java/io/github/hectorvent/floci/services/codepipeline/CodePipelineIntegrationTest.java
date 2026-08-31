@@ -301,6 +301,227 @@ class CodePipelineIntegrationTest {
                 .body("__type", containsString("InvalidStructureException"));
     }
 
+    @Test
+    void bindingParityUsesTypedErrorsAndManualApproval() throws Exception {
+        createBucket("codepipeline-bindings-source");
+        putObject("codepipeline-bindings-source", "source.zip", "bindings artifact");
+
+        String pipelineName = "bindings-parity-pipeline";
+        post("CreatePipeline", pipeline(pipelineName, """
+                {
+                    "name": "Source",
+                    "actions": [{
+                        "name": "S3Source",
+                        "actionTypeId": {
+                            "category": "Source",
+                            "owner": "AWS",
+                            "provider": "S3",
+                            "version": "1"
+                        },
+                        "configuration": {
+                            "S3Bucket": "codepipeline-bindings-source",
+                            "S3ObjectKey": "source.zip"
+                        },
+                        "outputArtifacts": [{"name": "SourceOutput"}]
+                    }]
+                },
+                {
+                    "name": "Approve",
+                    "actions": [{
+                        "name": "ManualApproval",
+                        "actionTypeId": {
+                            "category": "Approval",
+                            "owner": "AWS",
+                            "provider": "Manual",
+                            "version": "1"
+                        }
+                    }]
+                }
+                """))
+                .then()
+                .statusCode(200)
+                .body("pipeline.name", equalTo(pipelineName));
+
+        post("GetPipelineState", """
+                {"name": "%s"}
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(200)
+                .body("stageStates.name", hasItem("Source"))
+                .body("stageStates.name", hasItem("Approve"))
+                .body("stageStates[1].inboundTransitionState.enabled", equalTo(true));
+
+        post("PollForJobs", """
+                {
+                    "actionTypeId": {
+                        "category": "Build",
+                        "owner": "Custom",
+                        "provider": "AlchemyBindingsTest",
+                        "version": "1"
+                    }
+                }
+                """)
+                .then()
+                .statusCode(400)
+                .body("__type", containsString("ActionTypeNotFoundException"));
+
+        post("PutActionRevision", """
+                {
+                    "pipelineName": "%s",
+                    "stageName": "Source",
+                    "actionName": "NoSuchAction",
+                    "actionRevision": {
+                        "revisionId": "00000000-0000-0000-0000-000000000000",
+                        "revisionChangeId": "00000000-0000-0000-0000-000000000000",
+                        "created": 1
+                    }
+                }
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(400)
+                .body("__type", containsString("ActionNotFoundException"));
+
+        post("RetryStageExecution", """
+                {
+                    "pipelineName": "%s",
+                    "stageName": "Approve",
+                    "pipelineExecutionId": "00000000-0000-0000-0000-000000000000",
+                    "retryMode": "FAILED_ACTIONS"
+                }
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(400)
+                .body("__type", containsString("StageNotRetryableException"));
+
+        post("OverrideStageCondition", """
+                {
+                    "pipelineName": "%s",
+                    "stageName": "Approve",
+                    "pipelineExecutionId": "00000000-0000-0000-0000-000000000000",
+                    "conditionType": "BEFORE_ENTRY"
+                }
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(400)
+                .body("__type", containsString("ConditionNotOverridableException"));
+
+        post("GetJobDetails", """
+                {"jobId": "00000000-0000-0000-0000-000000000000"}
+                """)
+                .then()
+                .statusCode(400)
+                .body("__type", containsString("JobNotFoundException"));
+
+        post("PutApprovalResult", """
+                {
+                    "pipelineName": "%s",
+                    "stageName": "Approve",
+                    "actionName": "ManualApproval",
+                    "token": "00000000-0000-0000-0000-000000000000",
+                    "result": {"status": "Rejected", "summary": "fake token"}
+                }
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(400)
+                .body("__type", containsString("InvalidApprovalTokenException"));
+
+        post("DisableStageTransition", """
+                {
+                    "pipelineName": "%s",
+                    "stageName": "Approve",
+                    "transitionType": "Inbound",
+                    "reason": "bindings test freeze"
+                }
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(200);
+
+        post("GetPipelineState", """
+                {"name": "%s"}
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(200)
+                .body("stageStates[1].inboundTransitionState.enabled", equalTo(false));
+
+        post("EnableStageTransition", """
+                {
+                    "pipelineName": "%s",
+                    "stageName": "Approve",
+                    "transitionType": "Inbound"
+                }
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(200);
+
+        post("GetPipelineState", """
+                {"name": "%s"}
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(200)
+                .body("stageStates[1].inboundTransitionState.enabled", equalTo(true));
+
+        String executionId = post("StartPipelineExecution", """
+                {"name": "%s"}
+                """.formatted(pipelineName))
+                .then()
+                .statusCode(200)
+                .extract().path("pipelineExecutionId");
+
+        String token = waitForApprovalToken(pipelineName);
+        post("PutApprovalResult", """
+                {
+                    "pipelineName": "%s",
+                    "stageName": "Approve",
+                    "actionName": "ManualApproval",
+                    "token": "%s",
+                    "result": {"status": "Approved", "summary": "answered"}
+                }
+                """.formatted(pipelineName, token))
+                .then()
+                .statusCode(200)
+                .body("approvedAt", notNullValue());
+
+        waitForExecution(pipelineName, executionId, "Succeeded");
+
+        post("ListActionExecutions", """
+                {
+                    "pipelineName": "%s",
+                    "filter": {"pipelineExecutionId": "%s"}
+                }
+                """.formatted(pipelineName, executionId))
+                .then()
+                .statusCode(200)
+                .body("actionExecutionDetails.actionName", hasItem("S3Source"));
+
+        post("StopPipelineExecution", """
+                {
+                    "pipelineName": "%s",
+                    "pipelineExecutionId": "%s",
+                    "abandon": true,
+                    "reason": "already complete"
+                }
+                """.formatted(pipelineName, executionId))
+                .then()
+                .statusCode(400)
+                .body("__type", containsString("PipelineExecutionNotStoppableException"));
+    }
+
+    private String waitForApprovalToken(String pipelineName) throws Exception {
+        Instant deadline = Instant.now().plus(Duration.ofSeconds(5));
+        do {
+            Response response = post("GetPipelineState", """
+                    {"name": "%s"}
+                    """.formatted(pipelineName));
+            String token = response.jsonPath().getString(
+                    "stageStates.find { it.stageName == 'Approve' }.actionStates[0].latestExecution.token");
+            if (token != null && !token.isBlank() && !"null".equals(token)) {
+                return token;
+            }
+            Thread.sleep(50);
+        } while (Instant.now().isBefore(deadline));
+        throw new AssertionError("Approval token was not issued");
+    }
+
     private Response waitForJob() throws Exception {
         Instant deadline = Instant.now().plus(Duration.ofSeconds(5));
         Response response;

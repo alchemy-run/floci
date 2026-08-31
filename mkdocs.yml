@@ -93,12 +93,17 @@ nav:
     - STS: services/sts.md
     - ElastiCache: services/elasticache.md
     - MemoryDB: services/memorydb.md
+    - DAX: services/dax.md
     - RDS: services/rds.md
     - RDS Data API: services/rds-data.md
+    - Redshift: services/redshift.md
+    - Redshift Serverless: services/redshift-serverless.md
+    - Redshift Data API: services/redshift-data.md
     - MSK (Kafka): services/msk.md
     - Glue: services/glue.md
     - Neptune: services/neptune.md
     - DocumentDB: services/docdb.md
+    - Aurora DSQL: services/dsql.md
     - Athena: services/athena.md
     - Data Firehose: services/firehose.md
     - EventBridge: services/eventbridge.md
@@ -106,7 +111,15 @@ nav:
     - EventBridge Scheduler: services/scheduler.md
     - CloudWatch: services/cloudwatch.md
     - CloudWatch RUM: services/rum.md
+    - QuickSight: services/quicksight.md
+    - CloudWatch OAM: services/oam.md
+    - RAM: services/ram.md
+    - Account Management: services/account.md
+    - AMP: services/amp.md
+    - CloudWatch investigations (AIOps): services/aiops.md
+    - IAM Access Analyzer: services/access-analyzer.md
     - ACM: services/acm.md
+    - ACM PCA: services/acm-pca.md
     - ECS: services/ecs.md
     - ECR: services/ecr.md
     - Resource Groups Tagging API: services/resource-groups-tagging.md
@@ -116,7 +129,9 @@ nav:
     - EC2: services/ec2.md
     - Lightsail: services/lightsail.md
     - AppConfig: services/appconfig.md
+    - Service Catalog AppRegistry: services/appregistry.md
     - Bedrock Runtime: services/bedrock-runtime.md
+    - Bedrock Agents: services/bedrock-agent.md
     - ELB v2: services/elb.md
     - Auto Scaling: services/autoscaling.md
     - Elastic Beanstalk: services/elastic-beanstalk.md
@@ -128,6 +143,7 @@ nav:
     - CloudTrail: services/cloudtrail.md
     - CloudFront: services/cloudfront.md
     - Route53: services/route53.md
+    - Route53 Resolver: services/route53resolver.md
     - AWS Cloud Map: services/cloudmap.md
     - AWS IoT Core: services/iot.md
     - AppSync: services/appsync.md

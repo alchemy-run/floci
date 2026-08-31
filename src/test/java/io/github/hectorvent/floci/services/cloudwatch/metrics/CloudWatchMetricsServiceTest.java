@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cloudwatch.metrics;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.CompositeAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -252,5 +254,83 @@ class CloudWatchMetricsServiceTest {
     void buildDimKeyEmptyDimensions() {
         assertEquals("", CloudWatchMetricsService.buildDimKey(List.of()));
         assertEquals("", CloudWatchMetricsService.buildDimKey(null));
+    }
+
+    @Test
+    void putAndDescribeCompositeAlarm() {
+        CompositeAlarm alarm = new CompositeAlarm();
+        alarm.setAlarmName("high-severity");
+        alarm.setAlarmRule("ALARM(\"high-error-rate\")");
+        service.putCompositeAlarm(alarm, REGION);
+
+        List<CompositeAlarm> alarms = service.describeCompositeAlarms(null, null, REGION);
+        assertEquals(1, alarms.size());
+        assertEquals("high-severity", alarms.getFirst().getAlarmName());
+        assertEquals("ALARM(\"high-error-rate\")", alarms.getFirst().getAlarmRule());
+        assertNotNull(alarms.getFirst().getAlarmArn());
+        assertTrue(alarms.getFirst().getAlarmArn().contains(":alarm:high-severity"));
+    }
+
+    @Test
+    void describeCompositeAlarmsByNameAndPrefix() {
+        CompositeAlarm a1 = new CompositeAlarm();
+        a1.setAlarmName("prod-composite");
+        a1.setAlarmRule("ALARM(\"a\")");
+        CompositeAlarm a2 = new CompositeAlarm();
+        a2.setAlarmName("dev-composite");
+        a2.setAlarmRule("ALARM(\"b\")");
+        service.putCompositeAlarm(a1, REGION);
+        service.putCompositeAlarm(a2, REGION);
+
+        assertEquals(1, service.describeCompositeAlarms(List.of("prod-composite"), null, REGION).size());
+        assertEquals(1, service.describeCompositeAlarms(null, "prod-", REGION).size());
+    }
+
+    @Test
+    void deleteCompositeAlarmsIsIdempotent() {
+        CompositeAlarm alarm = new CompositeAlarm();
+        alarm.setAlarmName("to-delete-composite");
+        alarm.setAlarmRule("ALARM(\"x\")");
+        service.putCompositeAlarm(alarm, REGION);
+        service.deleteAlarms(List.of("to-delete-composite"), REGION);
+        assertTrue(service.describeCompositeAlarms(null, null, REGION).isEmpty());
+        service.deleteAlarms(List.of("to-delete-composite"), REGION);
+        assertTrue(service.describeCompositeAlarms(List.of("to-delete-composite"), null, REGION).isEmpty());
+    }
+
+    @Test
+    void tagCompositeAlarm() {
+        CompositeAlarm alarm = new CompositeAlarm();
+        alarm.setAlarmName("tagged-composite");
+        alarm.setAlarmRule("ALARM(\"x\")");
+        service.putCompositeAlarm(alarm, REGION);
+        String arn = service.describeCompositeAlarms(List.of("tagged-composite"), null, REGION)
+                .getFirst().getAlarmArn();
+
+        service.tagResource(arn, Map.of("env", "test"), REGION);
+        assertEquals("test", service.listTagsForResource(arn, REGION).get("env"));
+
+        service.untagResource(arn, List.of("env"), REGION);
+        assertTrue(service.listTagsForResource(arn, REGION).isEmpty());
+    }
+
+    @Test
+    void putCompositeAlarmUpdatePreservesTags() {
+        CompositeAlarm alarm = new CompositeAlarm();
+        alarm.setAlarmName("upsert-composite");
+        alarm.setAlarmRule("ALARM(\"first\")");
+        alarm.setTags(Map.of("keep", "me"));
+        service.putCompositeAlarm(alarm, REGION);
+
+        CompositeAlarm update = new CompositeAlarm();
+        update.setAlarmName("upsert-composite");
+        update.setAlarmRule("ALARM(\"second\")");
+        update.setTags(Map.of("ignored", "yes"));
+        service.putCompositeAlarm(update, REGION);
+
+        CompositeAlarm stored = service.describeCompositeAlarms(List.of("upsert-composite"), null, REGION).getFirst();
+        assertEquals("ALARM(\"second\")", stored.getAlarmRule());
+        assertEquals("me", stored.getTags().get("keep"));
+        assertNull(stored.getTags().get("ignored"));
     }
 }

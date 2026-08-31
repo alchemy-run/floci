@@ -180,4 +180,66 @@ class NeptuneServiceTest {
         assertEquals("InsufficientStorageClusterCapacity", e.getErrorCode());
         assertEquals(400, e.getHttpStatus());
     }
+
+    @Test
+    void clusterParameterGroupCreateModifyResetDelete() {
+        var group = service.createDbClusterParameterGroup(
+                "pg1", "neptune1.4", "desc", java.util.Map.of("fixture", "neptune-cluster-params"));
+        assertEquals("pg1", group.getDbClusterParameterGroupName());
+        assertEquals("neptune1.4", group.getDbParameterGroupFamily());
+        assertTrue(group.getDbClusterParameterGroupArn().contains(":cluster-pg:pg1"));
+        assertEquals("neptune-cluster-params", group.getTags().get("fixture"));
+        assertTrue(service.hasClusterParameterGroup("pg1"));
+        assertTrue(service.handlesClusterParameterGroupRequest("neptune1.4", null, null));
+        assertTrue(service.ownsTagResource(group.getDbClusterParameterGroupArn()));
+
+        service.modifyDbClusterParameterGroup("pg1", java.util.Map.of("neptune_query_timeout", "180000"));
+        assertEquals("180000", service.getDbClusterParameterGroup("pg1")
+                .getParameters().get("neptune_query_timeout"));
+
+        service.resetDbClusterParameterGroup("pg1", false, java.util.List.of("neptune_query_timeout"));
+        assertTrue(service.getDbClusterParameterGroup("pg1").getParameters().isEmpty());
+
+        service.deleteDbClusterParameterGroup("pg1");
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.getDbClusterParameterGroup("pg1"));
+        assertEquals("DBParameterGroupNotFound", missing.getErrorCode());
+        assertEquals(404, missing.getHttpStatus());
+    }
+
+    @Test
+    void createClusterParameterGroupDuplicateThrowsAlreadyExists() {
+        service.createDbClusterParameterGroup("pg-dup", "neptune1.4", "desc", null);
+        AwsException e = assertThrows(AwsException.class,
+                () -> service.createDbClusterParameterGroup("pg-dup", "neptune1.4", "desc", null));
+        assertEquals("DBParameterGroupAlreadyExists", e.getErrorCode());
+        assertEquals(400, e.getHttpStatus());
+    }
+
+    @Test
+    void parameterGroupCreateModifyResetDelete() {
+        var group = service.createDbParameterGroup(
+                "pg-inst", "neptune1.4", "desc", java.util.Map.of("fixture", "neptune-instance-params"));
+        assertEquals("pg-inst", group.getDbParameterGroupName());
+        assertEquals("neptune1.4", group.getDbParameterGroupFamily());
+        assertTrue(group.getDbParameterGroupArn().contains(":pg:pg-inst"));
+        assertEquals("neptune-instance-params", group.getTags().get("fixture"));
+        assertTrue(service.hasParameterGroup("pg-inst"));
+        assertTrue(service.handlesParameterGroupRequest("neptune1.4", null, null));
+        assertTrue(service.ownsTagResource(group.getDbParameterGroupArn()));
+
+        service.modifyDbParameterGroup("pg-inst", java.util.Map.of("neptune_query_timeout", "180000"));
+        assertEquals("180000", service.getDbParameterGroup("pg-inst")
+                .getParameters().get("neptune_query_timeout"));
+
+        service.resetDbParameterGroup("pg-inst", false, java.util.List.of("neptune_query_timeout"));
+        assertTrue(service.getDbParameterGroup("pg-inst").getParameters().isEmpty());
+
+        service.deleteDbParameterGroup("pg-inst");
+        assertTrue(service.hasParameterGroup("pg-inst"), "deleted names still route to Neptune");
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.getDbParameterGroup("pg-inst"));
+        assertEquals("DBParameterGroupNotFound", missing.getErrorCode());
+        assertEquals(404, missing.getHttpStatus());
+    }
 }

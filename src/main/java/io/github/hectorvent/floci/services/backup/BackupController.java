@@ -13,19 +13,23 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-@Path("/")
+/**
+ * AWS Backup restJson1. Public AWS paths are {@code /backup-vaults}, {@code /backup/plans},
+ * {@code /backup-jobs}, {@code /restore-jobs}, {@code /copy-jobs}, {@code /resources};
+ * {@link BackupRoutingFilter} prefixes them so they do not collide
+ * with S3 path-style routes. Tag APIs share {@code /tags/{arn}} and are dispatched by
+ * {@code SharedTagsController}.
+ */
+@Path(BackupRoutingFilter.INTERNAL_PREFIX)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class BackupController {
-
-    private static final Logger LOG = Logger.getLogger(BackupController.class);
 
     private final BackupService service;
     private final RegionResolver regionResolver;
@@ -62,6 +66,7 @@ public class BackupController {
 
     @GET
     @Path("/backup-vaults/{backupVaultName}")
+    @Consumes(MediaType.WILDCARD)
     public Response describeBackupVault(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
@@ -70,6 +75,7 @@ public class BackupController {
 
     @DELETE
     @Path("/backup-vaults/{backupVaultName}")
+    @Consumes(MediaType.WILDCARD)
     public Response deleteBackupVault(@Context HttpHeaders headers,
                                        @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
@@ -78,7 +84,8 @@ public class BackupController {
     }
 
     @GET
-    @Path("/backup-vaults/")
+    @Path("/backup-vaults")
+    @Consumes(MediaType.WILDCARD)
     public Response listBackupVaults(@Context HttpHeaders headers) {
         String region = regionResolver.resolveRegion(headers);
         List<BackupVault> vaults = service.listBackupVaults(region);
@@ -95,26 +102,52 @@ public class BackupController {
     // "not configured" signal rather than an empty 200 or a generic 400 they can't interpret.
     @GET
     @Path("/backup-vaults/{backupVaultName}/notification-configuration")
+    @Consumes(MediaType.WILDCARD)
     public Response getBackupVaultNotifications(@PathParam("backupVaultName") String vaultName) {
         throw new AwsException("ResourceNotFoundException",
                 "No notification configuration found for backup vault: " + vaultName, 400);
     }
 
-    // Access policy is an optional, never-configured aspect of a vault in the emulator. Per the
-    // AWS Backup API, GetBackupVaultAccessPolicy returns ResourceNotFoundException (HTTP 400)
-    // when no policy exists for the vault. We mirror that exact error contract so SDK clients
-    // see the documented "not configured" signal rather than an empty 200 or a generic 400.
     @GET
     @Path("/backup-vaults/{backupVaultName}/access-policy")
-    public Response getBackupVaultAccessPolicy(@PathParam("backupVaultName") String vaultName) {
-        throw new AwsException("ResourceNotFoundException",
-                "No access policy found for backup vault: " + vaultName, 400);
+    @Consumes(MediaType.WILDCARD)
+    public Response getBackupVaultAccessPolicy(@Context HttpHeaders headers,
+                                                @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        BackupVault vault = service.requireVaultAccessPolicy(vaultName, region);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("BackupVaultName", vault.getBackupVaultName());
+        out.put("BackupVaultArn", vault.getBackupVaultArn());
+        out.put("Policy", vault.getAccessPolicy());
+        return Response.ok(out).build();
+    }
+
+    @PUT
+    @Path("/backup-vaults/{backupVaultName}/access-policy")
+    public Response putBackupVaultAccessPolicy(@Context HttpHeaders headers,
+                                                @PathParam("backupVaultName") String vaultName,
+                                                String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        String policy = textOrNull(req, "Policy");
+        service.putBackupVaultAccessPolicy(vaultName, policy, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @DELETE
+    @Path("/backup-vaults/{backupVaultName}/access-policy")
+    @Consumes(MediaType.WILDCARD)
+    public Response deleteBackupVaultAccessPolicy(@Context HttpHeaders headers,
+                                                   @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteBackupVaultAccessPolicy(vaultName, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     // ── Plan ───────────────────────────────────────────────────────────────────
 
     @PUT
-    @Path("/backup/plans/")
+    @Path("/backup/plans")
     public Response createBackupPlan(@Context HttpHeaders headers, String body) throws IOException {
         String region = regionResolver.resolveRegion(headers);
         JsonNode req = objectMapper.readTree(body);
@@ -122,8 +155,9 @@ public class BackupController {
         String planName = planNode.path("BackupPlanName").asText();
         List<BackupRule> rules = readRules(planNode.path("Rules"));
         String creatorRequestId = textOrNull(req, "CreatorRequestId");
+        Map<String, String> tags = readStringMap(req, "BackupPlanTags");
 
-        BackupPlan plan = service.createBackupPlan(planName, rules, creatorRequestId, region);
+        BackupPlan plan = service.createBackupPlan(planName, rules, creatorRequestId, tags, region);
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("BackupPlanId", plan.getBackupPlanId());
@@ -134,7 +168,8 @@ public class BackupController {
     }
 
     @GET
-    @Path("/backup/plans/{backupPlanId}/")
+    @Path("/backup/plans/{backupPlanId}")
+    @Consumes(MediaType.WILDCARD)
     public Response getBackupPlan(@PathParam("backupPlanId") String planId) {
         BackupPlan plan = service.getBackupPlan(planId);
         ObjectNode out = objectMapper.createObjectNode();
@@ -167,13 +202,15 @@ public class BackupController {
 
     @DELETE
     @Path("/backup/plans/{backupPlanId}")
+    @Consumes(MediaType.WILDCARD)
     public Response deleteBackupPlan(@PathParam("backupPlanId") String planId) {
         service.deleteBackupPlan(planId);
         return Response.noContent().build();
     }
 
     @GET
-    @Path("/backup/plans/")
+    @Path("/backup/plans")
+    @Consumes(MediaType.WILDCARD)
     public Response listBackupPlans() {
         List<BackupPlan> plans = service.listBackupPlans();
         ObjectNode out = objectMapper.createObjectNode();
@@ -193,7 +230,7 @@ public class BackupController {
     // ── Selection ──────────────────────────────────────────────────────────────
 
     @PUT
-    @Path("/backup/plans/{backupPlanId}/selections/")
+    @Path("/backup/plans/{backupPlanId}/selections")
     public Response createBackupSelection(@PathParam("backupPlanId") String planId,
                                            String body) throws IOException {
         JsonNode req = objectMapper.readTree(body);
@@ -202,10 +239,11 @@ public class BackupController {
         String iamRoleArn       = selNode.path("IamRoleArn").asText();
         List<String> resources  = readStringList(selNode.path("Resources"));
         List<String> notResources = readStringList(selNode.path("NotResources"));
+        List<Condition> listOfTags = readConditions(selNode.path("ListOfTags"));
         String creatorRequestId = textOrNull(req, "CreatorRequestId");
 
         BackupSelection sel = service.createBackupSelection(planId, selectionName, iamRoleArn,
-                resources, notResources, creatorRequestId);
+                resources, notResources, listOfTags, creatorRequestId);
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("SelectionId", sel.getSelectionId());
@@ -216,6 +254,7 @@ public class BackupController {
 
     @GET
     @Path("/backup/plans/{backupPlanId}/selections/{selectionId}")
+    @Consumes(MediaType.WILDCARD)
     public Response getBackupSelection(@PathParam("backupPlanId") String planId,
                                         @PathParam("selectionId") String selectionId) {
         BackupSelection sel = service.getBackupSelection(planId, selectionId);
@@ -228,11 +267,13 @@ public class BackupController {
         selBody.put("IamRoleArn", sel.getIamRoleArn());
         selBody.set("Resources", objectMapper.valueToTree(sel.getResources()));
         selBody.set("NotResources", objectMapper.valueToTree(sel.getNotResources()));
+        selBody.set("ListOfTags", objectMapper.valueToTree(sel.getListOfTags()));
         return Response.ok(out).build();
     }
 
     @DELETE
     @Path("/backup/plans/{backupPlanId}/selections/{selectionId}")
+    @Consumes(MediaType.WILDCARD)
     public Response deleteBackupSelection(@PathParam("backupPlanId") String planId,
                                            @PathParam("selectionId") String selectionId) {
         service.deleteBackupSelection(planId, selectionId);
@@ -240,7 +281,8 @@ public class BackupController {
     }
 
     @GET
-    @Path("/backup/plans/{backupPlanId}/selections/")
+    @Path("/backup/plans/{backupPlanId}/selections")
+    @Consumes(MediaType.WILDCARD)
     public Response listBackupSelections(@PathParam("backupPlanId") String planId) {
         List<BackupSelection> selections = service.listBackupSelections(planId);
         ObjectNode out = objectMapper.createObjectNode();
@@ -283,24 +325,35 @@ public class BackupController {
 
     @GET
     @Path("/backup-jobs/{backupJobId}")
+    @Consumes(MediaType.WILDCARD)
     public Response describeBackupJob(@PathParam("backupJobId") String jobId) {
         return Response.ok(service.describeBackupJob(jobId)).build();
     }
 
     @POST
     @Path("/backup-jobs/{backupJobId}")
+    @Consumes(MediaType.WILDCARD)
     public Response stopBackupJob(@PathParam("backupJobId") String jobId) {
         service.stopBackupJob(jobId);
         return Response.noContent().build();
     }
 
     @GET
-    @Path("/backup-jobs/")
-    public Response listBackupJobs(@QueryParam("byBackupVaultName") String byVaultName,
-                                    @QueryParam("byState") String byState,
-                                    @QueryParam("byResourceArn") String byResourceArn,
-                                    @QueryParam("byResourceType") String byResourceType) {
-        List<BackupJob> jobs = service.listBackupJobs(byVaultName, byState, byResourceArn, byResourceType);
+    @Path("/backup-jobs")
+    @Consumes(MediaType.WILDCARD)
+    public Response listBackupJobs(@QueryParam("byBackupVaultName") String byVaultNameLegacy,
+                                    @QueryParam("backupVaultName") String byVaultName,
+                                    @QueryParam("byState") String byStateLegacy,
+                                    @QueryParam("state") String byState,
+                                    @QueryParam("byResourceArn") String byResourceArnLegacy,
+                                    @QueryParam("resourceArn") String byResourceArn,
+                                    @QueryParam("byResourceType") String byResourceTypeLegacy,
+                                    @QueryParam("resourceType") String byResourceType) {
+        List<BackupJob> jobs = service.listBackupJobs(
+                firstNonBlank(byVaultName, byVaultNameLegacy),
+                firstNonBlank(byState, byStateLegacy),
+                firstNonBlank(byResourceArn, byResourceArnLegacy),
+                firstNonBlank(byResourceType, byResourceTypeLegacy));
         ObjectNode out = objectMapper.createObjectNode();
         ArrayNode list = out.putArray("BackupJobs");
         jobs.forEach(list::addPOJO);
@@ -310,7 +363,25 @@ public class BackupController {
     // ── Recovery Point ─────────────────────────────────────────────────────────
 
     @GET
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}/restore-metadata")
+    @Consumes(MediaType.WILDCARD)
+    public Response getRecoveryPointRestoreMetadata(@Context HttpHeaders headers,
+                                                     @PathParam("backupVaultName") String vaultName,
+                                                     @PathParam("recoveryPointArn") String recoveryPointArn) {
+        String region = regionResolver.resolveRegion(headers);
+        RecoveryPoint rp = service.describeRecoveryPoint(vaultName, recoveryPointArn, region);
+        Map<String, String> metadata = service.getRecoveryPointRestoreMetadata(vaultName, recoveryPointArn, region);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("BackupVaultArn", rp.getBackupVaultArn());
+        out.put("RecoveryPointArn", rp.getRecoveryPointArn());
+        out.put("ResourceType", rp.getResourceType());
+        out.set("RestoreMetadata", objectMapper.valueToTree(metadata));
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
+    @Consumes(MediaType.WILDCARD)
     public Response describeRecoveryPoint(@Context HttpHeaders headers,
                                            @PathParam("backupVaultName") String vaultName,
                                            @PathParam("recoveryPointArn") String recoveryPointArn) {
@@ -319,7 +390,8 @@ public class BackupController {
     }
 
     @GET
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points")
+    @Consumes(MediaType.WILDCARD)
     public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers,
                                                      @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
@@ -331,7 +403,8 @@ public class BackupController {
     }
 
     @DELETE
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
+    @Consumes(MediaType.WILDCARD)
     public Response deleteRecoveryPoint(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName,
                                          @PathParam("recoveryPointArn") String recoveryPointArn) {
@@ -356,6 +429,7 @@ public class BackupController {
 
     @GET
     @Path("/supported-resource-types")
+    @Consumes(MediaType.WILDCARD)
     public Response getSupportedResourceTypes() {
         ObjectNode out = objectMapper.createObjectNode();
         ArrayNode list = out.putArray("ResourceTypes");
@@ -363,7 +437,148 @@ public class BackupController {
         return Response.ok(out).build();
     }
 
+    // ── Restore jobs ───────────────────────────────────────────────────────────
+
+    @PUT
+    @Path("/restore-jobs")
+    public Response startRestoreJob(@Context HttpHeaders headers, String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        RestoreJob job = service.startRestoreJob(
+                textOrNull(req, "RecoveryPointArn"),
+                textOrNull(req, "IamRoleArn"),
+                readStringMap(req, "Metadata"),
+                textOrNull(req, "ResourceType"),
+                region);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("RestoreJobId", job.getRestoreJobId());
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/restore-jobs/{restoreJobId}/metadata")
+    @Consumes(MediaType.WILDCARD)
+    public Response getRestoreJobMetadata(@PathParam("restoreJobId") String jobId) {
+        RestoreJob job = service.describeRestoreJob(jobId);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("RestoreJobId", job.getRestoreJobId());
+        out.set("Metadata", objectMapper.valueToTree(service.getRestoreJobMetadata(jobId)));
+        return Response.ok(out).build();
+    }
+
+    @PUT
+    @Path("/restore-jobs/{restoreJobId}/validations")
+    public Response putRestoreValidationResult(@PathParam("restoreJobId") String jobId, String body) throws IOException {
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        String status = textOrNull(req, "ValidationStatus");
+        if (status == null || status.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "Missing parameter: ValidationStatus", 400);
+        }
+        service.putRestoreValidationResult(jobId, status, textOrNull(req, "ValidationStatusMessage"));
+        return Response.ok().build();
+    }
+
+    @GET
+    @Path("/restore-jobs/{restoreJobId}")
+    @Consumes(MediaType.WILDCARD)
+    public Response describeRestoreJob(@PathParam("restoreJobId") String jobId) {
+        return Response.ok(service.describeRestoreJob(jobId)).build();
+    }
+
+    @GET
+    @Path("/restore-jobs")
+    @Consumes(MediaType.WILDCARD)
+    public Response listRestoreJobs() {
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("RestoreJobs");
+        service.listRestoreJobs().forEach(list::addPOJO);
+        return Response.ok(out).build();
+    }
+
+    // ── Copy jobs ──────────────────────────────────────────────────────────────
+
+    @PUT
+    @Path("/copy-jobs")
+    public Response startCopyJob(@Context HttpHeaders headers, String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        CopyJob job = service.startCopyJob(
+                textOrNull(req, "RecoveryPointArn"),
+                textOrNull(req, "SourceBackupVaultName"),
+                textOrNull(req, "DestinationBackupVaultArn"),
+                textOrNull(req, "IamRoleArn"),
+                region);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("CopyJobId", job.getCopyJobId());
+        out.put("CreationDate", job.getCreationDate());
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/copy-jobs/{copyJobId}")
+    @Consumes(MediaType.WILDCARD)
+    public Response describeCopyJob(@PathParam("copyJobId") String jobId) {
+        ObjectNode out = objectMapper.createObjectNode();
+        out.set("CopyJob", objectMapper.valueToTree(service.describeCopyJob(jobId)));
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/copy-jobs")
+    @Consumes(MediaType.WILDCARD)
+    public Response listCopyJobs() {
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("CopyJobs");
+        service.listCopyJobs().forEach(list::addPOJO);
+        return Response.ok(out).build();
+    }
+
+    // ── Protected resources ────────────────────────────────────────────────────
+
+    @GET
+    @Path("/resources/{resourceArn: .+}/restore-jobs")
+    @Consumes(MediaType.WILDCARD)
+    public Response listRestoreJobsByProtectedResource(@PathParam("resourceArn") String resourceArn) {
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("RestoreJobs");
+        service.listRestoreJobs().stream()
+                .filter(j -> resourceArn.equals(j.getSourceResourceArn()))
+                .forEach(list::addPOJO);
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/resources/{resourceArn: .+}/recovery-points")
+    @Consumes(MediaType.WILDCARD)
+    public Response listRecoveryPointsByResource(@PathParam("resourceArn") String resourceArn) {
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("RecoveryPoints");
+        service.listRecoveryPointsByResource(resourceArn).forEach(list::addPOJO);
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/resources/{resourceArn: .+}")
+    @Consumes(MediaType.WILDCARD)
+    public Response describeProtectedResource(@PathParam("resourceArn") String resourceArn) {
+        return Response.ok(service.describeProtectedResource(resourceArn)).build();
+    }
+
+    @GET
+    @Path("/resources")
+    @Consumes(MediaType.WILDCARD)
+    public Response listProtectedResources() {
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("Results");
+        service.listProtectedResources().forEach(list::addPOJO);
+        return Response.ok(out).build();
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
+
+    private static String firstNonBlank(String preferred, String fallback) {
+        return preferred != null && !preferred.isBlank() ? preferred : fallback;
+    }
 
     private static String textOrNull(JsonNode node, String field) {
         JsonNode n = node.path(field);
@@ -397,5 +612,16 @@ public class BackupController {
             rules.add(objectMapper.treeToValue(ruleNode, BackupRule.class));
         }
         return rules;
+    }
+
+    private List<Condition> readConditions(JsonNode conditionsNode) throws IOException {
+        List<Condition> conditions = new ArrayList<>();
+        if (conditionsNode == null || conditionsNode.isMissingNode() || !conditionsNode.isArray()) {
+            return conditions;
+        }
+        for (JsonNode conditionNode : conditionsNode) {
+            conditions.add(objectMapper.treeToValue(conditionNode, Condition.class));
+        }
+        return conditions;
     }
 }

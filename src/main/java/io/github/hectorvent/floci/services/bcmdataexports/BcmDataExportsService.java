@@ -45,13 +45,13 @@ public class BcmDataExportsService {
     private static final Pattern EXPORT_NAME_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
     private static final Set<String> ALLOWED_FREQUENCY = Set.of("SYNCHRONOUS");
     /**
-     * Floci only emits Parquet at the moment. Real AWS also accepts
-     * {@code TEXT_OR_CSV} / {@code GZIP} but Floci's emission engine writes
-     * Parquet unconditionally; accepting other formats would let a definition
-     * persist that no consumer can read. Restrict until CSV/GZIP support lands.
+     * AWS Data Exports accepts {@code TEXT_OR_CSV} (compression {@code GZIP})
+     * and {@code PARQUET} (compression {@code PARQUET}). The management plane
+     * persists whichever pair the caller supplies; emission may still write
+     * Parquet artifacts regardless of the stored format.
      */
-    private static final Set<String> ALLOWED_FORMAT = Set.of("PARQUET");
-    private static final Set<String> ALLOWED_COMPRESSION = Set.of("PARQUET");
+    private static final Set<String> ALLOWED_FORMAT = Set.of("TEXT_OR_CSV", "PARQUET");
+    private static final Set<String> ALLOWED_COMPRESSION = Set.of("GZIP", "PARQUET");
     private static final Set<String> ALLOWED_OVERWRITE = Set.of("CREATE_NEW_REPORT", "OVERWRITE_REPORT");
     private static final Set<String> ALLOWED_OUTPUT_TYPE = Set.of("CUSTOM");
 
@@ -164,6 +164,38 @@ public class BcmDataExportsService {
         return incoming;
     }
 
+    /** {@code ListTagsForResource} — tags stored on the export. */
+    public Map<String, String> listTags(String exportArn) {
+        Map<String, String> tags = getExport(exportArn).getResourceTags();
+        return tags == null ? Map.of() : new HashMap<>(tags);
+    }
+
+    /** {@code TagResource} — upserts tags on an existing export. */
+    public void tagResource(String exportArn, Map<String, String> tags) {
+        Export existing = getExport(exportArn);
+        Map<String, String> current = existing.getResourceTags();
+        if (current == null) {
+            current = new HashMap<>();
+            existing.setResourceTags(current);
+        }
+        if (tags != null) {
+            current.putAll(tags);
+        }
+        exportStore.put(exportKey(exportArn), existing);
+    }
+
+    /** {@code UntagResource} — removes tag keys from an existing export. */
+    public void untagResource(String exportArn, List<String> tagKeys) {
+        Export existing = getExport(exportArn);
+        Map<String, String> current = existing.getResourceTags();
+        if (current != null && tagKeys != null) {
+            for (String key : tagKeys) {
+                current.remove(key);
+            }
+        }
+        exportStore.put(exportKey(exportArn), existing);
+    }
+
     /** {@code DeleteExport} — removes an export. Idempotent. */
     public Export deleteExport(String exportArn) {
         requireNonEmpty(exportArn, "ExportArn");
@@ -202,6 +234,17 @@ public class BcmDataExportsService {
         return executionStore.get(executionKey(exportArn, executionId))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Execution " + executionId + " not found.", 400));
+    }
+
+    /** {@code ListTables} — returns the Data Exports table dictionary. */
+    public List<BcmDataExportsTables.TableDefinition> listTables() {
+        return BcmDataExportsTables.list();
+    }
+
+    /** {@code GetTable} — returns schema + resolved properties for one table. */
+    public BcmDataExportsTables.TableSnapshot getTable(String tableName, Map<String, String> tableProperties) {
+        requireNonEmpty(tableName, "TableName");
+        return BcmDataExportsTables.get(tableName, tableProperties);
     }
 
     // ── Internal helpers exposed package-private for the emitter (next step) ──
@@ -311,6 +354,17 @@ public class BcmDataExportsService {
             if (out.getCompression() != null && !ALLOWED_COMPRESSION.contains(out.getCompression())) {
                 throw new AwsException("ValidationException",
                         "S3OutputConfigurations.Compression must be one of " + ALLOWED_COMPRESSION, 400);
+            }
+            if (out.getFormat() != null && out.getCompression() != null) {
+                boolean parquetPair = "PARQUET".equals(out.getFormat())
+                        && "PARQUET".equals(out.getCompression());
+                boolean csvPair = "TEXT_OR_CSV".equals(out.getFormat())
+                        && "GZIP".equals(out.getCompression());
+                if (!parquetPair && !csvPair) {
+                    throw new AwsException("ValidationException",
+                            "S3OutputConfigurations.Compression must be GZIP when Format is TEXT_OR_CSV, and PARQUET when Format is PARQUET.",
+                            400);
+                }
             }
             if (out.getOverwrite() != null && !ALLOWED_OVERWRITE.contains(out.getOverwrite())) {
                 throw new AwsException("ValidationException",

@@ -20,9 +20,15 @@ floci:
     services:
       ssm:
         flush-interval-ms: 60000
+      ssm-incidents:
+        flush-interval-ms: 60000
+      ssm-contacts:
+        flush-interval-ms: 60000
       dynamodb:
         flush-interval-ms: 60000
       sns:
+        flush-interval-ms: 60000
+      social-messaging:
         flush-interval-ms: 60000
       lambda:
         flush-interval-ms: 60000
@@ -42,9 +48,21 @@ floci:
         flush-interval-ms: 60000
       codepipeline:
         flush-interval-ms: 60000
+      codeconnections:
+        flush-interval-ms: 60000
       s3vectors:
         flush-interval-ms: 60000
+      s3tables:
+        flush-interval-ms: 60000
+      ivs:
+        flush-interval-ms: 60000
+      ivschat:
+        flush-interval-ms: 60000
+      lex:
+        flush-interval-ms: 60000
       ecs:
+        flush-interval-ms: 60000
+      efs:
         flush-interval-ms: 60000
       codebuild:
         flush-interval-ms: 60000
@@ -61,7 +79,125 @@ floci:
       cloudfront:
       appsync:
         flush-interval-ms: 60000
+      qapps:
+        flush-interval-ms: 60000
+      ram:
+        flush-interval-ms: 60000
+      rolesanywhere:
+        flush-interval-ms: 60000
+      rbin:
+        flush-interval-ms: 60000
+      repostspace:
+        flush-interval-ms: 60000
       rum:
+        flush-interval-ms: 60000
+      vpc-lattice:
+        flush-interval-ms: 60000
+      synthetics:
+        flush-interval-ms: 60000
+      resource-explorer-2:
+        flush-interval-ms: 60000
+      resource-groups:
+        flush-interval-ms: 60000
+      oam:
+        flush-interval-ms: 60000
+      xray:
+        flush-interval-ms: 60000
+      observabilityadmin:
+        flush-interval-ms: 60000
+      internetmonitor:
+        flush-interval-ms: 60000
+      fis:
+        flush-interval-ms: 60000
+      finspace:
+        flush-interval-ms: 60000
+      amp:
+        flush-interval-ms: 60000
+      grafana:
+        flush-interval-ms: 60000
+      quicksight:
+        flush-interval-ms: 60000
+      aiops:
+        flush-interval-ms: 60000
+      account:
+        flush-interval-ms: 60000
+      accessanalyzer:
+        flush-interval-ms: 60000
+      neptune-graph:
+        flush-interval-ms: 60000
+      backupsearch:
+        flush-interval-ms: 60000
+      databrew:
+        flush-interval-ms: 60000
+      dataexchange:
+        flush-interval-ms: 60000
+      mediaconnect:
+        flush-interval-ms: 60000
+      medialive:
+        flush-interval-ms: 60000
+      mediapackagev2:
+        flush-interval-ms: 60000
+      mediatailor:
+        flush-interval-ms: 60000
+      datazone:
+        flush-interval-ms: 60000
+      dlm:
+        flush-interval-ms: 60000
+      dsql:
+        flush-interval-ms: 60000
+      docdb-elastic:
+        flush-interval-ms: 60000
+      detective:
+        flush-interval-ms: 60000
+      guardduty:
+        flush-interval-ms: 60000
+      devops-guru:
+        flush-interval-ms: 60000
+      deadline:
+        flush-interval-ms: 60000
+      emr-containers:
+        flush-interval-ms: 60000
+      emr-serverless:
+        flush-interval-ms: 60000
+      entityresolution:
+        flush-interval-ms: 60000
+      auditmanager:
+        flush-interval-ms: 60000
+      amplify:
+        flush-interval-ms: 60000
+      appflow:
+        flush-interval-ms: 60000
+      appintegrations:
+        flush-interval-ms: 60000
+      qbusiness:
+        flush-interval-ms: 60000
+      appregistry:
+        flush-interval-ms: 60000
+      apprunner:
+        flush-interval-ms: 60000
+      b2bi:
+        flush-interval-ms: 60000
+      verifiedpermissions:
+        flush-interval-ms: 60000
+      chatbot:
+        flush-interval-ms: 60000
+      aws-notifications:
+        flush-interval-ms: 60000
+      notifications-contacts:
+        flush-interval-ms: 60000
+      controltower:
+        flush-interval-ms: 60000
+      codeartifact:
+        flush-interval-ms: 60000
+      application-signals:
+        flush-interval-ms: 60000
+      bedrock-agent:
+        flush-interval-ms: 60000
+      bedrock-agent-core:
+        flush-interval-ms: 60000
+      bedrock-data-automation:
+        flush-interval-ms: 60000
+      greengrassv2:
         flush-interval-ms: 60000
 
   auth:
@@ -93,6 +229,10 @@ floci:
     ssm:
       enabled: true
       max-parameter-history: 5
+    ssm-incidents:
+      enabled: true
+    ssm-contacts:
+      enabled: true
     sqs:
       enabled: true
       default-visibility-timeout: 30
@@ -103,7 +243,15 @@ floci:
       default-presign-expiry-seconds: 3600
     dynamodb:
       enabled: true
+    dms:
+      enabled: true
+    datasync:
+      enabled: true
     sns:
+      enabled: true
+    simpledb:
+      enabled: true
+    social-messaging:
       enabled: true
     lambda:
       enabled: true
@@ -134,12 +282,24 @@ floci:
       proxy-max-port: 6399
       default-image: "valkey/valkey:8"
       default-memcached-image: "memcached:1.6"
+    mediaconnect:
+      enabled: true
+    medialive:
+      enabled: true
+    mediapackagev2:
+      enabled: true
+    mediatailor:
+      enabled: true
     memorydb:
       enabled: true
       mock: false
       proxy-base-port: 6400
       proxy-max-port: 6419
       default-image: "valkey/valkey:8"
+    dax:
+      enabled: true
+    ds:
+      enabled: true
     rds:
       enabled: true
       mock: false
@@ -151,16 +311,34 @@ floci:
     rds-data:
       enabled: true
       transaction-ttl-seconds: 180
+    redshift:
+      enabled: true
+    redshift-serverless:
+      enabled: true
+    redshift-data:
+      enabled: true
     neptune:
       enabled: true
       proxy-base-port: 8182
       proxy-max-port: 8282
       default-image: "tinkerpop/gremlin-server:3.7.3"
+    neptune-graph:
+      enabled: true
     eventbridge:
+      enabled: true
+    schemas:
+      enabled: true
+    signer:
       enabled: true
     cloudmap:
       enabled: true
     emr:
+      enabled: true
+    emr-containers:
+      enabled: true
+    emr-serverless:
+      enabled: true
+    entityresolution:
       enabled: true
     wafv2:
       enabled: true
@@ -174,11 +352,37 @@ floci:
     secretsmanager:
       enabled: true
       default-recovery-window-days: 30
+    kendra:
+      enabled: true
+    qbusiness:
+      enabled: true
+    keyspaces:
+      enabled: true
     kinesis:
+      enabled: true
+    kinesisvideo:
       enabled: true
     firehose:
       enabled: true
+    fms:
+      enabled: true
+    shield:
+      enabled: true
+    organizations:
+      enabled: true
+    sso-admin:
+      enabled: true
+    identitystore:
+      enabled: true
+    network-firewall:
+      enabled: true
+    license-manager:
+      enabled: true
+    frauddetector:
+      enabled: true
     kms:
+      enabled: true
+    payment-cryptography:
       enabled: true
     cognito:
       enabled: true
@@ -190,10 +394,14 @@ floci:
     acm:
       enabled: true
       validation-wait-seconds: 0
+    acm-pca:
+      enabled: true
     athena:
       enabled: true
       mock: true
     glue:
+      enabled: true
+    lakeformation:
       enabled: true
     ses:
       enabled: true
@@ -202,6 +410,10 @@ floci:
       mock: true
       proxy-base-port: 9400
       proxy-max-port: 9499
+    opensearchserverless:
+      enabled: true
+    osis:
+      enabled: true
     ec2:
       enabled: true
       imds-port: 9169
@@ -216,6 +428,24 @@ floci:
     ecs:
       enabled: true
       mock: true
+    efs:
+      enabled: true
+    glacier:
+      enabled: true
+    greengrassv2:
+      enabled: true
+    guardduty:
+      enabled: true
+    inspector2:
+      enabled: true
+    macie2:
+      enabled: true
+    securityhub:
+      enabled: true
+    securitylake:
+      enabled: true
+    fsx:
+      enabled: true
     appconfig:
       enabled: true
     appconfigdata:
@@ -226,6 +456,12 @@ floci:
       enabled: true
     bedrock-runtime:
       enabled: true
+    bedrock-agent:
+      enabled: true
+    bedrock-agent-core:
+      enabled: true
+    bedrock-data-automation:
+      enabled: true
     eks:
       enabled: true
       mock: true
@@ -233,6 +469,8 @@ floci:
     mwaa:
       enabled: true
       mock: true
+    mwaa-serverless:
+      enabled: true
     pipes:
       enabled: true
     elbv2:
@@ -249,6 +487,8 @@ floci:
       enabled: true
     codepipeline:
       enabled: true
+    codeconnections:
+      enabled: true
     autoscaling:
       enabled: true
     applicationautoscaling:
@@ -260,11 +500,69 @@ floci:
     backup:
       enabled: true
       job-completion-delay-seconds: 1
+    backupsearch:
+      enabled: true
+    databrew:
+      enabled: true
+    dataexchange:
+      enabled: true
+    mediaconvert:
+      enabled: true
+    datazone:
+      enabled: true
+    dlm:
+      enabled: true
+    dsql:
+      enabled: true
+      mock: true
+      proxy-port: 5432
+    docdb-elastic:
+      enabled: true
+    detective:
+      enabled: true
+    devops-guru:
+      enabled: true
     route53:
+      enabled: true
+    route53profiles:
+      enabled: true
+    route53resolver:
+      enabled: true
+    route53domains:
       enabled: true
     textract:
       enabled: true
+    rekognition:
+      enabled: true
+    forecast:
+      enabled: true
+    personalize:
+      enabled: true
+    sagemaker:
+      enabled: true
+    globalaccelerator:
+      enabled: true
+    comprehend:
+      enabled: true
+    comprehendmedical:
+      enabled: true
+    healthlake:
+      enabled: true
+    timestream:
+      enabled: true
+    timestream-influxdb:
+      enabled: true
+    medical-imaging:
+      enabled: true
+    omics:
+      enabled: true
+    mailmanager:
+      enabled: true
+    smsvoice:
+      enabled: true
     pricing:
+      enabled: true
+    translate:
       enabled: true
     ce:
       enabled: true
@@ -274,7 +572,11 @@ floci:
     bcm-data-exports:
       enabled: true
       emit-mode: off
+    budgets:
+      enabled: true
     cloudtrail:
+      enabled: true
+    cloudhsm-v2:
       enabled: true
     lightsail:
     cloudcontrol:
@@ -288,6 +590,18 @@ floci:
       schema-worker-shutdown-timeout-seconds: 30
     s3vectors:
       enabled: true
+    s3tables:
+      enabled: true
+    s3files:
+      enabled: true
+    ivs:
+      enabled: true
+    ivschat:
+      enabled: true
+    lex:
+      enabled: true
+    polly:
+      enabled: true
     iot:
       enabled: true
       mqtt:
@@ -297,5 +611,97 @@ floci:
         port: 1883
     iotdata:
       enabled: true
+    iotfleetwise:
+      enabled: true
+    iotsitewise:
+      enabled: true
+    iotmanagedintegrations:
+      enabled: true
+    iotwireless:
+      enabled: true
+    qapps:
+      enabled: true
+    ram:
+      enabled: true
+    rolesanywhere:
+      enabled: true
+    rbin:
+      enabled: true
+    repostspace:
+      enabled: true
     rum:
+      enabled: true
+    vpc-lattice:
+      enabled: true
+    xray:
+      enabled: true
+    synthetics:
+      enabled: true
+    resource-explorer-2:
+      enabled: true
+    resource-groups:
+      enabled: true
+    oam:
+      enabled: true
+    observabilityadmin:
+      enabled: true
+    internetmonitor:
+      enabled: true
+    location:
+      enabled: true
+    geo-maps:
+      enabled: true
+    geo-routes:
+      enabled: true
+    geo-places:
+      enabled: true
+    fis:
+      enabled: true
+    finspace:
+      enabled: true
+    amp:
+      enabled: true
+    grafana:
+      enabled: true
+    quicksight:
+      enabled: true
+    aiops:
+      enabled: true
+    account:
+      enabled: true
+    accessanalyzer:
+      enabled: true
+    auditmanager:
+      enabled: true
+    amplify:
+      enabled: true
+    appflow:
+      enabled: true
+    appintegrations:
+      enabled: true
+    appregistry:
+      enabled: true
+    servicecatalog:
+      enabled: true
+    service-quotas:
+      enabled: true
+    apprunner:
+      enabled: true
+    b2bi:
+      enabled: true
+    verifiedpermissions:
+      enabled: true
+    chatbot:
+      enabled: true
+    aws-notifications:
+      enabled: true
+    notifications-contacts:
+      enabled: true
+    controltower:
+      enabled: true
+    codeartifact:
+      enabled: true
+    application-signals:
+      enabled: true
+    deadline:
       enabled: true

@@ -30,7 +30,6 @@ import io.github.hectorvent.floci.services.sqs.SqsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
@@ -158,13 +157,24 @@ public class IotService {
     }
 
     public String describeEndpoint(String endpointType) {
+        return describeEndpoint(endpointType, regionResolver.getRegion());
+    }
+
+    public String describeEndpoint(String endpointType, String region) {
         String effectiveType = endpointType == null || endpointType.isBlank() ? DEFAULT_ENDPOINT_TYPE : endpointType;
         if (!Set.of(DEFAULT_ENDPOINT_TYPE, "iot:Data", "iot:Jobs").contains(effectiveType)) {
             throw new AwsException("InvalidRequestException", "Unsupported endpoint type: " + effectiveType, 400);
         }
         startMqttIfEnabled();
-        URI baseUri = URI.create(config.effectiveBaseUrl());
-        return baseUri.getAuthority();
+        String resolvedRegion = region == null || region.isBlank()
+                ? regionResolver.getDefaultRegion()
+                : region;
+        String accountId = regionResolver.getAccountId();
+        return switch (effectiveType) {
+            case "iot:Data" -> accountId + ".iot." + resolvedRegion + ".amazonaws.com";
+            case "iot:Jobs" -> accountId + ".jobs.iot." + resolvedRegion + ".amazonaws.com";
+            default -> accountId + "-ats.iot." + resolvedRegion + ".amazonaws.com";
+        };
     }
 
     public Thing createThing(String thingName, Map<String, String> attributes, String region) {
@@ -868,7 +878,20 @@ public class IotService {
 
     public IotTopicRule getTopicRule(String ruleName, String region) {
         return topicRuleStore.get(topicRuleKey(region, ruleName))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Topic rule not found: " + ruleName, 404));
+                .orElseThrow(() -> topicRuleAccessDenied(ruleName));
+    }
+
+    /**
+     * AWS IoT conceals missing topic rules behind {@code UnauthorizedException}
+     * (HTTP 401) with a message matching {@code Access to topic rule '<name>' was denied}
+     * so callers cannot enumerate rules. Distilled maps that pair onto the
+     * synthetic {@code TopicRuleNotFound} tag used by GetTopicRule/DeleteTopicRule.
+     */
+    private static AwsException topicRuleAccessDenied(String ruleName) {
+        return new AwsException(
+                "UnauthorizedException",
+                "Access to topic rule '" + ruleName + "' was denied",
+                401);
     }
 
     public List<IotTopicRule> listTopicRules(String region) {

@@ -48,22 +48,47 @@ public class TransferHandler {
                 case "UpdateUser"         -> updateUser(request);
                 case "ImportSshPublicKey" -> importSshPublicKey(request);
                 case "DeleteSshPublicKey" -> deleteSshPublicKey(request);
+                case "TestIdentityProvider" -> testIdentityProvider(request);
+                case "SendWorkflowStepState" -> sendWorkflowStepState(request);
                 case "TagResource"        -> tagResource(request);
                 case "UntagResource"      -> untagResource(request);
                 case "ListTagsForResource" -> listTagsForResource(request);
-                default -> JsonErrorResponseUtils.createUnknownOperationErrorResponse("AmazonTransfer." + action);
+                default -> JsonErrorResponseUtils.createUnknownOperationErrorResponse("TransferService." + action);
             };
         } catch (AwsException e) {
-            return JsonErrorResponseUtils.createErrorResponse(e);
+            return error(e);
         } catch (Exception e) {
             return JsonErrorResponseUtils.createErrorResponse(e);
         }
+    }
+
+    private Response error(AwsException e) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("__type", e.jsonType());
+        if (e.getMessage() != null) {
+            node.put("message", e.getMessage());
+            node.put("Message", e.getMessage());
+        }
+        Map<String, Object> extra = e.getExtendedData();
+        if (extra != null) {
+            extra.forEach((key, value) -> {
+                if (value != null) {
+                    node.put(key, String.valueOf(value));
+                }
+            });
+        }
+        String fault = e.getHttpStatus() < 500 ? "Sender" : "Receiver";
+        return Response.status(e.getHttpStatus())
+                .header("x-amzn-query-error", e.getErrorCode() + ";" + fault)
+                .entity(node)
+                .build();
     }
 
     // ── Server handlers ───────────────────────────────────────────────────────
 
     private Response createServer(JsonNode req, String region) {
         List<String> protocols = jsonStringList(req.path("Protocols"));
+        String domain = textOrNull(req, "Domain");
         String endpointType = textOrNull(req, "EndpointType");
         Map<String, Object> endpointDetails = jsonObjectMap(req.path("EndpointDetails"));
         String identityProviderType = textOrNull(req, "IdentityProviderType");
@@ -72,7 +97,7 @@ public class TransferHandler {
         String securityPolicyName = textOrNull(req, "SecurityPolicyName");
         Map<String, String> tags = parseTags(req.path("Tags"));
 
-        Server server = service.createServer(region, protocols, endpointType, endpointDetails,
+        Server server = service.createServer(region, protocols, domain, endpointType, endpointDetails,
                 identityProviderType, identityProviderDetails, loggingRole, securityPolicyName, tags);
 
         ObjectNode resp = objectMapper.createObjectNode();
@@ -238,6 +263,33 @@ public class TransferHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
+    private Response testIdentityProvider(JsonNode req) {
+        String serverId = req.path("ServerId").asText();
+        String userName = req.path("UserName").asText();
+        if (serverId == null || serverId.isEmpty()) {
+            throw new AwsException("InvalidRequestException", "ServerId is required.", 400);
+        }
+        if (userName == null || userName.isEmpty()) {
+            throw new AwsException("InvalidRequestException", "UserName is required.", 400);
+        }
+        String url = service.testIdentityProvider(serverId);
+        ObjectNode resp = objectMapper.createObjectNode();
+        resp.put("StatusCode", 200);
+        resp.put("Message", "Success");
+        resp.put("Url", url);
+        resp.put("Response", "");
+        return Response.ok(resp).build();
+    }
+
+    private Response sendWorkflowStepState(JsonNode req) {
+        service.sendWorkflowStepState(
+                textOrNull(req, "WorkflowId"),
+                textOrNull(req, "ExecutionId"),
+                textOrNull(req, "Token"),
+                textOrNull(req, "Status"));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     // ── Tag handlers ──────────────────────────────────────────────────────────
 
     private Response tagResource(JsonNode req) {
@@ -277,6 +329,7 @@ public class TransferHandler {
         node.put("ServerId", s.getServerId());
         node.put("Arn", s.getArn());
         node.put("State", s.getState());
+        node.put("Domain", s.getDomain() != null ? s.getDomain() : "S3");
         node.put("EndpointType", s.getEndpointType());
         node.put("IdentityProviderType", s.getIdentityProviderType());
         node.put("SecurityPolicyName", s.getSecurityPolicyName());
@@ -307,6 +360,7 @@ public class TransferHandler {
         node.put("EndpointType", s.getEndpointType());
         node.put("IdentityProviderType", s.getIdentityProviderType());
         node.put("ServerId", s.getServerId());
+        node.put("Domain", s.getDomain() != null ? s.getDomain() : "S3");
         node.put("State", s.getState());
         node.put("UserCount", service.countUsers(s.getServerId()));
         if (s.getLoggingRole() != null) {

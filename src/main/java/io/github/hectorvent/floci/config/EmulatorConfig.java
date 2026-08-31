@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.config;
 
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
+import io.smallrye.config.WithName;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -248,10 +249,16 @@ public interface EmulatorConfig {
 
     interface ServiceStorageOverrides {
         SsmStorageConfig ssm();
+        @WithName("ssm-incidents")
+        SsmIncidentsStorageConfig ssmIncidents();
+        @WithName("ssm-contacts")
+        SsmContactsStorageConfig ssmContacts();
         SqsStorageConfig sqs();
         S3StorageConfig s3();
         DynamoDbStorageConfig dynamodb();
         SnsStorageConfig sns();
+        @WithName("social-messaging")
+        SocialMessagingStorageConfig socialMessaging();
         LambdaStorageConfig lambda();
         CloudWatchLogsStorageConfig cloudwatchlogs();
         CloudWatchMetricsStorageConfig cloudwatchmetrics();
@@ -262,17 +269,38 @@ public interface EmulatorConfig {
         AppConfigDataStorageConfig appconfigdata();
         ElastiCacheStorageConfig elasticache();
         MemoryDbStorageConfig memorydb();
+        MediaConnectStorageConfig mediaconnect();
+        MediaLiveStorageConfig medialive();
+        MediaPackageV2StorageConfig mediapackagev2();
+        MediaTailorStorageConfig mediatailor();
         RdsStorageConfig rds();
         Ec2StorageConfig ec2();
         NeptuneStorageConfig neptune();
+        NeptuneGraphStorageConfig neptuneGraph();
         BackupStorageConfig backup();
+        BackupSearchStorageConfig backupsearch();
+        DataBrewStorageConfig databrew();
+        DataExchangeStorageConfig dataexchange();
+        DataZoneStorageConfig datazone();
+        DlmStorageConfig dlm();
+        DsqlStorageConfig dsql();
+        DocDbElasticStorageConfig docdbElastic();
+        DetectiveStorageConfig detective();
+        GuardDutyStorageConfig guardduty();
+        DevOpsGuruStorageConfig devopsGuru();
         CloudFrontStorageConfig cloudfront();
         AppSyncStorageConfig appsync();
         BatchStorageConfig batch();
         LightsailStorageConfig lightsail();
         CodePipelineStorageConfig codepipeline();
+        CodeConnectionsStorageConfig codeconnections();
         S3VectorsStorageConfig s3vectors();
+        S3TablesStorageConfig s3tables();
+        IvsStorageConfig ivs();
+        IvsChatStorageConfig ivschat();
+        LexStorageConfig lex();
         EcsStorageConfig ecs();
+        EfsStorageConfig efs();
         CodeBuildStorageConfig codebuild();
         ConfigStorageConfig config();
         CodeDeployStorageConfig codedeploy();
@@ -280,10 +308,73 @@ public interface EmulatorConfig {
         TaggingStorageConfig tagging();
         ElasticBeanstalkStorageConfig elasticbeanstalk();
         CloudTrailStorageConfig cloudtrail();
+        QAppsStorageConfig qapps();
+        RamStorageConfig ram();
+        RolesAnywhereStorageConfig rolesanywhere();
+        RbinStorageConfig rbin();
+        RepostspaceStorageConfig repostspace();
         RumStorageConfig rum();
+        @WithName("vpc-lattice")
+        VpcLatticeStorageConfig vpcLattice();
+        SyntheticsStorageConfig synthetics();
+        @WithName("resource-explorer-2")
+        ResourceExplorerStorageConfig resourceExplorer2();
+        @WithName("resource-groups")
+        ResourceGroupsStorageConfig resourceGroups();
+        OamStorageConfig oam();
+        XrayStorageConfig xray();
+        ObservabilityAdminStorageConfig observabilityadmin();
+        InternetMonitorStorageConfig internetmonitor();
+        FisStorageConfig fis();
+        FinSpaceStorageConfig finspace();
+        AmpStorageConfig amp();
+        GrafanaStorageConfig grafana();
+        QuickSightStorageConfig quicksight();
+        AiOpsStorageConfig aiops();
+        AccountStorageConfig account();
+        AccessAnalyzerStorageConfig accessanalyzer();
+        AuditManagerStorageConfig auditmanager();
+        AmplifyStorageConfig amplify();
+        AppFlowStorageConfig appflow();
+        AppIntegrationsStorageConfig appintegrations();
+        QBusinessStorageConfig qbusiness();
+        AppRegistryStorageConfig appregistry();
+        AppRunnerStorageConfig apprunner();
+        B2biStorageConfig b2bi();
+        VerifiedPermissionsStorageConfig verifiedpermissions();
+        ChatbotStorageConfig chatbot();
+        @WithName("aws-notifications")
+        NotificationsStorageConfig awsNotifications();
+        NotificationsContactsStorageConfig notificationsContacts();
+        ControlTowerStorageConfig controltower();
+        CodeArtifactStorageConfig codeartifact();
+        ApplicationSignalsStorageConfig applicationSignals();
+        BedrockAgentStorageConfig bedrockAgent();
+        BedrockAgentCoreStorageConfig bedrockAgentCore();
+        BedrockDataAutomationStorageConfig bedrockDataAutomation();
+        DeadlineStorageConfig deadline();
+        GreengrassV2StorageConfig greengrassv2();
+        EmrContainersStorageConfig emrContainers();
+        EmrServerlessStorageConfig emrServerless();
+        EntityResolutionStorageConfig entityresolution();
+        ImageBuilderStorageConfig imagebuilder();
     }
 
     interface SsmStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface SsmIncidentsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface SsmContactsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -306,6 +397,13 @@ public interface EmulatorConfig {
     }
 
     interface SnsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface SocialMessagingStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -382,6 +480,34 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface MediaConnectStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface MediaLiveStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface MediaPackageV2StorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface MediaTailorStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface RdsStorageConfig {
         Optional<String> mode();
     }
@@ -394,7 +520,84 @@ public interface EmulatorConfig {
         Optional<String> mode();
     }
 
+    interface NeptuneGraphStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface BackupStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface BackupSearchStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DataBrewStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DataExchangeStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DataZoneStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DlmStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DsqlStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DocDbElasticStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DetectiveStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface GuardDutyStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DevOpsGuruStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -440,7 +643,42 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface S3TablesStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface IvsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface IvsChatStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface LexStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface EcsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface EfsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -489,7 +727,329 @@ public interface EmulatorConfig {
         long flushIntervalMs();
     }
 
+    interface QAppsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface RamStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface RolesAnywhereStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface RbinStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface RepostspaceStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
     interface RumStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface VpcLatticeStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface SyntheticsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ResourceExplorerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ResourceGroupsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface OamStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface XrayStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ObservabilityAdminStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface InternetMonitorStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface FisStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface FinSpaceStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface BedrockAgentStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface BedrockAgentCoreStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface BedrockDataAutomationStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface DeadlineStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface GreengrassV2StorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface EmrContainersStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface EmrServerlessStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface EntityResolutionStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ImageBuilderStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AmpStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface GrafanaStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface QuickSightStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AiOpsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AccountStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AccessAnalyzerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AuditManagerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AmplifyStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AppFlowStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AppIntegrationsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface QBusinessStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AppRegistryStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface AppRunnerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface B2biStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface VerifiedPermissionsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ChatbotStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface NotificationsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface NotificationsContactsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ControlTowerStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface CodeArtifactStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface CodeConnectionsStorageConfig {
+        Optional<String> mode();
+
+        @WithDefault("5000")
+        long flushIntervalMs();
+    }
+
+    interface ApplicationSignalsStorageConfig {
         Optional<String> mode();
 
         @WithDefault("5000")
@@ -522,10 +1082,19 @@ public interface EmulatorConfig {
         Optional<String> dockerNetwork();
 
         SsmServiceConfig ssm();
+        @WithName("ssm-incidents")
+        SsmIncidentsServiceConfig ssmIncidents();
+        @WithName("ssm-contacts")
+        SsmContactsServiceConfig ssmContacts();
         SqsServiceConfig sqs();
         S3ServiceConfig s3();
         DynamoDbServiceConfig dynamodb();
+        DmsServiceConfig dms();
+        DataSyncServiceConfig datasync();
         SnsServiceConfig sns();
+        SimpleDbServiceConfig simpledb();
+        @WithName("social-messaging")
+        SocialMessagingServiceConfig socialMessaging();
         LambdaServiceConfig lambda();
         ApiGatewayServiceConfig apigateway();
         IamServiceConfig iam();
@@ -534,59 +1103,135 @@ public interface EmulatorConfig {
         KinesisAnalyticsServiceConfig kinesisAnalytics();
         ElastiCacheServiceConfig elasticache();
         MemoryDbServiceConfig memorydb();
+        MediaConnectServiceConfig mediaconnect();
+        MediaLiveServiceConfig medialive();
+        MediaPackageV2ServiceConfig mediapackagev2();
+        MediaTailorServiceConfig mediatailor();
+        DaxServiceConfig dax();
+        DsServiceConfig ds();
         RdsServiceConfig rds();
         RdsDataServiceConfig rdsData();
+        RedshiftServiceConfig redshift();
+        RedshiftServerlessServiceConfig redshiftServerless();
+        RedshiftDataServiceConfig redshiftData();
         EventBridgeServiceConfig eventbridge();
+        SchemasServiceConfig schemas();
+        SignerServiceConfig signer();
         CloudMapServiceConfig cloudmap();
         EmrServiceConfig emr();
+        EmrContainersServiceConfig emrContainers();
+        EmrServerlessServiceConfig emrServerless();
+        EntityResolutionServiceConfig entityresolution();
         WafV2ServiceConfig wafv2();
         SchedulerServiceConfig scheduler();
         CloudWatchLogsServiceConfig cloudwatchlogs();
         CloudWatchMetricsServiceConfig cloudwatchmetrics();
         SecretsManagerServiceConfig secretsmanager();
         ApiGatewayV2ServiceConfig apigatewayv2();
+        KendraServiceConfig kendra();
+        QBusinessServiceConfig qbusiness();
+        KeyspacesServiceConfig keyspaces();
         KinesisServiceConfig kinesis();
+        KinesisVideoServiceConfig kinesisvideo();
         FirehoseServiceConfig firehose();
+        FmsServiceConfig fms();
+        ShieldServiceConfig shield();
+        NetworkFirewallServiceConfig networkFirewall();
+        LicenseManagerServiceConfig licenseManager();
+        FraudDetectorServiceConfig frauddetector();
         KmsServiceConfig kms();
+        PaymentCryptographyServiceConfig paymentCryptography();
         CognitoServiceConfig cognito();
         StepFunctionsServiceConfig stepfunctions();
         CloudFormationServiceConfig cloudformation();
         AcmServiceConfig acm();
+        AcmPcaServiceConfig acmPca();
         AthenaServiceConfig athena();
         GlueServiceConfig glue();
+        LakeFormationServiceConfig lakeformation();
         SesServiceConfig ses();
         OpenSearchServiceConfig opensearch();
+        OpenSearchServerlessServiceConfig opensearchserverless();
+        OsisServiceConfig osis();
         Ec2ServiceConfig ec2();
         EcsServiceConfig ecs();
+        EfsServiceConfig efs();
+        GlacierServiceConfig glacier();
+        GreengrassV2ServiceConfig greengrassv2();
+        GuardDutyServiceConfig guardduty();
+        Inspector2ServiceConfig inspector2();
+        Macie2ServiceConfig macie2();
+        SecurityHubServiceConfig securityhub();
+        SecurityLakeServiceConfig securitylake();
+        FsxServiceConfig fsx();
+        SsoAdminServiceConfig ssoAdmin();
+        IdentityStoreServiceConfig identitystore();
+        OrganizationsServiceConfig organizations();
         AppConfigServiceConfig appconfig();
         AppConfigDataServiceConfig appconfigdata();
         EcrServiceConfig ecr();
         ResourceGroupsTaggingServiceConfig tagging();
         BedrockRuntimeServiceConfig bedrockRuntime();
+        BedrockAgentServiceConfig bedrockAgent();
+        BedrockAgentCoreServiceConfig bedrockAgentCore();
+        BedrockDataAutomationServiceConfig bedrockDataAutomation();
         EksServiceConfig eks();
         MwaaServiceConfig mwaa();
+        MwaaServerlessServiceConfig mwaaServerless();
         PipesServiceConfig pipes();
         ElbV2ServiceConfig elbv2();
         CodeBuildServiceConfig codebuild();
         CodeDeployServiceConfig codedeploy();
         CodePipelineServiceConfig codepipeline();
+        CodeConnectionsServiceConfig codeconnections();
         AutoScalingServiceConfig autoscaling();
         ApplicationAutoScalingServiceConfig applicationautoscaling();
         ElasticBeanstalkServiceConfig elasticbeanstalk();
         BackupServiceConfig backup();
+        BackupSearchServiceConfig backupsearch();
+        DataBrewServiceConfig databrew();
+        DataExchangeServiceConfig dataexchange();
+        DataZoneServiceConfig datazone();
+        DlmServiceConfig dlm();
+        DsqlServiceConfig dsql();
+        DetectiveServiceConfig detective();
+        DevOpsGuruServiceConfig devopsGuru();
         NeptuneServiceConfig neptune();
+        NeptuneGraphServiceConfig neptuneGraph();
         DocDbServiceConfig docdb();
+        DocDbElasticServiceConfig docdbElastic();
         Route53ServiceConfig route53();
+        Route53ProfilesServiceConfig route53profiles();
+        Route53ResolverServiceConfig route53resolver();
+        Route53DomainsServiceConfig route53domains();
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
+        TimestreamServiceConfig timestream();
+        TimestreamInfluxDbServiceConfig timestreamInfluxdb();
+        RekognitionServiceConfig rekognition();
+        ForecastServiceConfig forecast();
+        PersonalizeServiceConfig personalize();
+        SageMakerServiceConfig sagemaker();
+        GlobalAcceleratorServiceConfig globalaccelerator();
+        ComprehendServiceConfig comprehend();
+        ComprehendMedicalServiceConfig comprehendmedical();
+        HealthLakeServiceConfig healthlake();
+        MedicalImagingServiceConfig medicalImaging();
+        OmicsServiceConfig omics();
+        MailManagerServiceConfig mailmanager();
+        SmsVoiceServiceConfig smsvoice();
         PricingServiceConfig pricing();
         DuckConfig duck();
         TranscribeServiceConfig transcribe();
+        TranslateServiceConfig translate();
+        MediaConvertServiceConfig mediaconvert();
         CostExplorerServiceConfig ce();
         CurServiceConfig cur();
         BcmDataExportsServiceConfig bcmDataExports();
+        BudgetsServiceConfig budgets();
         ConfigServiceConfig configservice();
         CloudTrailServiceConfig cloudtrail();
+        CloudHsmV2ServiceConfig cloudhsmV2();
         CloudControlServiceConfig cloudcontrol();
         CloudFrontServiceConfig cloudfront();
         AppSyncServiceConfig appsync();
@@ -594,9 +1239,66 @@ public interface EmulatorConfig {
         LightsailServiceConfig lightsail();
         UiServiceConfig ui();
         S3VectorsServiceConfig s3vectors();
+        S3TablesServiceConfig s3tables();
+        S3FilesServiceConfig s3files();
+        IvsServiceConfig ivs();
+        IvsChatServiceConfig ivschat();
+        LexServiceConfig lex();
+        PollyServiceConfig polly();
         IotServiceConfig iot();
         IotDataServiceConfig iotdata();
+        IotFleetWiseServiceConfig iotfleetwise();
+        IotSiteWiseServiceConfig iotsitewise();
+        IotManagedIntegrationsServiceConfig iotmanagedintegrations();
+        IotWirelessServiceConfig iotwireless();
+        QAppsServiceConfig qapps();
+        RamServiceConfig ram();
+        RolesAnywhereServiceConfig rolesanywhere();
+        RbinServiceConfig rbin();
+        RepostspaceServiceConfig repostspace();
         RumServiceConfig rum();
+        @WithName("vpc-lattice")
+        VpcLatticeServiceConfig vpcLattice();
+        XrayServiceConfig xray();
+        SyntheticsServiceConfig synthetics();
+        @WithName("resource-explorer-2")
+        ResourceExplorerServiceConfig resourceExplorer2();
+        @WithName("resource-groups")
+        ResourceGroupsServiceConfig resourceGroups();
+        OamServiceConfig oam();
+        ObservabilityAdminServiceConfig observabilityadmin();
+        InternetMonitorServiceConfig internetmonitor();
+        LocationServiceConfig location();
+        GeoMapsServiceConfig geoMaps();
+        GeoRoutesServiceConfig geoRoutes();
+        GeoPlacesServiceConfig geoPlaces();
+        FisServiceConfig fis();
+        FinSpaceServiceConfig finspace();
+        AmpServiceConfig amp();
+        GrafanaServiceConfig grafana();
+        QuickSightServiceConfig quicksight();
+        AiOpsServiceConfig aiops();
+        AccountServiceConfig account();
+        AccessAnalyzerServiceConfig accessanalyzer();
+        AuditManagerServiceConfig auditmanager();
+        AmplifyServiceConfig amplify();
+        AppFlowServiceConfig appflow();
+        AppIntegrationsServiceConfig appintegrations();
+        AppRegistryServiceConfig appregistry();
+        ServiceCatalogServiceConfig servicecatalog();
+        ServiceQuotasServiceConfig serviceQuotas();
+        AppRunnerServiceConfig apprunner();
+        B2biServiceConfig b2bi();
+        VerifiedPermissionsServiceConfig verifiedpermissions();
+        ChatbotServiceConfig chatbot();
+        @WithName("aws-notifications")
+        NotificationsServiceConfig awsNotifications();
+        NotificationsContactsServiceConfig notificationsContacts();
+        ControlTowerServiceConfig controltower();
+        CodeArtifactServiceConfig codeartifact();
+        ApplicationSignalsServiceConfig applicationSignals();
+        DeadlineServiceConfig deadline();
+        ImageBuilderServiceConfig imagebuilder();
     }
 
     interface IotServiceConfig {
@@ -625,7 +1327,245 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface IotFleetWiseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IotSiteWiseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IotManagedIntegrationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IotWirelessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface QAppsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RamServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** IAM Roles Anywhere restJson1 trust anchors, profiles, and CRLs. */
+    interface RolesAnywhereServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** Recycle Bin (rbin) restJson1 retention rules. */
+    interface RbinServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RepostspaceServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface RumServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface VpcLatticeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface XrayServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SyntheticsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ResourceExplorerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ResourceGroupsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface OamServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ObservabilityAdminServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface InternetMonitorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LocationServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GeoMapsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GeoRoutesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GeoPlacesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FinSpaceServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AmpServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GrafanaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface QuickSightServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AiOpsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AccountServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AccessAnalyzerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AuditManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AmplifyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppFlowServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppIntegrationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppRegistryServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ServiceCatalogServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ServiceQuotasServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppRunnerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface B2biServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface VerifiedPermissionsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ChatbotServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface NotificationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface NotificationsContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ControlTowerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface CodeArtifactServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ApplicationSignalsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DeadlineServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ImageBuilderServiceConfig {
+        /** EC2 Image Builder restJson1. */
         @WithDefault("true")
         boolean enabled();
     }
@@ -644,6 +1584,36 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface S3TablesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface S3FilesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IvsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IvsChatServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LexServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface PollyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface TransferServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -655,6 +1625,53 @@ public interface EmulatorConfig {
 
         @WithDefault("3")
         int jobCompletionDelaySeconds();
+    }
+
+    interface BackupSearchServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DataBrewServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DataExchangeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DataZoneServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DlmServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DsqlServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, clusters are control-plane only — no Postgres container or IAM proxy. */
+        @WithDefault("false")
+        boolean mock();
+
+        @WithDefault("5432")
+        int proxyPort();
+    }
+
+    interface DetectiveServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DevOpsGuruServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface Route53ServiceConfig {
@@ -674,6 +1691,21 @@ public interface EmulatorConfig {
         String defaultNameserver4();
     }
 
+    interface Route53ProfilesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Route53ResolverServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Route53DomainsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface ConfigServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -688,6 +1720,11 @@ public interface EmulatorConfig {
          *  default here is 60s so dev/CI feedback loops stay fast. */
         @WithDefault("60")
         int flushIntervalSeconds();
+    }
+
+    interface CloudHsmV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface AutoScalingServiceConfig {
@@ -741,12 +1778,27 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface CodeConnectionsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface SsmServiceConfig {
         @WithDefault("true")
         boolean enabled();
 
         @WithDefault("5")
         int maxParameterHistory();
+    }
+
+    interface SsmIncidentsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SsmContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface SqsServiceConfig {
@@ -779,7 +1831,27 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface DmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DataSyncServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface SnsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SimpleDbServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SocialMessagingServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -885,6 +1957,36 @@ public interface EmulatorConfig {
         Optional<String> dockerNetwork();
     }
 
+    interface MediaConnectServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MediaLiveServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MediaPackageV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MediaTailorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DaxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface RdsServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -922,6 +2024,21 @@ public interface EmulatorConfig {
         long transactionTtlSeconds();
     }
 
+    interface RedshiftServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RedshiftServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RedshiftDataServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface NeptuneServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -953,6 +2070,11 @@ public interface EmulatorConfig {
         Optional<String> dockerNetwork();
     }
 
+    interface NeptuneGraphServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface DocDbServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -966,7 +2088,23 @@ public interface EmulatorConfig {
         Optional<String> dockerNetwork();
     }
 
+    interface DocDbElasticServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface EventBridgeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SchemasServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** AWS Signer restJson1 signing profiles and profile permissions. */
+    interface SignerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -991,6 +2129,21 @@ public interface EmulatorConfig {
         /** Delay before a cluster reaches WAITING; 0 = advance synchronously. */
         @WithDefault("0")
         int clusterStartupDelaySeconds();
+    }
+
+    interface EmrContainersServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface EmrServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface EntityResolutionServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface WafV2ServiceConfig {
@@ -1053,7 +2206,27 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface KendraServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface QBusinessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface KeyspacesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface KinesisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface KinesisVideoServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1063,7 +2236,37 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface FmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ShieldServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface NetworkFirewallServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LicenseManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FraudDetectorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface KmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface PaymentCryptographyServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1099,6 +2302,11 @@ public interface EmulatorConfig {
         int validationWaitSeconds();
     }
 
+    interface AcmPcaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface AthenaServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1116,6 +2324,12 @@ public interface EmulatorConfig {
     }
 
     interface GlueServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LakeFormationServiceConfig {
+        /** AWS Lake Formation restJson1. */
         @WithDefault("true")
         boolean enabled();
     }
@@ -1172,6 +2386,16 @@ public interface EmulatorConfig {
         boolean keepRunningOnShutdown();
     }
 
+    interface OpenSearchServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface OsisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface EcsServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1187,6 +2411,66 @@ public interface EmulatorConfig {
 
         @WithDefault("256")
         int defaultCpuUnits();
+    }
+
+    interface EfsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GlacierServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GreengrassV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GuardDutyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Inspector2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Macie2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SecurityHubServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SecurityLakeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FsxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SsoAdminServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface IdentityStoreServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface OrganizationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface ResourceGroupsTaggingServiceConfig {
@@ -1207,6 +2491,21 @@ public interface EmulatorConfig {
         String backend();
 
         BedrockProxyConfig proxy();
+    }
+
+    interface BedrockAgentServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface BedrockAgentCoreServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface BedrockDataAutomationServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface BedrockProxyConfig {
@@ -1256,6 +2555,76 @@ public interface EmulatorConfig {
         boolean enabled();
     }
 
+    interface TimestreamServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface TimestreamInfluxDbServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RekognitionServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ForecastServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface PersonalizeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SageMakerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface GlobalAcceleratorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ComprehendServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ComprehendMedicalServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface HealthLakeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MedicalImagingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface OmicsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MailManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SmsVoiceServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
     interface PricingServiceConfig {
         @WithDefault("true")
         boolean enabled();
@@ -1270,6 +2639,16 @@ public interface EmulatorConfig {
     }
 
     interface TranscribeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface TranslateServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface MediaConvertServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
@@ -1391,6 +2770,11 @@ public interface EmulatorConfig {
          */
         @WithDefault("synchronous")
         String emitMode();
+    }
+
+    interface BudgetsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface UiServiceConfig {
@@ -1752,6 +3136,11 @@ public interface EmulatorConfig {
          *  and on every DAG-sync pass in which the requirements file's ETag changed. */
         @WithDefault("true")
         boolean installRequirements();
+    }
+
+    interface MwaaServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface InitHooksConfig {

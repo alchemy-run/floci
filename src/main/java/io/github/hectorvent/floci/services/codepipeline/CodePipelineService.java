@@ -118,7 +118,7 @@ public class CodePipelineService {
                     completeJob(request, region, account, true);
             case "PutJobFailureResult", "PutThirdPartyJobFailureResult" ->
                     completeJob(request, region, account, false);
-            case "PutActionRevision" -> putActionRevision(request);
+            case "PutActionRevision" -> putActionRevision(request, region, account);
             case "PutWebhook" -> putWebhook(request, region, account);
             case "DeleteWebhook" -> deleteWebhook(request, region, account);
             case "ListWebhooks" -> listWebhooks(request, region, account);
@@ -438,24 +438,31 @@ public class CodePipelineService {
 
     private ObjectNode retryStageExecution(JsonNode request, String region, String account) {
         String pipelineName = text(request, "pipelineName");
-        CodePipelineExecution source = requireExecution(
-                account, region, pipelineName, text(request, "pipelineExecutionId"));
-        ObjectNode start = mapper.createObjectNode();
-        start.put("name", pipelineName);
-        start.set("sourceRevisions", mapper.valueToTree(source.getSourceRevisions()));
-        ArrayNode vars = start.putArray("variables");
-        source.getVariables().forEach(v -> vars.addObject()
-                .put("name", v.get("name"))
-                .put("value", v.get("resolvedValue")));
-        return startPipelineExecution(start, region, account);
+        String stageName = text(request, "stageName");
+        CodePipelinePipeline pipeline = requirePipeline(account, region, pipelineName);
+        requireStage(pipeline, stageName);
+        Optional<CodePipelineExecution> existing = executionStore.getForAccount(
+                account, executionKey(region, pipelineName, text(request, "pipelineExecutionId")));
+        CodePipelineExecution source = existing.orElseThrow(() -> new AwsException(
+                "StageNotRetryableException",
+                "The provided pipeline execution is not retryable for stage " + stageName, 400));
+        boolean retryable = actionExecutionsForStage(source, stageName).stream()
+                .anyMatch(a -> "Failed".equals(a.getStatus()));
+        if (!retryable) {
+            throw new AwsException("StageNotRetryableException",
+                    "The stage " + stageName + " cannot be retried", 400);
+        }
+        return startFromExisting(source, region, account);
     }
 
     private ObjectNode rollbackStage(JsonNode request, String region, String account) {
+        String pipelineName = text(request, "pipelineName");
+        String stageName = text(request, "stageName");
+        CodePipelinePipeline pipeline = requirePipeline(account, region, pipelineName);
+        requireStage(pipeline, stageName);
         CodePipelineExecution target = requireExecution(
-                account, region, text(request, "pipelineName"), text(request, "targetPipelineExecutionId"));
-        ObjectNode started = retryStageExecution(mapper.createObjectNode()
-                .put("pipelineName", target.getPipelineName())
-                .put("pipelineExecutionId", target.getPipelineExecutionId()), region, account);
+                account, region, pipelineName, text(request, "targetPipelineExecutionId"));
+        ObjectNode started = startFromExisting(target, region, account);
         CodePipelineExecution rollback = requireExecution(
                 account, region, target.getPipelineName(), started.path("pipelineExecutionId").asText());
         rollback.setExecutionType("ROLLBACK");
@@ -465,8 +472,28 @@ public class CodePipelineService {
     }
 
     private ObjectNode overrideStageCondition(JsonNode request, String region, String account) {
-        requireExecution(account, region, text(request, "pipelineName"), text(request, "pipelineExecutionId"));
+        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
+        JsonNode stage = requireStageNode(pipeline, text(request, "stageName"));
+        if (!stageHasConditions(stage)) {
+            throw new AwsException("ConditionNotOverridableException",
+                    "The stage has no overridable conditions", 400);
+        }
+        executionStore.getForAccount(
+                account, executionKey(region, pipeline.getName(), text(request, "pipelineExecutionId")))
+                .orElseThrow(() -> new AwsException("ConditionNotOverridableException",
+                        "The pipeline execution cannot override this stage condition", 400));
         return mapper.createObjectNode();
+    }
+
+    private ObjectNode startFromExisting(CodePipelineExecution source, String region, String account) {
+        ObjectNode start = mapper.createObjectNode();
+        start.put("name", source.getPipelineName());
+        start.set("sourceRevisions", mapper.valueToTree(source.getSourceRevisions()));
+        ArrayNode vars = start.putArray("variables");
+        source.getVariables().forEach(v -> vars.addObject()
+                .put("name", v.get("name"))
+                .put("value", v.get("resolvedValue")));
+        return startPipelineExecution(start, region, account);
     }
 
     private ObjectNode listRuleExecutions(JsonNode request, String region, String account) {
@@ -544,6 +571,10 @@ public class CodePipelineService {
         String requested = actionTypeId(actionTypeId.path("category").asText(),
                 owner, actionTypeId.path("provider").asText(),
                 actionTypeId.path("version").asText());
+        if (itemStore.getForAccount(account, itemKey(region, "action", requested)).isEmpty()) {
+            throw new AwsException("ActionTypeNotFoundException",
+                    "Action type not found: " + requested, 400);
+        }
         ArrayNode jobs = mapper.createArrayNode();
         int maximum = Math.max(1, request.path("maxBatchSize").asInt(1));
         for (CodePipelineStoredItem item : items(account, region, "job")) {
@@ -600,10 +631,14 @@ public class CodePipelineService {
         return mapper.createObjectNode();
     }
 
-    private ObjectNode putActionRevision(JsonNode request) {
+    private ObjectNode putActionRevision(JsonNode request, String region, String account) {
+        CodePipelinePipeline pipeline = requirePipeline(account, region, text(request, "pipelineName"));
+        requireAction(pipeline, text(request, "stageName"), text(request, "actionName"));
+        ObjectNode started = startPipelineExecution(
+                mapper.createObjectNode().put("name", pipeline.getName()), region, account);
         ObjectNode response = mapper.createObjectNode();
         response.put("newRevision", true);
-        response.put("pipelineExecutionId", UUID.randomUUID().toString());
+        response.put("pipelineExecutionId", started.path("pipelineExecutionId").asText());
         return response;
     }
 
@@ -894,14 +929,30 @@ public class CodePipelineService {
         state.setToken(UUID.randomUUID().toString());
         state.setSummary("Waiting for approval.");
         putExecution(execution);
-        while ("InProgress".equals(state.getStatus()) && !execution.isStopRequested()) {
+        while (true) {
+            CodePipelineExecution current = executionStore.getForAccount(
+                    execution.getAccountId(),
+                    executionKey(execution.getRegion(), execution.getPipelineName(),
+                            execution.getPipelineExecutionId()))
+                    .orElse(execution);
+            ActionExecution live = current.getActionExecutions().stream()
+                    .filter(a -> state.getActionExecutionId().equals(a.getActionExecutionId()))
+                    .findFirst()
+                    .orElse(state);
+            execution.setStopRequested(current.isStopRequested());
+            execution.setAbandon(current.isAbandon());
+            if (current.isStopRequested() || !"InProgress".equals(live.getStatus())) {
+                state.setStatus(live.getStatus());
+                state.setSummary(live.getSummary());
+                if (current.isStopRequested() && "InProgress".equals(state.getStatus())) {
+                    state.setStatus(current.isAbandon() ? "Abandoned" : "Stopped");
+                }
+                if ("Failed".equals(state.getStatus())) {
+                    throw new AwsException("ActionExecutionFailed", state.getSummary(), 400);
+                }
+                return;
+            }
             TimeUnit.MILLISECONDS.sleep(POLL_INTERVAL_MS);
-        }
-        if (execution.isStopRequested()) {
-            state.setStatus(execution.isAbandon() ? "Abandoned" : "Stopped");
-        }
-        if ("Failed".equals(state.getStatus())) {
-            throw new AwsException("ActionExecutionFailed", state.getSummary(), 400);
         }
     }
 
@@ -1128,12 +1179,36 @@ public class CodePipelineService {
     }
 
     private void requireStage(CodePipelinePipeline pipeline, String stageName) {
+        requireStageNode(pipeline, stageName);
+    }
+
+    private JsonNode requireStageNode(CodePipelinePipeline pipeline, String stageName) {
         for (JsonNode stage : pipeline.getDeclaration().path("stages")) {
             if (stageName.equals(stage.path("name").asText())) {
-                return;
+                return stage;
             }
         }
         throw new AwsException("StageNotFoundException", "Stage not found: " + stageName, 400);
+    }
+
+    private JsonNode requireAction(CodePipelinePipeline pipeline, String stageName, String actionName) {
+        for (JsonNode action : requireStageNode(pipeline, stageName).path("actions")) {
+            if (actionName.equals(action.path("name").asText())) {
+                return action;
+            }
+        }
+        throw new AwsException("ActionNotFoundException", "Action not found: " + actionName, 400);
+    }
+
+    private static boolean stageHasConditions(JsonNode stage) {
+        return hasConditions(stage.path("beforeEntry"))
+                || hasConditions(stage.path("onSuccess"))
+                || hasConditions(stage.path("onFailure"));
+    }
+
+    private static boolean hasConditions(JsonNode node) {
+        JsonNode conditions = node.path("conditions");
+        return conditions.isArray() && !conditions.isEmpty();
     }
 
     private ObjectNode executionNode(CodePipelineExecution execution) {

@@ -317,8 +317,11 @@ public class RdsQueryHandler {
                     "DBSubnetGroupName is required.", AwsNamespaces.RDS, 400);
         }
         List<String> subnetIds = memberList(params, "SubnetIds");
+        String description = params.getFirst("DBSubnetGroupDescription");
         try {
-            DbSubnetGroup group = service.modifyDbSubnetGroup(name, subnetIds, region);
+            DbSubnetGroup group = (description != null && !description.isBlank())
+                    ? service.modifyDbSubnetGroup(name, description, subnetIds, region)
+                    : service.modifyDbSubnetGroup(name, subnetIds, region);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBSubnetGroup",
                     AwsNamespaces.RDS, dbSubnetGroupXml(group))).build();
         } catch (AwsException e) {

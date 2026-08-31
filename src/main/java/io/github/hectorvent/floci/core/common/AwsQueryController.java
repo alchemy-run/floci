@@ -15,7 +15,9 @@ import io.github.hectorvent.floci.services.elasticache.ElastiCacheQueryHandler;
 import io.github.hectorvent.floci.services.iam.IamQueryHandler;
 import io.github.hectorvent.floci.services.iam.StsQueryHandler;
 import io.github.hectorvent.floci.services.rds.RdsQueryHandler;
+import io.github.hectorvent.floci.services.redshift.RedshiftQueryHandler;
 import io.github.hectorvent.floci.services.sns.SnsQueryHandler;
+import io.github.hectorvent.floci.services.simpledb.SimpleDbQueryHandler;
 import io.github.hectorvent.floci.services.ses.SesQueryHandler;
 import io.github.hectorvent.floci.services.sqs.SqsQueryHandler;
 import jakarta.inject.Inject;
@@ -77,6 +79,12 @@ public class AwsQueryController {
             "GetSMSSandboxAccountStatus", "ListSMSSandboxPhoneNumbers",
             "VerifySMSSandboxPhoneNumber", "ListOriginationNumbers",
             "AddPermission", "RemovePermission"
+    );
+
+    private static final Set<String> SIMPLEDB_ACTIONS = Set.of(
+            "CreateDomain", "DeleteDomain", "ListDomains", "DomainMetadata",
+            "PutAttributes", "GetAttributes", "DeleteAttributes",
+            "BatchPutAttributes", "BatchDeleteAttributes", "Select"
     );
 
     private static final Set<String> IAM_ACTIONS = Set.of(
@@ -190,6 +198,7 @@ public class AwsQueryController {
     private final DocDbService docDbService;
     private final SqsQueryHandler sqsQueryHandler;
     private final SnsQueryHandler snsQueryHandler;
+    private final SimpleDbQueryHandler simpleDbQueryHandler;
     private final SesQueryHandler sesQueryHandler;
     private final IamQueryHandler iamQueryHandler;
     private final StsQueryHandler stsQueryHandler;
@@ -199,6 +208,7 @@ public class AwsQueryController {
     private final ElbV2QueryHandler elbV2QueryHandler;
     private final AutoScalingQueryHandler autoScalingQueryHandler;
     private final ElasticBeanstalkQueryHandler elasticBeanstalkQueryHandler;
+    private final RedshiftQueryHandler redshiftQueryHandler;
     private final ResolvedServiceCatalog catalog;
     private final RegionResolver regionResolver;
 
@@ -211,6 +221,7 @@ public class AwsQueryController {
                               DocDbQueryHandler docDbQueryHandler,
                               DocDbService docDbService,
                               SqsQueryHandler sqsQueryHandler, SnsQueryHandler snsQueryHandler,
+                              SimpleDbQueryHandler simpleDbQueryHandler,
                               SesQueryHandler sesQueryHandler,
                               IamQueryHandler iamQueryHandler, StsQueryHandler stsQueryHandler,
                               CloudWatchMetricsQueryHandler cloudWatchMetricsQueryHandler,
@@ -219,6 +230,7 @@ public class AwsQueryController {
                               ElbV2QueryHandler elbV2QueryHandler,
                               AutoScalingQueryHandler autoScalingQueryHandler,
                               ElasticBeanstalkQueryHandler elasticBeanstalkQueryHandler,
+                              RedshiftQueryHandler redshiftQueryHandler,
                               ResolvedServiceCatalog catalog,
                               RegionResolver regionResolver) {
         this.cloudFormationQueryHandler = cloudFormationQueryHandler;
@@ -230,6 +242,7 @@ public class AwsQueryController {
         this.docDbService = docDbService;
         this.sqsQueryHandler = sqsQueryHandler;
         this.snsQueryHandler = snsQueryHandler;
+        this.simpleDbQueryHandler = simpleDbQueryHandler;
         this.sesQueryHandler = sesQueryHandler;
         this.iamQueryHandler = iamQueryHandler;
         this.stsQueryHandler = stsQueryHandler;
@@ -239,6 +252,7 @@ public class AwsQueryController {
         this.elbV2QueryHandler = elbV2QueryHandler;
         this.autoScalingQueryHandler = autoScalingQueryHandler;
         this.elasticBeanstalkQueryHandler = elasticBeanstalkQueryHandler;
+        this.redshiftQueryHandler = redshiftQueryHandler;
         this.catalog = catalog;
         this.regionResolver = regionResolver;
     }
@@ -288,6 +302,7 @@ public class AwsQueryController {
         return switch (service) {
             case "sqs" -> sqsQueryHandler.handle(action, formParams, region);
             case "sns" -> snsQueryHandler.handle(action, formParams, region);
+            case "sdb" -> simpleDbQueryHandler.handle(action, formParams, region);
             case "iam" -> iamQueryHandler.handle(action, formParams, authorization);
             case "sts" -> stsQueryHandler.handle(action, formParams);
             case "elasticache" -> elastiCacheQueryHandler.handle(action, formParams);
@@ -298,9 +313,22 @@ public class AwsQueryController {
                 String engine = formParams.getFirst("Engine");
                 String clusterId = formParams.getFirst("DBClusterIdentifier");
                 String instanceId = formParams.getFirst("DBInstanceIdentifier");
+                String snapshotId = formParams.getFirst("DBClusterSnapshotIdentifier");
+                String sourceSnapshotId = formParams.getFirst("SourceDBClusterSnapshotIdentifier");
                 if ("neptune".equalsIgnoreCase(engine)
                         || neptuneService.hasCluster(clusterId)
-                        || neptuneService.hasInstance(instanceId)) {
+                        || neptuneService.hasInstance(instanceId)
+                        || neptuneService.hasSnapshot(snapshotId)
+                        || neptuneService.hasSnapshot(sourceSnapshotId)
+                        || neptuneService.handlesClusterParameterGroupRequest(
+                                formParams.getFirst("DBParameterGroupFamily"),
+                                formParams.getFirst("DBClusterParameterGroupName"),
+                                formParams.getFirst("ResourceName"))
+                        || neptuneService.handlesParameterGroupRequest(
+                                formParams.getFirst("DBParameterGroupFamily"),
+                                formParams.getFirst("DBParameterGroupName"),
+                                formParams.getFirst("ResourceName"))
+                        || neptuneService.hasSubnetGroup(formParams.getFirst("DBSubnetGroupName"))) {
                     yield neptuneQueryHandler.handle(action, formParams);
                 }
 
@@ -321,6 +349,7 @@ public class AwsQueryController {
             case "elasticloadbalancing" -> elbV2QueryHandler.handle(action, formParams, region);
             case "autoscaling" -> autoScalingQueryHandler.handle(action, formParams, region);
             case "elasticbeanstalk" -> elasticBeanstalkQueryHandler.handle(action, formParams, region);
+            case "redshift" -> redshiftQueryHandler.handle(action, formParams, authorization);
             default -> xmlErrorResponse("UnknownService",
                     "Unknown or unsupported service: " + service, 400);
         };
@@ -367,6 +396,21 @@ public class AwsQueryController {
             "DescribeConfigurationSettings", "CheckDNSAvailability", "ListAvailableSolutionStacks"
     );
 
+    private static final Set<String> REDSHIFT_ACTIONS = Set.of(
+            "CreateCluster", "DescribeClusters", "ModifyCluster", "DeleteCluster",
+            "CreateClusterSubnetGroup", "DescribeClusterSubnetGroups",
+            "ModifyClusterSubnetGroup", "DeleteClusterSubnetGroup",
+            "CreateTags", "DeleteTags",
+            "CreateClusterSnapshot", "DescribeClusterSnapshots",
+            "DeleteClusterSnapshot", "CopyClusterSnapshot", "DescribeEvents",
+            "CreateClusterParameterGroup", "DescribeClusterParameterGroups",
+            "DeleteClusterParameterGroup", "ModifyClusterParameterGroup",
+            "ResetClusterParameterGroup", "DescribeClusterParameters",
+            "GetClusterCredentials", "GetClusterCredentialsWithIAM",
+            "CreateEventSubscription", "DescribeEventSubscriptions",
+            "ModifyEventSubscription", "DeleteEventSubscription"
+    );
+
     private static final Set<String> RDS_ACTIONS = Set.of(
             "CreateDBInstance", "DescribeDBInstances", "DeleteDBInstance",
             "ModifyDBInstance", "RebootDBInstance",
@@ -375,12 +419,15 @@ public class AwsQueryController {
             "AddTagsToResource", "ListTagsForResource", "RemoveTagsFromResource",
             "CreateDBCluster", "DescribeDBClusters", "DeleteDBCluster", "ModifyDBCluster",
             "CreateDBParameterGroup", "DescribeDBParameterGroups",
-            "DeleteDBParameterGroup", "ModifyDBParameterGroup", "DescribeDBParameters"
+            "DeleteDBParameterGroup", "ModifyDBParameterGroup", "DescribeDBParameters",
+            "ResetDBParameterGroup"
     );
 
     private static final Set<String> CLOUDFORMATION_ACTIONS = Set.of(
             "CreateStack", "DeleteStack", "UpdateStack", "DescribeStacks", "UpdateTerminationProtection",
-            "ListStacks", "ListExports", "GetTemplate", "ValidateTemplate",
+            "ListStacks", "ListExports", "ListImports", "GetTemplate", "ValidateTemplate",
+            "SignalResource", "DetectStackDrift", "DescribeStackDriftDetectionStatus",
+            "DescribeStackResourceDrifts",
             "CreateChangeSet", "DeleteChangeSet", "DescribeChangeSet", "ExecuteChangeSet", "ListChangeSets",
             "DescribeStackEvents", "DescribeStackResources", "ListStackResources", "DescribeStackResource",
             "SetStackPolicy", "GetStackPolicy",
@@ -458,6 +505,9 @@ public class AwsQueryController {
         if (SNS_ACTIONS.contains(action)) {
             return "sns";
         }
+        if (SIMPLEDB_ACTIONS.contains(action)) {
+            return "sdb";
+        }
         if (ELASTICACHE_ACTIONS.contains(action)) {
             return "elasticache";
         }
@@ -487,6 +537,9 @@ public class AwsQueryController {
         }
         if (ELASTIC_BEANSTALK_ACTIONS.contains(action)) {
             return "elasticbeanstalk";
+        }
+        if (REDSHIFT_ACTIONS.contains(action)) {
+            return "redshift";
         }
         // SQS actions are numerous and not enumerated — fall back to sqs only for
         // requests that arrived without an Authorization header (raw/test clients)

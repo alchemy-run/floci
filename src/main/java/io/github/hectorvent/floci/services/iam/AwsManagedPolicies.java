@@ -150,13 +150,36 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AmazonRDSEnhancedMonitoringRole", "/service-role/",
                 "Provides permissions required for Amazon RDS Enhanced Monitoring."),
 
+        // DMS VPC management role — Alchemy ReplicationSubnetGroup attaches this ARN.
+        new ManagedPolicyDef("AmazonDMSVPCManagementRole", "/service-role/",
+                "Provides access to manage VPC, subnet, and security group settings for AWS DMS."),
+
         // Glue job/crawler execution role — Alchemy Job/Crawler/Bindings attach this ARN.
         new ManagedPolicyDef("AWSGlueServiceRole", "/service-role/",
                 "Policy for AWS Glue service role."),
+        // Glue DataBrew project/job execution role — Alchemy DataBrew Project/Job attach this ARN.
+        new ManagedPolicyDef("AwsGlueDataBrewServiceRole", "/service-role/",
+                "Policy for AWS Glue DataBrew service role."),
 
         // Batch unmanaged CE service role — Alchemy Batch Bindings attach this ARN.
         new ManagedPolicyDef("AWSBatchServiceRole", "/service-role/",
                 "Provides access to AWS Batch resources to create and manage compute environments and job queues."),
+
+        // AWS Backup service roles — Alchemy Backup Bindings attach these ARNs.
+        new ManagedPolicyDef("AWSBackupServiceRolePolicyForBackup", "/service-role/",
+                "Provides AWS Backup permission to create backups of all supported resource types."),
+        new ManagedPolicyDef("AWSBackupServiceRolePolicyForRestores", "/service-role/",
+                "Provides AWS Backup permission to restore backups of all supported resource types."),
+
+        // DLM execution roles — Alchemy LifecyclePolicy attaches these ARNs.
+        new ManagedPolicyDef("AWSDataLifecycleManagerServiceRole", "/service-role/",
+                "Provides AWS Data Lifecycle Manager permission to manage EBS snapshots."),
+        new ManagedPolicyDef("AWSDataLifecycleManagerServiceRoleForAMIManagement", "/service-role/",
+                "Provides AWS Data Lifecycle Manager permission to manage EBS-backed AMIs."),
+
+        // CodeDeploy Lambda service role — Alchemy CodeDeploy Bindings attach this ARN.
+        new ManagedPolicyDef("AWSCodeDeployRoleForLambda", "/service-role/",
+                "Provides CodeDeploy service access to perform a Lambda deployment on your behalf."),
 
         // S3 Object Lambda execution role policy
         new ManagedPolicyDef("AmazonS3ObjectLambdaExecutionRolePolicy", "/service-role/",
@@ -188,7 +211,13 @@ final class AwsManagedPolicies {
         new ManagedPolicyDef("AmazonSSMManagedInstanceCore", "/",
                 "Provides permissions required for instances to use AWS Systems Manager core service functionality."),
 
+        // EC2 Image Builder instance-profile role — Alchemy ImageBuilder tests attach this ARN.
+        new ManagedPolicyDef("EC2InstanceProfileForImageBuilder", "/",
+                "Provides permissions required for EC2 Image Builder to create images."),
+
         // SageMaker execution role policies
+        new ManagedPolicyDef("AmazonSageMakerFullAccess", "/",
+                "Provides full access to Amazon SageMaker and supporting services."),
         new ManagedPolicyDef("AmazonSageMakerGeospatialExecutionRole", "/service-role/",
                 "Provides full access to Amazon SageMaker Geospatial capabilities and related services."),
         new ManagedPolicyDef("AmazonSageMakerCanvasEMRServerlessExecutionRolePolicy", "/",
@@ -205,6 +234,12 @@ final class AwsManagedPolicies {
         // Amazon DataZone execution role policy
         new ManagedPolicyDef("AmazonDataZoneDomainExecutionRolePolicy", "/service-role/",
                 "Provides permissions for the Amazon DataZone domain execution role."),
+        // DataZone environment blueprint provisioning / manage-access roles —
+        // Alchemy EnvironmentBlueprintConfiguration attaches these ARNs.
+        new ManagedPolicyDef("AmazonDataZoneRedshiftGlueProvisioningPolicy", "/",
+                "Provides Amazon DataZone permissions to provision Glue and Redshift resources."),
+        new ManagedPolicyDef("AmazonDataZoneGlueManageAccessRolePolicy", "/service-role/",
+                "Provides Amazon DataZone permissions to manage Glue access grants."),
 
         // Amazon Bedrock policies
         new ManagedPolicyDef("AmazonBedrockFullAccess", "/",
@@ -217,7 +252,19 @@ final class AwsManagedPolicies {
 
         // AWS Partner Central execution role policy
         new ManagedPolicyDef("AWSPartnerCentralSellingResourceSnapshotJobExecutionRolePolicy", "/",
-                "Provides permissions for AWS Partner Central resource snapshot job execution role.")
+                "Provides permissions for AWS Partner Central resource snapshot job execution role."),
+
+        // CloudWatch investigations (AIOps) assistant role — Alchemy InvestigationGroup
+        // fixtures attach this ARN at create time.
+        new ManagedPolicyDef("AIOpsAssistantPolicy", "/",
+                "Provides permissions for CloudWatch investigations to access telemetry during investigations."),
+
+        // AWS Budgets action execution role — Alchemy Budgets Bindings attach this ARN.
+        new ManagedPolicyDef("AWSBudgetsActionsWithAWSResourceControlAccess", "/",
+                "Provides full access to AWS Budgets Actions including using Budgets Actions to control AWS resources."),
+        // IAM policy the fixture budget action applies to target roles.
+        new ManagedPolicyDef("AWSDenyAll", "/",
+                "AWS managed policy that denies all actions on all resources.")
     );
 
     private AwsManagedPolicies() {}

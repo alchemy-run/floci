@@ -763,6 +763,8 @@ class EventBridgeServiceTest {
         assertEquals(List.of("consume"), names);
         assertTrue(service.listRuleNamesByTarget(
                 "arn:aws:lambda:us-east-1:000000000000:function:other", null, REGION).isEmpty());
+        assertEquals(List.of("consume"), service.listRuleNamesByTarget(
+                "arn:aws:lambda:us-east-1:000000000000:function:consumer:$LATEST", null, REGION));
     }
 
     @Test

@@ -12,6 +12,10 @@ EKS uses a standard REST API with JSON bodies — not the JSON 1.1 (`X-Amz-Targe
 | `CreateCluster` | Create a new EKS cluster |
 | `DescribeCluster` | Describe a cluster by name |
 | `ListClusters` | List all cluster names |
+| `ListAccessPolicies` | List AWS-managed cluster access policies |
+| `DescribeClusterVersions` | List supported Kubernetes versions |
+| `DescribeAddonVersions` | List add-on versions (e.g. vpc-cni) |
+| `DescribeAddonConfiguration` | Return an add-on's configuration JSON schema |
 | `DeleteCluster` | Delete a cluster |
 | `CreateNodegroup` | Create node group metadata for a cluster |
 | `DescribeNodegroup` | Describe a node group by cluster and name |

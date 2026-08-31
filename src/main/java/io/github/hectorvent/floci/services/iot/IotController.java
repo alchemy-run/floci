@@ -56,9 +56,11 @@ public class IotController {
 
     @GET
     @Path("/endpoint")
-    public Response describeEndpoint(@QueryParam("endpointType") String endpointType) {
+    public Response describeEndpoint(@Context HttpHeaders headers,
+                                     @QueryParam("endpointType") String endpointType) {
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("endpointAddress", iotService.describeEndpoint(endpointType));
+        response.put("endpointAddress",
+                iotService.describeEndpoint(endpointType, regionResolver.resolveRegion(headers)));
         return Response.ok(response).build();
     }
 

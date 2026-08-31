@@ -20,6 +20,7 @@ state backed by a live Flink job on Floci's Docker network.
 | `StartApplication` | Starts an application, provisioning a Flink JobManager container |
 | `StopApplication` | Stops a running application and tears down its container |
 | `UpdateApplication` | Updates an application (code, parallelism, execution role) and bumps its version; redeploys code in place on a running job |
+| `UpdateApplicationMaintenanceConfiguration` | Updates the application's daily UTC maintenance window (start HH:MM; end is start + 8 hours) |
 | `DeleteApplication` | Deletes an application |
 | `TagResource` | Assigns one or more tags to an application |
 | `UntagResource` | Removes one or more tags from an application |

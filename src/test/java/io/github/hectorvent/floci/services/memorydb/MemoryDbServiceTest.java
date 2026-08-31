@@ -13,6 +13,7 @@ import io.github.hectorvent.floci.services.memorydb.model.Acl;
 import io.github.hectorvent.floci.services.memorydb.model.AuthMode;
 import io.github.hectorvent.floci.services.memorydb.model.Cluster;
 import io.github.hectorvent.floci.services.memorydb.model.ClusterStatus;
+import io.github.hectorvent.floci.services.memorydb.model.SubnetGroup;
 import io.github.hectorvent.floci.services.memorydb.model.User;
 import io.github.hectorvent.floci.services.memorydb.proxy.MemoryDbProxyManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +68,7 @@ class MemoryDbServiceTest {
         when(mdbConfig.defaultImage()).thenReturn("valkey/valkey:8");
         when(config.hostname()).thenReturn(Optional.of("localhost"));
         when(regionResolver.getAccountId()).thenReturn("000000000000");
+        when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
         when(regionResolver.buildArn(anyString(), anyString(), anyString())).thenAnswer(inv ->
                 AwsArnUtils.Arn.of(inv.getArgument(0), inv.getArgument(1),
                         "000000000000", inv.getArgument(2)).toString());
@@ -91,7 +93,8 @@ class MemoryDbServiceTest {
         assertEquals("my-cluster", created.getName());
         assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
         assertEquals("arn:aws:memorydb:us-east-1:000000000000:cluster/my-cluster", created.getArn());
-        assertEquals("localhost", created.getClusterEndpoint().address());
+        assertEquals("clustercfg.my-cluster.floci.memorydb.us-east-1.amazonaws.com",
+                created.getClusterEndpoint().address());
 
         assertEquals(1, service.describeClusters("my-cluster").size());
         assertEquals(1, service.describeClusters(null).size());
@@ -159,7 +162,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("app-acl");
-        aclSpec.setUserNames(List.of("default", "app-user"));
+        aclSpec.setUserNames(List.of("app-user"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -184,7 +187,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("iam-acl");
-        aclSpec.setUserNames(List.of("default", "iam-user"));
+        aclSpec.setUserNames(List.of("iam-user"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -253,7 +256,7 @@ class MemoryDbServiceTest {
     }
 
     @Test
-    void createAclRequiresDefaultUser() {
+    void createAclAllowsCustomUsersWithoutDefault() {
         User userSpec = new User();
         userSpec.setName("solo");
         userSpec.setAuthMode(AuthMode.PASSWORD);
@@ -263,9 +266,52 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("no-default-acl");
-        aclSpec.setUserNames(List.of("solo")); // missing the required "default" user
+        aclSpec.setUserNames(List.of("solo"));
+        Acl created = service.createAcl(aclSpec, "us-east-1");
+        assertEquals(List.of("solo"), created.getUserNames());
+        assertEquals("active", created.getStatus());
+    }
+
+    @Test
+    void createAclRejectsDefaultUser() {
+        Acl aclSpec = new Acl();
+        aclSpec.setName("with-default");
+        aclSpec.setUserNames(List.of("default"));
         AwsException ex = assertThrows(AwsException.class, () -> service.createAcl(aclSpec, "us-east-1"));
-        assertEquals("DefaultUserRequired", ex.jsonType());
+        assertEquals("InvalidParameterValueException", ex.jsonType());
+    }
+
+    @Test
+    void describeAclMissingThrowsAclNotFoundFault() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.describeAcls("alchemy-nonexistent-acl-probe", "us-east-1"));
+        assertEquals("ACLNotFoundFault", ex.jsonType());
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void updateAclAddsAndRemovesUsers() {
+        User first = new User();
+        first.setName("first-user");
+        first.setAuthMode(AuthMode.PASSWORD);
+        first.setPasswords(List.of("p"));
+        first.setAccessString("on ~* +@all");
+        service.createUser(first, "us-east-1");
+
+        User second = new User();
+        second.setName("second-user");
+        second.setAuthMode(AuthMode.PASSWORD);
+        second.setPasswords(List.of("p"));
+        second.setAccessString("on ~* +@all");
+        service.createUser(second, "us-east-1");
+
+        Acl aclSpec = new Acl();
+        aclSpec.setName("mutable-acl");
+        aclSpec.setUserNames(List.of("first-user"));
+        service.createAcl(aclSpec, "us-east-1");
+
+        Acl updated = service.updateAcl("mutable-acl", List.of("second-user"), List.of("first-user"));
+        assertEquals(List.of("second-user"), updated.getUserNames());
     }
 
     @Test
@@ -279,7 +325,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("dup-acl");
-        aclSpec.setUserNames(List.of("default", "dup", "dup"));
+        aclSpec.setUserNames(List.of("dup", "dup"));
         AwsException ex = assertThrows(AwsException.class, () -> service.createAcl(aclSpec, "us-east-1"));
         assertEquals("DuplicateUserNameFault", ex.jsonType());
     }
@@ -309,7 +355,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("in-use");
-        aclSpec.setUserNames(List.of("default", "u1"));
+        aclSpec.setUserNames(List.of("u1"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -427,7 +473,8 @@ class MemoryDbServiceTest {
         Cluster created = service.createCluster(spec, "us-east-1");
 
         assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
-        assertEquals("localhost", created.getClusterEndpoint().address());
+        assertEquals("clustercfg.mock-cluster.floci.memorydb.us-east-1.amazonaws.com",
+                created.getClusterEndpoint().address());
         assertEquals(6379, created.getClusterEndpoint().port());
         verifyNoInteractions(containerManager);
     }
@@ -462,5 +509,116 @@ class MemoryDbServiceTest {
         firstRequest.join(5000);
 
         assertEquals(ClusterStatus.AVAILABLE, service.getCluster("c1").getStatus());
+    }
+
+    @Test
+    void describeMissingSubnetGroupIsNotFound() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.describeSubnetGroups("alchemy-nonexistent-subnet-group"));
+        assertEquals("SubnetGroupNotFoundFault", ex.jsonType());
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void createDescribeDeleteSubnetGroup() {
+        SubnetGroup spec = new SubnetGroup();
+        spec.setName("cluster-subnets");
+        spec.setDescription("alchemy memorydb cluster subnets");
+        spec.setSubnets(List.of(
+                new SubnetGroup.SubnetRef("subnet-aaa", null),
+                new SubnetGroup.SubnetRef("subnet-bbb", null)));
+        spec.setTags(Map.of("fixture", "memorydb-cluster"));
+
+        SubnetGroup created = service.createSubnetGroup(spec, "us-east-1");
+        assertEquals("cluster-subnets", created.getName());
+        assertEquals("vpc-floci", created.getVpcId());
+        assertEquals(2, created.getSubnets().size());
+        assertEquals("subnet-aaa", created.getSubnets().get(0).getIdentifier());
+        assertTrue(created.getArn().contains(":subnetgroup/"));
+        assertEquals("memorydb-cluster", created.getTags().get("fixture"));
+
+        assertEquals(1, service.describeSubnetGroups("cluster-subnets").size());
+        assertEquals("memorydb-cluster", service.listTags(created.getArn()).get("fixture"));
+
+        service.deleteSubnetGroup("cluster-subnets");
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.describeSubnetGroups("cluster-subnets"));
+        assertEquals("SubnetGroupNotFoundFault", ex.jsonType());
+    }
+
+    @Test
+    void createClusterStoresSubnetGroupAndSecurityGroups() {
+        SubnetGroup group = new SubnetGroup();
+        group.setName("cluster-subnets");
+        group.setSubnets(List.of(new SubnetGroup.SubnetRef("subnet-aaa", null)));
+        service.createSubnetGroup(group, "us-east-1");
+
+        Cluster spec = new Cluster();
+        spec.setName("wired");
+        spec.setAclName("open-access");
+        spec.setSubnetGroupName("cluster-subnets");
+        spec.setSecurityGroupIds(List.of("sg-123"));
+        spec.setNumberOfShards(1);
+        spec.setTlsEnabled(true);
+        Cluster created = service.createCluster(spec, "us-east-1");
+
+        assertEquals("cluster-subnets", created.getSubnetGroupName());
+        assertEquals(List.of("sg-123"), created.getSecurityGroupIds());
+        assertTrue(created.isTlsEnabled());
+        assertTrue(created.getClusterEndpoint().address().contains("memorydb"));
+    }
+
+    @Test
+    void deleteSubnetGroupInUseIsRejected() {
+        SubnetGroup group = new SubnetGroup();
+        group.setName("in-use-subnets");
+        group.setSubnets(List.of(new SubnetGroup.SubnetRef("subnet-aaa", null)));
+        service.createSubnetGroup(group, "us-east-1");
+
+        Cluster spec = new Cluster();
+        spec.setName("uses-subnets");
+        spec.setAclName("open-access");
+        spec.setSubnetGroupName("in-use-subnets");
+        service.createCluster(spec, "us-east-1");
+
+        AwsException ex = assertThrows(AwsException.class, () -> service.deleteSubnetGroup("in-use-subnets"));
+        assertEquals("SubnetGroupInUseFault", ex.jsonType());
+    }
+
+    @Test
+    void describeEngineVersionsFiltersValkey() {
+        assertTrue(service.describeEngineVersions("valkey", null, null, false).size() >= 1);
+        assertTrue(service.describeEngineVersions("valkey", null, null, false).stream()
+                .allMatch(v -> "valkey".equals(v.getEngine())));
+    }
+
+    @Test
+    void deleteSnapshotMissingThrowsSnapshotNotFound() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.deleteSnapshot("alchemy-memorydb-nonexistent-probe"));
+        assertEquals("SnapshotNotFoundFault", ex.jsonType());
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void copySnapshotMissingThrowsSnapshotNotFound() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.copySnapshot("alchemy-memorydb-nonexistent-probe",
+                        "alchemy-memorydb-nonexistent-probe-copy", null, "us-east-1"));
+        assertEquals("SnapshotNotFoundFault", ex.jsonType());
+    }
+
+    @Test
+    void batchUpdateClusterUnknownServiceUpdateThrows() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.batchUpdateCluster(List.of("alchemy-memorydb-nonexistent-probe"),
+                        "alchemy-memorydb-nonexistent-probe-service-update"));
+        assertEquals("ServiceUpdateNotFoundFault", ex.jsonType());
+        assertEquals(404, ex.getHttpStatus());
+    }
+
+    @Test
+    void describeSnapshotsEmpty() {
+        assertEquals(0, service.describeSnapshots(null, null).size());
     }
 }

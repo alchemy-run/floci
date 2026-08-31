@@ -8,9 +8,12 @@ import io.github.hectorvent.floci.core.common.AwsQueryResponse;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.elasticache.model.AuthMode;
 import io.github.hectorvent.floci.services.elasticache.model.CacheCluster;
+import io.github.hectorvent.floci.services.elasticache.model.CacheEvent;
 import io.github.hectorvent.floci.services.elasticache.model.ElastiCacheUser;
 import io.github.hectorvent.floci.services.elasticache.model.Endpoint;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroup;
+import io.github.hectorvent.floci.services.elasticache.model.ServerlessCache;
+import io.github.hectorvent.floci.services.elasticache.model.ServerlessCacheSnapshot;
 import io.github.hectorvent.floci.services.elasticache.proxy.SigV4Validator;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -20,7 +23,9 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Query-protocol handler for all ElastiCache actions (form-encoded POST, XML response).
@@ -64,6 +69,19 @@ public class ElastiCacheQueryHandler {
             case "DeleteCacheCluster"         -> handleDeleteCacheCluster(params);
             case "DescribeCacheSubnetGroups"  -> handleDescribeCacheSubnetGroups(params);
             case "DescribeCacheParameterGroups" -> handleDescribeCacheParameterGroups(params);
+            case "CreateServerlessCache"      -> handleCreateServerlessCache(params);
+            case "DescribeServerlessCaches"   -> handleDescribeServerlessCaches(params);
+            case "ModifyServerlessCache"      -> handleModifyServerlessCache(params);
+            case "DeleteServerlessCache"      -> handleDeleteServerlessCache(params);
+            case "CreateServerlessCacheSnapshot" -> handleCreateServerlessCacheSnapshot(params);
+            case "DescribeServerlessCacheSnapshots" -> handleDescribeServerlessCacheSnapshots(params);
+            case "DeleteServerlessCacheSnapshot" -> handleDeleteServerlessCacheSnapshot(params);
+            case "CopyServerlessCacheSnapshot" -> handleCopyServerlessCacheSnapshot(params);
+            case "ExportServerlessCacheSnapshot" -> handleExportServerlessCacheSnapshot(params);
+            case "DescribeEvents"             -> handleDescribeEvents(params);
+            case "ListTagsForResource"        -> handleListTagsForResource(params);
+            case "AddTagsToResource"          -> handleAddTagsToResource(params);
+            case "RemoveTagsFromResource"     -> handleRemoveTagsFromResource(params);
             default -> AwsQueryResponse.error("UnsupportedOperation",
                     "Operation " + action + " is not supported.", AwsNamespaces.EC, 400);
         };
@@ -296,6 +314,218 @@ public class ElastiCacheQueryHandler {
         return Response.ok(AwsQueryResponse.envelope("DescribeCacheParameterGroups", AwsNamespaces.EC, xml.build())).build();
     }
 
+    // ── Serverless caches ─────────────────────────────────────────────────────
+
+    private Response handleCreateServerlessCache(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("ServerlessCacheName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "ServerlessCacheName is required.", AwsNamespaces.EC, 400);
+        }
+        try {
+            ServerlessCache cache = new ServerlessCache();
+            cache.setServerlessCacheName(name);
+            cache.setDescription(params.getFirst("Description"));
+            cache.setEngine(params.getFirst("Engine"));
+            cache.setMajorEngineVersion(params.getFirst("MajorEngineVersion"));
+            cache.setKmsKeyId(params.getFirst("KmsKeyId"));
+            cache.setUserGroupId(params.getFirst("UserGroupId"));
+            cache.setSubnetIds(extractNamedList(params, "SubnetIds", "SubnetId"));
+            cache.setSecurityGroupIds(extractNamedList(params, "SecurityGroupIds", "SecurityGroupId"));
+            cache.setSnapshotRetentionLimit(parseInteger(params.getFirst("SnapshotRetentionLimit")));
+            cache.setDailySnapshotTime(params.getFirst("DailySnapshotTime"));
+            cache.setNetworkType(params.getFirst("NetworkType"));
+            cache.setDataStorageMaximum(parseInteger(params.getFirst("CacheUsageLimits.DataStorage.Maximum")));
+            cache.setDataStorageMinimum(parseInteger(params.getFirst("CacheUsageLimits.DataStorage.Minimum")));
+            cache.setDataStorageUnit(params.getFirst("CacheUsageLimits.DataStorage.Unit"));
+            cache.setEcpuPerSecondMaximum(parseInteger(params.getFirst("CacheUsageLimits.ECPUPerSecond.Maximum")));
+            cache.setEcpuPerSecondMinimum(parseInteger(params.getFirst("CacheUsageLimits.ECPUPerSecond.Minimum")));
+            cache.setTags(extractTags(params));
+            ServerlessCache created = service.createServerlessCache(cache);
+            return Response.ok(AwsQueryResponse.envelope("CreateServerlessCache", AwsNamespaces.EC,
+                    serverlessCacheXml(created))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleDescribeServerlessCaches(MultivaluedMap<String, String> params) {
+        String filterName = params.getFirst("ServerlessCacheName");
+        try {
+            Collection<ServerlessCache> caches = service.listServerlessCaches(filterName);
+            var xml = new XmlBuilder().start("ServerlessCaches");
+            for (ServerlessCache cache : caches) {
+                xml.start("member").raw(serverlessCacheInnerXml(cache)).end("member");
+            }
+            xml.end("ServerlessCaches");
+            return Response.ok(AwsQueryResponse.envelope("DescribeServerlessCaches", AwsNamespaces.EC, xml.build())).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleModifyServerlessCache(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("ServerlessCacheName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "ServerlessCacheName is required.", AwsNamespaces.EC, 400);
+        }
+        try {
+            List<String> securityGroupIds = extractNamedList(params, "SecurityGroupIds", "SecurityGroupId");
+            ServerlessCache cache = service.modifyServerlessCache(
+                    name,
+                    params.getFirst("Description"),
+                    parseInteger(params.getFirst("CacheUsageLimits.DataStorage.Maximum")),
+                    parseInteger(params.getFirst("CacheUsageLimits.DataStorage.Minimum")),
+                    params.getFirst("CacheUsageLimits.DataStorage.Unit"),
+                    parseInteger(params.getFirst("CacheUsageLimits.ECPUPerSecond.Maximum")),
+                    parseInteger(params.getFirst("CacheUsageLimits.ECPUPerSecond.Minimum")),
+                    parseBoolean(params.getFirst("RemoveUserGroup")),
+                    params.getFirst("UserGroupId"),
+                    securityGroupIds.isEmpty() ? null : securityGroupIds,
+                    parseInteger(params.getFirst("SnapshotRetentionLimit")),
+                    params.getFirst("DailySnapshotTime"),
+                    params.getFirst("Engine"),
+                    params.getFirst("MajorEngineVersion"));
+            return Response.ok(AwsQueryResponse.envelope("ModifyServerlessCache", AwsNamespaces.EC,
+                    serverlessCacheXml(cache))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleDeleteServerlessCache(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("ServerlessCacheName");
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "ServerlessCacheName is required.", AwsNamespaces.EC, 400);
+        }
+        try {
+            ServerlessCache cache = service.deleteServerlessCache(name, params.getFirst("FinalSnapshotName"));
+            return Response.ok(AwsQueryResponse.envelope("DeleteServerlessCache", AwsNamespaces.EC,
+                    serverlessCacheXml(cache))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleCreateServerlessCacheSnapshot(MultivaluedMap<String, String> params) {
+        String cacheName = params.getFirst("ServerlessCacheName");
+        String snapshotName = params.getFirst("ServerlessCacheSnapshotName");
+        if (cacheName == null || cacheName.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    "ServerlessCacheName is required.", AwsNamespaces.EC, 400);
+        }
+        try {
+            ServerlessCacheSnapshot snapshot = service.createServerlessCacheSnapshot(
+                    cacheName, snapshotName, params.getFirst("KmsKeyId"), extractTags(params));
+            return Response.ok(AwsQueryResponse.envelope("CreateServerlessCacheSnapshot", AwsNamespaces.EC,
+                    serverlessCacheSnapshotXml(snapshot))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleDescribeServerlessCacheSnapshots(MultivaluedMap<String, String> params) {
+        try {
+            Collection<ServerlessCacheSnapshot> snapshots = service.listServerlessCacheSnapshots(
+                    params.getFirst("ServerlessCacheName"),
+                    params.getFirst("ServerlessCacheSnapshotName"),
+                    params.getFirst("SnapshotType"));
+            var xml = new XmlBuilder().start("ServerlessCacheSnapshots");
+            for (ServerlessCacheSnapshot snapshot : snapshots) {
+                xml.raw(serverlessCacheSnapshotXml(snapshot));
+            }
+            xml.end("ServerlessCacheSnapshots");
+            return Response.ok(AwsQueryResponse.envelope("DescribeServerlessCacheSnapshots", AwsNamespaces.EC, xml.build())).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleDeleteServerlessCacheSnapshot(MultivaluedMap<String, String> params) {
+        try {
+            ServerlessCacheSnapshot snapshot = service.deleteServerlessCacheSnapshot(
+                    params.getFirst("ServerlessCacheSnapshotName"));
+            return Response.ok(AwsQueryResponse.envelope("DeleteServerlessCacheSnapshot", AwsNamespaces.EC,
+                    serverlessCacheSnapshotXml(snapshot))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleCopyServerlessCacheSnapshot(MultivaluedMap<String, String> params) {
+        try {
+            ServerlessCacheSnapshot snapshot = service.copyServerlessCacheSnapshot(
+                    params.getFirst("SourceServerlessCacheSnapshotName"),
+                    params.getFirst("TargetServerlessCacheSnapshotName"),
+                    params.getFirst("KmsKeyId"),
+                    extractTags(params));
+            return Response.ok(AwsQueryResponse.envelope("CopyServerlessCacheSnapshot", AwsNamespaces.EC,
+                    serverlessCacheSnapshotXml(snapshot))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleExportServerlessCacheSnapshot(MultivaluedMap<String, String> params) {
+        try {
+            ServerlessCacheSnapshot snapshot = service.exportServerlessCacheSnapshot(
+                    params.getFirst("ServerlessCacheSnapshotName"),
+                    params.getFirst("S3BucketName"));
+            return Response.ok(AwsQueryResponse.envelope("ExportServerlessCacheSnapshot", AwsNamespaces.EC,
+                    serverlessCacheSnapshotXml(snapshot))).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleDescribeEvents(MultivaluedMap<String, String> params) {
+        List<CacheEvent> listed = service.listEvents(
+                params.getFirst("SourceType"), params.getFirst("SourceIdentifier"));
+        var xml = new XmlBuilder().start("Events");
+        for (CacheEvent event : listed) {
+            xml.start("Event")
+               .elem("SourceIdentifier", event.getSourceIdentifier())
+               .elem("SourceType", event.getSourceType())
+               .elem("Message", event.getMessage())
+               .elem("Date", event.getDate() != null ? event.getDate().toString() : null)
+               .end("Event");
+        }
+        xml.end("Events");
+        return Response.ok(AwsQueryResponse.envelope("DescribeEvents", AwsNamespaces.EC, xml.build())).build();
+    }
+
+    private Response handleListTagsForResource(MultivaluedMap<String, String> params) {
+        try {
+            var xml = new XmlBuilder().start("TagList");
+            writeTags(xml, service.listTagsForResource(params.getFirst("ResourceName")));
+            xml.end("TagList");
+            return Response.ok(AwsQueryResponse.envelope("ListTagsForResource", AwsNamespaces.EC, xml.build())).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleAddTagsToResource(MultivaluedMap<String, String> params) {
+        try {
+            service.addTagsToResource(params.getFirst("ResourceName"), extractTags(params));
+            return Response.ok(AwsQueryResponse.envelope("AddTagsToResource", AwsNamespaces.EC, "")).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
+    private Response handleRemoveTagsFromResource(MultivaluedMap<String, String> params) {
+        try {
+            service.removeTagsFromResource(params.getFirst("ResourceName"),
+                    extractNamedList(params, "TagKeys", "member"));
+            return Response.ok(AwsQueryResponse.envelope("RemoveTagsFromResource", AwsNamespaces.EC, "")).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
+        }
+    }
+
     // ── IAM Token Validation ──────────────────────────────────────────────────
 
     private Response handleValidateIamAuthToken(MultivaluedMap<String, String> params) {
@@ -389,6 +619,185 @@ public class ElastiCacheQueryHandler {
                 .start("UserGroupIds").end("UserGroupIds")
                 .elem("ARN", AwsArnUtils.Arn.of("elasticache", regionResolver.getDefaultRegion(), regionResolver.getAccountId(), "user:" + u.getUserId()).toString())
                 .build();
+    }
+
+    private String serverlessCacheXml(ServerlessCache cache) {
+        return new XmlBuilder()
+                .start("ServerlessCache")
+                .raw(serverlessCacheInnerXml(cache))
+                .end("ServerlessCache")
+                .build();
+    }
+
+    private String serverlessCacheInnerXml(ServerlessCache cache) {
+        var xml = new XmlBuilder()
+                .elem("ServerlessCacheName", cache.getServerlessCacheName())
+                .elem("Description", cache.getDescription())
+                .elem("CreateTime", cache.getCreateTime() != null ? cache.getCreateTime().toString() : null)
+                .elem("Status", cache.getStatus())
+                .elem("Engine", cache.getEngine())
+                .elem("MajorEngineVersion", cache.getMajorEngineVersion())
+                .elem("FullEngineVersion", cache.getFullEngineVersion());
+        if (cache.getDataStorageMaximum() != null || cache.getDataStorageMinimum() != null
+                || cache.getEcpuPerSecondMaximum() != null || cache.getEcpuPerSecondMinimum() != null) {
+            xml.start("CacheUsageLimits");
+            if (cache.getDataStorageMaximum() != null || cache.getDataStorageMinimum() != null) {
+                xml.start("DataStorage")
+                   .elem("Maximum", cache.getDataStorageMaximum() != null
+                           ? String.valueOf(cache.getDataStorageMaximum()) : null)
+                   .elem("Minimum", cache.getDataStorageMinimum() != null
+                           ? String.valueOf(cache.getDataStorageMinimum()) : null)
+                   .elem("Unit", cache.getDataStorageUnit() != null ? cache.getDataStorageUnit() : "GB")
+                   .end("DataStorage");
+            }
+            if (cache.getEcpuPerSecondMaximum() != null || cache.getEcpuPerSecondMinimum() != null) {
+                xml.start("ECPUPerSecond")
+                   .elem("Maximum", cache.getEcpuPerSecondMaximum() != null
+                           ? String.valueOf(cache.getEcpuPerSecondMaximum()) : null)
+                   .elem("Minimum", cache.getEcpuPerSecondMinimum() != null
+                           ? String.valueOf(cache.getEcpuPerSecondMinimum()) : null)
+                   .end("ECPUPerSecond");
+            }
+            xml.end("CacheUsageLimits");
+        }
+        xml.elem("KmsKeyId", cache.getKmsKeyId())
+           .elem("StorageEncryptionType", cache.getStorageEncryptionType());
+        if (cache.getSecurityGroupIds() != null && !cache.getSecurityGroupIds().isEmpty()) {
+            xml.start("SecurityGroupIds");
+            for (String id : cache.getSecurityGroupIds()) {
+                xml.elem("SecurityGroupId", id);
+            }
+            xml.end("SecurityGroupIds");
+        }
+        writeEndpoint(xml, "Endpoint", cache.getEndpoint());
+        writeEndpoint(xml, "ReaderEndpoint", cache.getReaderEndpoint());
+        xml.elem("ARN", cache.getArn() != null ? cache.getArn() : serverlessCacheArn(cache.getServerlessCacheName()))
+           .elem("UserGroupId", cache.getUserGroupId());
+        if (cache.getSubnetIds() != null && !cache.getSubnetIds().isEmpty()) {
+            xml.start("SubnetIds");
+            for (String id : cache.getSubnetIds()) {
+                xml.elem("SubnetId", id);
+            }
+            xml.end("SubnetIds");
+        }
+        xml.elem("SnapshotRetentionLimit", cache.getSnapshotRetentionLimit() != null
+                        ? String.valueOf(cache.getSnapshotRetentionLimit()) : null)
+           .elem("DailySnapshotTime", cache.getDailySnapshotTime())
+           .elem("NetworkType", cache.getNetworkType());
+        return xml.build();
+    }
+
+    private String serverlessCacheSnapshotXml(ServerlessCacheSnapshot snapshot) {
+        return new XmlBuilder()
+                .start("ServerlessCacheSnapshot")
+                  .elem("ServerlessCacheSnapshotName", snapshot.getServerlessCacheSnapshotName())
+                  .elem("ARN", snapshot.getArn() != null
+                          ? snapshot.getArn()
+                          : serverlessCacheSnapshotArn(snapshot.getServerlessCacheSnapshotName()))
+                  .elem("KmsKeyId", snapshot.getKmsKeyId())
+                  .elem("SnapshotType", snapshot.getSnapshotType())
+                  .elem("Status", snapshot.getStatus())
+                  .elem("CreateTime", snapshot.getCreateTime() != null ? snapshot.getCreateTime().toString() : null)
+                  .elem("BytesUsedForCache", snapshot.getBytesUsedForCache())
+                  .start("ServerlessCacheConfiguration")
+                    .elem("ServerlessCacheName", snapshot.getServerlessCacheName())
+                    .elem("Engine", snapshot.getEngine())
+                    .elem("MajorEngineVersion", snapshot.getMajorEngineVersion())
+                  .end("ServerlessCacheConfiguration")
+                .end("ServerlessCacheSnapshot")
+                .build();
+    }
+
+    private static void writeEndpoint(XmlBuilder xml, String element, Endpoint endpoint) {
+        if (endpoint == null) {
+            return;
+        }
+        xml.start(element)
+           .elem("Address", endpoint.address())
+           .elem("Port", (long) endpoint.port())
+           .end(element);
+    }
+
+    private static void writeTags(XmlBuilder xml, Map<String, String> tags) {
+        if (tags == null) {
+            return;
+        }
+        tags.forEach((key, value) -> xml.start("Tag")
+                .elem("Key", key)
+                .elem("Value", value)
+                .end("Tag"));
+    }
+
+    private String serverlessCacheArn(String name) {
+        return AwsArnUtils.Arn.of(
+                "elasticache",
+                regionOrDefault(),
+                accountOrDefault(),
+                "serverlesscache:" + name).toString();
+    }
+
+    private String serverlessCacheSnapshotArn(String name) {
+        return AwsArnUtils.Arn.of(
+                "elasticache",
+                regionOrDefault(),
+                accountOrDefault(),
+                "serverlesscachesnapshot:" + name).toString();
+    }
+
+    private String regionOrDefault() {
+        String region = regionResolver.getRegion();
+        return region != null ? region : "us-east-1";
+    }
+
+    private String accountOrDefault() {
+        String account = regionResolver.getAccountId();
+        return account != null ? account : "000000000000";
+    }
+
+    private static List<String> extractNamedList(MultivaluedMap<String, String> params,
+                                                 String wrapper, String xmlName) {
+        List<String> named = extractMemberList(params, wrapper + "." + xmlName + ".");
+        if (!named.isEmpty()) {
+            return named;
+        }
+        return extractMemberList(params, wrapper + ".member.");
+    }
+
+    private static Map<String, String> extractTags(MultivaluedMap<String, String> params) {
+        Map<String, String> tags = new LinkedHashMap<>();
+        for (int i = 1; ; i++) {
+            String key = firstNonNull(params.getFirst("Tags.Tag." + i + ".Key"),
+                    params.getFirst("Tags.member." + i + ".Key"));
+            if (key == null) {
+                break;
+            }
+            String value = firstNonNull(params.getFirst("Tags.Tag." + i + ".Value"),
+                    params.getFirst("Tags.member." + i + ".Value"));
+            tags.put(key, value != null ? value : "");
+        }
+        return tags;
+    }
+
+    private static String firstNonNull(String a, String b) {
+        return a != null ? a : b;
+    }
+
+    private static Integer parseInteger(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Boolean parseBoolean(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return Boolean.parseBoolean(value);
     }
 
     private static List<String> extractMemberList(MultivaluedMap<String, String> params, String prefix) {

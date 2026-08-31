@@ -31,13 +31,13 @@ class IotIntegrationTest {
 
     @Test
     @Order(2)
-    void defaultDescribeEndpointReturnsBaseUrlAuthority() {
+    void defaultDescribeEndpointReturnsAtsDataEndpoint() {
         given()
         .when()
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo("localhost:4566"));
+            .body("endpointAddress", equalTo("000000000000-ats.iot.us-east-1.amazonaws.com"));
     }
 
     @Test
@@ -49,7 +49,7 @@ class IotIntegrationTest {
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo("localhost:4566"));
+            .body("endpointAddress", equalTo("000000000000-ats.iot.us-east-1.amazonaws.com"));
     }
 
     @Test
