@@ -13,6 +13,7 @@ public class CacheBehavior {
     private String viewerProtocolPolicy = "redirect-to-https";
     private List<String> allowedMethods;
     private List<String> cachedMethods;
+    private Map<String, Object> forwardedValues;
     private String cachePolicyId;
     private String originRequestPolicyId;
     private String responseHeadersPolicyId;
@@ -21,9 +22,11 @@ public class CacheBehavior {
     private List<Map<String, String>> functionAssociations;
     private List<Map<String, Object>> lambdaFunctionAssociations;
     private boolean compress;
-    private long defaultTTL;
-    private long minTTL;
-    private long maxTTL;
+    // Boxed: `null` distinguishes "not supplied" (cache-policy mode) from a
+    // legacy-mode TTL of 0, so GetDistributionConfig round-trips faithfully.
+    private Long defaultTTL;
+    private Long minTTL;
+    private Long maxTTL;
 
     public CacheBehavior() {}
 
@@ -66,12 +69,15 @@ public class CacheBehavior {
     public boolean isCompress() { return compress; }
     public void setCompress(boolean compress) { this.compress = compress; }
 
-    public long getDefaultTTL() { return defaultTTL; }
-    public void setDefaultTTL(long defaultTTL) { this.defaultTTL = defaultTTL; }
+    public Map<String, Object> getForwardedValues() { return forwardedValues; }
+    public void setForwardedValues(Map<String, Object> forwardedValues) { this.forwardedValues = forwardedValues; }
 
-    public long getMinTTL() { return minTTL; }
-    public void setMinTTL(long minTTL) { this.minTTL = minTTL; }
+    public Long getDefaultTTL() { return defaultTTL; }
+    public void setDefaultTTL(Long defaultTTL) { this.defaultTTL = defaultTTL; }
 
-    public long getMaxTTL() { return maxTTL; }
-    public void setMaxTTL(long maxTTL) { this.maxTTL = maxTTL; }
+    public Long getMinTTL() { return minTTL; }
+    public void setMinTTL(Long minTTL) { this.minTTL = minTTL; }
+
+    public Long getMaxTTL() { return maxTTL; }
+    public void setMaxTTL(Long maxTTL) { this.maxTTL = maxTTL; }
 }
