@@ -190,6 +190,13 @@ public class CognitoService {
 
         populateUserPool(updatedPool, request);
 
+        // AWS UpdateUserPool resets omitted mutable fields to their defaults:
+        // a request without LambdaConfig clears the pool's triggers and
+        // custom senders rather than keeping the previously stored value.
+        if (!request.containsKey("LambdaConfig")) {
+            updatedPool.setLambdaConfig(null);
+        }
+
         updatedPool.setLastModifiedDate(System.currentTimeMillis() / 1000L);
         poolStore.put(id, updatedPool);
         LOG.infov("Updated User Pool: {0}", id);
