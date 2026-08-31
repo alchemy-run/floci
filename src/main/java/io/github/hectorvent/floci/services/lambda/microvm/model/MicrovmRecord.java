@@ -29,6 +29,12 @@ public class MicrovmRecord {
     private long startedAt;
     private Long terminatedAt;
     private String stateReason;
+    /** RunMicrovm idempotency token: a re-run with the same token reattaches. */
+    private String clientToken;
+    /** Last data-plane request through the endpoint proxy (idle-policy input). */
+    private long lastActivityAt;
+    /** When the VM entered SUSPENDED (idle-policy expiry input). */
+    private Long suspendedAt;
     private List<String> ingressNetworkConnectors;
     private List<String> egressNetworkConnectors;
 
@@ -87,4 +93,13 @@ public class MicrovmRecord {
 
     public int getPort() { return port; }
     public void setPort(int port) { this.port = port; }
+
+    public String getClientToken() { return clientToken; }
+    public void setClientToken(String clientToken) { this.clientToken = clientToken; }
+
+    public long getLastActivityAt() { return lastActivityAt; }
+    public void setLastActivityAt(long lastActivityAt) { this.lastActivityAt = lastActivityAt; }
+
+    public Long getSuspendedAt() { return suspendedAt; }
+    public void setSuspendedAt(Long suspendedAt) { this.suspendedAt = suspendedAt; }
 }
