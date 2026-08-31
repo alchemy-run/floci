@@ -53,4 +53,14 @@ class MicrovmBuildServiceTest {
         assertEquals(List.of("FROM amazonlinux:2023", "RUN echo hello"),
                 Files.readAllLines(file));
     }
+
+    @Test
+    void dockerUriPatternMatchesPrebuiltReferences() {
+        // The docker:// form short-circuits the build — covered end-to-end by
+        // the alchemy dev suite; here we pin the accepted shapes.
+        assertEquals("alchemy-dev/microvm-app:abc123",
+                MicrovmBuildService.localImageRef("docker://alchemy-dev/microvm-app:abc123"));
+        assertEquals(null, MicrovmBuildService.localImageRef("s3://bucket/key.zip"));
+        assertEquals(null, MicrovmBuildService.localImageRef(null));
+    }
 }

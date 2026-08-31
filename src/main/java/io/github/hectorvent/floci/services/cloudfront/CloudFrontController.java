@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.cloudfront.model.*;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
@@ -26,6 +27,8 @@ import java.util.Map;
 
 @Path("/2020-05-31")
 public class CloudFrontController {
+
+    private static final Logger LOG = Logger.getLogger(CloudFrontController.class);
 
     private static final String NS = AwsNamespaces.CLOUDFRONT;
     private static final String XML = "application/xml";
@@ -2030,7 +2033,28 @@ public class CloudFrontController {
         }
         xml.end("CacheBehaviors");
 
-        xml.start("CustomErrorResponses").elem("Quantity", 0).end("CustomErrorResponses");
+        List<Map<String, Object>> customErrors = cfg.getCustomErrorResponses();
+        int ceCount = customErrors != null ? customErrors.size() : 0;
+        xml.start("CustomErrorResponses").elem("Quantity", ceCount);
+        if (ceCount > 0) {
+            xml.start("Items");
+            for (Map<String, Object> ce : customErrors) {
+                xml.start("CustomErrorResponse")
+                        .elem("ErrorCode", ce.get("ErrorCode") != null
+                                ? String.valueOf(ce.get("ErrorCode")) : null)
+                        .elem("ResponsePagePath", ce.get("ResponsePagePath") != null
+                                ? String.valueOf(ce.get("ResponsePagePath")) : null)
+                        .elem("ResponseCode", ce.get("ResponseCode") != null
+                                ? String.valueOf(ce.get("ResponseCode")) : null)
+                        .elem("ErrorCachingMinTTL", ce.get("ErrorCachingMinTTL") != null
+                                ? String.valueOf(ce.get("ErrorCachingMinTTL")) : null)
+                        .end("CustomErrorResponse");
+            }
+            xml.end("Items");
+        }
+        xml.end("CustomErrorResponses");
+
+        xml.raw(xmlRestrictions(cfg.getGeoRestriction()));
 
         List<String> aliases = cfg.getAliases();
         int aliasCount = aliases != null ? aliases.size() : 0;
@@ -2049,6 +2073,30 @@ public class CloudFrontController {
         return xml.build();
     }
 
+    @SuppressWarnings("unchecked")
+    private String xmlRestrictions(Map<String, Object> geo) {
+        XmlBuilder xml = new XmlBuilder().start("Restrictions").start("GeoRestriction");
+        Object restrictionType = geo != null ? geo.get("RestrictionType") : null;
+        if (restrictionType != null && !"none".equals(restrictionType)) {
+            List<String> locations = geo.get("Items") instanceof List<?> items
+                    ? (List<String>) items
+                    : List.of();
+            xml.elem("RestrictionType", String.valueOf(restrictionType))
+                    .elem("Quantity", locations.size());
+            if (!locations.isEmpty()) {
+                xml.start("Items");
+                for (String location : locations) {
+                    xml.elem("Location", location);
+                }
+                xml.end("Items");
+            }
+        } else {
+            xml.elem("RestrictionType", "none").elem("Quantity", 0);
+        }
+        xml.end("GeoRestriction").end("Restrictions");
+        return xml.build();
+    }
+
     private String xmlOrigin(Origin o) {
         XmlBuilder xml = new XmlBuilder()
                 .start("Origin")
@@ -2061,6 +2109,21 @@ public class CloudFrontController {
         if (o.getOriginAccessControlId() != null && !o.getOriginAccessControlId().isEmpty()) {
             xml.elem("OriginAccessControlId", o.getOriginAccessControlId());
         }
+
+        List<Map<String, String>> customHeaders = o.getCustomHeaders();
+        int headerCount = customHeaders != null ? customHeaders.size() : 0;
+        xml.start("CustomHeaders").elem("Quantity", headerCount);
+        if (headerCount > 0) {
+            xml.start("Items");
+            for (Map<String, String> header : customHeaders) {
+                xml.start("OriginCustomHeader")
+                        .elem("HeaderName", header.get("HeaderName"))
+                        .elem("HeaderValue", header.get("HeaderValue"))
+                        .end("OriginCustomHeader");
+            }
+            xml.end("Items");
+        }
+        xml.end("CustomHeaders");
 
         Map<String, String> s3Config = o.getS3OriginConfig();
         if (s3Config != null) {
@@ -2109,12 +2172,20 @@ public class CloudFrontController {
                 .elem("ResponseHeadersPolicyId", dcb.getResponseHeadersPolicyId())
                 .elem("Compress", dcb.isCompress());
 
-        List<String> allowed = dcb.getAllowedMethods();
-        if (allowed == null || allowed.isEmpty()) {
-            allowed = List.of("GET", "HEAD");
+        xml.raw(xmlAllowedMethods(dcb.getAllowedMethods(), dcb.getCachedMethods()));
+
+        if (dcb.getForwardedValues() != null) {
+            xml.raw(xmlForwardedValues(dcb.getForwardedValues()));
         }
-        xml.raw(xmlQuantityItems("AllowedMethods", "Method", allowed.size(),
-                allowed.stream().map(m -> "<Method>" + XmlBuilder.escape(m) + "</Method>").toList()));
+        if (dcb.getMinTTL() != null) {
+            xml.elem("MinTTL", dcb.getMinTTL().longValue());
+        }
+        if (dcb.getDefaultTTL() != null) {
+            xml.elem("DefaultTTL", dcb.getDefaultTTL().longValue());
+        }
+        if (dcb.getMaxTTL() != null) {
+            xml.elem("MaxTTL", dcb.getMaxTTL().longValue());
+        }
 
         xml.raw(xmlFunctionAssociations(dcb.getFunctionAssociations()));
         xml.start("LambdaFunctionAssociations").elem("Quantity", 0).end("LambdaFunctionAssociations");
@@ -2135,17 +2206,101 @@ public class CloudFrontController {
                 .elem("ResponseHeadersPolicyId", cb.getResponseHeadersPolicyId())
                 .elem("Compress", cb.isCompress());
 
-        List<String> allowed = cb.getAllowedMethods();
-        if (allowed == null || allowed.isEmpty()) {
-            allowed = List.of("GET", "HEAD");
+        xml.raw(xmlAllowedMethods(cb.getAllowedMethods(), cb.getCachedMethods()));
+
+        if (cb.getForwardedValues() != null) {
+            xml.raw(xmlForwardedValues(cb.getForwardedValues()));
         }
-        xml.raw(xmlQuantityItems("AllowedMethods", "Method", allowed.size(),
-                allowed.stream().map(m -> "<Method>" + XmlBuilder.escape(m) + "</Method>").toList()));
+        if (cb.getMinTTL() != null) {
+            xml.elem("MinTTL", cb.getMinTTL().longValue());
+        }
+        if (cb.getDefaultTTL() != null) {
+            xml.elem("DefaultTTL", cb.getDefaultTTL().longValue());
+        }
+        if (cb.getMaxTTL() != null) {
+            xml.elem("MaxTTL", cb.getMaxTTL().longValue());
+        }
 
         xml.raw(xmlFunctionAssociations(cb.getFunctionAssociations()));
         xml.start("LambdaFunctionAssociations").elem("Quantity", 0).end("LambdaFunctionAssociations");
 
         xml.end("CacheBehavior");
+        return xml.build();
+    }
+
+    private String xmlAllowedMethods(List<String> allowed, List<String> cached) {
+        if (allowed == null || allowed.isEmpty()) {
+            allowed = List.of("GET", "HEAD");
+        }
+        if (cached == null || cached.isEmpty()) {
+            cached = List.of("GET", "HEAD");
+        }
+        XmlBuilder xml = new XmlBuilder()
+                .start("AllowedMethods").elem("Quantity", allowed.size()).start("Items");
+        for (String method : allowed) {
+            xml.elem("Method", method);
+        }
+        xml.end("Items");
+        xml.start("CachedMethods").elem("Quantity", cached.size()).start("Items");
+        for (String method : cached) {
+            xml.elem("Method", method);
+        }
+        xml.end("Items").end("CachedMethods");
+        xml.end("AllowedMethods");
+        return xml.build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String xmlForwardedValues(Map<String, Object> fv) {
+        XmlBuilder xml = new XmlBuilder()
+                .start("ForwardedValues")
+                .elem("QueryString", Boolean.TRUE.equals(fv.get("QueryString")));
+
+        Map<String, Object> cookies = fv.get("Cookies") instanceof Map<?, ?> map
+                ? (Map<String, Object>) map
+                : null;
+        xml.start("Cookies").elem("Forward",
+                cookies != null ? String.valueOf(cookies.getOrDefault("Forward", "none")) : "none");
+        List<String> whitelisted = cookies != null && cookies.get("WhitelistedNames") instanceof List<?> names
+                ? (List<String>) names
+                : null;
+        if (whitelisted != null && !whitelisted.isEmpty()) {
+            xml.start("WhitelistedNames").elem("Quantity", whitelisted.size()).start("Items");
+            for (String name : whitelisted) {
+                xml.elem("Name", name);
+            }
+            xml.end("Items").end("WhitelistedNames");
+        }
+        xml.end("Cookies");
+
+        List<String> headers = fv.get("Headers") instanceof List<?> headerNames
+                ? (List<String>) headerNames
+                : null;
+        xml.start("Headers").elem("Quantity", headers != null ? headers.size() : 0);
+        if (headers != null && !headers.isEmpty()) {
+            xml.start("Items");
+            for (String name : headers) {
+                xml.elem("Name", name);
+            }
+            xml.end("Items");
+        }
+        xml.end("Headers");
+
+        List<String> queryStringCacheKeys = fv.get("QueryStringCacheKeys") instanceof List<?> keys
+                ? (List<String>) keys
+                : null;
+        xml.start("QueryStringCacheKeys")
+                .elem("Quantity", queryStringCacheKeys != null ? queryStringCacheKeys.size() : 0);
+        if (queryStringCacheKeys != null && !queryStringCacheKeys.isEmpty()) {
+            xml.start("Items");
+            for (String key : queryStringCacheKeys) {
+                xml.elem("Name", key);
+            }
+            xml.end("Items");
+        }
+        xml.end("QueryStringCacheKeys");
+
+        xml.end("ForwardedValues");
         return xml.build();
     }
 
@@ -2496,8 +2651,116 @@ public class CloudFrontController {
         cfg.setCacheBehaviors(parseCacheBehaviors(body));
         cfg.setAliases(parseAliases(body));
         cfg.setViewerCertificate(parseViewerCertificate(body));
+        cfg.setGeoRestriction(parseGeoRestriction(body));
+        cfg.setCustomErrorResponses(parseCustomErrorResponses(body));
 
         return cfg;
+    }
+
+    private Map<String, Object> parseGeoRestriction(String body) {
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        try {
+            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
+            boolean inGeoRestriction = false;
+            String restrictionType = null;
+            List<String> locations = new ArrayList<>();
+
+            while (r.hasNext()) {
+                int event = r.next();
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    switch (r.getLocalName()) {
+                        case "GeoRestriction" -> inGeoRestriction = true;
+                        case "RestrictionType" -> {
+                            if (inGeoRestriction) restrictionType = r.getElementText();
+                        }
+                        case "Location" -> {
+                            if (inGeoRestriction) locations.add(r.getElementText());
+                        }
+                        default -> {
+                        }
+                    }
+                } else if (event == XMLStreamConstants.END_ELEMENT
+                        && "GeoRestriction".equals(r.getLocalName())) {
+                    inGeoRestriction = false;
+                }
+            }
+            r.close();
+            if (restrictionType != null) {
+                Map<String, Object> geo = new LinkedHashMap<>();
+                geo.put("RestrictionType", restrictionType);
+                geo.put("Items", locations);
+                return geo;
+            }
+        } catch (Exception e) {
+            LOG.debugv("Failed to parse GeoRestriction: {0}", e.getMessage());
+        }
+        return null;
+    }
+
+    private List<Map<String, Object>> parseCustomErrorResponses(String body) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (body == null || body.isEmpty()) {
+            return result;
+        }
+        try {
+            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
+            boolean inList = false;
+            Map<String, Object> current = null;
+
+            while (r.hasNext()) {
+                int event = r.next();
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    switch (r.getLocalName()) {
+                        case "CustomErrorResponses" -> inList = true;
+                        case "CustomErrorResponse" -> {
+                            if (inList) current = new LinkedHashMap<>();
+                        }
+                        case "ErrorCode" -> {
+                            if (current != null) {
+                                try {
+                                    current.put("ErrorCode", Integer.parseInt(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
+                            }
+                        }
+                        case "ResponsePagePath" -> {
+                            if (current != null) current.put("ResponsePagePath", r.getElementText());
+                        }
+                        case "ResponseCode" -> {
+                            if (current != null) current.put("ResponseCode", r.getElementText());
+                        }
+                        case "ErrorCachingMinTTL" -> {
+                            if (current != null) {
+                                try {
+                                    current.put("ErrorCachingMinTTL", Long.parseLong(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
+                            }
+                        }
+                        default -> {
+                        }
+                    }
+                } else if (event == XMLStreamConstants.END_ELEMENT) {
+                    switch (r.getLocalName()) {
+                        case "CustomErrorResponse" -> {
+                            if (current != null) {
+                                result.add(current);
+                                current = null;
+                            }
+                        }
+                        case "CustomErrorResponses" -> inList = false;
+                        default -> {
+                        }
+                    }
+                }
+            }
+            r.close();
+        } catch (Exception e) {
+            LOG.debugv("Failed to parse CustomErrorResponses: {0}", e.getMessage());
+        }
+        return result;
     }
 
     private List<Origin> parseOrigins(String body) {
@@ -2512,10 +2775,13 @@ public class CloudFrontController {
             boolean inS3OriginConfig = false;
             boolean inCustomOriginConfig = false;
             boolean inVpcOriginConfig = false;
+            boolean inCustomHeaders = false;
             Origin current = null;
             Map<String, String> s3Config = null;
             Map<String, Object> customConfig = null;
             Map<String, String> vpcConfig = null;
+            List<Map<String, String>> customHeaders = new ArrayList<>();
+            Map<String, String> currentHeader = null;
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -2527,6 +2793,23 @@ public class CloudFrontController {
                             if (inOrigins) {
                                 inOrigin = true;
                                 current = new Origin();
+                                customHeaders = new ArrayList<>();
+                            }
+                        }
+                        case "CustomHeaders" -> {
+                            if (inOrigin) inCustomHeaders = true;
+                        }
+                        case "OriginCustomHeader" -> {
+                            if (inCustomHeaders) currentHeader = new LinkedHashMap<>();
+                        }
+                        case "HeaderName" -> {
+                            if (currentHeader != null) {
+                                currentHeader.put("HeaderName", r.getElementText());
+                            }
+                        }
+                        case "HeaderValue" -> {
+                            if (currentHeader != null) {
+                                currentHeader.put("HeaderValue", r.getElementText());
                             }
                         }
                         case "S3OriginConfig" -> {
@@ -2619,6 +2902,13 @@ public class CloudFrontController {
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
+                        case "OriginCustomHeader" -> {
+                            if (currentHeader != null) {
+                                customHeaders.add(currentHeader);
+                                currentHeader = null;
+                            }
+                        }
+                        case "CustomHeaders" -> inCustomHeaders = false;
                         case "S3OriginConfig" -> {
                             if (inS3OriginConfig && current != null) {
                                 current.setS3OriginConfig(s3Config);
@@ -2642,6 +2932,9 @@ public class CloudFrontController {
                         }
                         case "Origin" -> {
                             if (inOrigin && current != null) {
+                                if (!customHeaders.isEmpty()) {
+                                    current.setCustomHeaders(customHeaders);
+                                }
                                 result.add(current);
                             }
                             inOrigin = false;
@@ -2668,10 +2961,22 @@ public class CloudFrontController {
             XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
             boolean inDcb = false;
             boolean inAllowedMethods = false;
+            boolean inCachedMethods = false;
             boolean inFunctionAssociations = false;
+            boolean inForwardedValues = false;
+            boolean inCookies = false;
+            boolean inWhitelistedNames = false;
+            boolean inFvHeaders = false;
+            boolean inQueryStringCacheKeys = false;
             List<String> allowedMethods = new ArrayList<>();
+            List<String> cachedMethods = new ArrayList<>();
             List<Map<String, String>> functionAssociations = new ArrayList<>();
             Map<String, String> currentAssociation = null;
+            Map<String, Object> forwardedValues = null;
+            Map<String, Object> cookies = null;
+            List<String> whitelistedNames = new ArrayList<>();
+            List<String> fvHeaders = new ArrayList<>();
+            List<String> queryStringCacheKeys = new ArrayList<>();
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -2681,6 +2986,9 @@ public class CloudFrontController {
                         case "DefaultCacheBehavior" -> inDcb = true;
                         case "AllowedMethods" -> {
                             if (inDcb) inAllowedMethods = true;
+                        }
+                        case "CachedMethods" -> {
+                            if (inAllowedMethods) inCachedMethods = true;
                         }
                         case "FunctionAssociations" -> {
                             if (inDcb) inFunctionAssociations = true;
@@ -2696,6 +3004,71 @@ public class CloudFrontController {
                         case "EventType" -> {
                             if (currentAssociation != null) {
                                 currentAssociation.put("EventType", r.getElementText());
+                            }
+                        }
+                        case "ForwardedValues" -> {
+                            if (inDcb) {
+                                inForwardedValues = true;
+                                forwardedValues = new LinkedHashMap<>();
+                            }
+                        }
+                        case "QueryString" -> {
+                            if (inForwardedValues && forwardedValues != null) {
+                                forwardedValues.put("QueryString",
+                                        "true".equalsIgnoreCase(r.getElementText()));
+                            }
+                        }
+                        case "Cookies" -> {
+                            if (inForwardedValues) {
+                                inCookies = true;
+                                cookies = new LinkedHashMap<>();
+                            }
+                        }
+                        case "Forward" -> {
+                            if (inCookies && cookies != null) {
+                                cookies.put("Forward", r.getElementText());
+                            }
+                        }
+                        case "WhitelistedNames" -> {
+                            if (inCookies) inWhitelistedNames = true;
+                        }
+                        case "Headers" -> {
+                            if (inForwardedValues && !inCookies) inFvHeaders = true;
+                        }
+                        case "QueryStringCacheKeys" -> {
+                            if (inForwardedValues) inQueryStringCacheKeys = true;
+                        }
+                        case "Name" -> {
+                            if (inWhitelistedNames) {
+                                whitelistedNames.add(r.getElementText());
+                            } else if (inFvHeaders) {
+                                fvHeaders.add(r.getElementText());
+                            } else if (inQueryStringCacheKeys) {
+                                queryStringCacheKeys.add(r.getElementText());
+                            }
+                        }
+                        case "MinTTL" -> {
+                            if (inDcb) {
+                                try {
+                                    dcb.setMinTTL(Long.parseLong(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
+                            }
+                        }
+                        case "DefaultTTL" -> {
+                            if (inDcb) {
+                                try {
+                                    dcb.setDefaultTTL(Long.parseLong(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
+                            }
+                        }
+                        case "MaxTTL" -> {
+                            if (inDcb) {
+                                try {
+                                    dcb.setMaxTTL(Long.parseLong(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
                             }
                         }
                         case "TargetOriginId" -> {
@@ -2723,13 +3096,18 @@ public class CloudFrontController {
                             if (inDcb) dcb.setCompress("true".equalsIgnoreCase(r.getElementText()));
                         }
                         case "Method" -> {
-                            if (inAllowedMethods) allowedMethods.add(r.getElementText());
+                            if (inCachedMethods) {
+                                cachedMethods.add(r.getElementText());
+                            } else if (inAllowedMethods) {
+                                allowedMethods.add(r.getElementText());
+                            }
                         }
                         default -> {
                         }
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
+                        case "CachedMethods" -> inCachedMethods = false;
                         case "AllowedMethods" -> inAllowedMethods = false;
                         case "FunctionAssociation" -> {
                             if (currentAssociation != null) {
@@ -2738,6 +3116,46 @@ public class CloudFrontController {
                             }
                         }
                         case "FunctionAssociations" -> inFunctionAssociations = false;
+                        case "WhitelistedNames" -> {
+                            if (inWhitelistedNames && cookies != null && !whitelistedNames.isEmpty()) {
+                                cookies.put("WhitelistedNames", new ArrayList<>(whitelistedNames));
+                            }
+                            whitelistedNames.clear();
+                            inWhitelistedNames = false;
+                        }
+                        case "Headers" -> {
+                            if (inFvHeaders) {
+                                if (forwardedValues != null && !fvHeaders.isEmpty()) {
+                                    forwardedValues.put("Headers", new ArrayList<>(fvHeaders));
+                                }
+                                fvHeaders.clear();
+                                inFvHeaders = false;
+                            }
+                        }
+                        case "QueryStringCacheKeys" -> {
+                            if (inQueryStringCacheKeys) {
+                                if (forwardedValues != null && !queryStringCacheKeys.isEmpty()) {
+                                    forwardedValues.put("QueryStringCacheKeys",
+                                            new ArrayList<>(queryStringCacheKeys));
+                                }
+                                queryStringCacheKeys.clear();
+                                inQueryStringCacheKeys = false;
+                            }
+                        }
+                        case "Cookies" -> {
+                            if (inCookies && forwardedValues != null && cookies != null) {
+                                forwardedValues.put("Cookies", cookies);
+                            }
+                            cookies = null;
+                            inCookies = false;
+                        }
+                        case "ForwardedValues" -> {
+                            if (inForwardedValues && forwardedValues != null) {
+                                dcb.setForwardedValues(forwardedValues);
+                            }
+                            forwardedValues = null;
+                            inForwardedValues = false;
+                        }
                         case "DefaultCacheBehavior" -> inDcb = false;
                         default -> {
                         }
@@ -2747,6 +3165,9 @@ public class CloudFrontController {
             r.close();
             if (!allowedMethods.isEmpty()) {
                 dcb.setAllowedMethods(allowedMethods);
+            }
+            if (!cachedMethods.isEmpty()) {
+                dcb.setCachedMethods(cachedMethods);
             }
             if (!functionAssociations.isEmpty()) {
                 dcb.setFunctionAssociations(functionAssociations);
@@ -2766,11 +3187,23 @@ public class CloudFrontController {
             boolean inCacheBehaviors = false;
             boolean inCacheBehavior = false;
             boolean inAllowedMethods = false;
+            boolean inCachedMethods = false;
             boolean inFunctionAssociations = false;
+            boolean inForwardedValues = false;
+            boolean inCookies = false;
+            boolean inWhitelistedNames = false;
+            boolean inFvHeaders = false;
+            boolean inQueryStringCacheKeys = false;
             CacheBehavior current = null;
             List<String> allowedMethods = new ArrayList<>();
+            List<String> cachedMethods = new ArrayList<>();
             List<Map<String, String>> functionAssociations = new ArrayList<>();
             Map<String, String> currentAssociation = null;
+            Map<String, Object> forwardedValues = null;
+            Map<String, Object> cookies = null;
+            List<String> whitelistedNames = new ArrayList<>();
+            List<String> fvHeaders = new ArrayList<>();
+            List<String> queryStringCacheKeys = new ArrayList<>();
 
             while (r.hasNext()) {
                 int event = r.next();
@@ -2783,11 +3216,15 @@ public class CloudFrontController {
                                 inCacheBehavior = true;
                                 current = new CacheBehavior();
                                 allowedMethods = new ArrayList<>();
+                                cachedMethods = new ArrayList<>();
                                 functionAssociations = new ArrayList<>();
                             }
                         }
                         case "AllowedMethods" -> {
                             if (inCacheBehavior) inAllowedMethods = true;
+                        }
+                        case "CachedMethods" -> {
+                            if (inAllowedMethods) inCachedMethods = true;
                         }
                         case "FunctionAssociations" -> {
                             if (inCacheBehavior) inFunctionAssociations = true;
@@ -2803,6 +3240,71 @@ public class CloudFrontController {
                         case "EventType" -> {
                             if (currentAssociation != null) {
                                 currentAssociation.put("EventType", r.getElementText());
+                            }
+                        }
+                        case "ForwardedValues" -> {
+                            if (inCacheBehavior) {
+                                inForwardedValues = true;
+                                forwardedValues = new LinkedHashMap<>();
+                            }
+                        }
+                        case "QueryString" -> {
+                            if (inForwardedValues && forwardedValues != null) {
+                                forwardedValues.put("QueryString",
+                                        "true".equalsIgnoreCase(r.getElementText()));
+                            }
+                        }
+                        case "Cookies" -> {
+                            if (inForwardedValues) {
+                                inCookies = true;
+                                cookies = new LinkedHashMap<>();
+                            }
+                        }
+                        case "Forward" -> {
+                            if (inCookies && cookies != null) {
+                                cookies.put("Forward", r.getElementText());
+                            }
+                        }
+                        case "WhitelistedNames" -> {
+                            if (inCookies) inWhitelistedNames = true;
+                        }
+                        case "Headers" -> {
+                            if (inForwardedValues && !inCookies) inFvHeaders = true;
+                        }
+                        case "QueryStringCacheKeys" -> {
+                            if (inForwardedValues) inQueryStringCacheKeys = true;
+                        }
+                        case "Name" -> {
+                            if (inWhitelistedNames) {
+                                whitelistedNames.add(r.getElementText());
+                            } else if (inFvHeaders) {
+                                fvHeaders.add(r.getElementText());
+                            } else if (inQueryStringCacheKeys) {
+                                queryStringCacheKeys.add(r.getElementText());
+                            }
+                        }
+                        case "MinTTL" -> {
+                            if (inCacheBehavior && current != null) {
+                                try {
+                                    current.setMinTTL(Long.parseLong(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
+                            }
+                        }
+                        case "DefaultTTL" -> {
+                            if (inCacheBehavior && current != null) {
+                                try {
+                                    current.setDefaultTTL(Long.parseLong(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
+                            }
+                        }
+                        case "MaxTTL" -> {
+                            if (inCacheBehavior && current != null) {
+                                try {
+                                    current.setMaxTTL(Long.parseLong(r.getElementText()));
+                                } catch (NumberFormatException ignored) {
+                                }
                             }
                         }
                         case "PathPattern" -> {
@@ -2831,13 +3333,18 @@ public class CloudFrontController {
                             }
                         }
                         case "Method" -> {
-                            if (inAllowedMethods) allowedMethods.add(r.getElementText());
+                            if (inCachedMethods) {
+                                cachedMethods.add(r.getElementText());
+                            } else if (inAllowedMethods) {
+                                allowedMethods.add(r.getElementText());
+                            }
                         }
                         default -> {
                         }
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
+                        case "CachedMethods" -> inCachedMethods = false;
                         case "AllowedMethods" -> inAllowedMethods = false;
                         case "FunctionAssociation" -> {
                             if (currentAssociation != null) {
@@ -2846,10 +3353,53 @@ public class CloudFrontController {
                             }
                         }
                         case "FunctionAssociations" -> inFunctionAssociations = false;
+                        case "WhitelistedNames" -> {
+                            if (inWhitelistedNames && cookies != null && !whitelistedNames.isEmpty()) {
+                                cookies.put("WhitelistedNames", new ArrayList<>(whitelistedNames));
+                            }
+                            whitelistedNames.clear();
+                            inWhitelistedNames = false;
+                        }
+                        case "Headers" -> {
+                            if (inFvHeaders) {
+                                if (forwardedValues != null && !fvHeaders.isEmpty()) {
+                                    forwardedValues.put("Headers", new ArrayList<>(fvHeaders));
+                                }
+                                fvHeaders.clear();
+                                inFvHeaders = false;
+                            }
+                        }
+                        case "QueryStringCacheKeys" -> {
+                            if (inQueryStringCacheKeys) {
+                                if (forwardedValues != null && !queryStringCacheKeys.isEmpty()) {
+                                    forwardedValues.put("QueryStringCacheKeys",
+                                            new ArrayList<>(queryStringCacheKeys));
+                                }
+                                queryStringCacheKeys.clear();
+                                inQueryStringCacheKeys = false;
+                            }
+                        }
+                        case "Cookies" -> {
+                            if (inCookies && forwardedValues != null && cookies != null) {
+                                forwardedValues.put("Cookies", cookies);
+                            }
+                            cookies = null;
+                            inCookies = false;
+                        }
+                        case "ForwardedValues" -> {
+                            if (inForwardedValues && current != null && forwardedValues != null) {
+                                current.setForwardedValues(forwardedValues);
+                            }
+                            forwardedValues = null;
+                            inForwardedValues = false;
+                        }
                         case "CacheBehavior" -> {
                             if (inCacheBehavior && current != null) {
                                 if (!allowedMethods.isEmpty()) {
                                     current.setAllowedMethods(allowedMethods);
+                                }
+                                if (!cachedMethods.isEmpty()) {
+                                    current.setCachedMethods(cachedMethods);
                                 }
                                 if (!functionAssociations.isEmpty()) {
                                     current.setFunctionAssociations(functionAssociations);
