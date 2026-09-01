@@ -2,12 +2,14 @@ package io.github.hectorvent.floci.services.elasticache;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerHandle;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheMemcachedContainerManager;
 import io.github.hectorvent.floci.services.elasticache.model.CacheCluster;
 import io.github.hectorvent.floci.services.elasticache.model.CacheClusterStatus;
+import io.github.hectorvent.floci.services.elasticache.proxy.ElastiCacheMemcachedProxyManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,8 +30,11 @@ class ElastiCacheMemcachedServiceTest {
     @BeforeEach
     void setUp() {
         ElastiCacheMemcachedContainerManager containerManager = mock(ElastiCacheMemcachedContainerManager.class);
+        ElastiCacheMemcachedProxyManager proxyManager = mock(ElastiCacheMemcachedProxyManager.class);
+        ElastiCacheService elasticacheService = mock(ElastiCacheService.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
         EmulatorConfig config = mock(EmulatorConfig.class);
+        DockerHostResolver dockerHostResolver = mock(DockerHostResolver.class);
 
         EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.ElastiCacheServiceConfig ecConfig = mock(EmulatorConfig.ElastiCacheServiceConfig.class);
@@ -41,8 +46,9 @@ class ElastiCacheMemcachedServiceTest {
         when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> new InMemoryStorage<>());
         when(containerManager.start(anyString(), anyString()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "cluster", "localhost", 11211));
+        when(elasticacheService.allocateProxyPort()).thenReturn(6379, 6380, 6381);
 
-        service = new ElastiCacheMemcachedService(containerManager, storageFactory, config);
+        service = new ElastiCacheMemcachedService(containerManager, proxyManager, elasticacheService, storageFactory, config, dockerHostResolver);
     }
 
     @Test
@@ -66,7 +72,7 @@ class ElastiCacheMemcachedServiceTest {
     @Test
     void getUnknownClusterThrows() {
         AwsException ex = assertThrows(AwsException.class, () -> service.getCacheCluster("no-such-cluster"));
-        assertEquals("CacheClusterNotFound", ex.getErrorCode());
+        assertEquals("CacheClusterNotFoundFault", ex.getErrorCode());
     }
 
     @Test
@@ -94,14 +100,17 @@ class ElastiCacheMemcachedServiceTest {
         service.deleteCacheCluster("my-cluster");
 
         AwsException ex = assertThrows(AwsException.class, () -> service.getCacheCluster("my-cluster"));
-        assertEquals("CacheClusterNotFound", ex.getErrorCode());
+        assertEquals("CacheClusterNotFoundFault", ex.getErrorCode());
     }
 
     @Test
-    void createClusterUsesContainerHostWhenHostnameNotConfigured() {
+    void createClusterUsesLocalhostWhenHostnameNotConfigured() {
         ElastiCacheMemcachedContainerManager containerManager = mock(ElastiCacheMemcachedContainerManager.class);
+        ElastiCacheMemcachedProxyManager proxyManager = mock(ElastiCacheMemcachedProxyManager.class);
+        ElastiCacheService elasticacheService = mock(ElastiCacheService.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
         EmulatorConfig config = mock(EmulatorConfig.class);
+        DockerHostResolver dockerHostResolver = mock(DockerHostResolver.class);
 
         EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.ElastiCacheServiceConfig ecConfig = mock(EmulatorConfig.ElastiCacheServiceConfig.class);
@@ -109,16 +118,18 @@ class ElastiCacheMemcachedServiceTest {
         when(servicesConfig.elasticache()).thenReturn(ecConfig);
         when(ecConfig.defaultMemcachedImage()).thenReturn("memcached:1.6");
         when(config.hostname()).thenReturn(Optional.empty());
+        when(dockerHostResolver.resolve()).thenReturn("172.20.0.2");
 
         when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> new InMemoryStorage<>());
         when(containerManager.start(anyString(), anyString()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "cluster", "172.20.0.10", 11211));
+        when(elasticacheService.allocateProxyPort()).thenReturn(6379);
 
         ElastiCacheMemcachedService containerModeService =
-                new ElastiCacheMemcachedService(containerManager, storageFactory, config);
+                new ElastiCacheMemcachedService(containerManager, proxyManager, elasticacheService, storageFactory, config, dockerHostResolver);
 
         CacheCluster cluster = containerModeService.createCacheCluster("container-cluster");
 
-        assertEquals("172.20.0.10", cluster.getConfigurationEndpoint().address());
+        assertEquals("172.20.0.2", cluster.getConfigurationEndpoint().address());
     }
 }

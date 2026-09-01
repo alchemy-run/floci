@@ -3,11 +3,15 @@ package io.github.hectorvent.floci.services.elasticache;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerHandle;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerManager;
 import io.github.hectorvent.floci.services.elasticache.model.AuthMode;
+import io.github.hectorvent.floci.services.elasticache.model.CacheSnapshot;
+import io.github.hectorvent.floci.services.elasticache.model.CacheSubnetGroup;
 import io.github.hectorvent.floci.services.elasticache.model.Endpoint;
 import io.github.hectorvent.floci.services.elasticache.model.ElastiCacheUser;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroup;
@@ -35,9 +39,13 @@ public class ElastiCacheService {
 
     private final StorageBackend<String, ReplicationGroup> groups;
     private final StorageBackend<String, ElastiCacheUser> users;
+    private final StorageBackend<String, CacheSubnetGroup> subnetGroups;
+    private final StorageBackend<String, CacheSnapshot> snapshots;
     private final ElastiCacheContainerManager containerManager;
     private final ElastiCacheProxyManager proxyManager;
     private final EmulatorConfig config;
+    private final DockerHostResolver dockerHostResolver;
+    private final ContainerDetector containerDetector;
     private final Set<Integer> usedPorts = ConcurrentHashMap.newKeySet();
     private final Set<String> provisioningGroupIds = ConcurrentHashMap.newKeySet();
 
@@ -45,14 +53,31 @@ public class ElastiCacheService {
     public ElastiCacheService(ElastiCacheContainerManager containerManager,
                               ElastiCacheProxyManager proxyManager,
                               StorageFactory storageFactory,
-                              EmulatorConfig config) {
+                              EmulatorConfig config,
+                              DockerHostResolver dockerHostResolver,
+                              ContainerDetector containerDetector) {
         this.containerManager = containerManager;
         this.proxyManager = proxyManager;
         this.config = config;
+        this.dockerHostResolver = dockerHostResolver;
+        this.containerDetector = containerDetector;
         this.groups = storageFactory.create("elasticache", "elasticache-groups.json",
                 new TypeReference<Map<String, ReplicationGroup>>() {});
         this.users = storageFactory.create("elasticache", "elasticache-users.json",
                 new TypeReference<Map<String, ElastiCacheUser>>() {});
+        this.subnetGroups = storageFactory.create("elasticache", "elasticache-subnet-groups.json",
+                new TypeReference<Map<String, CacheSubnetGroup>>() {});
+        this.snapshots = storageFactory.create("elasticache", "elasticache-snapshots.json",
+                new TypeReference<Map<String, CacheSnapshot>>() {});
+    }
+
+    public ElastiCacheService(ElastiCacheContainerManager containerManager,
+                              ElastiCacheProxyManager proxyManager,
+                              StorageFactory storageFactory,
+                              EmulatorConfig config,
+                              DockerHostResolver dockerHostResolver) {
+        this(containerManager, proxyManager, storageFactory, config, dockerHostResolver,
+                new ContainerDetector());
     }
 
     public ReplicationGroup createReplicationGroup(String groupId, String description,
@@ -79,8 +104,7 @@ public class ElastiCacheService {
             try {
                 handle = containerManager.start(groupId, image);
 
-                String endpointHost = resolveEndpointHost();
-                Endpoint endpoint = new Endpoint(endpointHost, proxyPort);
+                Endpoint endpoint = endpointFor(handle, proxyPort);
                 ReplicationGroup group = new ReplicationGroup(
                         groupId, description, ReplicationGroupStatus.AVAILABLE,
                         authMode, endpoint, Instant.now(), proxyPort);
@@ -94,7 +118,8 @@ public class ElastiCacheService {
                         (username, password) -> validatePassword(groupId, username, password));
 
                 groups.put(groupId, group);
-                LOG.infov("Replication group {0} created, endpoint={1}:{2}", groupId, endpointHost, String.valueOf(proxyPort));
+                LOG.infov("Replication group {0} created, endpoint={1}:{2}",
+                        groupId, endpoint.address(), String.valueOf(endpoint.port()));
                 return group;
             } catch (RuntimeException e) {
                 LOG.warnv("Replication group {0} provisioning failed, rolling back: {1}", groupId, e.getMessage());
@@ -128,6 +153,13 @@ public class ElastiCacheService {
         }
     }
 
+    private Endpoint endpointFor(ElastiCacheContainerHandle handle, int proxyPort) {
+        if (containerDetector.isRunningInContainer()) {
+            return new Endpoint(handle.getHost(), handle.getPort());
+        }
+        return new Endpoint(resolveEndpointHost(), proxyPort);
+    }
+
     public ReplicationGroup getReplicationGroup(String groupId) {
         return groups.get(groupId).orElseThrow(() ->
                 new AwsException("ReplicationGroupNotFoundFault",
@@ -145,9 +177,17 @@ public class ElastiCacheService {
     }
 
     public void deleteReplicationGroup(String groupId) {
+        deleteReplicationGroup(groupId, null);
+    }
+
+    public void deleteReplicationGroup(String groupId, String finalSnapshotName) {
         ReplicationGroup group = groups.get(groupId).orElseThrow(() ->
                 new AwsException("ReplicationGroupNotFoundFault",
                         "Replication group " + groupId + " not found.", 404));
+
+        if (finalSnapshotName != null && !finalSnapshotName.isBlank()) {
+            createSnapshot(finalSnapshotName, groupId);
+        }
 
         group.setStatus(ReplicationGroupStatus.DELETING);
         groups.put(groupId, group);
@@ -180,6 +220,93 @@ public class ElastiCacheService {
 
         groups.put(groupId, group);
         return group;
+    }
+
+    public ReplicationGroup saveReplicationGroup(ReplicationGroup group) {
+        groups.put(group.getReplicationGroupId(), group);
+        return group;
+    }
+
+    public ReplicationGroup setReplicaCount(String groupId, int replicaCount) {
+        ReplicationGroup group = getReplicationGroup(groupId);
+        group.setReplicasPerNodeGroup(Math.max(0, replicaCount));
+        return saveReplicationGroup(group);
+    }
+
+    public ReplicationGroup setNodeGroupCount(String groupId, int nodeGroupCount) {
+        if (nodeGroupCount < 1) {
+            throw new AwsException("InvalidParameterValue", "NodeGroupCount must be at least 1.", 400);
+        }
+        ReplicationGroup group = getReplicationGroup(groupId);
+        group.setNodeGroupCount(nodeGroupCount);
+        return saveReplicationGroup(group);
+    }
+
+    public CacheSubnetGroup createSubnetGroup(String name, String description, List<String> subnetIds,
+                                               Map<String, String> tags) {
+        if (subnetGroups.get(name).isPresent()) {
+            throw new AwsException("CacheSubnetGroupAlreadyExistsFault",
+                    "Cache subnet group " + name + " already exists.", 400);
+        }
+        CacheSubnetGroup group = new CacheSubnetGroup(name, description, subnetIds, tags);
+        subnetGroups.put(name, group);
+        return group;
+    }
+
+    public CacheSubnetGroup getSubnetGroup(String name) {
+        return subnetGroups.get(name).orElseThrow(() -> new AwsException("CacheSubnetGroupNotFoundFault",
+                "Cache subnet group " + name + " not found.", 404));
+    }
+
+    public Collection<CacheSubnetGroup> listSubnetGroups(String name) {
+        if (name != null && !name.isBlank()) {
+            return List.of(getSubnetGroup(name));
+        }
+        return subnetGroups.scan(key -> true);
+    }
+
+    public CacheSubnetGroup modifySubnetGroup(String name, String description, List<String> subnetIds) {
+        CacheSubnetGroup group = getSubnetGroup(name);
+        if (description != null) {
+            group.setDescription(description);
+        }
+        if (subnetIds != null && !subnetIds.isEmpty()) {
+            group.setSubnetIds(subnetIds);
+        }
+        subnetGroups.put(name, group);
+        return group;
+    }
+
+    public void deleteSubnetGroup(String name) {
+        getSubnetGroup(name);
+        subnetGroups.delete(name);
+    }
+
+    public CacheSnapshot createSnapshot(String snapshotName, String groupId) {
+        getReplicationGroup(groupId);
+        if (snapshots.get(snapshotName).isPresent()) {
+            throw new AwsException("SnapshotAlreadyExistsFault", "Snapshot " + snapshotName + " already exists.", 400);
+        }
+        CacheSnapshot snapshot = new CacheSnapshot(snapshotName, groupId);
+        snapshots.put(snapshotName, snapshot);
+        return snapshot;
+    }
+
+    public Collection<CacheSnapshot> listSnapshots(String snapshotName) {
+        if (snapshotName != null && !snapshotName.isBlank()) {
+            return snapshots.get(snapshotName)
+                    .map(List::of)
+                    .orElseThrow(() -> new AwsException("SnapshotNotFoundFault",
+                            "Snapshot " + snapshotName + " not found.", 404));
+        }
+        return snapshots.scan(key -> true);
+    }
+
+    public CacheSnapshot deleteSnapshot(String snapshotName) {
+        CacheSnapshot snapshot = snapshots.get(snapshotName).orElseThrow(() ->
+                new AwsException("SnapshotNotFoundFault", "Snapshot " + snapshotName + " not found.", 404));
+        snapshots.delete(snapshotName);
+        return snapshot;
     }
 
     public ElastiCacheUser createUser(String userId, String userName, AuthMode authMode,
@@ -268,10 +395,10 @@ public class ElastiCacheService {
     }
 
     private String resolveEndpointHost() {
-        return config.hostname().orElse("localhost");
+        return config.hostname().orElseGet(dockerHostResolver::resolve);
     }
 
-    private int allocateProxyPort() {
+    public int allocateProxyPort() {
         int base = config.services().elasticache().proxyBasePort();
         int max = config.services().elasticache().proxyMaxPort();
         for (int port = base; port <= max; port++) {
@@ -283,7 +410,7 @@ public class ElastiCacheService {
                 "No available proxy ports in range " + base + "-" + max, 503);
     }
 
-    private void releaseProxyPort(int port) {
+    public void releaseProxyPort(int port) {
         usedPorts.remove(port);
     }
 }

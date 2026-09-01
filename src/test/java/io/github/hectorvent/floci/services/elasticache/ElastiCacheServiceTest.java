@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.elasticache;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerHandle;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -43,6 +45,7 @@ class ElastiCacheServiceTest {
         proxyManager = mock(ElastiCacheProxyManager.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
         EmulatorConfig config = mock(EmulatorConfig.class);
+        DockerHostResolver dockerHostResolver = mock(DockerHostResolver.class);
 
         EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.ElastiCacheServiceConfig ecConfig = mock(EmulatorConfig.ElastiCacheServiceConfig.class);
@@ -58,7 +61,7 @@ class ElastiCacheServiceTest {
                 .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "localhost", 6379));
         doNothing().when(proxyManager).startProxy(anyString(), any(), anyInt(), anyString(), anyInt(), any());
 
-        service = new ElastiCacheService(containerManager, proxyManager, storageFactory, config);
+        service = new ElastiCacheService(containerManager, proxyManager, storageFactory, config, dockerHostResolver);
     }
 
     @Test
@@ -135,6 +138,35 @@ class ElastiCacheServiceTest {
                 service.createReplicationGroup("grp2", "test", AuthMode.PASSWORD, null);
         assertEquals(16379, recovered.getProxyPort(),
                 "Port from the failed create must be released so the next group reuses it");
+    }
+
+    @Test
+    void createsContainerReachableEndpointWhenHostnameNotConfigured() {
+        ElastiCacheContainerManager reachableContainerManager = mock(ElastiCacheContainerManager.class);
+        ElastiCacheProxyManager reachableProxyManager = mock(ElastiCacheProxyManager.class);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        DockerHostResolver dockerHostResolver = mock(DockerHostResolver.class);
+        EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.ElastiCacheServiceConfig ecConfig = mock(EmulatorConfig.ElastiCacheServiceConfig.class);
+        when(config.services()).thenReturn(servicesConfig);
+        when(servicesConfig.elasticache()).thenReturn(ecConfig);
+        when(ecConfig.proxyBasePort()).thenReturn(16379);
+        when(ecConfig.proxyMaxPort()).thenReturn(16399);
+        when(ecConfig.defaultImage()).thenReturn("valkey/valkey:8");
+        when(config.hostname()).thenReturn(Optional.empty());
+        when(dockerHostResolver.resolve()).thenReturn("172.20.0.2");
+        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> new InMemoryStorage<>());
+        when(reachableContainerManager.start(anyString(), anyString()))
+                .thenReturn(new ElastiCacheContainerHandle("cid", "grp", "172.20.0.3", 6379));
+
+        ElastiCacheService reachableService = new ElastiCacheService(
+                reachableContainerManager, reachableProxyManager, storageFactory, config, dockerHostResolver);
+
+        ReplicationGroup group = reachableService.createReplicationGroup(
+                "grp", "test", AuthMode.NO_AUTH, null);
+
+        assertEquals("172.20.0.2", group.getConfigurationEndpoint().address());
     }
 
     @Test

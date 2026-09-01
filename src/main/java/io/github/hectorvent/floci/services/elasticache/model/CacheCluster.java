@@ -3,6 +3,10 @@ package io.github.hectorvent.floci.services.elasticache.model;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @RegisterForReflection
 public class CacheCluster {
@@ -13,6 +17,11 @@ public class CacheCluster {
     private String engineVersion;
     private Endpoint configurationEndpoint;
     private Instant cacheClusterCreateTime;
+    private int proxyPort;
+    private int numCacheNodes = 1;
+    private String cacheNodeType = "cache.t4g.small";
+    private List<String> securityGroupIds = new ArrayList<>();
+    private Map<String, String> tags = new LinkedHashMap<>();
 
     // Transient — not persisted, restored on container restart
     private transient String containerId;
@@ -49,6 +58,23 @@ public class CacheCluster {
 
     public Instant getCacheClusterCreateTime() { return cacheClusterCreateTime; }
     public void setCacheClusterCreateTime(Instant cacheClusterCreateTime) { this.cacheClusterCreateTime = cacheClusterCreateTime; }
+
+    public int getProxyPort() { return proxyPort; }
+    public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
+
+    public int getNumCacheNodes() { return numCacheNodes; }
+    public void setNumCacheNodes(int numCacheNodes) { this.numCacheNodes = numCacheNodes; }
+
+    public String getCacheNodeType() { return cacheNodeType; }
+    public void setCacheNodeType(String cacheNodeType) { this.cacheNodeType = cacheNodeType; }
+
+    public List<String> getSecurityGroupIds() { return securityGroupIds; }
+    public void setSecurityGroupIds(List<String> securityGroupIds) {
+        this.securityGroupIds = securityGroupIds != null ? new ArrayList<>(securityGroupIds) : new ArrayList<>();
+    }
+
+    public Map<String, String> getTags() { return tags; }
+    public void setTags(Map<String, String> tags) { this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>(); }
 
     public String getContainerId() { return containerId; }
     public void setContainerId(String containerId) { this.containerId = containerId; }
