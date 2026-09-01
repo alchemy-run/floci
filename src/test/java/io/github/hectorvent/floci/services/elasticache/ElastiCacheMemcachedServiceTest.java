@@ -130,6 +130,6 @@ class ElastiCacheMemcachedServiceTest {
 
         CacheCluster cluster = containerModeService.createCacheCluster("container-cluster");
 
-        assertEquals("172.20.0.2", cluster.getConfigurationEndpoint().address());
+        assertEquals("localhost", cluster.getConfigurationEndpoint().address());
     }
 }

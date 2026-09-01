@@ -395,7 +395,10 @@ public class ElastiCacheService {
     }
 
     private String resolveEndpointHost() {
-        return config.hostname().orElseGet(dockerHostResolver::resolve);
+        // Host clients talk to the TCP proxy on localhost. When Floci itself
+        // runs in Docker, endpointFor() returns the cache container address
+        // instead so Lambda-in-Docker can reach it on the shared network.
+        return config.hostname().orElse("localhost");
     }
 
     public int allocateProxyPort() {

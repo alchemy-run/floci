@@ -141,7 +141,7 @@ class ElastiCacheServiceTest {
     }
 
     @Test
-    void createsContainerReachableEndpointWhenHostnameNotConfigured() {
+    void usesLocalhostWhenHostnameNotConfigured() {
         ElastiCacheContainerManager reachableContainerManager = mock(ElastiCacheContainerManager.class);
         ElastiCacheProxyManager reachableProxyManager = mock(ElastiCacheProxyManager.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
@@ -166,7 +166,7 @@ class ElastiCacheServiceTest {
         ReplicationGroup group = reachableService.createReplicationGroup(
                 "grp", "test", AuthMode.NO_AUTH, null);
 
-        assertEquals("172.20.0.2", group.getConfigurationEndpoint().address());
+        assertEquals("localhost", group.getConfigurationEndpoint().address());
     }
 
     @Test

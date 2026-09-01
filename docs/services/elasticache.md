@@ -22,6 +22,7 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `DeleteUser` | Remove an ElastiCache user |
 | `CreateCacheCluster` | - |
 | `DescribeCacheClusters` | - |
+| `DescribeCacheEngineVersions` | - |
 | `ModifyCacheCluster` | Update node count and node type metadata |
 | `DeleteCacheCluster` | - |
 | `CreateCacheSubnetGroup` | Create persisted subnet metadata |
@@ -31,6 +32,7 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `IncreaseReplicaCount` | Update replication group replica metadata |
 | `DecreaseReplicaCount` | Update replication group replica metadata |
 | `ModifyReplicationGroupShardConfiguration` | Update shard metadata |
+| `TestFailover` | - |
 | `DescribeSnapshots` | List final snapshots created on delete |
 | `DeleteSnapshot` | Delete a snapshot |
 | `ListTagsForResource` | List tags for provisioned cache resources |

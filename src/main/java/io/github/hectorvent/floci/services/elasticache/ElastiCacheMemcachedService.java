@@ -150,6 +150,6 @@ public class ElastiCacheMemcachedService {
     }
 
     private String resolveEndpointHost() {
-        return config.hostname().orElseGet(dockerHostResolver::resolve);
+        return config.hostname().orElse("localhost");
     }
 }
