@@ -1,0 +1,4531 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fast, free, open-source local AWS emulator">
+      
+      
+      
+        <link rel="canonical" href="https://floci.io/floci/alchemy-local-gaps/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/floci.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Alchemy local-dev gaps - Floci</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <script defer src="https://cloud.umami.is/script.js" data-website-id="b2ab8ccd-4619-4b94-bfa6-e8870961d6eb"></script>
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#alchemy-local-dev-gaps" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Floci" class="md-header__button md-logo" aria-label="Floci" data-md-component="logo">
+      
+  <img src="../assets/floci-header.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Floci
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Alchemy local-dev gaps
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/floci-io/floci" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/quick-start/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/environment-variables/" class="md-tabs__link">
+          
+  
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../services/" class="md-tabs__link">
+          
+  
+  
+  Services
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../testcontainers/" class="md-tabs__link">
+          
+  
+  
+  Testcontainers
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Floci" class="md-nav__button md-logo" aria-label="Floci" data-md-component="logo">
+      
+  <img src="../assets/floci-header.svg" alt="logo">
+
+    </a>
+    Floci
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/floci-io/floci" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    floci-io/floci
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/aws-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS CLI & SDK Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/migrate-from-localstack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migrate from LocalStack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/docker-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/docker-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/ports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ports Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/multi-account/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-Account Isolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/tls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TLS / HTTPS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/initialization-hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Initialization Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_9" id="__nav_3_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/advanced/application-yml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    application.yml Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Services
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/ssm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SSM Parameter Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/sqs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/sns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/ses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SES
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/s3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    S3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/dynamodb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DynamoDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/lambda/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lambda
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/api-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Gateway
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cognito/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cognito
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/kms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KMS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/kinesis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kinesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/kinesisanalytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managed Service for Apache Flink
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/secrets-manager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cloudformation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudFormation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/step-functions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Step Functions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/iam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IAM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/sts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    STS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/elasticache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ElastiCache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/memorydb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MemoryDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/rds/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RDS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/rds-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RDS Data API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/msk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MSK (Kafka)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/glue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Glue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/neptune/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Neptune
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/docdb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DocumentDB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/athena/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Athena
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/firehose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Firehose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/eventbridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EventBridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/pipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EventBridge Pipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/scheduler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EventBridge Scheduler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cloudwatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudWatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/rum/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudWatch RUM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/acm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ACM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/ecs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ECS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/ecr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ECR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/resource-groups-tagging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Resource Groups Tagging API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/eks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EKS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/mwaa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MWAA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/opensearch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenSearch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/ec2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EC2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/lightsail/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lightsail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/appconfig/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AppConfig
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/bedrock-runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bedrock Runtime
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/elb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ELB v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/autoscaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto Scaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/elastic-beanstalk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Elastic Beanstalk
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/codebuild/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CodeBuild
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/batch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS Batch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/codedeploy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CodeDeploy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/codepipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CodePipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/backup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS Backup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cloudtrail/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudTrail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cloudfront/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudFront
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/route53/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Route53
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cloudmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS Cloud Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/iot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS IoT Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/appsync/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AppSync
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/transfer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transfer Family
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AWS Config
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cloudtrail/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CloudTrail
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/emr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EMR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/wafv2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WAF v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/textract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Textract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/transcribe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcribe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/pricing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pricing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/ce/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost Explorer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/cur/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and Usage Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/bcm-data-exports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    BCM Data Exports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testcontainers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Testcontainers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testcontainers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testcontainers/java/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Java
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testcontainers/nodejs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Node.js / TypeScript
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testcontainers/python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testcontainers/go/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Go
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#genuine-census-first-real-full-run-2026-08-18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Genuine census (first real full run, 2026-08-18)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Policy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S3
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#s3-vectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        S3 Vectors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API Gateway
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appsync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AppSync
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AppConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wafv2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WAFv2
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ACM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scheduler-pipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduler / Pipes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ec2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EC2
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ecr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ECR
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ecs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ECS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dynamodb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DynamoDB
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lambda" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lambda
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lambda-microvms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lambda MicroVMs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#iam" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IAM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-scaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto Scaling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#application-auto-scaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Application Auto Scaling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step Functions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RDS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloud-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloud Map
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#route-53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Route 53
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudwatch-cloudwatch-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CloudWatch / CloudWatch Logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#elbv2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ELBv2
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#eventbridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EventBridge
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#eventbridge-scheduler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EventBridge Scheduler
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#eventbridge-pipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        EventBridge Pipes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KMS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloudfront" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CloudFront
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cognito" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cognito
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#firehose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Firehose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kinesis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kinesis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SES
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secrets-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets Manager
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ssm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SNS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#glue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Glue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#athena" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Athena
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-reproduce" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to reproduce
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="alchemy-local-dev-gaps">Alchemy local-dev gaps</h1>
+<p>Alchemy runs its live AWS suites against Floci with <code>ALCHEMY_TEST_DEV=1</code>
+(<code>ALCHEMY_FLOCI_IMAGE=floci:dev</code> while iterating). This page is the order
+book for emulator gaps those suites surface. Control-plane CRUD that already
+works is not listed.</p>
+<blockquote>
+<p><strong>Evidence caveat (2026-08-18):</strong> every run made through <code>pnpm
+test:aws:floci</code> before this date silently executed against <strong>live AWS</strong> —
+<code>Bun.spawn</code> in <code>scripts/test-aws-floci.ts</code> snapshots the environment at
+process start, so the script's <code>process.env.ALCHEMY_TEST_DEV = "1"</code>
+mutation never reached the spawned test process (fixed by passing
+<code>env: { ...process.env }</code> explicitly). Only runs made with a literal
+<code>ALCHEMY_TEST_DEV=1</code> shell prefix actually hit Floci. Per-service claims
+below that cite <code>test:aws:floci</code> evidence from before the fix are suspect
+until re-verified against a genuine emulator run.</p>
+</blockquote>
+<h2 id="genuine-census-first-real-full-run-2026-08-18">Genuine census (first real full run, 2026-08-18)</h2>
+<p><code>pnpm test:aws:floci --retry 0</code> after the env fix: <strong>635 passed / 253
+failed</strong> across 294 files (at <code>--concurrency 200</code> the RPC sidecar spawner
+collapses with mass <code>WebSocket connection failed</code>; the script now defaults
+to 64). Verified green in isolation: AutoScaling (incl. all 10 bindings),
+ACM (14/14), ApiGateway RestApi lifecycle, CloudFront KVS bindings.</p>
+<p>Failure classes, largest first:</p>
+<ol>
+<li><strong>Split-brain suites (not Floci gaps).</strong> The runner includes a service's
+   whole test directory when <em>any</em> of its resources is <code>flociDual</code>'d. A
+   non-dualized resource in that directory (IAM User/Group/Policy/…,
+   EC2 Instance, …) deploys <strong>live</strong> while the test body's distilled
+   clients are pinned to Floci — list/describe assertions then read an
+   empty emulator. Fixing these means dualizing the resources (and
+   implementing whatever Floci ops they need), not patching handlers
+   blindly. Biggest offenders: IAM (38), EC2 Instance suites.</li>
+<li><strong>Missing IAM Query ops</strong> (needed before IAM resources can dualize):
+   <code>ListAccountAliases</code>/aliases CRUD, <code>GetAccountPasswordPolicy</code> + CRUD,
+   <code>ListVirtualMFADevices</code> + CRUD, <code>GetServerCertificate</code> + CRUD,
+   <code>GetSSHPublicKey</code> + CRUD, <code>GetSAMLProvider</code> + CRUD,
+   <code>GetOpenIDConnectProvider</code> + CRUD, credential report, account
+   summary/authorization details, simulate/access-advisor family.</li>
+<li><strong>Per-service handler gaps in already-dualized services</strong> — the true
+   order book: StepFunctions (16), SES (16), ECS (16), CloudFront (13 —
+   KVS data plane now implemented), Glue (12), SecretsManager (11),
+   Cognito (11), ApplicationAutoScaling (9), S3 (8), Batch (7), ELBv2 (6),
+   Kinesis (5), ECR (5), DynamoDB (5), and a long tail. Each needs the
+   standard inner loop against its run-log failures.</li>
+</ol>
+<h2 id="policy">Policy</h2>
+<ul>
+<li><strong><code>UnknownOperationException</code> / CloudWatch <code>UnsupportedOperation</code> = implement the operation.</strong> These are missing handler cases, not environment problems. Add the action to the service handler, store enough in-memory state to satisfy AWS-shaped describe/list/update, write a Floci integration test, and update <code>docs/services/{service}.md</code> plus the count in <code>docs/services/index.md</code>. Do <strong>not</strong> paper them over with <code>isLocalEmulator</code> skips in Alchemy.</li>
+<li><strong>Wrong-shape responses</strong> (extra fields, dropped <code>Condition</code>, leftover <code>StreamViewType</code>) are also patches — match live AWS.</li>
+<li><strong>Services with no Floci implementation at all</strong> stay remote-only in Alchemy (<code>Alchemy.remote()</code> / live provider). Do not invent a new service here.</li>
+<li>Alchemy <code>isLocalEmulator</code> skips stay only for host/environment issues (port 80, advertised Function URL hostname) until the data plane is actually reachable.</li>
+</ul>
+<h2 id="s3">S3</h2>
+<p>Patched in this tree (tagging <code>NoSuchTagSet</code>, singleton policy collapse,
+accelerate, replication, intelligent-tiering including list;
+<code>RestoreObject</code> → <code>403 InvalidObjectState</code> on STANDARD;
+Get/Put ObjectRetention and LegalHold → <code>400 InvalidRequest</code> without
+Object Lock; presigned PUT Content-Type mismatch → <code>403</code>; copy REPLACE
+<code>application/octet-stream</code> → <code>binary/octet-stream</code>). Isolated
+<code>pnpm test:aws:floci test/AWS/S3 --retry 0 --concurrency 8</code> (2026-08-19):
+<strong>51 passed / 0 failed</strong>. Remaining:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Website data plane on <code>*.s3-website-*.amazonaws.com:80</code></td>
+<td>Alchemy <code>ownership controls and website hosting serves index.html</code></td>
+<td>Gateway already serves website Host headers on <code>:4566</code>. Host port 80 + public DNS is an environment problem; alchemy rewrites those URLs onto the gateway under <code>ALCHEMY_TEST_DEV</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="s3-vectors">S3 Vectors</h2>
+<p>Patched in this tree (tags, bucket policy, <code>ListVectors</code>, create-time
+metadata). Alchemy now <code>flociDual</code>s VectorBucket and Index. Needs image
+rebuild (old image falls through missing <code>GetVectorBucketPolicy</code> to S3).</p>
+<h2 id="api-gateway">API Gateway</h2>
+<p>Patched in this tree (usage-plan get/update, key/authorizer/deployment
+updates, gateway responses, v1 VPC links, ExportApi, cache flush, v2
+domain names, binaryMediaTypes, <code>rootResourceId</code> on every RestApi
+response, <code>GetResources?embed=methods</code>, GetUsage/UpdateUsage, v2 stage
+<code>description</code> + tags, TagResource on <code>/apis/{id}/stages/{name}</code> ARNs,
+and <code>{apiId}.execute-api.{region}.amazonaws.com</code> Host
+routing onto <code>/execute-api/{apiId}/{stage}/…</code>). Alchemy now <code>flociDual</code>s
+RestApi and the related v1/v2 resources. Api mappings stay live-only
+(unimplemented). Still missing ReimportApi, routing rules,
+TestInvokeAuthorizer, docs parts, client certificates. WebSocket
+invoke URLs in Lambda env are rewritten to
+<code>wss://127.0.0.1:{port}/ws/{apiId}/{stage}</code> so the host-side <code>ws</code>
+client can dial them; <code>@connections</code> POSTs from inside Lambda are
+rewritten onto the path-style execute-api plane.</p>
+<h2 id="appsync">AppSync</h2>
+<p>Patched in this tree (API cache, EvaluateCode/MappingTemplate, GraphQL
+data plane, AWS-shaped URLs, ACM cert check). Embedded DNS now resolves
+<code>{apiId}.appsync-api.{region}.amazonaws.com</code> and <code>appsync.{region}.amazonaws.com</code>
+to Floci so in-Lambda GraphQL <code>fetch()</code> / distilled clients reach the
+emulator; TLS SAN <code>*.appsync-api.us-east-1.amazonaws.com</code> covers HTTPS:443
+(the single-label <code>*.us-east-1.amazonaws.com</code> wildcard does not).
+<code>EvaluateCode</code> <code>outErrors</code> is the AWS JSON string. Alchemy <code>flociDual</code>s
+GraphqlApi and related resources. Test-process HTTP rewrite still maps
+<code>*.appsync-api.*.amazonaws.com</code> onto the gateway (same as S3 website).
+Still missing DynamoDB/HTTP/OpenSearch/RDS adapters, subscriptions, and
+Lambda-authorizer data-plane.</p>
+<h2 id="appconfig">AppConfig</h2>
+<p>Patched in this tree (update/delete, extensions, validate, stop
+deployment, strategy duration, extension action dispatch). Alchemy now
+<code>flociDual</code>s Application, Environment, Profile, Strategy, Deployment,
+HostedConfigurationVersion, Extension, and ExtensionAssociation.
+<code>StartDeployment</code> stays <code>DEPLOYING</code> when <code>DeploymentDurationInMinutes &gt; 0</code>
+so <code>StopDeployment</code> can roll it back. Associated extension actions invoke
+Lambda (<code>Event</code>) and emit EventBridge (<code>Source=aws.appconfig</code>) on
+<code>ON_DEPLOYMENT_START</code> / <code>COMPLETE</code> / <code>ROLLED_BACK</code>.</p>
+<h2 id="wafv2">WAFv2</h2>
+<p>Patched in this tree (API keys, managed-rule catalog, sampled/rate/top-path,
+TagResource persist). Against current <code>floci:dev</code>: 7/21. Alchemy now
+<code>flociDual</code>s WebACL, RuleGroup, IPSet, RegexPatternSet, LoggingConfiguration,
+and WebACLAssociation (creates were stamping the live account). Sampled
+requests / rate keys / top-path return empty AWS-shaped payloads.</p>
+<h2 id="acm">ACM</h2>
+<p>Patched in this tree (<code>SearchCertificates</code>, <code>UpdateCertificateOptions</code>,
+<code>RenewCertificate</code>, <code>ResendValidationEmail</code>, <code>RevokeCertificate</code>; pending
+public certs). Alchemy now <code>flociDual</code>s Certificate and AccountConfiguration.
+ACMPCA stays remote-only. Bindings 500s are Lambda Function URL reachability.
+<code>NoSuchHostedZone</code> is Route53.</p>
+<h2 id="scheduler-pipes">Scheduler / Pipes</h2>
+<p>Scheduler Schedule/ScheduleGroup and Pipes Pipe are <code>flociDual</code> (15/17).
+Needs rebuild for context-attribute substitution and Lambda bare-array
+batch. No missing operations.</p>
+<h2 id="ec2">EC2</h2>
+<p>Patched in this tree (peering, DHCP, prefix lists, ENIs, snapshots,
+describe-by-id NotFound, default-VPC reseed, CloudWatch VPC flow logs +
+<code>vpc-flow-log</code> tags, CreateVolume <code>KmsKeyId</code> alias→ARN, DescribeFlowLogs
+filters/pagination, DeleteVpc default-furniture reap, instance
+control-plane <code>running</code> without waiting on Docker, RunInstances
+<code>NetworkInterface.N</code> subnet/SG/public-IP, hosted <code>systemctl</code> shim, HTTP
+mux on the guest app port). Alchemy now <code>flociDual</code>s Instance, FlowLog,
+and the networking/storage resources the suite hits. Transit / Carrier /
+LocalGateway / CoreNetwork route targets stay <code>UnsupportedOperation</code>.</p>
+<h2 id="ecr">ECR</h2>
+<p>Patched in this tree (registry policy, scan config, layer upload/PutImage,
+download URL, scan APIs, describe fallback across account ids, AWS-shaped
+<code>GetAuthorizationToken</code> proxyEndpoint, hostname-style docker-push lookup,
+EventBridge <code>ECR Image Action</code> on PutImage / BatchDeleteImage). Alchemy
+<code>flociDual</code>s Repository, Image, and RegistryPolicy.</p>
+<p>Repository-name validation matches live AWS
+<code>(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*</code> —
+consecutive separators (<code>--</code>) are rejected on both. ECS-generated names
+containing <code>--</code> are out-of-scope (name generation), not an ECR emulator
+bug.</p>
+<p>Remaining: <code>docker push</code> to real <code>*.amazonaws.com</code> hostnames (Floci
+returns <code>*.localhost</code> URIs).</p>
+<h2 id="ecs">ECS</h2>
+<p>No missing operations. Source now round-trips task-def/service fields
+(logConfiguration, dependsOn, circuit breaker, FARGATE_SPOT, container
+<code>healthCheck</code>, <code>serviceRegistries</code>, …). Cluster, Service, Task,
+TaskDefinition already dual; CapacityProvider now dual.
+Remaining: EC2 <code>InvalidVpcID.NotFound</code> / hung subnet create (Bindings),
+Route53 hosted-zone lookup (<code>ServiceHostedZoneNotFound</code> after local
+<code>CreateHostedZone</code> — fixed in Route 53 <code>ListHostedZonesByName</code>), Cloud Map + EFS
+on <code>ServicePhase2Config</code>, AAS unstamped-row delete, stale live-AWS
+<code>delete (remote)</code> / <code>ServiceNotActiveException</code>, ECR repo-name pattern.</p>
+<h2 id="dynamodb">DynamoDB</h2>
+<p>Patched in this tree (stream spec omitted when disabled, resource policy,
+Contributor Insights, Kinesis destination precision, Kinesis
+<code>ListTagsForResource</code>, CloudWatch <code>DescribeInsightRules</code>).</p>
+<p><code>UpdateTable</code> matches AWS no-op semantics: unchanged
+<code>ProvisionedThroughput</code> is rejected only when it is the sole field on the
+request. Alchemy's Table reconciler always sends BillingMode /
+AttributeDefinitions / SSE / deletion protection alongside throughput, so
+those updates now succeed (unblocks Application Auto Scaling's nine
+DynamoDB-backed suites).</p>
+<p>On-demand backups (<code>CreateBackup</code> / <code>DescribeBackup</code> / <code>ListBackups</code> /
+<code>DeleteBackup</code> / <code>RestoreTableFromBackup</code>) and
+<code>RestoreTableToPointInTime</code> are implemented. <code>ExportTableToPointInTime</code>
+and PITR restore emit <code>PointInTimeRecoveryUnavailableException</code> when
+PITR is disabled. <code>ExecuteTransaction</code> returns per-statement
+<code>Responses</code> for PartiQL <code>SELECT</code>.</p>
+<p>Isolated DynamoDB (2026-08-19): <strong>103 passed / 2 failed / 1 todo</strong>.
+Remaining Bindings <code>DeleteItem</code> and <code>Backups</code> delete are Lambda Function
+URL dropping HTTP DELETE bodies (<code>RequestParseError: Unexpected end of
+JSON input</code>) — the DynamoDB APIs themselves work. Out of scope for this
+service.</p>
+<h2 id="lambda">Lambda</h2>
+<p>Patched in this tree (<code>AddPermission</code>/<code>GetPolicy</code> keep
+<code>lambda:InvokedViaFunctionUrl</code> and <code>lambda:FunctionUrlAuthType</code>
+Conditions; <code>UpdateFunctionCode</code> persists <code>Architectures</code>;
+<code>GetAccountSettings</code>; <code>InvokeWithResponseStream</code> event-stream;
+VPC Hyperplane ENIs on create/delete; Extensions API writes
+<code>EXTENSION Name: "…"</code> to CloudWatch; <code>GetLayerVersionByArn</code>;
+<code>UpdateFunctionUrlConfig</code> Cors MaxAge is null-safe;
+unsigned AWS_IAM Function URLs return 403).</p>
+<p><code>Version</code> and <code>Alias</code> now deploy locally (the <code>DurableFunction</code> suite
+publishes a version and creates a <code>live</code> alias against Floci,
+2026-08-19 — account <code>000000000000</code>, <code>PublishVersion</code>/<code>CreateAlias</code> in
+the emulator log). The <code>LayerVersion</code> dualization status is unverified.</p>
+<p>Lambda containers now receive <code>ASIA…</code> credentials minted from the
+function's execution role (see IAM). The <code>test</code> root bypass is only used
+when the function has no role.</p>
+<p><strong>Durable Functions</strong> are emulated (<code>services/lambda/durable/</code>, see
+<a href="../services/lambda/#durable-executions">docs/services/lambda.md</a>):
+durable <code>Invoke</code> (<code>X-Amz-Durable-Execution-Name</code> → 202 +
+<code>X-Amz-Durable-Execution-Arn</code>, idempotent reattach by name),
+the checkpoint data plane the Durable Execution SDK speaks from inside
+the function (<code>CheckpointDurableExecution</code>, <code>GetDurableExecutionState</code>),
+real suspend/resume (a durable wait arms a Vert.x timer and the function
+is re-invoked with <code>UpdatedOperationIds</code>; no container is held during the
+wait), chained invokes (<code>CHAINED_INVOKE</code> starts a child durable execution
+and resumes the parent with the child's result), callbacks, <code>Stop</code>,
+<code>List</code>, <code>Get</code>, and synthesized <code>History</code>. Suspended WAIT/RETRY/callback
+timers are re-armed from <code>lambda-durable-executions.json</code> on startup
+(hybrid storage under <code>/app/data</code>). Function delete — API or CloudFormation
+— purges the function's executions via <code>LambdaService.deleteFunction</code>.
+<code>timeout 900 pnpm test:aws:floci test/AWS/Lambda/DurableFunction.test.ts
+--retry 0</code> is green (2026-08-19): typed-error probe + the full 2-step +
+5s-sleep suspend/resume lifecycle.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LayerVersion</code> dualization unverified</td>
+<td>historical <code>391965393224</code> / <code>us-west-2</code> ARNs</td>
+<td><code>Version</code>/<code>Alias</code> verified local via <code>DurableFunction.test.ts</code>; re-run the layer suites to confirm. Floci implements layer CRUD.</td>
+</tr>
+<tr>
+<td>Durable execution timeout / retention not enforced</td>
+<td><code>DurableConfig.ExecutionTimeout</code> / <code>RetentionPeriodInDays</code> accepted at CreateFunction</td>
+<td>Executions never TIMED_OUT server-side; they are retained until function delete.</td>
+</tr>
+<tr>
+<td>OTLP export from Lambda to a Cloudflare collector</td>
+<td><code>Telemetry.test.ts</code> <code>/probe</code> status 0</td>
+<td>Platform: collector reachability from the Lambda container, not a missing Lambda op.</td>
+</tr>
+<tr>
+<td>CloudWatch Logs log-group reap</td>
+<td>Prior destroy hangs</td>
+<td>Logs describe/delete is slow or unimplemented enough that alchemy now skips reap on the emulator account.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="lambda-microvms">Lambda MicroVMs</h2>
+<p>Implemented in this tree (see <code>docs/services/lambda-microvms.md</code>): the full
+<code>2025-09-09</code> control plane (image CRUD + versions + builds, managed base-image
+catalog, Run/Get/List/Suspend/Resume/Terminate, auth tokens, Lambda-shared tag
+routes), real <code>docker build</code> of code artifacts, real Docker containers per
+MicroVM, and the authenticated endpoint data plane on
+<code>{id}.lambda-microvm.{region}.localhost.floci.io:443</code>.</p>
+<p>Acceptance status (<code>LAMBDA_TEST_MICROVM=1 pnpm test:aws:floci
+test/AWS/Lambda/MicrovmImage.test.ts --retry 0</code>, 2026-08-19): <strong>4 passed / 0
+failed</strong> — including <code>drives the MicroVM from a Cloudflare Worker
+(cross-cloud assume-role)</code>. The Alchemy-side registrations are dualized
+(<code>Lambda.MicrovmImage</code>, <code>Lambda.NetworkConnector</code>, <code>IAM.User</code>,
+<code>IAM.AccessKey</code>; <code>IAM.Role</code> was already dual), and the two former
+worker-side wiring gaps are closed:</p>
+<ul>
+<li><strong>Endpoint</strong>: <code>MicrovmBinding</code> bakes <code>AWS_ENDPOINT_URL</code> into the worker
+  env under <code>alchemy dev</code> and provides <code>Endpoint.fromEnv()</code> on the runtime
+  path, so the worker's STS <code>AssumeRole</code> and MicroVM ops target the
+  emulator (alchemy <code>3516b82cf</code>).</li>
+<li><strong>CA trust</strong>: <code>ensureFloci</code> refreshes the emulator CA bundle to
+  <code>~/.floci/ca.pem</code> on every health check; the dev harness points
+  <code>NODE_EXTRA_CA_CERTS</code> at it, which the local workerd runtime folds into
+  its outbound <code>trustedCertificates</code>.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Lambda.NetworkConnector</code> emulation is identity-only</td>
+<td>Floci stores connector records; no real network plumbing</td>
+<td>The MicroVM fixtures never create connectors, so this is inert for the acceptance suite.</td>
+</tr>
+<tr>
+<td>No Cloudflare <strong>Container</strong> host support in <code>MicrovmBinding</code></td>
+<td>Host detection recognizes Lambda functions and Workers only</td>
+<td>Binding MicroVM ops to a Cloudflare Container (creds/env into the container itself) is unimplemented — feature, not emulator gap.</td>
+</tr>
+</tbody>
+</table>
+<p>IAM policy evaluation is <strong>intentionally permissive for MicroVM actions</strong>:
+<code>lambda:RunMicrovm</code> etc. are not on the enforcement allowlist and unmapped
+actions are allow-by-default; STS <code>AssumeRole</code> session keys only need to
+resolve as identities (they do — <code>IamService.registerSession</code>). TODO: evaluate
+role policies once the IAM enforcement allowlist grows to cover MicroVM
+actions.</p>
+<h2 id="iam">IAM</h2>
+<p>Lambda execution-role sessions (<code>ASIA…</code> minted at container launch) are
+evaluated for <code>ses:SendEmail</code> / <code>ses:SendRawEmail</code> / <code>ses:SendBulkEmail</code>
+and <code>kms:GetKeyRotationStatus</code> even while
+<code>floci.services.iam.enforcement-enabled</code> is off. <code>test</code> keys, unknown
+keys, unmapped actions, and all other role-issued calls stay permissive.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GetRolePolicy</code> drops <code>Condition</code></td>
+<td>Lambda Function URL policy</td>
+<td>Store and return the full statement, including <code>Condition</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="auto-scaling">Auto Scaling</h2>
+<p>Implemented in this tree (scheduled actions, execute policy, standby,
+instance protection/health, cancel/rollback refresh). Remaining after the
+image picks up those handlers:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Default subnet <code>subnet-default-a</code> missing</td>
+<td>Alchemy ASG / LifecycleHook / ScheduledAction</td>
+<td>EC2 default-VPC restore; Alchemy <code>TestNetwork</code> waits but create still races a missing subnet.</td>
+</tr>
+<tr>
+<td>Launch template name not found after create</td>
+<td>Alchemy <code>AutoScalingGroup</code> / <code>ScalingPolicy</code> list</td>
+<td>EC2 <code>DescribeLaunchTemplates</code> visibility, not an ASG handler gap.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="application-auto-scaling">Application Auto Scaling</h2>
+<p>Control plane is implemented: scalable targets (local DynamoDB
+<code>table/{name}</code> and ECS <code>service/{cluster}/{service}</code> IDs are stored
+without probing the backing service), target-tracking policies +
+managed CloudWatch alarms, scheduled actions, empty
+<code>DescribeScalingActivities</code> pages, and <code>GetPredictiveScalingForecast</code>
+with AWS-shaped non-ECS <code>AccessDeniedException</code> ("GetPredictiveScalingForecast
+is not supported.") that distilled maps to
+<code>PredictiveScalingForecastNotSupported</code>.</p>
+<p>Isolated <code>pnpm test:aws:floci test/AWS/ApplicationAutoScaling --retry 0
+--concurrency 8</code> (2026-08-19): <strong>10 passed / 0 failed</strong> after DynamoDB
+<code>UpdateTable</code> no-op parity.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DynamoDB <code>UpdateTable</code> no-op</td>
+<td>Bindings / ScalableTarget / ScalingPolicy / ScheduledAction</td>
+<td>Fixed — reject unchanged throughput only when it is the sole UpdateTable field.</td>
+</tr>
+<tr>
+<td>Policies stay inert</td>
+<td>documented</td>
+<td>No control loop; <code>DescribeScalingActivities</code> returns an empty page.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="step-functions">Step Functions</h2>
+<p>Patched in this tree (<code>UpdateStateMachine</code>, <code>TestState</code>, <code>RedriveExecution</code>,
+Map Run list/describe/update, Fail-state Catch unwrap, <code>sync-states</code> DNS +
+TLS SAN so Lambda <code>StartSyncExecution</code> can reach Floci on 443, optimized
+<code>lambda:invoke</code> envelope wraps <code>{Payload, StatusCode}</code>). Alchemy now
+<code>flociDual</code>s StateMachine and Activity (creates were landing on live AWS).
+Remaining after rebuild:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RedriveExecution</code> restarts from the start</td>
+<td>documented</td>
+<td>Not failure-point resume.</td>
+</tr>
+<tr>
+<td>Distributed Map Runs</td>
+<td>metadata only</td>
+<td>Execute inline; no real Map Run engine.</td>
+</tr>
+<tr>
+<td>ASL validation is partial</td>
+<td><code>ValidateStateMachineDefinition</code></td>
+<td>StartAt/States + JSONata/ItemReader only.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="rds">RDS</h2>
+<p>Patched in this tree: custom cluster endpoints, instance/cluster snapshots
+(create/copy/delete + not-found), <code>ResetDBParameterGroup</code>, <code>DescribeEvents</code>,
+<code>DescribePendingMaintenanceActions</code>, <code>ApplyPendingMaintenanceAction</code>
+(<code>ResourceNotFoundFault</code> on a missing ARN), start/stop/failover no-ops,
+parameter-group ARNs + <code>Source=user</code> on describe, distilled Query list keys
+(<code>Parameters.Parameter.N</code>), and create-time <code>MasterUserPassword</code> /
+<code>BackupRetentionPeriod</code> validation (<code>InvalidParameterValue</code>). Remaining:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DB proxy CRUD</td>
+<td>Alchemy <code>DBProxy*</code> suites are env-gated (<code>AWS_TEST_RDS_DBPROXY</code>)</td>
+<td><code>DescribeDBProxies</code> still returns an empty list. Full <code>CreateDBProxy</code> / endpoints / target groups are not modeled.</td>
+</tr>
+<tr>
+<td>Real data-plane containers</td>
+<td><code>RDSData</code> bindings + instance/cluster lifecycle</td>
+<td>Gated by <code>RDS_TEST_LIFECYCLE</code> / <code>SLOW</code>. Mock mode is enough for control-plane list/diff tests.</td>
+</tr>
+</tbody>
+</table>
+<p>Alchemy now <code>flociDual</code>s cluster/instance/parameter-group/subnet-group
+resources. Proxy CRUD stays live-only.</p>
+<h2 id="cloud-map">Cloud Map</h2>
+<p>Patched in this tree: namespace/service updates, SOA TTL, <code>TYPE</code>/<code>NAME</code> list
+filters, service attributes, <code>UpdateInstanceCustomHealthStatus</code>.</p>
+<h2 id="route-53">Route 53</h2>
+<p>Patched in this tree: private-zone VPC attach/associate/auth, query logging
+configs, <code>UpdateHostedZoneComment</code>, <code>TestDNSAnswer</code>,
+<code>GetHealthCheckLastFailureReason</code>, <code>ListHostedZonesByVPC</code>, geo/cidr/geoproximity
+record fields, DNS-order <code>ListHostedZonesByName</code> (fixes ECS
+<code>ServiceHostedZoneNotFound</code> after a local <code>CreateHostedZone</code>),
+<code>QueryLoggingConfigAlreadyExists</code>, weighted/failover <code>SetIdentifier</code> DELETE.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>logs:PutResourcePolicy</code></td>
+<td>Alchemy <code>QueryLoggingConfig.test.ts</code></td>
+<td>CloudWatch Logs, not Route 53. Query-logging CRUD is implemented; the test also needs the Logs resource-policy action.</td>
+</tr>
+<tr>
+<td>Route53 Domains / Profiles / Resolver</td>
+<td>No Floci service</td>
+<td>Stay remote-only in Alchemy.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cloudwatch-cloudwatch-logs">CloudWatch / CloudWatch Logs</h2>
+<p>Patched in this tree: <code>DescribeInsightRules</code> returns an empty
+<code>InsightRules</code> list so DynamoDB Contributor Insights teardown can finish.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Log group lifecycle used by Lambda delete</td>
+<td>Destroy hang before alchemy skip</td>
+<td>Need cheap no-op or fast not-found for <code>/aws/lambda/*</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="elbv2">ELBv2</h2>
+<p>Patched in this tree (Trust Store CRUD, <code>ModifyCapacityReservation</code>,
+authenticate-oidc round-trip, CreateListener NLB/TCP/TLS — the
+<code>InternalFailure: Unexpected error: null</code> was an immutable region-map
+<code>UnsupportedOperationException</code>, not an NPE — SNI <code>IsDefault</code> +
+ModifyListener default-cert-only). Alchemy <code>flociDual</code>s LB, Listener,
+Rule, TargetGroup, TrustStore, ListenerCertificate, and
+TargetGroupAttachment. Unsigned Query <code>CreateListener</code> (NLB/TCP) against
+<code>alchemy-floci</code> returns 200.</p>
+<h2 id="eventbridge">EventBridge</h2>
+<p>Patched in this tree (Connection + ApiDestination CRUD, <code>ListRuleNamesByTarget</code>).
+Alchemy <code>flociDual</code>s Archive/Connection/ApiDestination. Against current
+<code>floci:dev</code>: 17/19. The two failures are the old image still rejecting
+<code>DescribeConnection</code> and <code>ListRuleNamesByTarget</code>.</p>
+<h2 id="eventbridge-scheduler">EventBridge Scheduler</h2>
+<p>Control-plane CRUD (12 ops) already works against the current image.
+Context-attribute substitution in <code>Target.Input</code> is patched in this tree
+(<code>&lt;aws.scheduler.schedule-arn&gt;</code> etc.) and needs the image rebuild.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Context attrs not substituted in running image</td>
+<td><code>ScheduleEventSource</code> asserts a real <code>:schedule/default/</code> ARN</td>
+<td>Source replaces placeholders at fire time; current <code>floci:dev</code> still delivers the literal <code>"&lt;aws.scheduler.schedule-arn&gt;"</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="eventbridge-pipes">EventBridge Pipes</h2>
+<p>Control-plane CRUD + tags (10 ops) work after Alchemy <code>flociDual</code>s <code>Pipe</code>
+(without dual, CreatePipe hit live AWS with a <code>000000000000</code> role ARN →
+<code>AccessDeniedException: Cross-account pass role is not allowed</code>).
+Lambda target batch shape is patched in this tree and needs the image rebuild.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lambda target <code>{Records:[...]}</code> envelope in running image</td>
+<td><code>Pipes delivery</code> → <code>MessageNotDelivered</code></td>
+<td>AWS Pipes Lambda targets get a bare JSON array. Source now emits that; current <code>floci:dev</code> still wraps <code>Records</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="kms">KMS</h2>
+<p>Patched in this tree (<code>UpdateAlias</code>, <code>GenerateDataKeyPair*</code>,
+<code>DeriveSharedSecret</code>, rotation period, Verify/CancelKeyDeletion shapes).
+Alchemy now <code>flociDual</code>s <code>Key</code> and <code>Alias</code>. SSM lazily seeds
+<code>alias/aws/ssm</code> on the first SecureString so <code>DescribeKey</code> can resolve
+<code>keyArn</code>.</p>
+<p><code>kms:GetKeyRotationStatus</code> is in the Lambda-role IAM allowlist, so the
+bindings least-privilege test (<code>the role only receives the bound actions</code>)
+can observe <code>AccessDeniedException</code>. Other KMS actions stay permissive
+while global enforcement is off (alias condition keys are not modeled).</p>
+<h2 id="cloudfront">CloudFront</h2>
+<p>Patched in this tree (VpcOrigin + KeyValueStore CRUD, DescribeFunction,
+KVS associations, policy XML round-trip, list envelopes as HttpPayload
+roots, KeyGroup <code>PublicKey</code> items, realtime-log Fields/EndPoints, Function
+DEVELOPMENT+LIVE stages). KvEntries / KvRoutesUpdate stay live-only —
+CloudFront-KeyValueStore data plane is a separate service (now implemented
+in this tree; see KVS data-plane section above).</p>
+<h2 id="cognito">Cognito</h2>
+<p>Patched in this tree: user-pool JWT issuer is now AWS-shaped
+(<code>https://cognito-idp.&lt;region&gt;.amazonaws.com/&lt;poolId&gt;</code>), custom schema
+attributes are prefixed <code>custom:</code> on create, <code>DeleteUser</code> /
+<code>AdminListDevices</code> exist, and <code>AWSCognitoIdentityService</code> implements
+identity-pool CRUD, tags, roles (no PassRole / cross-account check),
+guest <code>GetId</code> / credentials / OpenID token, and identity admin.</p>
+<p>User-pool control plane (UserPool, Client, Domain, Group, User,
+IdentityProvider, ResourceServer, RiskConfiguration, custom schema) is
+green against <code>floci:dev</code>. Remaining Alchemy suite failures are not
+missing IdP APIs:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>IdentityPool / RoleAttachment not <code>flociDual</code></td>
+<td>create without <code>(local)</code>; <code>ResourceNotFoundException</code> on distilled describe; <code>AccessDeniedException: Cross-account pass role</code></td>
+<td>Alchemy still registers live-only <code>IdentityPoolProvider</code> / <code>IdentityPoolRoleAttachmentProvider</code>. Floci implements the identity APIs; Bindings + IdentityPool tests hit real AWS (split-brain).</td>
+</tr>
+<tr>
+<td>Triggers Function URL socket close</td>
+<td><code>HttpClientError</code> POST <code>…lambda-url…/sign-up-flow</code></td>
+<td>One Lambda is both the Function URL and PreSignUp/PreTokenGeneration. Cognito <code>RequestResponse</code>-invokes that same function while the URL invoke is in-flight. Reproduced isolated. Lambda same-function concurrency — trigger handlers themselves exist.</td>
+</tr>
+<tr>
+<td>Cross-region Lambda triggers</td>
+<td><code>InvalidParameterException</code></td>
+<td>Only if a pool's <code>LambdaConfig</code> ARN region differs from the pool; same-account local Functions work.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="firehose">Firehose</h2>
+<p>Patched in this tree (SSE start/stop, Kinesis-as-source, list pagination).
+Suite was 0/7 against live Firehose because <code>DeliveryStream</code> was not
+<code>flociDual</code> (create used a Floci S3 bucket). Alchemy now registers
+<code>DeliveryStream</code> and <code>Kinesis.Stream</code> / <code>StreamConsumer</code> via <code>flociDual</code>.
+SSE start/stop still needs the image rebuild (<code>InvalidAction</code> on current
+<code>floci:dev</code>).</p>
+<h2 id="kinesis">Kinesis</h2>
+<p>Patched in this tree: <code>UpdateShardCount</code> (uniform split/merge),
+<code>UpdateMaxRecordSize</code> / <code>MaxRecordSizeInKiB</code> on describe,
+<code>UpdateStreamWarmThroughput</code> + <code>DescribeAccountSettings</code> (commitment
+<code>ENABLED</code>), <code>DescribeLimits</code>, <code>ListStreams.StreamSummaries</code>,
+<code>CreateStream</code> tags / warm throughput / max record size, consumer
+<code>TagResource</code> (consumer ARNs no longer mutate the stream), even
+hash-key ranges, and <code>MergeShards</code> adjacency + parent lineage.
+<code>DeleteStream EnforceConsumerDeletion</code> removes registered consumers.</p>
+<p>Isolated <code>pnpm test:aws:floci test/AWS/Kinesis --retry 0 --concurrency 8</code>
+(2026-08-19): <strong>37 passed / 0 failed</strong> (two transport flakes on a
+mid-run container restart reran green).</p>
+<h2 id="ses">SES</h2>
+<p>Patched in this tree (receipt rules/filters, tenants, MREs, VDM,
+SendBounce, deliverability stubs, <code>PutTenantSuppressionAttributes</code> as
+POST, v2 email-address identities stay PENDING, bulk
+<code>MessageRejected</code> → entry <code>MESSAGE_REJECTED</code>). Alchemy now
+<code>flociDual</code>s the SES resource set. New v1 actions are on
+<code>AwsQueryController.SES_ACTIONS</code>. Inbound receiving data plane stays
+out of scope. Contact lists are 1-per-account (concurrent
+Contact/ContactList tests collide).</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~Bindings IAM outsider From is <code>MessageRejected</code>, not <code>AccessDeniedException</code>~~</td>
+<td><code>SendEmail &gt; a sender outside the bound identity is denied by the scoped IAM policy</code></td>
+<td><strong>Fixed:</strong> Lambda containers sign as an <code>ASIA</code> session mapped to the execution role. <code>IamEnforcementFilter</code> evaluates <code>ses:SendEmail</code> (global enforcement stays off) against <code>arn:aws:ses:…:identity/&lt;from&gt;</code>. <code>AWSLambdaBasicExecutionRole</code> is seeded as CloudWatch Logs only so its old <code>*/*</code> placeholder cannot grant the send.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="secrets-manager">Secrets Manager</h2>
+<p>Patched in this tree (<code>CancelRotateSecret</code>; persist Put/Get/Delete
+ResourcePolicy; <code>RotateSecret</code> no longer reserves an empty <code>AWSPENDING</code>
+version before <code>createSecret</code>). Isolated <code>test/AWS/SecretsManager</code>
+against a rebuilt image: resource CRUD, bindings (Get/Put/Describe/
+List/Batch/GetRandomPassword), and rotation schedule config.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ValidateResourcePolicy</code> / replica APIs</td>
+<td>not called by suite</td>
+<td>Still unimplemented.</td>
+</tr>
+</tbody>
+</table>
+<p>Alchemy: <code>RotationSchedule</code> is <code>flociDual</code> so Bindings call Floci
+<code>RotateSecret</code> (which invokes the emulated Lambda through the four-step
+protocol).</p>
+<h2 id="ssm">SSM</h2>
+<p>Patched in this tree (<code>UnlabelParameterVersion</code>; PutParameter tags/metadata;
+label defaults to latest; first SecureString seeds KMS <code>alias/aws/ssm</code>).
+Needs image rebuild for the alias seed.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SSMContacts / SSMIncidents</td>
+<td>no Floci service</td>
+<td>Remote-only.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="sns">SNS</h2>
+<p>Patched in this tree (<code>AddPermission</code> / <code>RemovePermission</code> persist topic
+policy Sids; GCM/FCM <code>CreatePlatformApplication</code> rejects fake credentials
+with <code>InvalidParameter</code>; SMS sandbox / attributes / opt-out / origination
+list ops). Needs image rebuild.</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Real APNS / FCM delivery</td>
+<td>Mobile push is captured in-memory</td>
+<td>Unchanged mock.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="glue">Glue</h2>
+<p>Implemented in this tree: jobs, crawlers, connections, job runs/bookmarks, and <code>GetTags</code>/<code>TagResource</code> on catalog ARNs. Remaining:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Job runs complete immediately</td>
+<td><code>StartJobRun</code></td>
+<td>No Spark/Python worker; runs are stored as <code>SUCCEEDED</code>.</td>
+</tr>
+<tr>
+<td>Crawlers do not inspect S3</td>
+<td><code>StartCrawler</code></td>
+<td>State machine only (<code>READY</code>/<code>RUNNING</code>); no table inference.</td>
+</tr>
+<tr>
+<td><code>AWSGlueServiceRole</code> missing</td>
+<td>Job/Crawler/Bindings beforeAll</td>
+<td>IAM managed-policy seed.</td>
+</tr>
+</tbody>
+</table>
+<p>Alchemy now <code>flociDual</code>s Glue Connection/Crawler/Database/Job/Table,
+Athena DataCatalog/NamedQuery/PreparedStatement/WorkGroup, and Batch
+ComputeEnvironment/JobDefinition/JobQueue.</p>
+<h2 id="athena">Athena</h2>
+<p>Implemented in this tree: workgroup update/tags, data catalogs, named queries, prepared statements, batch-get, runtime stats stub, Glue-qualified DuckDB views + headerless CSV, EventBridge <code>Athena Query State Change</code> on every execution transition, <code>NamedQuery</code> not-found message matching distilled <code>NamedQueryNotFound</code>, in-process <code>SELECT &lt;n&gt;</code> (no DuckDB). Remaining:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runtime statistics are a stub</td>
+<td><code>GetQueryRuntimeStatistics</code></td>
+<td>Timeline fields exist; no real engine counters.</td>
+</tr>
+<tr>
+<td>Query data plane still needs DuckDB</td>
+<td><code>StartQueryExecution</code></td>
+<td>Unchanged; mock mode skips execution but still emits state-change events.</td>
+</tr>
+<tr>
+<td><code>StopQueryExecution</code> on a terminal query</td>
+<td>Alchemy <code>StopQueryExecution</code> binding</td>
+<td>AWS is a no-op (stays <code>SUCCEEDED</code>). Source now matches.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="batch">Batch</h2>
+<p>Implemented in this tree: update/delete CE+queue, cancel/terminate (no-op when already terminal), snapshot (<code>earliestTimeAtPosition</code>), tag APIs, unmanaged <code>unmanagedvCpus</code>, distilled not-found / <code>ComputeEnvironmentInUse</code> messages, and <code>AWSBatchServiceRole</code> IAM seed. The Alchemy image sets <code>immediate-complete: false</code> so <code>SubmitJob</code> leaves jobs <code>RUNNABLE</code> for binding cancel/terminate tests. Isolated <code>pnpm test:aws:floci test/AWS/Batch --retry 0 --concurrency 4</code>: 10 passed, 2 todo (<code>AWS_TEST_SLOW</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No array / multi-node jobs</td>
+<td>Existing limitation</td>
+<td>Unchanged.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="how-to-reproduce">How to reproduce</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># from alchemy-effect, after `pnpm floci:build`</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">ALCHEMY_TEST_DEV</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">ALCHEMY_FLOCI_IMAGE</span><span class="o">=</span>floci:dev<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>pnpm<span class="w"> </span><span class="nb">test</span><span class="w"> </span>test/AWS/S3/Bucket.test.ts<span class="w"> </span>--profile<span class="w"> </span>testing<span class="w"> </span>--retry<span class="w"> </span><span class="m">0</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">ALCHEMY_TEST_DEV</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">ALCHEMY_FLOCI_IMAGE</span><span class="o">=</span>floci:dev<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>pnpm<span class="w"> </span><span class="nb">test</span><span class="w"> </span>test/AWS/<span class="o">{</span>DynamoDB/Table,Lambda/Function,Kinesis/Stream,SQS/Queue,SNS/Topic<span class="o">}</span>.test.ts<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--profile<span class="w"> </span>testing<span class="w"> </span>--retry<span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.instant", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
