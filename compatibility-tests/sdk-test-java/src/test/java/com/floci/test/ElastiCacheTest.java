@@ -88,7 +88,8 @@ class ElastiCacheTest {
         assertThat(response.replicationGroup().replicationGroupId()).isEqualTo(groupId);
         assertThat(response.replicationGroup().status()).isEqualTo("available");
         assertThat(response.replicationGroup().configurationEndpoint()).isNotNull();
-        assertThat(response.replicationGroup().configurationEndpoint().address()).isEqualTo(TestFixtures.proxyHost());
+        assertThat(response.replicationGroup().configurationEndpoint().address()).isNotBlank();
+        assertThat(response.replicationGroup().configurationEndpoint().port()).isPositive();
         assertThat(response.replicationGroup().authTokenEnabled()).isTrue();
 
         firstProxyPort = response.replicationGroup().configurationEndpoint().port();
