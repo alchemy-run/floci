@@ -39,6 +39,12 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `AddTagsToResource` | Add resource tags |
 | `RemoveTagsFromResource` | Remove resource tags |
 | `DescribeCacheParameterGroups` | - |
+| `DescribeServerlessCaches` | Empty list; named lookups raise `ServerlessCacheNotFoundFault` (serverless caches are not emulated) |
+| `DescribeServerlessCacheSnapshots` | Empty list; named lookups raise `ServerlessCacheSnapshotNotFoundFault` |
+| `DeleteServerlessCacheSnapshot` | Always `ServerlessCacheSnapshotNotFoundFault` |
+| `CopyServerlessCacheSnapshot` | Always `ServerlessCacheSnapshotNotFoundFault` |
+| `ExportServerlessCacheSnapshot` | Always `ServerlessCacheSnapshotNotFoundFault` |
+| `DescribeEvents` | Empty list (events are not recorded) |
 <!-- floci:actions:end -->
 
 ## Configuration
