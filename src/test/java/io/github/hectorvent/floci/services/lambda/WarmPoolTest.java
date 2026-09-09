@@ -307,6 +307,75 @@ class WarmPoolTest {
         pool.shutdown();
     }
 
+    /**
+     * A code update drains the pool while a container is BUSY serving an invocation. That
+     * container still runs the superseded code, so releasing it must retire it rather than
+     * put it back into the (now empty) pool where the next invoke would draw stale code.
+     */
+    @Test
+    void drainFunction_retiresContainerThatWasInFlightDuringDrain() {
+        WarmPool pool = buildPool();
+        pool.init();
+
+        LambdaFunction fn = mock(LambdaFunction.class);
+        when(fn.getFunctionName()).thenReturn("swap-fn");
+
+        ContainerHandle idle = new ContainerHandle("cid-idle", "swap-fn", null, ContainerState.WARM);
+        ContainerHandle busy = new ContainerHandle("cid-busy", "swap-fn", null, ContainerState.WARM);
+        ContainerHandle fresh = new ContainerHandle("cid-fresh", "swap-fn", null, ContainerState.WARM);
+        // Every acquire below cold-starts (the pool is empty each time), so no isAlive stub.
+        when(containerLauncher.launch(any())).thenReturn(idle, busy, fresh);
+
+        // Two containers exist: one back in the pool, one mid-invocation.
+        ContainerHandle a1 = pool.acquire(fn);
+        ContainerHandle a2 = pool.acquire(fn);
+        assertSame(idle, a1);
+        assertSame(busy, a2);
+        pool.release(a1);
+
+        // UpdateFunctionCode: only the pooled container can be stopped right now.
+        pool.drainFunction("swap-fn");
+        verify(containerLauncher, times(1)).stop(idle);
+        verify(containerLauncher, never()).stop(busy);
+
+        // The in-flight invocation completes: the container predates the drain and is retired.
+        pool.release(a2);
+        verify(containerLauncher, times(1)).stop(busy);
+
+        // The next invoke cold-starts on the new code instead of reusing the stale container.
+        ContainerHandle next = pool.acquire(fn);
+        assertSame(fresh, next);
+        verify(containerLauncher, times(3)).launch(any());
+
+        pool.shutdown();
+    }
+
+    @Test
+    void drainFunction_keepsContainerLaunchedAfterDrain() {
+        WarmPool pool = buildPool();
+        pool.init();
+
+        LambdaFunction fn = mock(LambdaFunction.class);
+        when(fn.getFunctionName()).thenReturn("post-drain-fn");
+
+        ContainerHandle handle = new ContainerHandle("cid-new", "post-drain-fn", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(handle);
+        when(containerLauncher.isAlive(any())).thenReturn(true);
+
+        // A drain with nothing pooled (e.g. the first UpdateFunctionCode) must not taint
+        // containers launched afterwards.
+        pool.drainFunction("post-drain-fn");
+
+        ContainerHandle first = pool.acquire(fn);
+        pool.release(first);
+        verify(containerLauncher, never()).stop(handle);
+
+        assertSame(handle, pool.acquire(fn));
+        verify(containerLauncher, times(1)).launch(any());
+
+        pool.shutdown();
+    }
+
     @Test
     void acquire_waitsForInFlightSlotWhenAtMaxConcurrent() throws Exception {
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);

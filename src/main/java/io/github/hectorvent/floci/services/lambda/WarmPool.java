@@ -23,6 +23,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Manages a pool of warm Lambda containers per function.
@@ -47,6 +48,14 @@ public class WarmPool implements ContainerTeardown {
     /** In-flight leases (acquire → release/destroy). Used so destroy without acquire is a no-op. */
     private final Set<ContainerHandle> leased = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, Semaphore> inFlight = new ConcurrentHashMap<>();
+    /**
+     * Per-function drain generation, bumped by every {@link #drainFunction}. A container
+     * records the generation it was launched under; one that is BUSY (leased) while a drain
+     * runs cannot be stopped mid-invocation, so it is retired on release instead of rejoining
+     * the pool with code the drain was meant to invalidate.
+     */
+    private final ConcurrentHashMap<String, AtomicLong> drainGeneration = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ContainerHandle, Long> launchGeneration = new ConcurrentHashMap<>();
     private final ScheduledExecutorService evictionScheduler = Executors.newSingleThreadScheduledExecutor(
             r -> { Thread t = new Thread(r, "warm-pool-evictor"); t.setDaemon(true); return t; });
 
@@ -155,6 +164,7 @@ public class WarmPool implements ContainerTeardown {
             LOG.debugv(ephemeral ? "Ephemeral start for function: {0}" : "Cold start for function: {0}",
                     fn.getFunctionName());
             handle = containerLauncher.launch(fn);
+            launchGeneration.put(handle, currentGeneration(fn.getFunctionName()));
         } else {
             LOG.debugv("Reusing warm container for function: {0}", fn.getFunctionName());
         }
@@ -172,6 +182,15 @@ public class WarmPool implements ContainerTeardown {
 
     private Semaphore semaphoreFor(String functionName) {
         return inFlight.computeIfAbsent(functionName, k -> new Semaphore(maxConcurrent()));
+    }
+
+    private long currentGeneration(String functionName) {
+        return drainGeneration.computeIfAbsent(functionName, k -> new AtomicLong()).get();
+    }
+
+    private boolean predatesDrain(ContainerHandle handle) {
+        Long launched = launchGeneration.get(handle);
+        return launched != null && launched != currentGeneration(handle.getFunctionName());
     }
 
     private void takeLease(String functionName) {
@@ -216,6 +235,15 @@ public class WarmPool implements ContainerTeardown {
         if (ephemeral || handle.isHotReload()) {
             LOG.debugv("{0}: stopping container {1} after invocation",
                     handle.isHotReload() ? "Hot-reload" : "Ephemeral", handle.getContainerId());
+            stopQuietly(handle);
+            return;
+        }
+        // The function was drained (code update / delete) while this container was serving an
+        // invocation. It still runs the superseded code, so pooling it would hand stale code to
+        // every later invoke that happens to draw it.
+        if (predatesDrain(handle)) {
+            LOG.infov("Retiring container {0} for function {1}: it was in flight during a drain",
+                    handle.getContainerId(), handle.getFunctionName());
             stopQuietly(handle);
             return;
         }
@@ -266,8 +294,11 @@ public class WarmPool implements ContainerTeardown {
     /**
      * Stops and removes all warm containers for the given function.
      * Called on function delete or code update.
+     * Containers currently serving an invocation are not interrupted; they are retired
+     * when released instead of rejoining the pool (see {@link #release}).
      */
     public void drainFunction(String functionName) {
+        drainGeneration.computeIfAbsent(functionName, k -> new AtomicLong()).incrementAndGet();
         ArrayDeque<ContainerHandle> queue = pool.remove(functionName);
         if (queue == null) {
             return;
@@ -341,6 +372,7 @@ public class WarmPool implements ContainerTeardown {
     }
 
     private void stopQuietly(ContainerHandle handle) {
+        launchGeneration.remove(handle);
         try {
             containerLauncher.stop(handle);
         } catch (Exception e) {
