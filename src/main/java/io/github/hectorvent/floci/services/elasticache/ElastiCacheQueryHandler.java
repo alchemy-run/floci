@@ -83,6 +83,12 @@ public class ElastiCacheQueryHandler {
             case "AddTagsToResource"          -> handleAddTagsToResource(params);
             case "RemoveTagsFromResource"     -> handleRemoveTagsFromResource(params);
             case "DescribeCacheParameterGroups" -> handleDescribeCacheParameterGroups(params);
+            case "DescribeServerlessCaches"   -> handleDescribeServerlessCaches(params);
+            case "DescribeServerlessCacheSnapshots" -> handleDescribeServerlessCacheSnapshots(params);
+            case "DeleteServerlessCacheSnapshot"    -> handleServerlessCacheSnapshotNotFound(params, "ServerlessCacheSnapshotName");
+            case "CopyServerlessCacheSnapshot"      -> handleServerlessCacheSnapshotNotFound(params, "SourceServerlessCacheSnapshotName");
+            case "ExportServerlessCacheSnapshot"    -> handleServerlessCacheSnapshotNotFound(params, "ServerlessCacheSnapshotName");
+            case "DescribeEvents"             -> handleDescribeEvents(params);
             default -> AwsQueryResponse.error("UnsupportedOperation",
                     "Operation " + action + " is not supported.", AwsNamespaces.EC, 400);
         };
@@ -526,6 +532,52 @@ public class ElastiCacheQueryHandler {
         } catch (AwsException e) {
             return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
         }
+    }
+
+    // ── Serverless caches (not modeled: the registry is always empty) ────────
+
+    private Response handleDescribeServerlessCaches(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("ServerlessCacheName");
+        if (name != null && !name.isBlank()) {
+            return AwsQueryResponse.error("ServerlessCacheNotFoundFault",
+                    "Serverless cache " + name + " not found.", AwsNamespaces.EC, 404);
+        }
+        var xml = new XmlBuilder().start("ServerlessCaches").end("ServerlessCaches");
+        return Response.ok(AwsQueryResponse.envelope("DescribeServerlessCaches", AwsNamespaces.EC, xml.build())).build();
+    }
+
+    private Response handleDescribeServerlessCacheSnapshots(MultivaluedMap<String, String> params) {
+        String name = params.getFirst("ServerlessCacheSnapshotName");
+        if (name != null && !name.isBlank()) {
+            return serverlessCacheSnapshotNotFound(name);
+        }
+        String cacheName = params.getFirst("ServerlessCacheName");
+        if (cacheName != null && !cacheName.isBlank()) {
+            return AwsQueryResponse.error("ServerlessCacheNotFoundFault",
+                    "Serverless cache " + cacheName + " not found.", AwsNamespaces.EC, 404);
+        }
+        var xml = new XmlBuilder().start("ServerlessCacheSnapshots").end("ServerlessCacheSnapshots");
+        return Response.ok(AwsQueryResponse.envelope("DescribeServerlessCacheSnapshots", AwsNamespaces.EC, xml.build())).build();
+    }
+
+    private Response handleServerlessCacheSnapshotNotFound(MultivaluedMap<String, String> params, String nameParam) {
+        String name = params.getFirst(nameParam);
+        if (name == null || name.isBlank()) {
+            return AwsQueryResponse.error("InvalidParameterValue",
+                    nameParam + " is required.", AwsNamespaces.EC, 400);
+        }
+        return serverlessCacheSnapshotNotFound(name);
+    }
+
+    private static Response serverlessCacheSnapshotNotFound(String name) {
+        return AwsQueryResponse.error("ServerlessCacheSnapshotNotFoundFault",
+                "Serverless cache snapshot " + name + " not found.", AwsNamespaces.EC, 404);
+    }
+
+    private Response handleDescribeEvents(MultivaluedMap<String, String> params) {
+        // The emulator does not record ElastiCache events; the wire-accurate empty page.
+        var xml = new XmlBuilder().start("Events").end("Events");
+        return Response.ok(AwsQueryResponse.envelope("DescribeEvents", AwsNamespaces.EC, xml.build())).build();
     }
 
     // ── IAM Token Validation ──────────────────────────────────────────────────

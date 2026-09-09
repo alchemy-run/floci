@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cognito.model.CognitoGroup;
 import io.github.hectorvent.floci.services.cognito.model.CognitoUser;
 import io.github.hectorvent.floci.services.cognito.model.IdentityProvider;
+import io.github.hectorvent.floci.services.cognito.model.ManagedLoginBranding;
 import io.github.hectorvent.floci.services.cognito.model.ResourceServer;
 import io.github.hectorvent.floci.services.cognito.model.ResourceServerScope;
 import io.github.hectorvent.floci.services.cognito.model.UserPool;
@@ -29,11 +30,14 @@ import java.util.Optional;
 public class CognitoJsonHandler {
 
     private final CognitoService service;
+    private final CognitoManagedLoginBrandingService brandingService;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public CognitoJsonHandler(CognitoService service, ObjectMapper objectMapper) {
+    public CognitoJsonHandler(CognitoService service, CognitoManagedLoginBrandingService brandingService,
+                              ObjectMapper objectMapper) {
         this.service = service;
+        this.brandingService = brandingService;
         this.objectMapper = objectMapper;
     }
 
@@ -111,6 +115,11 @@ public class CognitoJsonHandler {
             case "DescribeUserPoolDomain" -> handleDescribeUserPoolDomain(request);
             case "UpdateUserPoolDomain" -> handleUpdateUserPoolDomain(request);
             case "DeleteUserPoolDomain" -> handleDeleteUserPoolDomain(request);
+            case "CreateManagedLoginBranding" -> handleCreateManagedLoginBranding(request);
+            case "DescribeManagedLoginBranding" -> handleDescribeManagedLoginBranding(request);
+            case "DescribeManagedLoginBrandingByClient" -> handleDescribeManagedLoginBrandingByClient(request);
+            case "UpdateManagedLoginBranding" -> handleUpdateManagedLoginBranding(request);
+            case "DeleteManagedLoginBranding" -> handleDeleteManagedLoginBranding(request);
             case "SetRiskConfiguration" -> handleSetRiskConfiguration(request);
             case "DescribeRiskConfiguration" -> handleDescribeRiskConfiguration(request);
             default -> Response.status(400)
@@ -195,7 +204,9 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteUserPool(JsonNode request) {
-        service.deleteUserPool(request.path("UserPoolId").asText());
+        String userPoolId = request.path("UserPoolId").asText();
+        service.deleteUserPool(userPoolId);
+        brandingService.deleteAllForUserPool(userPoolId);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -260,11 +271,109 @@ public class CognitoJsonHandler {
     }
 
     private Response handleDeleteUserPoolClient(JsonNode request) {
-        service.deleteUserPoolClient(
-                request.path("UserPoolId").asText(),
-                request.path("ClientId").asText()
-        );
+        String userPoolId = request.path("UserPoolId").asText();
+        String clientId = request.path("ClientId").asText();
+        service.deleteUserPoolClient(userPoolId, clientId);
+        brandingService.deleteAllForClient(userPoolId, clientId);
         return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    // ──────────────────────────── Managed Login Branding ────────────────────────────
+
+    private Response handleCreateManagedLoginBranding(JsonNode request) {
+        ManagedLoginBranding branding = brandingService.create(
+                request.path("UserPoolId").asText(),
+                request.path("ClientId").asText(),
+                optionalBoolean(request, "UseCognitoProvidedValues"),
+                settingsDocument(request.path("Settings")),
+                assetList(request.path("Assets")));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ManagedLoginBranding", managedLoginBrandingToNode(branding, false));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeManagedLoginBranding(JsonNode request) {
+        ManagedLoginBranding branding = brandingService.describe(
+                request.path("UserPoolId").asText(),
+                request.path("ManagedLoginBrandingId").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ManagedLoginBranding",
+                managedLoginBrandingToNode(branding, request.path("ReturnMergedResources").asBoolean(false)));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeManagedLoginBrandingByClient(JsonNode request) {
+        ManagedLoginBranding branding = brandingService.describeByClient(
+                request.path("UserPoolId").asText(),
+                request.path("ClientId").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ManagedLoginBranding",
+                managedLoginBrandingToNode(branding, request.path("ReturnMergedResources").asBoolean(false)));
+        return Response.ok(response).build();
+    }
+
+    private Response handleUpdateManagedLoginBranding(JsonNode request) {
+        ManagedLoginBranding branding = brandingService.update(
+                request.path("UserPoolId").asText(),
+                request.path("ManagedLoginBrandingId").asText(),
+                optionalBoolean(request, "UseCognitoProvidedValues"),
+                settingsDocument(request.path("Settings")),
+                assetList(request.path("Assets")));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ManagedLoginBranding", managedLoginBrandingToNode(branding, false));
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteManagedLoginBranding(JsonNode request) {
+        brandingService.delete(
+                request.path("UserPoolId").asText(),
+                request.path("ManagedLoginBrandingId").asText());
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private static Boolean optionalBoolean(JsonNode request, String field) {
+        JsonNode node = request.path(field);
+        return node.isMissingNode() || node.isNull() ? null : node.asBoolean();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> settingsDocument(JsonNode node) {
+        if (node.isMissingNode() || node.isNull() || !node.isObject()) {
+            return null;
+        }
+        return objectMapper.convertValue(node, Map.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> assetList(JsonNode node) {
+        if (node.isMissingNode() || node.isNull() || !node.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> assets = new java.util.ArrayList<>();
+        for (JsonNode asset : node) {
+            assets.add(objectMapper.convertValue(asset, Map.class));
+        }
+        return assets;
+    }
+
+    private ObjectNode managedLoginBrandingToNode(ManagedLoginBranding branding, boolean returnMergedResources) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("UserPoolId", branding.getUserPoolId());
+        node.put("ManagedLoginBrandingId", branding.getManagedLoginBrandingId());
+        node.put("UseCognitoProvidedValues", branding.isUseCognitoProvidedValues());
+        Map<String, Object> settings = returnMergedResources
+                ? brandingService.mergedSettings(branding)
+                : branding.getSettings();
+        if (settings != null) {
+            node.set("Settings", objectMapper.valueToTree(settings));
+        }
+        ArrayNode assets = node.putArray("Assets");
+        for (Map<String, Object> asset : branding.getAssets()) {
+            assets.add(objectMapper.valueToTree(asset));
+        }
+        node.put("CreationDate", (double) branding.getCreationDate());
+        node.put("LastModifiedDate", (double) branding.getLastModifiedDate());
+        return node;
     }
 
     private Response handleUpdateUserPoolClient(JsonNode request) {

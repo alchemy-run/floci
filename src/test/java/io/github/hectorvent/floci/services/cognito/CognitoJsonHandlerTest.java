@@ -39,7 +39,85 @@ class CognitoJsonHandlerTest {
                 regionResolver,
                 null
         );
-        handler = new CognitoJsonHandler(service, mapper);
+        handler = new CognitoJsonHandler(service,
+                new CognitoManagedLoginBrandingService(new InMemoryStorage<>(), service), mapper);
+    }
+
+    @Test
+    void managedLoginBranding_lifecycle() {
+        ObjectNode poolReq = mapper.createObjectNode();
+        poolReq.put("PoolName", "branding-pool");
+        JsonNode poolBody = (JsonNode) handler.handle("CreateUserPool", poolReq, "us-east-1").getEntity();
+        String poolId = poolBody.get("UserPool").get("Id").asText();
+
+        ObjectNode clientReq = mapper.createObjectNode();
+        clientReq.put("UserPoolId", poolId);
+        clientReq.put("ClientName", "branding-client");
+        JsonNode clientBody = (JsonNode) handler.handle("CreateUserPoolClient", clientReq, "us-east-1").getEntity();
+        String clientId = clientBody.get("UserPoolClient").get("ClientId").asText();
+
+        // No branding yet: by-client describe is a typed not-found.
+        ObjectNode byClientReq = mapper.createObjectNode();
+        byClientReq.put("UserPoolId", poolId);
+        byClientReq.put("ClientId", clientId);
+        AwsException missing = assertThrows(AwsException.class,
+                () -> handler.handle("DescribeManagedLoginBrandingByClient", byClientReq, "us-east-1"));
+        assertEquals("ResourceNotFoundException", missing.getErrorCode());
+
+        // Create with Cognito's provided values (no Settings/Assets).
+        ObjectNode createReq = mapper.createObjectNode();
+        createReq.put("UserPoolId", poolId);
+        createReq.put("ClientId", clientId);
+        createReq.put("UseCognitoProvidedValues", true);
+        JsonNode created = ((JsonNode) handler.handle("CreateManagedLoginBranding", createReq, "us-east-1").getEntity())
+                .get("ManagedLoginBranding");
+        String brandingId = created.get("ManagedLoginBrandingId").asText();
+        assertFalse(brandingId.isBlank());
+        assertTrue(created.get("UseCognitoProvidedValues").asBoolean());
+        assertFalse(created.has("Settings"), "provided-values style carries no Settings document");
+
+        // A second style for the same client is rejected with the typed conflict.
+        AwsException duplicate = assertThrows(AwsException.class,
+                () -> handler.handle("CreateManagedLoginBranding", createReq, "us-east-1"));
+        assertEquals("ManagedLoginBrandingExistsException", duplicate.getErrorCode());
+
+        // By-client describe resolves the same style.
+        JsonNode byClient = ((JsonNode) handler.handle("DescribeManagedLoginBrandingByClient", byClientReq, "us-east-1").getEntity())
+                .get("ManagedLoginBranding");
+        assertEquals(brandingId, byClient.get("ManagedLoginBrandingId").asText());
+
+        // Merged resources surface the provided default document.
+        ObjectNode mergedReq = mapper.createObjectNode();
+        mergedReq.put("UserPoolId", poolId);
+        mergedReq.put("ManagedLoginBrandingId", brandingId);
+        mergedReq.put("ReturnMergedResources", true);
+        JsonNode merged = ((JsonNode) handler.handle("DescribeManagedLoginBranding", mergedReq, "us-east-1").getEntity())
+                .get("ManagedLoginBranding");
+        assertTrue(merged.get("Settings").isObject());
+        assertTrue(merged.get("Settings").has("components"));
+
+        // Update to a custom document flips UseCognitoProvidedValues off.
+        ObjectNode updateReq = mapper.createObjectNode();
+        updateReq.put("UserPoolId", poolId);
+        updateReq.put("ManagedLoginBrandingId", brandingId);
+        updateReq.put("UseCognitoProvidedValues", false);
+        updateReq.set("Settings", merged.get("Settings"));
+        JsonNode updated = ((JsonNode) handler.handle("UpdateManagedLoginBranding", updateReq, "us-east-1").getEntity())
+                .get("ManagedLoginBranding");
+        assertFalse(updated.get("UseCognitoProvidedValues").asBoolean());
+        assertTrue(updated.get("Settings").has("components"));
+
+        ObjectNode describeReq = mapper.createObjectNode();
+        describeReq.put("UserPoolId", poolId);
+        describeReq.put("ManagedLoginBrandingId", brandingId);
+        JsonNode described = ((JsonNode) handler.handle("DescribeManagedLoginBranding", describeReq, "us-east-1").getEntity())
+                .get("ManagedLoginBranding");
+        assertFalse(described.get("UseCognitoProvidedValues").asBoolean());
+
+        handler.handle("DeleteManagedLoginBranding", describeReq, "us-east-1");
+        AwsException gone = assertThrows(AwsException.class,
+                () -> handler.handle("DescribeManagedLoginBranding", describeReq, "us-east-1"));
+        assertEquals("ResourceNotFoundException", gone.getErrorCode());
     }
 
     @Test
