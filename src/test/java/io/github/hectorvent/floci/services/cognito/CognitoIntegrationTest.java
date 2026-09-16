@@ -231,6 +231,20 @@ class CognitoIntegrationTest {
     }
 
     @Test
+    @Order(5)
+    void describeUnknownUserPoolNamesPoolInResourceNotFoundMessage() {
+        String missingPoolId = "us-east-1_000000000";
+
+        cognitoAction("DescribeUserPool", """
+                { "UserPoolId": "%s" }
+                """.formatted(missingPoolId))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"))
+                .body("message", equalTo("User pool " + missingPoolId + " does not exist."));
+    }
+
+    @Test
     @Order(6)
     void confirmForgotPasswordRejectsWrongConfirmationCode() throws Exception {
         JsonNode poolResponse = cognitoJson("CreateUserPool", """
@@ -340,6 +354,55 @@ class CognitoIntegrationTest {
         String destination = signUpResponse.jsonPath().getString("CodeDeliveryDetails.Destination");
         assertThat(destination, notNullValue());
         assertThat(destination, containsString("4567"));
+    }
+
+    @Test
+    void signUpEnforcesTheConfiguredPasswordPolicy() throws Exception {
+        JsonNode poolResponse = cognitoJson("CreateUserPool", """
+                {
+                  "PoolName": "StrictPasswordPolicyPool",
+                  "Policies": {
+                    "PasswordPolicy": {
+                      "MinimumLength": 12,
+                      "RequireUppercase": true,
+                      "RequireLowercase": true,
+                      "RequireNumbers": true,
+                      "RequireSymbols": true,
+                      "PasswordHistorySize": 10
+                    }
+                  }
+                }
+                """);
+        String strictPoolId = poolResponse.path("UserPool").path("Id").asText();
+
+        JsonNode clientResponse = cognitoJson("CreateUserPoolClient", """
+                {
+                  "UserPoolId": "%s",
+                  "ClientName": "strict-password-policy-client"
+                }
+                """.formatted(strictPoolId));
+        String strictClientId = clientResponse.path("UserPoolClient").path("ClientId").asText();
+
+        cognitoAction("SignUp", """
+                {
+                  "ClientId": "%s",
+                  "Username": "invalid-password-user",
+                  "Password": "Short1!"
+                }
+                """.formatted(strictClientId))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("InvalidPasswordException"));
+
+        cognitoAction("SignUp", """
+                {
+                  "ClientId": "%s",
+                  "Username": "valid-password-user",
+                  "Password": "ValidPassword1!"
+                }
+                """.formatted(strictClientId))
+                .then()
+                .statusCode(200);
     }
 
     @Test
@@ -810,7 +873,7 @@ class CognitoIntegrationTest {
                 }
                 """.formatted(poolId))
                 .then()
-                .statusCode(404);
+                .statusCode(400);
     }
 
     // ── UpdateGroup & ListUsersInGroup ────────────────────────────────
@@ -1440,7 +1503,7 @@ class CognitoIntegrationTest {
                 }
                 """.formatted(clientId, poolId))
                 .then()
-                .statusCode(404);
+                .statusCode(400);
     }
 
     @Test
@@ -2349,6 +2412,188 @@ class CognitoIntegrationTest {
         assertEquals("Google", identity.path("providerType").asText());
         assertTrue(identity.path("issuer").isNull());
         assertFalse(identity.path("primary").asBoolean());
+    }
+
+    // ── Issue #2113: InitiateAuth REFRESH_TOKEN_AUTH rejects garbage tokens ─
+
+    @Test
+    @Order(101)
+    void initiateAuthRefreshTokenAuthRejectsInvalidRefreshToken() {
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "REFRESH_TOKEN_AUTH",
+                  "AuthParameters": { "REFRESH_TOKEN": "invalid-refresh-token" }
+                }
+                """.formatted(clientId))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("NotAuthorizedException"));
+    }
+
+    @Test
+    @Order(102)
+    void initiateAuthRefreshTokenAuthRejectsUnknownWellFormedRefreshToken() {
+        // Well-formed shape (poolId|username|clientId|iat|nonce) but for a user that
+        // does not exist in this pool — must still be rejected, not silently accepted.
+        String bogusToken = java.util.Base64.getEncoder().withoutPadding().encodeToString(
+                (poolId + "|nonexistent-user|" + clientId + "|" + System.currentTimeMillis() + "|"
+                        + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8));
+
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "REFRESH_TOKEN_AUTH",
+                  "AuthParameters": { "REFRESH_TOKEN": "%s" }
+                }
+                """.formatted(clientId, bogusToken))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("NotAuthorizedException"));
+    }
+
+    @Test
+    @Order(102)
+    void initiateAuthRefreshTokenAuthRejectsTokenWithNonNumericIssuedAt() {
+        // Well-formed shape (5 base64 parts), but the issued-at field is not a number.
+        // Must fail with NotAuthorizedException, not a 500 from an unguarded parseLong.
+        String bogusToken = java.util.Base64.getEncoder().withoutPadding().encodeToString(
+                (poolId + "|" + USERNAME + "|" + clientId + "|not-a-number|"
+                        + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8));
+
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "REFRESH_TOKEN_AUTH",
+                  "AuthParameters": { "REFRESH_TOKEN": "%s" }
+                }
+                """.formatted(clientId, bogusToken))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("NotAuthorizedException"));
+    }
+
+    /**
+     * github.com/floci-io/floci/issues/2864: found while addressing review feedback on the
+     * identity-provider version of this bug (#2858) - deleteUserPool cascaded to groups and
+     * identity providers but not users or resource servers, so a pool id pinned with the
+     * floci:override-id tag and recreated after delete inherited the deleted pool's users,
+     * password hashes included. This is the more serious of the two orphan cases.
+     */
+    @Test
+    @Order(103)
+    void deletedUserPoolDoesNotLeaveOrphanedUsersForAReusedPoolId() throws Exception {
+        String pinnedId = "us-east-1_userorph1";
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "UserOrphanPool",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("AdminCreateUser", """
+                {
+                  "UserPoolId": "%s",
+                  "Username": "orphanuser",
+                  "MessageAction": "SUPPRESS"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "UserOrphanPoolAgain",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        assertEquals(0, cognitoJson("ListUsers", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId)).path("Users").size(),
+                "a recreated pool must not inherit the deleted pool's users");
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+    }
+
+    /** Same as above, for resource servers (issue #2864's second orphan case). */
+    @Test
+    @Order(104)
+    void deletedUserPoolDoesNotLeaveOrphanedResourceServersForAReusedPoolId() throws Exception {
+        String pinnedId = "us-east-1_rsorph1";
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "ResourceServerOrphanPool",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("CreateResourceServer", """
+                {
+                  "UserPoolId": "%s",
+                  "Identifier": "https://api.example.com",
+                  "Name": "API",
+                  "Scopes": [{"ScopeName": "read", "ScopeDescription": "r"}]
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "ResourceServerOrphanPoolAgain",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        assertEquals(0, cognitoJson("ListResourceServers", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId)).path("ResourceServers").size(),
+                "a recreated pool must not inherit the deleted pool's resource servers");
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
     }
 
     private static JsonNode decodeJwtPayload(String token) throws Exception {

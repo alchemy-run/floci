@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -14,8 +14,8 @@ public class IdentityProvider {
     private String userPoolId;
     private String providerName;
     private String providerType;
-    private Map<String, String> providerDetails = new HashMap<>();
-    private Map<String, String> attributeMapping = new HashMap<>();
+    private Map<String, String> providerDetails = new LinkedHashMap<>();
+    private Map<String, String> attributeMapping = new LinkedHashMap<>();
     private List<String> idpIdentifiers = new ArrayList<>();
     private long creationDate;
     private long lastModifiedDate;
@@ -36,19 +36,13 @@ public class IdentityProvider {
     public void setProviderType(String providerType) { this.providerType = providerType; }
 
     public Map<String, String> getProviderDetails() { return providerDetails; }
-    public void setProviderDetails(Map<String, String> providerDetails) {
-        this.providerDetails = providerDetails == null ? new HashMap<>() : new HashMap<>(providerDetails);
-    }
+    public void setProviderDetails(Map<String, String> providerDetails) { this.providerDetails = providerDetails; }
 
     public Map<String, String> getAttributeMapping() { return attributeMapping; }
-    public void setAttributeMapping(Map<String, String> attributeMapping) {
-        this.attributeMapping = attributeMapping == null ? new HashMap<>() : new HashMap<>(attributeMapping);
-    }
+    public void setAttributeMapping(Map<String, String> attributeMapping) { this.attributeMapping = attributeMapping; }
 
     public List<String> getIdpIdentifiers() { return idpIdentifiers; }
-    public void setIdpIdentifiers(List<String> idpIdentifiers) {
-        this.idpIdentifiers = idpIdentifiers == null ? new ArrayList<>() : new ArrayList<>(idpIdentifiers);
-    }
+    public void setIdpIdentifiers(List<String> idpIdentifiers) { this.idpIdentifiers = idpIdentifiers; }
 
     public long getCreationDate() { return creationDate; }
     public void setCreationDate(long creationDate) { this.creationDate = creationDate; }

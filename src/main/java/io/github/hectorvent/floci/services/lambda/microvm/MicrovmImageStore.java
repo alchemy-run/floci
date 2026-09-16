@@ -1,9 +1,10 @@
 package io.github.hectorvent.floci.services.lambda.microvm;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.lambda.microvm.model.MicrovmImageRecord;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -27,11 +28,22 @@ public class MicrovmImageStore {
     }
 
     public void save(MicrovmImageRecord image) {
-        backend.put(key(image.getRegion(), image.getName()), image);
+        if (backend instanceof AccountAwareStorageBackend<MicrovmImageRecord> aware) {
+            aware.putForAccount(image.getAccountId(), key(image.getRegion(), image.getName()), image);
+        } else {
+            backend.put(key(image.getRegion(), image.getName()), image);
+        }
     }
 
     public Optional<MicrovmImageRecord> get(String region, String name) {
         return backend.get(key(region, name));
+    }
+
+    public Optional<MicrovmImageRecord> getForAccount(String accountId, String region, String name) {
+        if (backend instanceof AccountAwareStorageBackend<MicrovmImageRecord> aware) {
+            return aware.getForAccount(accountId, key(region, name));
+        }
+        return get(region, name);
     }
 
     /** Resolve by name OR by full image ARN (the API accepts either). */
@@ -43,11 +55,16 @@ public class MicrovmImageStore {
         if (nameOrArn.startsWith("arn:")) {
             int idx = nameOrArn.indexOf(":microvm-image/");
             if (idx < 0) {
+                idx = nameOrArn.indexOf(":microvm-image:");
+            }
+            if (idx < 0) {
                 return Optional.empty();
             }
             name = nameOrArn.substring(idx + ":microvm-image/".length());
         }
-        return get(region, name);
+        String requestedArn = nameOrArn.replace(":microvm-image/", ":microvm-image:");
+        return get(region, name).filter(image -> !nameOrArn.startsWith("arn:")
+                || requestedArn.equals(image.getImageArn().replace(":microvm-image/", ":microvm-image:")));
     }
 
     public List<MicrovmImageRecord> list(String region) {

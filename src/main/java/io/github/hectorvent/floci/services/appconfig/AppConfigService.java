@@ -8,7 +8,15 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.appconfig.model.*;
+import io.github.hectorvent.floci.services.appconfig.model.Application;
+import io.github.hectorvent.floci.services.appconfig.model.ConfigurationProfile;
+import io.github.hectorvent.floci.services.appconfig.model.Deployment;
+import io.github.hectorvent.floci.services.appconfig.model.DeploymentStrategy;
+import io.github.hectorvent.floci.services.appconfig.model.Environment;
+import io.github.hectorvent.floci.services.appconfig.model.Extension;
+import io.github.hectorvent.floci.services.appconfig.model.ExtensionAssociation;
+import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersion;
+import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersionSummary;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
@@ -20,7 +28,15 @@ import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -208,15 +224,6 @@ public class AppConfigService {
         return profile;
     }
 
-    public void deleteConfigurationProfile(String appId, String profileId) {
-        getConfigurationProfile(appId, profileId);
-        String prefix = appId + "::" + profileId + "::";
-        if (!versionStore.scan(k -> k.startsWith(prefix)).isEmpty()) {
-            throw new AwsException("BadRequestException",
-                    "Cannot delete configuration profile " + profileId + " because hosted configuration versions still exist", 400);
-        }
-        profileStore.delete(profileId);
-    }
 
     public ConfigurationProfile getConfigurationProfile(String appId, String profileId) {
         ConfigurationProfile profile = profileStore.get(profileId).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Configuration profile not found", 404));
@@ -228,6 +235,25 @@ public class AppConfigService {
         return profileStore.scan(k -> true).stream()
                 .filter(p -> p.getApplicationId().equals(appId))
                 .toList();
+    }
+
+    public void deleteConfigurationProfile(String appId, String profileId) {
+        // Unlike deleteApplication (a single, unscoped ID), a profile is nested under an
+        // application - a mismatched appId must not be able to delete another application's
+        // profile just because its bare profileId is guessed/known. A profileId that doesn't
+        // exist at all is still an idempotent no-op, matching deleteApplication's convention;
+        // only an existing-but-wrongly-scoped one is rejected.
+        profileStore.get(profileId).ifPresent(profile -> {
+            if (!profile.getApplicationId().equals(appId)) {
+                throw new AwsException("ResourceNotFoundException", "Configuration profile not found in this application", 404);
+            }
+        });
+        String versionPrefix = appId + "::" + profileId + "::";
+        if (!versionStore.scan(key -> key.startsWith(versionPrefix)).isEmpty()) {
+            throw new AwsException("BadRequestException",
+                    "Cannot delete configuration profile " + profileId + " because hosted configuration versions still exist", 400);
+        }
+        profileStore.delete(profileId);
     }
 
     // ──────────────────────────── Hosted Configuration Version ────────────────────────────
@@ -251,10 +277,6 @@ public class AppConfigService {
         return version;
     }
 
-    public void deleteHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
-        getHostedConfigurationVersion(appId, profileId, versionNumber);
-        versionStore.delete(appId + "::" + profileId + "::" + versionNumber);
-    }
 
     public HostedConfigurationVersion getHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
         return versionStore.get(appId + "::" + profileId + "::" + versionNumber)
@@ -278,6 +300,10 @@ public class AppConfigService {
                 .toList();
     }
 
+    public void deleteHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
+        versionStore.delete(appId + "::" + profileId + "::" + versionNumber);
+    }
+
     // ──────────────────────────── Deployment Strategy ────────────────────────────
 
     public DeploymentStrategy createDeploymentStrategy(Map<String, Object> request) {
@@ -295,15 +321,6 @@ public class AppConfigService {
         return strategy;
     }
 
-    public List<DeploymentStrategy> listDeploymentStrategies() {
-        List<DeploymentStrategy> strategies = new ArrayList<>(List.of(
-                builtinStrategy("AppConfig.AllAtOnce"),
-                builtinStrategy("AppConfig.Linear50PercentEvery30Seconds"),
-                builtinStrategy("AppConfig.Canary10Percent20Minutes")
-        ));
-        strategies.addAll(strategyStore.scan(k -> true));
-        return strategies;
-    }
 
     public DeploymentStrategy updateDeploymentStrategy(String id, Map<String, Object> request) {
         DeploymentStrategy strategy = getDeploymentStrategy(id);
@@ -329,19 +346,36 @@ public class AppConfigService {
         return strategy;
     }
 
-    public void deleteDeploymentStrategy(String id) {
-        if (id.startsWith("AppConfig.")) {
-            throw new AwsException("BadRequestException", "Cannot delete predefined Deployment Strategy", 400);
-        }
-        getDeploymentStrategy(id);
-        strategyStore.delete(id);
-    }
 
     public DeploymentStrategy getDeploymentStrategy(String id) {
         // AWS predefined built-in strategies
         DeploymentStrategy builtin = builtinStrategy(id);
         if (builtin != null) return builtin;
         return strategyStore.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Deployment strategy not found", 404));
+    }
+
+    public List<DeploymentStrategy> listDeploymentStrategies() {
+        // Real AWS's ListDeploymentStrategies includes the predefined strategies alongside
+        // custom ones (confirmed via the API reference's own sample response) - the predefined
+        // ones aren't in strategyStore at all (see getDeploymentStrategy's builtinStrategy check
+        // above), so they need to be added explicitly here too.
+        List<DeploymentStrategy> result = new ArrayList<>(List.of(
+                builtinStrategy("AppConfig.AllAtOnce"),
+                builtinStrategy("AppConfig.Linear50PercentEvery30Seconds"),
+                builtinStrategy("AppConfig.Canary10Percent20Minutes")));
+        result.addAll(strategyStore.scan(k -> true));
+        return result;
+    }
+
+    public void deleteDeploymentStrategy(String id) {
+        // Predefined strategies aren't real stored resources (see builtinStrategy above) -
+        // silently no-op'ing here would report success for a delete that did nothing, and the
+        // "deleted" strategy would still show up in every subsequent Get/List call.
+        if (builtinStrategy(id) != null) {
+            throw new AwsException("BadRequestException",
+                    "Predefined deployment strategy " + id + " cannot be deleted.", 400);
+        }
+        strategyStore.delete(id);
     }
 
     private static DeploymentStrategy builtinStrategy(String id) {

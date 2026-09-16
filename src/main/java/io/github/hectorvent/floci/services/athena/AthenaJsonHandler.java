@@ -4,15 +4,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.athena.model.CreateWorkGroupRequest;
+import io.github.hectorvent.floci.services.athena.model.NamedQuery;
+import io.github.hectorvent.floci.services.athena.model.PreparedStatement;
 import io.github.hectorvent.floci.services.athena.model.QueryExecution;
 import io.github.hectorvent.floci.services.athena.model.QueryExecutionContext;
 import io.github.hectorvent.floci.services.athena.model.ResultConfiguration;
 import io.github.hectorvent.floci.services.athena.model.ResultSet;
+import io.github.hectorvent.floci.services.athena.model.UpdateWorkGroupRequest;
+import io.github.hectorvent.floci.services.athena.model.WorkGroupTag;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+
 
 @ApplicationScoped
 public class AthenaJsonHandler {
@@ -74,10 +82,43 @@ public class AthenaJsonHandler {
                 athenaService.createWorkGroup(createRequest, region);
                 yield Response.ok(Map.of()).build();
             }
-            case "ListDataCatalogs" -> Response.ok(Map.of("DataCatalogsSummary", athenaService.listDataCatalogs())).build();
+            case "UpdateWorkGroup" -> {
+                UpdateWorkGroupRequest updateRequest = mapper.treeToValue(request, UpdateWorkGroupRequest.class);
+                athenaService.updateWorkGroup(updateRequest, region);
+                yield Response.ok(Map.of()).build();
+            }
+            case "ListDataCatalogs" ->
+                    Response.ok(Map.of("DataCatalogsSummary", athenaService.listDataCatalogs(region))).build();
             case "GetDataCatalog" -> {
                 String name = request.has("Name") ? request.get("Name").asText() : AthenaService.DEFAULT_CATALOG;
-                yield Response.ok(Map.of("DataCatalog", athenaService.getDataCatalog(name))).build();
+                yield Response.ok(Map.of("DataCatalog", athenaService.getDataCatalog(region, name))).build();
+            }
+            case "CreateDataCatalog" -> {
+                Map<String, Object> catalog = athenaService.createDataCatalog(region,
+                        text(request, "Name"),
+                        text(request, "Type"),
+                        text(request, "Description"),
+                        parameters(request),
+                        tags(request));
+                yield Response.ok(Map.of("DataCatalog", catalog)).build();
+            }
+            case "UpdateDataCatalog" -> {
+                athenaService.updateDataCatalog(region,
+                        text(request, "Name"),
+                        text(request, "Type"),
+                        text(request, "Description"),
+                        parameters(request));
+                yield Response.ok(Map.of()).build();
+            }
+            case "DeleteDataCatalog" -> Response.ok(
+                    Map.of("DataCatalog", athenaService.deleteDataCatalog(region, text(request, "Name")))).build();
+            case "TagResource" -> {
+                athenaService.tagResource(text(request, "ResourceARN"), tags(request));
+                yield Response.ok(Map.of()).build();
+            }
+            case "UntagResource" -> {
+                athenaService.untagResource(text(request, "ResourceARN"), tagKeys(request));
+                yield Response.ok(Map.of()).build();
             }
             case "ListDatabases" -> {
                 String catalog = request.has("CatalogName") ? request.get("CatalogName").asText() : AthenaService.DEFAULT_CATALOG;
@@ -94,6 +135,10 @@ public class AthenaJsonHandler {
                 String tableName = request.get("TableName").asText();
                 yield Response.ok(Map.of("TableMetadata", athenaService.getTableMetadata(catalog, database, tableName))).build();
             }
+            case "ListTagsForResource" -> {
+                String resourceArn = request.path("ResourceARN").asText(null);
+                yield Response.ok(Map.of("Tags", athenaService.listTagsForResource(resourceArn))).build();
+            }
             case "DeleteWorkGroup" -> {
                 String wg = request.path("WorkGroup").asText(null);
                 if (wg == null || !wg.matches("[a-zA-Z0-9._-]{1,128}")) {
@@ -105,51 +150,14 @@ public class AthenaJsonHandler {
                 athenaService.deleteWorkGroup(wg, region, request.path("RecursiveDeleteOption").asBoolean(false));
                 yield Response.ok(Map.of()).build();
             }
-            case "UpdateWorkGroup" -> {
-                String wg = request.path("WorkGroup").asText(null);
-                if (wg == null || wg.isBlank()) {
-                    throw new AwsException("InvalidRequestException", "WorkGroup is required.", 400);
-                }
-                @SuppressWarnings("unchecked")
-                Map<String, Object> updates = request.has("ConfigurationUpdates")
-                        ? mapper.convertValue(request.get("ConfigurationUpdates"), Map.class)
-                        : null;
-                athenaService.updateWorkGroup(
-                        wg,
-                        request.path("Description").asText(null),
-                        request.path("State").asText(null),
-                        updates,
-                        region);
-                yield Response.ok(Map.of()).build();
-            }
-            case "CreateDataCatalog" -> {
-                athenaService.createDataCatalog(mapper.treeToValue(request, io.github.hectorvent.floci.services.athena.model.DataCatalog.class));
-                yield Response.ok(Map.of()).build();
-            }
-            case "UpdateDataCatalog" -> {
-                @SuppressWarnings("unchecked")
-                Map<String, String> parameters = request.has("Parameters")
-                        ? mapper.convertValue(request.get("Parameters"), Map.class)
-                        : null;
-                athenaService.updateDataCatalog(
-                        request.get("Name").asText(),
-                        request.path("Type").asText(null),
-                        request.path("Description").asText(null),
-                        parameters);
-                yield Response.ok(Map.of()).build();
-            }
-            case "DeleteDataCatalog" -> {
-                athenaService.deleteDataCatalog(request.get("Name").asText());
-                yield Response.ok(Map.of()).build();
-            }
             case "GetDatabase" -> {
                 String catalog = request.has("CatalogName") ? request.get("CatalogName").asText() : AthenaService.DEFAULT_CATALOG;
                 yield Response.ok(Map.of("Database",
                         athenaService.getDatabase(catalog, request.get("DatabaseName").asText()))).build();
             }
             case "CreateNamedQuery" -> {
-                io.github.hectorvent.floci.services.athena.model.NamedQuery query =
-                        mapper.treeToValue(request, io.github.hectorvent.floci.services.athena.model.NamedQuery.class);
+                NamedQuery query =
+                        mapper.treeToValue(request, NamedQuery.class);
                 yield Response.ok(Map.of("NamedQueryId", athenaService.createNamedQuery(query))).build();
             }
             case "GetNamedQuery" -> Response.ok(Map.of("NamedQuery",
@@ -169,13 +177,13 @@ public class AthenaJsonHandler {
                 yield Response.ok(Map.of()).build();
             }
             case "BatchGetNamedQuery" -> {
-                java.util.List<String> ids = mapper.convertValue(request.get("NamedQueryIds"),
-                        mapper.getTypeFactory().constructCollectionType(java.util.List.class, String.class));
+                List<String> ids = mapper.convertValue(request.get("NamedQueryIds"),
+                        mapper.getTypeFactory().constructCollectionType(List.class, String.class));
                 yield Response.ok(athenaService.batchGetNamedQuery(ids)).build();
             }
             case "CreatePreparedStatement" -> {
-                io.github.hectorvent.floci.services.athena.model.PreparedStatement statement =
-                        mapper.treeToValue(request, io.github.hectorvent.floci.services.athena.model.PreparedStatement.class);
+                PreparedStatement statement =
+                        mapper.treeToValue(request, PreparedStatement.class);
                 if (statement.getWorkGroupName() == null && request.has("WorkGroup")) {
                     statement.setWorkGroupName(request.get("WorkGroup").asText());
                 }
@@ -190,8 +198,8 @@ public class AthenaJsonHandler {
             case "ListPreparedStatements" -> Response.ok(Map.of("PreparedStatements",
                     athenaService.listPreparedStatements(request.path("WorkGroup").asText(null)))).build();
             case "UpdatePreparedStatement" -> {
-                io.github.hectorvent.floci.services.athena.model.PreparedStatement statement =
-                        mapper.treeToValue(request, io.github.hectorvent.floci.services.athena.model.PreparedStatement.class);
+                PreparedStatement statement =
+                        mapper.treeToValue(request, PreparedStatement.class);
                 if (statement.getWorkGroupName() == null && request.has("WorkGroup")) {
                     statement.setWorkGroupName(request.get("WorkGroup").asText());
                 }
@@ -206,34 +214,57 @@ public class AthenaJsonHandler {
             }
             case "BatchGetPreparedStatement" -> {
                 String workGroup = request.path("WorkGroup").asText("primary");
-                java.util.List<String> names = mapper.convertValue(request.get("PreparedStatementNames"),
-                        mapper.getTypeFactory().constructCollectionType(java.util.List.class, String.class));
+                List<String> names = mapper.convertValue(request.get("PreparedStatementNames"),
+                        mapper.getTypeFactory().constructCollectionType(List.class, String.class));
                 yield Response.ok(athenaService.batchGetPreparedStatement(workGroup, names)).build();
             }
             case "BatchGetQueryExecution" -> {
-                java.util.List<String> ids = mapper.convertValue(request.get("QueryExecutionIds"),
-                        mapper.getTypeFactory().constructCollectionType(java.util.List.class, String.class));
+                List<String> ids = mapper.convertValue(request.get("QueryExecutionIds"),
+                        mapper.getTypeFactory().constructCollectionType(List.class, String.class));
                 yield Response.ok(athenaService.batchGetQueryExecution(ids)).build();
             }
             case "GetQueryRuntimeStatistics" -> Response.ok(
                     athenaService.getQueryRuntimeStatistics(request.get("QueryExecutionId").asText())).build();
-            case "TagResource" -> {
-                java.util.List<io.github.hectorvent.floci.services.athena.model.WorkGroupTag> tags =
-                        mapper.convertValue(request.get("Tags"),
-                                mapper.getTypeFactory().constructCollectionType(java.util.List.class,
-                                        io.github.hectorvent.floci.services.athena.model.WorkGroupTag.class));
-                athenaService.tagResource(request.path("ResourceARN").asText(null), tags, region);
-                yield Response.ok(Map.of()).build();
-            }
-            case "UntagResource" -> {
-                java.util.List<String> keys = mapper.convertValue(request.get("TagKeys"),
-                        mapper.getTypeFactory().constructCollectionType(java.util.List.class, String.class));
-                athenaService.untagResource(request.path("ResourceARN").asText(null), keys, region);
-                yield Response.ok(Map.of()).build();
-            }
-            case "ListTagsForResource" -> Response.ok(Map.of("Tags",
-                    athenaService.listTagsForResource(request.path("ResourceARN").asText(null), region))).build();
             default -> throw new AwsException("InvalidAction", "Action " + action + " is not supported", 400);
         };
+    }
+
+    private static String text(JsonNode request, String field) {
+        JsonNode node = request.get(field);
+        return node == null || node.isNull() ? null : node.asText();
+    }
+
+    private static Map<String, String> parameters(JsonNode request) {
+        JsonNode node = request.get("Parameters");
+        if (node == null || !node.isObject()) {
+            return Map.of();
+        }
+        Map<String, String> parameters = new LinkedHashMap<>();
+        node.fields().forEachRemaining(entry -> parameters.put(entry.getKey(), entry.getValue().asText()));
+        return parameters;
+    }
+
+    private static List<WorkGroupTag> tags(JsonNode request) {
+        JsonNode node = request.get("Tags");
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<WorkGroupTag> tags = new ArrayList<>();
+        for (JsonNode tag : node) {
+            tags.add(new WorkGroupTag(text(tag, "Key"), text(tag, "Value")));
+        }
+        return tags;
+    }
+
+    private static List<String> tagKeys(JsonNode request) {
+        JsonNode node = request.get("TagKeys");
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<String> keys = new ArrayList<>();
+        for (JsonNode key : node) {
+            keys.add(key.asText());
+        }
+        return keys;
     }
 }

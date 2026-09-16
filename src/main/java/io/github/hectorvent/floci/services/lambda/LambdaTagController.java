@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageService;
+import io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -33,19 +34,37 @@ public class LambdaTagController {
 
     private final LambdaService lambdaService;
     private final MicrovmImageService microvmImageService;
+    private final LambdaMicrovmsService microvmsService;
     private final ObjectMapper objectMapper;
 
     @Inject
     public LambdaTagController(LambdaService lambdaService, MicrovmImageService microvmImageService,
-                               ObjectMapper objectMapper) {
+                               LambdaMicrovmsService microvmsService, ObjectMapper objectMapper) {
         this.lambdaService = lambdaService;
         this.microvmImageService = microvmImageService;
+        this.microvmsService = microvmsService;
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * MicroVM-family ARNs (microvm-image, microvm, network-connector) share
+     * the /2017-03-31/tags route with classic Lambda resources; dispatch on
+     * the ARN's resource type. The region comes from the ARN itself.
+     */
+    private static String arnRegion(String arn) {
+        String[] parts = arn.split(":");
+        return parts.length > 3 ? parts[3] : "";
+    }
+
     @GET
-    @Path("/tags/{arn}")
+    @Path("/tags/{arn: .+}")
     public Response listTags(@PathParam("arn") String arn) {
+        if (LambdaMicrovmsService.ownsArn(arn)) {
+            ObjectNode mvRoot = objectMapper.createObjectNode();
+            ObjectNode mvTags = mvRoot.putObject("Tags");
+            microvmsService.listTags(arnRegion(arn), arn).forEach(mvTags::put);
+            return Response.ok(mvRoot).build();
+        }
         Map<String, String> tags = microvmImageService.isMicrovmImageArn(arn)
                 ? microvmImageService.listTags(regionFromArn(arn), arn)
                 : lambdaService.listTags(arn);
@@ -56,7 +75,7 @@ public class LambdaTagController {
     }
 
     @POST
-    @Path("/tags/{arn}")
+    @Path("/tags/{arn: .+}")
     public Response tagResource(@PathParam("arn") String arn, String body) {
         try {
             @SuppressWarnings("unchecked")
@@ -68,6 +87,8 @@ public class LambdaTagController {
             }
             if (microvmImageService.isMicrovmImageArn(arn)) {
                 microvmImageService.tagResource(regionFromArn(arn), arn, tags);
+            } else if (LambdaMicrovmsService.ownsArn(arn)) {
+                microvmsService.tagResource(arnRegion(arn), arn, tags);
             } else {
                 lambdaService.tagResource(arn, tags);
             }
@@ -80,11 +101,13 @@ public class LambdaTagController {
     }
 
     @DELETE
-    @Path("/tags/{arn}")
+    @Path("/tags/{arn: .+}")
     public Response untagResource(@PathParam("arn") String arn,
                                   @QueryParam("tagKeys") List<String> tagKeys) {
         if (microvmImageService.isMicrovmImageArn(arn)) {
             microvmImageService.untagResource(regionFromArn(arn), arn, tagKeys);
+        } else if (LambdaMicrovmsService.ownsArn(arn)) {
+            microvmsService.untagResource(arnRegion(arn), arn, tagKeys);
         } else {
             lambdaService.untagResource(arn, tagKeys);
         }

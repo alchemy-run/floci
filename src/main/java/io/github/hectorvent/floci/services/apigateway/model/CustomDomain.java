@@ -3,6 +3,11 @@ package io.github.hectorvent.floci.services.apigateway.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CustomDomain {
@@ -19,6 +24,11 @@ public class CustomDomain {
     private String endpointConfigurationType; // REGIONAL or EDGE
     private String domainNameStatus; // AVAILABLE, UPDATING, PENDING
     private String securityPolicy;
+    private Map<String, String> tags;
+    private String routingMode;
+    private String apiMappingSelectionExpression;
+    private Map<String, Object> mutualTlsAuthentication;
+    private List<Map<String, Object>> domainNameConfigurations;
 
     public CustomDomain() {
         this.domainNameStatus = "AVAILABLE";
@@ -64,4 +74,55 @@ public class CustomDomain {
 
     public String getSecurityPolicy() { return securityPolicy; }
     public void setSecurityPolicy(String securityPolicy) { this.securityPolicy = securityPolicy; }
+
+    public Map<String, String> getTags() { return tags; }
+    public void setTags(Map<String, String> tags) { this.tags = tags; }
+
+    public String getRoutingMode() { return routingMode; }
+    public void setRoutingMode(String routingMode) { this.routingMode = routingMode; }
+
+    public String getApiMappingSelectionExpression() { return apiMappingSelectionExpression; }
+    public void setApiMappingSelectionExpression(String expression) { this.apiMappingSelectionExpression = expression; }
+
+    public Map<String, Object> getMutualTlsAuthentication() { return mutualTlsAuthentication; }
+    public void setMutualTlsAuthentication(Map<String, Object> authentication) {
+        this.mutualTlsAuthentication = authentication == null ? null : new LinkedHashMap<>(authentication);
+    }
+
+    public List<Map<String, Object>> getDomainNameConfigurations() { return domainNameConfigurations; }
+    public void setDomainNameConfigurations(List<Map<String, Object>> configurations) {
+        this.domainNameConfigurations = configurations == null ? null : new ArrayList<>();
+        if (configurations != null) {
+            configurations.forEach(configuration -> this.domainNameConfigurations.add(new LinkedHashMap<>(configuration)));
+        }
+    }
+
+    /** The first v2 configuration shares its scalar fields with the v1 domain. */
+    public Map<String, Object> primaryConfiguration() {
+        Map<String, Object> configuration = domainNameConfigurations == null || domainNameConfigurations.isEmpty()
+                ? new LinkedHashMap<>() : new LinkedHashMap<>(domainNameConfigurations.getFirst());
+        configuration.put("apiGatewayDomainName", regionalDomainName);
+        configuration.put("hostedZoneId", regionalHostedZoneId);
+        configuration.put("endpointType", endpointConfigurationType);
+        configuration.put("domainNameStatus", domainNameStatus);
+        configuration.put("securityPolicy", securityPolicy);
+        configuration.putIfAbsent("ipAddressType", "ipv4");
+        if (certificateArn == null) {
+            configuration.remove("certificateArn");
+        } else {
+            configuration.put("certificateArn", certificateArn);
+        }
+        if (certificateName == null) {
+            configuration.remove("certificateName");
+        } else {
+            configuration.put("certificateName", certificateName);
+        }
+        return configuration;
+    }
+
+    public void synchronizePrimaryConfiguration() {
+        if (domainNameConfigurations != null && !domainNameConfigurations.isEmpty()) {
+            domainNameConfigurations.set(0, primaryConfiguration());
+        }
+    }
 }

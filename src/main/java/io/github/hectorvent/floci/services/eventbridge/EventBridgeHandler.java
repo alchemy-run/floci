@@ -8,6 +8,8 @@ import io.github.hectorvent.floci.services.eventbridge.model.Archive;
 import io.github.hectorvent.floci.services.eventbridge.model.ArchiveState;
 import io.github.hectorvent.floci.services.eventbridge.model.BatchParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.Connection;
+import io.github.hectorvent.floci.services.eventbridge.model.ConnectionState;
+import io.github.hectorvent.floci.services.eventbridge.model.EcsParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
 import io.github.hectorvent.floci.services.eventbridge.model.InputTransformer;
 import io.github.hectorvent.floci.services.eventbridge.model.Replay;
@@ -229,16 +231,7 @@ public class EventBridgeHandler {
                         input.isEmpty() ? null : input,
                         inputPath.isEmpty() ? null : inputPath
                 );
-                JsonNode transformerNode = t.path("InputTransformer");
-                if (!transformerNode.isMissingNode() && transformerNode.isObject()) {
-                    Map<String, String> pathsMap = new HashMap<>();
-                    JsonNode pathsNode = transformerNode.path("InputPathsMap");
-                    if (pathsNode.isObject()) {
-                        pathsNode.fields().forEachRemaining(e -> pathsMap.put(e.getKey(), e.getValue().asText()));
-                    }
-                    String template = transformerNode.path("InputTemplate").asText(null);
-                    target.setInputTransformer(new InputTransformer(pathsMap, template));
-                }
+                target.setInputTransformer(InputTransformer.fromJson(t.path("InputTransformer")));
                 JsonNode sqsParamsNode = t.path("SqsParameters");
                 if (!sqsParamsNode.isMissingNode() && sqsParamsNode.isObject()) {
                     String messageGroupId = sqsParamsNode.path("MessageGroupId").asText(null);
@@ -251,6 +244,10 @@ public class EventBridgeHandler {
                 JsonNode batchParamsNode = t.path("BatchParameters");
                 if (!batchParamsNode.isMissingNode() && batchParamsNode.isObject()) {
                     target.setBatchParameters(objectMapper.convertValue(batchParamsNode, BatchParameters.class));
+                }
+                JsonNode ecsParamsNode = t.path("EcsParameters");
+                if (!ecsParamsNode.isMissingNode() && ecsParamsNode.isObject()) {
+                    target.setEcsParameters(objectMapper.convertValue(ecsParamsNode, EcsParameters.class));
                 }
                 targets.add(target);
             }
@@ -311,6 +308,9 @@ public class EventBridgeHandler {
             }
             if (t.getBatchParameters() != null) {
                 node.set("BatchParameters", objectMapper.valueToTree(t.getBatchParameters()));
+            }
+            if (t.getEcsParameters() != null) {
+                node.set("EcsParameters", objectMapper.valueToTree(t.getEcsParameters()));
             }
             targetsArray.add(node);
         }
@@ -488,6 +488,73 @@ public class EventBridgeHandler {
         return Response.ok(response).build();
     }
 
+    // ──────────────────────────── Connections ────────────────────────────
+
+    private Response handleCreateConnection(JsonNode request, String region) {
+        Connection connection = eventBridgeService.createConnection(
+                request.path("Name").asText(null),
+                request.path("Description").asText(null),
+                request.path("AuthorizationType").asText(null),
+                objectAsJson(request.path("AuthParameters")),
+                objectAsJson(request.path("InvocationConnectivityParameters")),
+                request.path("KmsKeyIdentifier").asText(null),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ConnectionArn", connection.getConnectionArn());
+        response.put("ConnectionState", connection.getConnectionState().name());
+        response.put("CreationTime", connection.getCreationTime().getEpochSecond());
+        response.put("LastModifiedTime", connection.getLastModifiedTime().getEpochSecond());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeConnection(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        Connection connection = eventBridgeService.describeConnection(name, region);
+        return Response.ok(buildConnectionNode(connection, true)).build();
+    }
+
+    private Response handleUpdateConnection(JsonNode request, String region) {
+        Connection connection = eventBridgeService.updateConnection(
+                request.path("Name").asText(null),
+                request.path("Description").asText(null),
+                request.path("AuthorizationType").asText(null),
+                objectAsJson(request.path("AuthParameters")),
+                objectAsJson(request.path("InvocationConnectivityParameters")),
+                request.path("KmsKeyIdentifier").asText(null),
+                region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ConnectionArn", connection.getConnectionArn());
+        response.put("ConnectionState", connection.getConnectionState().name());
+        response.put("CreationTime", connection.getCreationTime().getEpochSecond());
+        response.put("LastModifiedTime", connection.getLastModifiedTime().getEpochSecond());
+        response.put("LastAuthorizedTime", connection.getLastAuthorizedTime().getEpochSecond());
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteConnection(JsonNode request, String region) {
+        String name = request.path("Name").asText(null);
+        Connection connection = eventBridgeService.deleteConnection(name, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ConnectionArn", connection.getConnectionArn());
+        response.put("ConnectionState", ConnectionState.DELETING.name());
+        response.put("CreationTime", connection.getCreationTime().getEpochSecond());
+        response.put("LastModifiedTime", connection.getLastModifiedTime().getEpochSecond());
+        response.put("LastAuthorizedTime", connection.getLastAuthorizedTime().getEpochSecond());
+        return Response.ok(response).build();
+    }
+
+    private Response handleListConnections(JsonNode request, String region) {
+        String namePrefix = request.path("NamePrefix").asText(null);
+        ConnectionState state = parseConnectionState(request.path("ConnectionState").asText(null));
+        List<Connection> connections = eventBridgeService.listConnections(namePrefix, state, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode connectionsArray = response.putArray("Connections");
+        for (Connection connection : connections) {
+            connectionsArray.add(buildConnectionNode(connection, false));
+        }
+        return Response.ok(response).build();
+    }
+
     // ──────────────────────────── Replays ────────────────────────────
 
     private Response handleStartReplay(JsonNode request, String region) {
@@ -539,64 +606,6 @@ public class EventBridgeHandler {
     }
 
     // ──────────────────────────── Connections ────────────────────────────
-
-    private Response handleCreateConnection(JsonNode request, String region) {
-        String name = request.path("Name").asText(null);
-        String description = request.path("Description").asText(null);
-        String authorizationType = request.path("AuthorizationType").asText(null);
-        String kmsKey = request.path("KmsKeyIdentifier").asText(null);
-        String authJson = objectOrNull(request.path("AuthParameters"));
-        Connection connection = eventBridgeService.createConnection(
-                name, description, authorizationType, authJson, kmsKey, region);
-        return Response.ok(buildConnectionMutationNode(connection)).build();
-    }
-
-    private Response handleDescribeConnection(JsonNode request, String region) {
-        String name = request.path("Name").asText(null);
-        Connection connection = eventBridgeService.describeConnection(name, region);
-        return Response.ok(buildConnectionDescribeNode(connection)).build();
-    }
-
-    private Response handleUpdateConnection(JsonNode request, String region) {
-        String name = request.path("Name").asText(null);
-        String description = request.has("Description") ? request.path("Description").asText(null) : null;
-        String authorizationType = request.path("AuthorizationType").asText(null);
-        String kmsKey = request.has("KmsKeyIdentifier") ? request.path("KmsKeyIdentifier").asText(null) : null;
-        String authJson = objectOrNull(request.path("AuthParameters"));
-        Connection connection = eventBridgeService.updateConnection(
-                name, description, authorizationType, authJson, kmsKey, region);
-        return Response.ok(buildConnectionMutationNode(connection)).build();
-    }
-
-    private Response handleDeleteConnection(JsonNode request, String region) {
-        String name = request.path("Name").asText(null);
-        Connection connection = eventBridgeService.deleteConnection(name, region);
-        ObjectNode response = buildConnectionMutationNode(connection);
-        putEpoch(response, "LastAuthorizedTime", connection.getLastAuthorizedTime());
-        return Response.ok(response).build();
-    }
-
-    private Response handleListConnections(JsonNode request, String region) {
-        String namePrefix = request.path("NamePrefix").asText(null);
-        String state = request.path("ConnectionState").asText(null);
-        List<Connection> connections = eventBridgeService.listConnections(namePrefix, state, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("Connections");
-        for (Connection connection : connections) {
-            ObjectNode node = objectMapper.createObjectNode();
-            node.put("ConnectionArn", connection.getConnectionArn());
-            node.put("Name", connection.getName());
-            node.put("ConnectionState", connection.getConnectionState());
-            if (connection.getAuthorizationType() != null) {
-                node.put("AuthorizationType", connection.getAuthorizationType());
-            }
-            putEpoch(node, "CreationTime", connection.getCreationTime());
-            putEpoch(node, "LastModifiedTime", connection.getLastModifiedTime());
-            putEpoch(node, "LastAuthorizedTime", connection.getLastAuthorizedTime());
-            array.add(node);
-        }
-        return Response.ok(response).build();
-    }
 
     // ──────────────────────────── API Destinations ────────────────────────────
 
@@ -774,6 +783,96 @@ public class EventBridgeHandler {
         return node;
     }
 
+    private ObjectNode buildConnectionNode(Connection connection, boolean full) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Name", connection.getName());
+        node.put("ConnectionArn", connection.getConnectionArn());
+        node.put("ConnectionState", connection.getConnectionState().name());
+        node.put("AuthorizationType", connection.getAuthorizationType());
+        if (connection.getStateReason() != null) {
+            node.put("StateReason", connection.getStateReason());
+        }
+        if (connection.getCreationTime() != null) {
+            node.put("CreationTime", connection.getCreationTime().getEpochSecond());
+        }
+        if (connection.getLastModifiedTime() != null) {
+            node.put("LastModifiedTime", connection.getLastModifiedTime().getEpochSecond());
+        }
+        if (connection.getLastAuthorizedTime() != null) {
+            node.put("LastAuthorizedTime", connection.getLastAuthorizedTime().getEpochSecond());
+        }
+        if (full) {
+            if (connection.getDescription() != null) {
+                node.put("Description", connection.getDescription());
+            }
+            node.put("SecretArn", connection.getSecretArn());
+            if (connection.getKmsKeyIdentifier() != null) {
+                node.put("KmsKeyIdentifier", connection.getKmsKeyIdentifier());
+            }
+            JsonNode authParameters = sanitizeAuthParameters(connection.getAuthParameters());
+            if (authParameters != null) {
+                node.set("AuthParameters", authParameters);
+            }
+            JsonNode connectivity = readJson(connection.getInvocationConnectivityParameters());
+            if (connectivity != null) {
+                node.set("InvocationConnectivityParameters", connectivity);
+            }
+        }
+        return node;
+    }
+
+    /**
+     * Strips secret values from stored connection auth parameters, matching what
+     * AWS DescribeConnection returns: credential fields are removed and invocation
+     * http parameter values flagged as secret are masked.
+     */
+    private JsonNode sanitizeAuthParameters(String authParametersJson) {
+        JsonNode parsed = readJson(authParametersJson);
+        if (!(parsed instanceof ObjectNode authParameters)) {
+            return parsed;
+        }
+        if (authParameters.path("ApiKeyAuthParameters") instanceof ObjectNode apiKey) {
+            apiKey.remove("ApiKeyValue");
+        }
+        if (authParameters.path("BasicAuthParameters") instanceof ObjectNode basic) {
+            basic.remove("Password");
+        }
+        if (authParameters.path("OAuthParameters") instanceof ObjectNode oauth) {
+            if (oauth.path("ClientParameters") instanceof ObjectNode client) {
+                client.remove("ClientSecret");
+            }
+            maskSecretHttpParameters(oauth.path("OAuthHttpParameters"));
+        }
+        maskSecretHttpParameters(authParameters.path("InvocationHttpParameters"));
+        return authParameters;
+    }
+
+    private void maskSecretHttpParameters(JsonNode httpParameters) {
+        if (!httpParameters.isObject()) {
+            return;
+        }
+        for (String field : List.of("BodyParameters", "HeaderParameters", "QueryStringParameters")) {
+            for (JsonNode parameter : httpParameters.path(field)) {
+                // IsValueSecret is optional; an omitted flag means "treat as secret" on AWS.
+                if (parameter instanceof ObjectNode param && param.path("IsValueSecret").asBoolean(true)) {
+                    param.put("Value", "*");
+                }
+            }
+        }
+    }
+
+    private JsonNode readJson(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(json);
+        } catch (Exception e) {
+            LOG.warnv("Failed to parse stored connection parameters: {0}", e.getMessage());
+            return null;
+        }
+    }
+
     private ObjectNode buildReplayNode(Replay replay, boolean full) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("ReplayName", replay.getReplayName());
@@ -817,6 +916,21 @@ public class EventBridgeHandler {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private ConnectionState parseConnectionState(String state) {
+        if (state == null || state.isBlank()) {
+            return null;
+        }
+        try {
+            return ConnectionState.valueOf(state);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static String objectAsJson(JsonNode node) {
+        return (node.isObject() && !node.isEmpty()) ? node.toString() : null;
     }
 
     private ReplayState parseReplayState(String state) {
@@ -867,95 +981,10 @@ public class EventBridgeHandler {
         }
     }
 
-    private ObjectNode buildConnectionMutationNode(Connection connection) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("ConnectionArn", connection.getConnectionArn());
-        node.put("ConnectionState", connection.getConnectionState());
-        putEpoch(node, "CreationTime", connection.getCreationTime());
-        putEpoch(node, "LastModifiedTime", connection.getLastModifiedTime());
-        return node;
-    }
-
-    private ObjectNode buildConnectionDescribeNode(Connection connection) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("ConnectionArn", connection.getConnectionArn());
-        node.put("Name", connection.getName());
-        node.put("ConnectionState", connection.getConnectionState());
-        if (connection.getDescription() != null) {
-            node.put("Description", connection.getDescription());
-        }
-        if (connection.getAuthorizationType() != null) {
-            node.put("AuthorizationType", connection.getAuthorizationType());
-        }
-        if (connection.getSecretArn() != null) {
-            node.put("SecretArn", connection.getSecretArn());
-        }
-        if (connection.getKmsKeyIdentifier() != null) {
-            node.put("KmsKeyIdentifier", connection.getKmsKeyIdentifier());
-        }
-        JsonNode sanitized = sanitizeAuthParameters(connection.getAuthParametersJson());
-        if (sanitized != null) {
-            node.set("AuthParameters", sanitized);
-        }
-        putEpoch(node, "CreationTime", connection.getCreationTime());
-        putEpoch(node, "LastModifiedTime", connection.getLastModifiedTime());
-        putEpoch(node, "LastAuthorizedTime", connection.getLastAuthorizedTime());
-        return node;
-    }
-
     /**
      * EventBridge never returns secret values from DescribeConnection — only
      * the non-secret halves (header name, username, client id, endpoints).
      */
-    private JsonNode sanitizeAuthParameters(String authJson) {
-        if (authJson == null || authJson.isBlank()) {
-            return null;
-        }
-        try {
-            JsonNode raw = objectMapper.readTree(authJson);
-            if (!raw.isObject()) {
-                return null;
-            }
-            ObjectNode out = objectMapper.createObjectNode();
-            JsonNode apiKey = raw.path("ApiKeyAuthParameters");
-            if (apiKey.isObject() && apiKey.hasNonNull("ApiKeyName")) {
-                out.putObject("ApiKeyAuthParameters")
-                        .put("ApiKeyName", apiKey.path("ApiKeyName").asText());
-            }
-            JsonNode basic = raw.path("BasicAuthParameters");
-            if (basic.isObject() && basic.hasNonNull("Username")) {
-                out.putObject("BasicAuthParameters")
-                        .put("Username", basic.path("Username").asText());
-            }
-            JsonNode oauth = raw.path("OAuthParameters");
-            if (oauth.isObject()) {
-                ObjectNode oauthOut = out.putObject("OAuthParameters");
-                JsonNode client = oauth.path("ClientParameters");
-                if (client.isObject() && client.hasNonNull("ClientID")) {
-                    oauthOut.putObject("ClientParameters")
-                            .put("ClientID", client.path("ClientID").asText());
-                }
-                if (oauth.hasNonNull("AuthorizationEndpoint")) {
-                    oauthOut.put("AuthorizationEndpoint", oauth.path("AuthorizationEndpoint").asText());
-                }
-                if (oauth.hasNonNull("HttpMethod")) {
-                    oauthOut.put("HttpMethod", oauth.path("HttpMethod").asText());
-                }
-                JsonNode oauthHttp = oauth.path("OAuthHttpParameters");
-                if (oauthHttp.isObject()) {
-                    oauthOut.set("OAuthHttpParameters", oauthHttp);
-                }
-            }
-            JsonNode invocation = raw.path("InvocationHttpParameters");
-            if (invocation.isObject()) {
-                out.set("InvocationHttpParameters", invocation);
-            }
-            return out.isEmpty() ? null : out;
-        } catch (Exception e) {
-            LOG.warnv("Failed to sanitize connection AuthParameters: {0}", e.getMessage());
-            return null;
-        }
-    }
 
     private ObjectNode buildDestinationMutationNode(ApiDestination destination) {
         ObjectNode node = objectMapper.createObjectNode();

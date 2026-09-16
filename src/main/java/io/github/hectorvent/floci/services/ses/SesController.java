@@ -1,40 +1,34 @@
 package io.github.hectorvent.floci.services.ses;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ses.model.AccountSuppressionAttributes;
 import io.github.hectorvent.floci.services.ses.model.AccountVdmAttributes;
 import io.github.hectorvent.floci.services.ses.model.ArchivingOptions;
-import io.github.hectorvent.floci.services.ses.model.DashboardOptions;
-import io.github.hectorvent.floci.services.ses.model.GuardianOptions;
-import io.github.hectorvent.floci.services.ses.model.MultiRegionEndpoint;
-import io.github.hectorvent.floci.services.ses.model.Tenant;
-import io.github.hectorvent.floci.services.ses.model.TenantResource;
 import io.github.hectorvent.floci.services.ses.model.BulkEmailEntry;
 import io.github.hectorvent.floci.services.ses.model.BulkEmailEntryResult;
 import io.github.hectorvent.floci.services.ses.model.ConfigurationSet;
-import io.github.hectorvent.floci.services.ses.model.Contact;
-import io.github.hectorvent.floci.services.ses.model.ContactList;
-import io.github.hectorvent.floci.services.ses.model.CustomVerificationEmailTemplate;
-import io.github.hectorvent.floci.services.ses.model.DedicatedIpPool;
-import io.github.hectorvent.floci.services.ses.model.Topic;
-import io.github.hectorvent.floci.services.ses.model.TopicPreference;
+import io.github.hectorvent.floci.services.ses.model.DashboardOptions;
 import io.github.hectorvent.floci.services.ses.model.DeliveryOptions;
 import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
 import io.github.hectorvent.floci.services.ses.model.EventDestination;
+import io.github.hectorvent.floci.services.ses.model.GuardianOptions;
 import io.github.hectorvent.floci.services.ses.model.Identity;
 import io.github.hectorvent.floci.services.ses.model.ListManagementOptions;
 import io.github.hectorvent.floci.services.ses.model.MessageHeader;
 import io.github.hectorvent.floci.services.ses.model.MessageTag;
+import io.github.hectorvent.floci.services.ses.model.MultiRegionEndpoint;
 import io.github.hectorvent.floci.services.ses.model.SuppressedDestination;
 import io.github.hectorvent.floci.services.ses.model.SuppressionOptions;
 import io.github.hectorvent.floci.services.ses.model.Tag;
+import io.github.hectorvent.floci.services.ses.model.Tenant;
+import io.github.hectorvent.floci.services.ses.model.TenantResourceAssociation;
 import io.github.hectorvent.floci.services.ses.model.TrackingOptions;
 import io.github.hectorvent.floci.services.ses.model.VdmOptions;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -59,6 +53,19 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static io.github.hectorvent.floci.services.ses.SesV2Json.coerceBoolean;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.intMemberOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.parseOptionString;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readRequiredStringField;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.requireObjectOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.stringArrayOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMemberOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.unexpectedStartError;
+
 /**
  * REST JSON controller for the AWS SES V2 API.
  * Implements the AWS SES V2 wire protocol at /v2/email/* for the operations
@@ -77,13 +84,16 @@ public class SesController {
     private static final Logger LOG = Logger.getLogger(SesController.class);
 
     private final SesService sesService;
+    // The bulk send resolves a stored template's content before handing the entries to the facade.
+    private final SesTemplateService templateService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public SesController(SesService sesService, RegionResolver regionResolver,
-                           ObjectMapper objectMapper) {
+    public SesController(SesService sesService, SesTemplateService templateService,
+                         RegionResolver regionResolver, ObjectMapper objectMapper) {
         this.sesService = sesService;
+        this.templateService = templateService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -96,39 +106,49 @@ public class SesController {
         String region = regionResolver.resolveRegion(headers);
         try {
             JsonNode request = objectMapper.readTree(body);
-            String emailIdentity = request.path("EmailIdentity").asText(null);
+            JsonNode emailIdentityNode = request.path("EmailIdentity");
+            if (!emailIdentityNode.isMissingNode() && !emailIdentityNode.isNull()
+                    && !emailIdentityNode.isTextual()) {
+                // A non-string EmailIdentity is rejected rather than coerced (asText would turn 123
+                // into "123"), the same as ConfigurationSetName below.
+                throw new AwsException("SerializationException", null, 400);
+            }
+            String emailIdentity = emailIdentityNode.asText(null);
             if (emailIdentity == null || emailIdentity.isBlank()) {
                 throw new AwsException("BadRequestException", "EmailIdentity is required.", 400);
             }
-
-            if (sesService.getIdentityVerificationAttributes(emailIdentity, region) != null) {
-                throw new AwsException("AlreadyExistsException",
-                        "Email identity " + emailIdentity + " already exist.", 400);
+            // ConfigurationSetName must be a String; AWS rejects a non-string, so reject it here too
+            // rather than coercing via asText (which would turn 123 into "123"). Floci surfaces this
+            // as a 400 SerializationException, rendered as a JSON error body by AwsExceptionMapper.
+            JsonNode configSetNode = request.path("ConfigurationSetName");
+            String configurationSetName = null;
+            if (!configSetNode.isMissingNode() && !configSetNode.isNull()) {
+                if (!configSetNode.isTextual()) {
+                    throw new AwsException("SerializationException", null, 400);
+                }
+                configurationSetName = configSetNode.textValue();
             }
-
-            Identity identity = emailIdentity.contains("@")
-                    ? sesService.createEmailAddressIdentity(emailIdentity, region)
-                    : sesService.verifyDomainIdentity(emailIdentity, region);
 
             List<Tag> parsedTags = parseTagsArray(request.path("Tags"));
-            if (parsedTags != null) {
-                sesService.setIdentityTags(emailIdentity, region, parsedTags);
-            }
-            JsonNode dkimSigning = request.path("DkimSigningAttributes");
-            if (!dkimSigning.isMissingNode() && !dkimSigning.isNull()) {
-                String nextLength = dkimSigning.path("NextSigningKeyLength").asText(null);
-                if (nextLength != null && !nextLength.isBlank()) {
-                    sesService.putEmailIdentityDkimSigningAttributes(
-                            emailIdentity, "AWS_SES", nextLength, region);
-                    identity = sesService.getIdentityVerificationAttributes(emailIdentity, region);
-                }
-            }
+
+            // Only the empty string means "no default configuration set" (consistent with the
+            // PutEmailIdentityConfigurationSetAttributes path); a whitespace-only name flows through
+            // name validation and is rejected as invalid input, rather than being silently ignored.
+            boolean hasConfigSet = configurationSetName != null && !configurationSetName.isEmpty();
+
+            // The service builds the complete identity (default configuration set and tags included)
+            // and persists it with a single write, so any failure (AlreadyExists, invalid tags, a
+            // missing configuration set) fails the whole call and creates nothing, matching AWS.
+            JsonNode dkimSigning = requireObjectOrAbsent(request, "DkimSigningAttributes");
+            String nextSigningKeyLength = dkimSigning.path("NextSigningKeyLength").asText(null);
+            Identity identity = sesService.createEmailIdentity(emailIdentity,
+                    hasConfigSet ? configurationSetName : null, parsedTags, region, nextSigningKeyLength);
 
             ObjectNode result = objectMapper.createObjectNode();
             result.put("IdentityType", toV2IdentityType(identity.getIdentityType()));
             result.put("VerifiedForSendingStatus",
                     "Success".equals(identity.getVerificationStatus()));
-            result.set("DkimAttributes", buildDkimAttributes(identity));
+            result.set("DkimAttributes", buildDkimAttributes(identity, region));
 
             LOG.infov("SES V2 CreateEmailIdentity: {0}", emailIdentity);
             return Response.ok(result).build();
@@ -177,7 +197,7 @@ public class SesController {
             throw new AwsException("NotFoundException",
                     "Identity " + emailIdentity + " does not exist.", 404);
         }
-        return Response.ok(buildFullIdentityResponse(identity)).build();
+        return Response.ok(buildFullIdentityResponse(identity, region)).build();
     }
 
     @DELETE
@@ -305,16 +325,36 @@ public class SesController {
                                                           String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode() : objectMapper.readTree(body);
             requireJsonObject(request);
             String origin = request.path("SigningAttributesOrigin").asText(null);
-            JsonNode signing = request.path("SigningAttributes");
-            String nextLength = null;
-            if (!signing.isMissingNode() && !signing.isNull()) {
-                nextLength = signing.path("NextSigningKeyLength").asText(null);
+            if (!"AWS_SES".equals(origin) && !"EXTERNAL".equals(origin)) {
+                throw new AwsException("BadRequestException",
+                        "SigningAttributesOrigin must be AWS_SES or EXTERNAL.", 400);
             }
-            sesService.putEmailIdentityDkimSigningAttributes(emailIdentity, origin, nextLength, region);
-            return Response.ok(objectMapper.createObjectNode()).build();
+            JsonNode attrs = requireObjectOrAbsent(request, "SigningAttributes");
+            String selector = attrs.path("DomainSigningSelector").asText(null);
+            String nextKeyLength = attrs.path("NextSigningKeyLength").asText(null);
+            if (nextKeyLength != null
+                    && !"RSA_1024_BIT".equals(nextKeyLength) && !"RSA_2048_BIT".equals(nextKeyLength)) {
+                throw new AwsException("BadRequestException",
+                        "NextSigningKeyLength must be RSA_1024_BIT or RSA_2048_BIT.", 400);
+            }
+            String privateKey = attrs.path("DomainSigningPrivateKey").asText(null);
+            if ("EXTERNAL".equals(origin)
+                    && (selector == null || selector.isBlank()
+                        || privateKey == null || privateKey.isBlank())) {
+                throw new AwsException("BadRequestException",
+                        "EXTERNAL origin requires DomainSigningSelector and DomainSigningPrivateKey.", 400);
+            }
+            SesIdentityService.DkimSigningResult result = sesService.putDkimSigningAttributes(
+                    emailIdentity, origin, selector, nextKeyLength, region);
+            ObjectNode out = objectMapper.createObjectNode();
+            out.put("DkimStatus", toV2Status(result.dkimStatus()));
+            ArrayNode tokens = out.putArray("DkimTokens");
+            result.dkimTokens().forEach(tokens::add);
+            return Response.ok(out).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
         } catch (Exception e) {
@@ -455,8 +495,11 @@ public class SesController {
             List<String> ccAddresses = jsonArrayToList(destination.path("CcAddresses"));
             List<String> bccAddresses = jsonArrayToList(destination.path("BccAddresses"));
             List<String> replyToAddresses = jsonArrayToList(request.path("ReplyToAddresses"));
+            String feedbackForwardingAddress =
+                    request.path("FeedbackForwardingEmailAddress").asText(null);
             List<String> allDestinations = mergeLists(toAddresses, ccAddresses, bccAddresses);
             String configurationSetName = request.path("ConfigurationSetName").asText(null);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
             List<MessageTag> emailTags = parseEmailTagsArray(request.path("EmailTags"), "EmailTags");
             ListManagementOptions listManagement =
                     parseListManagementOptions(request.path("ListManagementOptions"));
@@ -474,8 +517,11 @@ public class SesController {
                     throw new AwsException("BadRequestException",
                             "At least one destination address is required.", 400);
                 }
+                sesService.checkTenantRawSendAccess(tenantName, fromEmailAddress, rawData,
+                        configurationSetName, regionResolver.getAccountId(), region);
                 messageId = sesService.sendRawEmail(fromEmailAddress, allDestinations, rawData,
-                        configurationSetName, emailTags, listManagement, region);
+                        feedbackForwardingAddress, configurationSetName, emailTags, listManagement,
+                        region);
             } else if (content.has("Simple")) {
                 if (fromEmailAddress == null || fromEmailAddress.isBlank()) {
                     // AWS returns BadRequestException with a null message body here.
@@ -487,8 +533,11 @@ public class SesController {
                 String bodyHtml = simple.path("Body").path("Html").path("Data").asText(null);
                 List<MessageHeader> additionalHeaders =
                         parseHeadersArray(simple.path("Headers"), "content.simple.headers");
+                sesService.checkTenantSendAccess(tenantName, fromEmailAddress, configurationSetName,
+                        null, regionResolver.getAccountId(), region);
                 messageId = sesService.sendEmail(fromEmailAddress, toAddresses, ccAddresses,
-                        bccAddresses, replyToAddresses, subject, bodyText, bodyHtml,
+                        bccAddresses, replyToAddresses, feedbackForwardingAddress,
+                        subject, bodyText, bodyHtml,
                         configurationSetName, emailTags, additionalHeaders, listManagement, region);
             } else if (content.has("Template")) {
                 if (fromEmailAddress == null || fromEmailAddress.isBlank()) {
@@ -516,17 +565,26 @@ public class SesController {
                 if (hasName || hasArn) {
                     String resolvedName = hasName
                             ? templateName
-                            : SesService.templateNameFromArn(templateArn);
+                            : SesTemplateService.templateNameFromArn(templateArn);
+                    sesService.checkTenantSendAccess(tenantName, fromEmailAddress,
+                            configurationSetName, resolvedName, regionResolver.getAccountId(), region);
                     messageId = sesService.sendTemplatedEmail(fromEmailAddress, toAddresses, ccAddresses,
-                            bccAddresses, replyToAddresses, resolvedName, templateData,
+                            bccAddresses, replyToAddresses, feedbackForwardingAddress,
+                            resolvedName, templateData,
                             configurationSetName, emailTags, additionalHeaders, listManagement, region);
                 } else {
                     JsonNode inline = template.path("TemplateContent");
                     String subject = inline.path("Subject").asText(null);
                     String text = inline.path("Text").asText(null);
                     String html = inline.path("Html").asText(null);
+                    // An empty inline template is reported before the tenant lookup on AWS; the
+                    // inline content is not a stored template resource, so only the identity and
+                    // configuration set pass through the gate.
+                    SesService.requireInlineTemplateContent(subject, text, html);
+                    sesService.checkTenantSendAccess(tenantName, fromEmailAddress,
+                            configurationSetName, null, regionResolver.getAccountId(), region);
                     messageId = sesService.sendInlineTemplatedEmail(fromEmailAddress, toAddresses,
-                            ccAddresses, bccAddresses, replyToAddresses,
+                            ccAddresses, bccAddresses, replyToAddresses, feedbackForwardingAddress,
                             subject, text, html, templateData,
                             configurationSetName, emailTags, additionalHeaders, listManagement, region);
                 }
@@ -566,7 +624,10 @@ public class SesController {
                         "FromEmailAddress is required.", 400);
             }
             List<String> replyToAddresses = jsonArrayToList(request.path("ReplyToAddresses"));
+            String feedbackForwardingAddress =
+                    request.path("FeedbackForwardingEmailAddress").asText(null);
             String configurationSetName = request.path("ConfigurationSetName").asText(null);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
 
             JsonNode template = request.path("DefaultContent").path("Template");
             if (template.isMissingNode() || template.isNull()) {
@@ -592,16 +653,22 @@ public class SesController {
             String subject;
             String text;
             String html;
+            // Inline template content is not a stored template resource, so it stays out of the
+            // tenant gate below.
+            String gateTemplateName = null;
             if (hasInline) {
                 JsonNode inline = template.path("TemplateContent");
                 subject = inline.path("Subject").asText(null);
                 text = inline.path("Text").asText(null);
                 html = inline.path("Html").asText(null);
+                // Shape validation belongs before the tenant gate below, as on SendEmail.
+                SesService.requireInlineTemplateContent(subject, text, html);
             } else {
                 String resolvedName = hasName
                         ? templateName
-                        : SesService.templateNameFromArn(templateArn);
-                EmailTemplate stored = sesService.getTemplate(resolvedName, region);
+                        : SesTemplateService.templateNameFromArn(templateArn);
+                gateTemplateName = resolvedName;
+                EmailTemplate stored = templateService.getTemplate(resolvedName, region);
                 subject = stored.getSubject();
                 text = stored.getTextPart();
                 html = stored.getHtmlPart();
@@ -639,8 +706,13 @@ public class SesController {
                 entryIndex++;
             }
 
+            // The tenant gate runs only after every part of the request has been parsed and
+            // validated — AWS reports malformed content before a missing tenant (probe-confirmed).
+            sesService.checkTenantSendAccess(tenantName, fromEmailAddress, configurationSetName,
+                    gateTemplateName, regionResolver.getAccountId(), region);
+
             List<BulkEmailEntryResult> results = sesService.sendBulkTemplatedEmail(fromEmailAddress,
-                    replyToAddresses, subject, text, html,
+                    replyToAddresses, feedbackForwardingAddress, subject, text, html,
                     defaultTemplateData, entries, configurationSetName,
                     defaultEmailTags, defaultHeaders, region);
 
@@ -668,223 +740,319 @@ public class SesController {
         }
     }
 
-    // ──────────────────────────── Templates ────────────────────────────
-
     // ──────────────── Custom verification email templates ────────────────
 
     @POST
-    @Path("/custom-verification-email-templates")
-    public Response createCustomVerificationEmailTemplate(@Context HttpHeaders headers, String body) {
+    @Path("/outbound-custom-verification-emails")
+    public Response sendCustomVerificationEmail(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
+        String templateName = null;
         try {
-            CustomVerificationEmailTemplate t = parseCvet(objectMapper.readTree(body));
-            sesService.createCustomVerificationEmailTemplate(t, region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @GET
-    @Path("/custom-verification-email-templates")
-    public Response listCustomVerificationEmailTemplates(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode items = result.putArray("CustomVerificationEmailTemplates");
-        for (CustomVerificationEmailTemplate t : sesService.listCustomVerificationEmailTemplates(region)) {
-            items.add(cvetJson(t, false));
-        }
-        return Response.ok(result).build();
-    }
-
-    @GET
-    @Path("/custom-verification-email-templates/{templateName}")
-    public Response getCustomVerificationEmailTemplate(@Context HttpHeaders headers,
-                                                       @PathParam("templateName") String templateName) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            return Response.ok(
-                    cvetJson(sesService.getCustomVerificationEmailTemplate(templateName, region), true)).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        }
-    }
-
-    @PUT
-    @Path("/custom-verification-email-templates/{templateName}")
-    public Response updateCustomVerificationEmailTemplate(@Context HttpHeaders headers,
-                                                          @PathParam("templateName") String templateName, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            CustomVerificationEmailTemplate t = parseCvet(objectMapper.readTree(body));
-            t.setTemplateName(templateName);
-            sesService.updateCustomVerificationEmailTemplate(t, region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @DELETE
-    @Path("/custom-verification-email-templates/{templateName}")
-    public Response deleteCustomVerificationEmailTemplate(@Context HttpHeaders headers,
-                                                          @PathParam("templateName") String templateName) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            sesService.deleteCustomVerificationEmailTemplate(templateName, region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        }
-    }
-
-    private CustomVerificationEmailTemplate parseCvet(JsonNode request) {
-        requireJsonObject(request);
-        CustomVerificationEmailTemplate t = new CustomVerificationEmailTemplate();
-        t.setTemplateName(request.path("TemplateName").asText(null));
-        t.setFromEmailAddress(request.path("FromEmailAddress").asText(null));
-        t.setTemplateSubject(request.path("TemplateSubject").asText(null));
-        t.setTemplateContent(request.path("TemplateContent").asText(null));
-        t.setSuccessRedirectionURL(request.path("SuccessRedirectionURL").asText(null));
-        t.setFailureRedirectionURL(request.path("FailureRedirectionURL").asText(null));
-        return t;
-    }
-
-    // List omits TemplateContent (matches AWS); Get includes it.
-    private ObjectNode cvetJson(CustomVerificationEmailTemplate t, boolean includeContent) {
-        ObjectNode o = objectMapper.createObjectNode();
-        o.put("TemplateName", t.getTemplateName());
-        o.put("FromEmailAddress", t.getFromEmailAddress());
-        o.put("TemplateSubject", t.getTemplateSubject());
-        if (includeContent) {
-            o.put("TemplateContent", t.getTemplateContent());
-        }
-        o.put("SuccessRedirectionURL", t.getSuccessRedirectionURL());
-        o.put("FailureRedirectionURL", t.getFailureRedirectionURL());
-        return o;
-    }
-
-    @POST
-    @Path("/templates")
-    public Response createEmailTemplate(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body);
-            String templateName = request.path("TemplateName").asText(null);
-            if (templateName == null || templateName.isBlank()) {
-                throw new AwsException("BadRequestException", "TemplateName is required.", 400);
-            }
-            EmailTemplate template = parseTemplateContent(templateName, request.path("TemplateContent"));
-            List<Tag> parsedTags = parseTagsArray(request.path("Tags"));
-            if (parsedTags != null) {
-                template.setTags(parsedTags);
-            }
-            sesService.createTemplate(template, region);
-            LOG.infov("SES V2 CreateEmailTemplate: {0}", templateName);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @GET
-    @Path("/templates")
-    public Response listEmailTemplates(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        List<EmailTemplate> templates = sesService.listTemplates(region);
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode items = result.putArray("TemplatesMetadata");
-        for (EmailTemplate t : templates) {
-            ObjectNode item = objectMapper.createObjectNode();
-            item.put("TemplateName", t.getTemplateName());
-            if (t.getCreatedTimestamp() != null) {
-                item.put("CreatedTimestamp", t.getCreatedTimestamp().getEpochSecond());
-            }
-            items.add(item);
-        }
-        return Response.ok(result).build();
-    }
-
-    @GET
-    @Path("/templates/{templateName}")
-    public Response getEmailTemplate(@Context HttpHeaders headers,
-                                      @PathParam("templateName") String templateName) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            EmailTemplate template = sesService.getTemplate(templateName, region);
-            return Response.ok(buildTemplateResponse(template)).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        }
-    }
-
-    @PUT
-    @Path("/templates/{templateName}")
-    public Response updateEmailTemplate(@Context HttpHeaders headers,
-                                         @PathParam("templateName") String templateName,
-                                         String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body);
-            EmailTemplate template = parseTemplateContent(templateName, request.path("TemplateContent"));
-            sesService.updateTemplate(template, region);
-            LOG.infov("SES V2 UpdateEmailTemplate: {0}", templateName);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @DELETE
-    @Path("/templates/{templateName}")
-    public Response deleteEmailTemplate(@Context HttpHeaders headers,
-                                         @PathParam("templateName") String templateName) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            sesService.deleteTemplate(templateName, region);
-            LOG.infov("SES V2 DeleteEmailTemplate: {0}", templateName);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        }
-    }
-
-    @POST
-    @Path("/templates/{templateName}/render")
-    public Response testRenderEmailTemplate(@Context HttpHeaders headers,
-                                             @PathParam("templateName") String templateName,
-                                             String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            if (body == null || body.isBlank()) {
-                throw new AwsException("BadRequestException", "Request body is required.", 400);
+            if (!sesService.isAccountSendingEnabled(region)) {
+                throw new AwsException("SendingPausedException",
+                        "Account sending is disabled.", 400);
             }
             JsonNode request = objectMapper.readTree(body);
             requireJsonObject(request);
-            JsonNode templateDataNode = request.path("TemplateData");
-            if (!templateDataNode.isMissingNode() && !templateDataNode.isNull()
-                    && !templateDataNode.isTextual()) {
-                throw new AwsException("BadRequestException",
-                        "TemplateData must be a JSON-encoded string.", 400);
-            }
-            String templateDataRaw = templateDataNode.asText("");
-            String rendered = sesService.renderTestTemplate(templateName, templateDataRaw, region);
+            templateName = request.path("TemplateName").asText(null);
+            String messageId = sesService.sendCustomVerificationEmail(
+                    request.path("EmailAddress").asText(null), templateName,
+                    request.path("ConfigurationSetName").asText(null), region);
             ObjectNode result = objectMapper.createObjectNode();
-            result.put("RenderedTemplate", rendered);
+            result.put("MessageId", messageId);
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            // AWS returns a longer not-found message on v2 than the v1 send message ("Template <name>
+            // does not exist"); the service throws the v1-native form, so restate it in the v2 wording.
+            if ("CustomVerificationEmailTemplateDoesNotExist".equals(e.getErrorCode())) {
+                throw new AwsException("NotFoundException",
+                        "Custom verification email template <" + templateName + "> does not exist", 404);
+            }
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    // ──────────────────────────── Tenants (multi-tenancy) ────────────────────────────
+    // The SES v2 tenant operations use RPC-style POST subpaths (/tenants, /tenants/get, /tenants/list,
+    // /tenants/delete). The service owns id/ARN generation and name validation; the controller only
+    // parses the request and renders the response.
+
+    @POST
+    @Path("/tenants")
+    public Response createTenant(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            List<Tag> tags = parseTagsArray(request.path("Tags"));
+            List<String> suppressedReasons = null;
+            String suppressionScope = null;
+            JsonNode attrs = request.path("SuppressionAttributes");
+            if (!attrs.isMissingNode() && !attrs.isNull()) {
+                if (!attrs.isObject()) {
+                    throw new AwsException("SerializationException", null, 400);
+                }
+                suppressedReasons = stringArrayOrAbsent(attrs, "SuppressedReasons");
+                suppressionScope = stringMemberOrAbsent(attrs, "SuppressionScope");
+            }
+            String accountId = regionResolver.getAccountId();
+            Tenant tenant = sesService.createTenant(tenantName, tags, suppressedReasons,
+                    suppressionScope, accountId, region);
+            return Response.ok(tenantJson(tenant)).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/get")
+    public Response getTenant(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            Tenant tenant = sesService.getTenant(tenantName, region);
+            ObjectNode result = objectMapper.createObjectNode();
+            result.set("Tenant", tenantJson(tenant));
             return Response.ok(result).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
+            throw new AwsException("SerializationException", null, 400);
         }
+    }
+
+    @POST
+    @Path("/tenants/list")
+    public Response listTenants(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            // Parse the body so a malformed request is rejected rather than silently accepted. Phase 1
+            // returns every tenant in one page; PageSize/NextToken pagination is a follow-up.
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode tenants = result.putArray("Tenants");
+        for (Tenant t : sesService.listTenants(region)) {
+            // ListTenants returns the TenantInfo subset (no Tags / SendingStatus).
+            ObjectNode item = tenants.addObject();
+            item.put("TenantName", t.tenantName());
+            item.put("TenantId", t.tenantId());
+            item.put("TenantArn", t.tenantArn());
+            if (t.createdTimestamp() != null) {
+                item.put("CreatedTimestamp", t.createdTimestamp().toEpochMilli() / 1000.0);
+            }
+        }
+        return Response.ok(result).build();
+    }
+
+    @POST
+    @Path("/tenants/delete")
+    public Response deleteTenant(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            sesService.deleteTenant(tenantName, region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    // Phase 2: tenant→resource associations. AWS's wire format for ResourceType — in responses and as
+    // the RESOURCE_TYPE filter value — is the ARN segment (identity / configuration-set / template),
+    // not the SDK's EMAIL_IDENTITY-style enum spelling; real AWS rejects the enum spelling.
+
+    @POST
+    @Path("/tenants/resources")
+    public Response createTenantResourceAssociation(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            String resourceArn = stringMemberOrAbsent(request, "ResourceArn");
+            sesService.createTenantResourceAssociation(tenantName, resourceArn,
+                    regionResolver.getAccountId(), region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/resources/delete")
+    public Response deleteTenantResourceAssociation(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            String resourceArn = stringMemberOrAbsent(request, "ResourceArn");
+            sesService.deleteTenantResourceAssociation(tenantName, resourceArn,
+                    regionResolver.getAccountId(), region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    @POST
+    @Path("/tenants/resources/list")
+    public Response listTenantResources(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            String resourceTypeFilter = null;
+            JsonNode filter = request.path("Filter");
+            if (!filter.isMissingNode() && !filter.isNull()) {
+                if (!filter.isObject()) {
+                    throw new AwsException("SerializationException", null, 400);
+                }
+                resourceTypeFilter = stringMemberOrAbsent(filter, "RESOURCE_TYPE");
+            }
+            Integer pageSize = intMemberOrAbsent(request, "PageSize");
+            String nextToken = stringMemberOrAbsent(request, "NextToken");
+            List<TenantResourceAssociation> associations = sesService.listTenantResources(
+                    tenantName, resourceTypeFilter, pageSize, nextToken, region);
+            ObjectNode result = objectMapper.createObjectNode();
+            // AWS renders NextToken as an explicit null on the last (here: only) page.
+            result.putNull("NextToken");
+            ArrayNode resources = result.putArray("TenantResources");
+            for (TenantResourceAssociation a : associations) {
+                ObjectNode item = resources.addObject();
+                item.put("ResourceArn", a.resourceArn());
+                item.put("ResourceType", a.resourceType());
+            }
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    @POST
+    @Path("/resources/tenants/list")
+    public Response listResourceTenants(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String resourceArn = stringMemberOrAbsent(request, "ResourceArn");
+            Integer pageSize = intMemberOrAbsent(request, "PageSize");
+            String nextToken = stringMemberOrAbsent(request, "NextToken");
+            List<TenantResourceAssociation> associations = sesService.listResourceTenants(
+                    resourceArn, pageSize, nextToken, regionResolver.getAccountId(), region);
+            ObjectNode result = objectMapper.createObjectNode();
+            result.putNull("NextToken");
+            ArrayNode tenants = result.putArray("ResourceTenants");
+            for (TenantResourceAssociation a : associations) {
+                // ResourceTenantMetadata has no TenantArn (probe-confirmed).
+                ObjectNode item = tenants.addObject();
+                item.put("TenantName", a.tenantName());
+                item.put("TenantId", a.tenantId());
+                item.put("ResourceArn", a.resourceArn());
+                if (a.associatedTimestamp() != null) {
+                    item.put("AssociatedTimestamp", a.associatedTimestamp().toEpochMilli() / 1000.0);
+                }
+            }
+            return Response.ok(result).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    // Phase 3: PutTenantSuppressionAttributes. The route really is the singular "tenant", unlike
+    // every other tenant route (verified against real AWS and the SDK marshaller).
+    @POST
+    @Path("/tenant/suppression")
+    public Response putTenantSuppressionAttributes(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            List<String> suppressedReasons = stringArrayOrAbsent(request, "SuppressedReasons");
+            String suppressionScope = stringMemberOrAbsent(request, "SuppressionScope");
+            sesService.putTenantSuppressionAttributes(tenantName, suppressedReasons,
+                    suppressionScope, region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    private ObjectNode tenantJson(Tenant tenant) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("TenantName", tenant.tenantName());
+        node.put("TenantId", tenant.tenantId());
+        node.put("TenantArn", tenant.tenantArn());
+        if (tenant.createdTimestamp() != null) {
+            node.put("CreatedTimestamp", tenant.createdTimestamp().toEpochMilli() / 1000.0);
+        }
+        if (tenant.tags() != null && !tenant.tags().isEmpty()) {
+            ArrayNode tags = node.putArray("Tags");
+            for (Tag t : tenant.tags()) {
+                ObjectNode tagNode = tags.addObject();
+                tagNode.put("Key", t.key());
+                tagNode.put("Value", t.value());
+            }
+        }
+        node.put("SendingStatus", tenant.sendingStatus());
+        // AWS renders the block as an explicit null when the tenant has none.
+        if (tenant.suppressionAttributes() == null) {
+            node.putNull("SuppressionAttributes");
+        } else {
+            ObjectNode attrs = node.putObject("SuppressionAttributes");
+            ArrayNode reasons = attrs.putArray("SuppressedReasons");
+            for (String reason : tenant.suppressionAttributes().suppressedReasons()) {
+                reasons.add(reason);
+            }
+            attrs.put("SuppressionScope", tenant.suppressionAttributes().suppressionScope());
+        }
+        return node;
     }
 
     // ──────────────────────── Configuration Sets ───────────────────────
@@ -1052,7 +1220,8 @@ public class SesController {
             // Reuse the AWS-aligned SendingEnabled deserialization shared with CreateConfigurationSet:
             // absent -> false, string -> true, null/number -> SerializationException. An empty body
             // / {} therefore disables sending (200). Verified against real AWS.
-            boolean enabled = parseSendingEnabled(readOptionBody(body).path("SendingEnabled"));
+            boolean enabled = parseSendingEnabled(
+                    readOptionBody(objectMapper, body).path("SendingEnabled"));
             sesService.setConfigurationSetSendingEnabled(name, enabled, region);
             LOG.infov("SES V2 PutConfigurationSetSendingOptions: {0} on {1}", enabled, name);
             return Response.ok(objectMapper.createObjectNode()).build();
@@ -1068,7 +1237,7 @@ public class SesController {
                                                          String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = readOptionBody(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             Boolean enabled = parseReputationMetricsEnabled(request.path("ReputationMetricsEnabled"));
             boolean effectiveEnabled = enabled != null && enabled;
             sesService.setConfigurationSetReputationOptions(name, effectiveEnabled, region);
@@ -1086,7 +1255,7 @@ public class SesController {
                                                        String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = readOptionBody(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             sesService.setConfigurationSetTrackingOptions(name, parseTrackingOptions(request), region);
             LOG.infov("SES V2 PutConfigurationSetTrackingOptions on {0}", name);
             return Response.ok(objectMapper.createObjectNode()).build();
@@ -1102,7 +1271,7 @@ public class SesController {
                                                        String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = readOptionBody(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             sesService.setConfigurationSetDeliveryOptions(name, parseDeliveryOptions(request), region);
             LOG.infov("SES V2 PutConfigurationSetDeliveryOptions on {0}", name);
             return Response.ok(objectMapper.createObjectNode()).build();
@@ -1118,7 +1287,7 @@ public class SesController {
                                                         String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = readOptionBody(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             sesService.setConfigurationSetArchivingOptions(name, parseArchivingOptions(request), region);
             LOG.infov("SES V2 PutConfigurationSetArchivingOptions on {0}", name);
             return Response.ok(objectMapper.createObjectNode()).build();
@@ -1134,7 +1303,7 @@ public class SesController {
                                                   String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = readOptionBody(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             JsonNode vdmNode = request.path("VdmOptions");
             VdmOptions options = (vdmNode.isMissingNode() || vdmNode.isNull())
                     ? null : parseVdmOptions(vdmNode);
@@ -1153,19 +1322,6 @@ public class SesController {
         }
     }
 
-    /** Parse a configuration-set option PUT body into a JSON object, treating an empty body as {}. */
-    private JsonNode readOptionBody(String body) {
-        try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
-            return request;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
     private static Boolean parseReputationMetricsEnabled(JsonNode node) {
         if (node.isMissingNode() || node.isNull()) {
             return null;
@@ -1175,17 +1331,6 @@ public class SesController {
                     "ReputationMetricsEnabled must be a boolean.", 400);
         }
         return node.booleanValue();
-    }
-
-    /** Read an optional string member, rejecting a non-string value the way the AWS deserialization layer does. */
-    private static String parseOptionString(JsonNode node, String field) {
-        if (node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        if (!node.isTextual()) {
-            throw new AwsException("BadRequestException", field + " must be a JSON string.", 400);
-        }
-        return node.asText();
     }
 
     private static TrackingOptions parseTrackingOptions(JsonNode node) {
@@ -1368,413 +1513,6 @@ public class SesController {
         }
     }
 
-    // ──────────────────────── Dedicated IP Pools ────────────────────────
-
-    @POST
-    @Path("/dedicated-ip-pools")
-    public Response createDedicatedIpPool(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            if (body == null || body.isBlank()) {
-                throw new AwsException("BadRequestException", "Request body is required.", 400);
-            }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
-            String poolName = readRequiredStringField(request, "PoolName");
-            JsonNode scalingNode = request.path("ScalingMode");
-            String scalingMode;
-            if (scalingNode.isMissingNode() || scalingNode.isNull()) {
-                scalingMode = null;
-            } else if (!scalingNode.isTextual()) {
-                throw new AwsException("BadRequestException",
-                        "The ScalingMode parameter is invalid.", 400);
-            } else {
-                scalingMode = scalingNode.asText();
-            }
-            List<Tag> parsedTags = parseTagsArray(request.path("Tags"));
-            sesService.createDedicatedIpPool(poolName, scalingMode, parsedTags, region);
-            LOG.infov("SES V2 CreateDedicatedIpPool: {0}", poolName);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @GET
-    @Path("/dedicated-ip-pools")
-    public Response listDedicatedIpPools(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode pools = result.putArray("DedicatedIpPools");
-        sesService.listDedicatedIpPools(region).forEach(pools::add);
-        return Response.ok(result).build();
-    }
-
-    @GET
-    @Path("/dedicated-ip-pools/{poolName}")
-    public Response getDedicatedIpPool(@Context HttpHeaders headers,
-                                       @PathParam("poolName") String poolName) {
-        String region = regionResolver.resolveRegion(headers);
-        DedicatedIpPool pool = sesService.getDedicatedIpPool(poolName, region);
-        ObjectNode result = objectMapper.createObjectNode();
-        result.set("DedicatedIpPool", objectMapper.valueToTree(pool));
-        return Response.ok(result).build();
-    }
-
-    @DELETE
-    @Path("/dedicated-ip-pools/{poolName}")
-    public Response deleteDedicatedIpPool(@Context HttpHeaders headers,
-                                          @PathParam("poolName") String poolName) {
-        String region = regionResolver.resolveRegion(headers);
-        sesService.deleteDedicatedIpPool(poolName, region);
-        LOG.infov("SES V2 DeleteDedicatedIpPool: {0}", poolName);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    @PUT
-    @Path("/dedicated-ip-pools/{poolName}/scaling")
-    public Response putDedicatedIpPoolScalingAttributes(@Context HttpHeaders headers,
-                                                        @PathParam("poolName") String poolName,
-                                                        String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            requireJsonObject(request);
-            String scalingMode = readRequiredStringField(request, "ScalingMode");
-            sesService.putDedicatedIpPoolScalingAttributes(poolName, scalingMode, region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    // ─────────────────────────── Contact lists ───────────────────────────
-
-    @POST
-    @Path("/contact-lists")
-    public Response createContactList(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            if (body == null || body.isBlank()) {
-                throw new AwsException("BadRequestException", "Request body is required.", 400);
-            }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
-            // Read leniently; the service surfaces a missing ContactListName as the AWS Smithy
-            // validation error rather than a custom "required" message.
-            String name = request.path("ContactListName").asText(null);
-            List<Topic> topics = parseTopicsArray(request.path("Topics"));
-            List<Tag> tags = parseTagsArray(request.path("Tags"));
-            String description = request.path("Description").asText(null);
-            sesService.createContactList(name, description, topics, tags, region);
-            LOG.infov("SES V2 CreateContactList: {0}", name);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @GET
-    @Path("/contact-lists")
-    public Response listContactLists(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode lists = result.putArray("ContactLists");
-        for (ContactList cl : sesService.listContactLists(region)) {
-            ObjectNode item = lists.addObject();
-            item.put("ContactListName", cl.getContactListName());
-            if (cl.getLastUpdatedTimestamp() != null) {
-                item.put("LastUpdatedTimestamp", cl.getLastUpdatedTimestamp().getEpochSecond());
-            }
-        }
-        return Response.ok(result).build();
-    }
-
-    @GET
-    @Path("/contact-lists/{contactListName}")
-    public Response getContactList(@Context HttpHeaders headers,
-                                   @PathParam("contactListName") String contactListName) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(contactListJson(sesService.getContactList(contactListName, region))).build();
-    }
-
-    @PUT
-    @Path("/contact-lists/{contactListName}")
-    public Response updateContactList(@Context HttpHeaders headers,
-                                      @PathParam("contactListName") String contactListName,
-                                      String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
-            JsonNode topicsNode = request.path("Topics");
-            // Treat absent or explicit-null Topics as "not provided" (keep existing), consistent
-            // with Description; clearing is done via an explicit empty array [].
-            List<Topic> topics = (topicsNode.isMissingNode() || topicsNode.isNull())
-                    ? null : parseTopicsArray(topicsNode);
-            JsonNode descNode = request.path("Description");
-            boolean descriptionPresent = !descNode.isMissingNode() && !descNode.isNull();
-            String description = descNode.asText(null);
-            sesService.updateContactList(contactListName, description, descriptionPresent, topics, region);
-            LOG.infov("SES V2 UpdateContactList: {0}", contactListName);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @DELETE
-    @Path("/contact-lists/{contactListName}")
-    public Response deleteContactList(@Context HttpHeaders headers,
-                                      @PathParam("contactListName") String contactListName) {
-        String region = regionResolver.resolveRegion(headers);
-        sesService.deleteContactList(contactListName, region);
-        LOG.infov("SES V2 DeleteContactList: {0}", contactListName);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private List<Topic> parseTopicsArray(JsonNode topicsNode) {
-        List<Topic> out = new ArrayList<>();
-        if (topicsNode == null || topicsNode.isMissingNode() || topicsNode.isNull()) {
-            return out;
-        }
-        if (!topicsNode.isArray()) {
-            throw new AwsException("BadRequestException", "Topics must be an array.", 400);
-        }
-        for (JsonNode t : topicsNode) {
-            out.add(new Topic(
-                    t.path("TopicName").asText(null),
-                    t.path("DisplayName").asText(null),
-                    t.path("DefaultSubscriptionStatus").asText(null),
-                    t.path("Description").asText(null)));
-        }
-        return out;
-    }
-
-    private ObjectNode contactListJson(ContactList cl) {
-        ObjectNode result = objectMapper.createObjectNode();
-        result.put("ContactListName", cl.getContactListName());
-        if (cl.getDescription() != null) {
-            result.put("Description", cl.getDescription());
-        }
-        ArrayNode topics = result.putArray("Topics");
-        for (Topic t : cl.getTopics()) {
-            ObjectNode to = topics.addObject();
-            to.put("TopicName", t.getTopicName());
-            to.put("DisplayName", t.getDisplayName());
-            to.put("DefaultSubscriptionStatus", t.getDefaultSubscriptionStatus());
-            if (t.getDescription() != null) {
-                to.put("Description", t.getDescription());
-            }
-        }
-        if (cl.getCreatedTimestamp() != null) {
-            result.put("CreatedTimestamp", cl.getCreatedTimestamp().getEpochSecond());
-        }
-        if (cl.getLastUpdatedTimestamp() != null) {
-            result.put("LastUpdatedTimestamp", cl.getLastUpdatedTimestamp().getEpochSecond());
-        }
-        ArrayNode tags = result.putArray("Tags");
-        for (Tag tag : cl.getTags()) {
-            ObjectNode tn = tags.addObject();
-            tn.put("Key", tag.key());
-            tn.put("Value", tag.value());
-        }
-        return result;
-    }
-
-    // ───────────────────────────── Contacts ─────────────────────────────
-
-    @POST
-    @Path("/contact-lists/{contactListName}/contacts")
-    public Response createContact(@Context HttpHeaders headers,
-                                  @PathParam("contactListName") String contactListName, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            if (body == null || body.isBlank()) {
-                throw new AwsException("BadRequestException", "Request body is required.", 400);
-            }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
-            String emailAddress = request.path("EmailAddress").asText(null);
-            List<TopicPreference> prefs = parseTopicPreferences(request.path("TopicPreferences"));
-            Boolean unsubscribeAll = parseUnsubscribeAll(request);
-            String attributesData = parseAttributesData(request);
-            sesService.createContact(contactListName, emailAddress, prefs, unsubscribeAll, attributesData, region);
-            LOG.infov("SES V2 CreateContact: {0} in {1}", emailAddress, contactListName);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @POST
-    @Path("/contact-lists/{contactListName}/contacts/list")
-    public Response listContacts(@Context HttpHeaders headers,
-                                 @PathParam("contactListName") String contactListName, String body) {
-        // AWS uses POST .../contacts/list with Filter/PageSize/NextToken in the body; Floci returns
-        // all contacts (filtering/pagination not yet implemented) but still rejects a malformed or
-        // non-object body like the other v2 endpoints.
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            if (body != null && !body.isBlank()) {
-                requireJsonObject(objectMapper.readTree(body));
-            }
-            SesService.ContactsWithList listed = sesService.listContacts(contactListName, region);
-            ObjectNode result = objectMapper.createObjectNode();
-            ArrayNode arr = result.putArray("Contacts");
-            for (Contact c : listed.contacts()) {
-                arr.add(contactJson(c, listed.list(), false));
-            }
-            return Response.ok(result).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @GET
-    @Path("/contact-lists/{contactListName}/contacts/{emailAddress}")
-    public Response getContact(@Context HttpHeaders headers,
-                               @PathParam("contactListName") String contactListName,
-                               @PathParam("emailAddress") String emailAddress) {
-        String region = regionResolver.resolveRegion(headers);
-        SesService.ContactWithList result = sesService.getContact(contactListName, emailAddress, region);
-        return Response.ok(contactJson(result.contact(), result.list(), true)).build();
-    }
-
-    @PUT
-    @Path("/contact-lists/{contactListName}/contacts/{emailAddress}")
-    public Response updateContact(@Context HttpHeaders headers,
-                                  @PathParam("contactListName") String contactListName,
-                                  @PathParam("emailAddress") String emailAddress, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
-            JsonNode prefsNode = request.path("TopicPreferences");
-            boolean prefsPresent = !prefsNode.isMissingNode() && !prefsNode.isNull();
-            List<TopicPreference> prefs = prefsPresent ? parseTopicPreferences(prefsNode) : null;
-            Boolean unsubscribeAll = parseUnsubscribeAll(request);
-            String attributesData = parseAttributesData(request);
-            sesService.updateContact(contactListName, emailAddress, prefs, prefsPresent,
-                    unsubscribeAll, attributesData, region);
-            LOG.infov("SES V2 UpdateContact: {0} in {1}", emailAddress, contactListName);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @DELETE
-    @Path("/contact-lists/{contactListName}/contacts/{emailAddress}")
-    public Response deleteContact(@Context HttpHeaders headers,
-                                  @PathParam("contactListName") String contactListName,
-                                  @PathParam("emailAddress") String emailAddress) {
-        String region = regionResolver.resolveRegion(headers);
-        sesService.deleteContact(contactListName, emailAddress, region);
-        LOG.infov("SES V2 DeleteContact: {0} in {1}", emailAddress, contactListName);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private List<TopicPreference> parseTopicPreferences(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        if (!node.isArray()) {
-            throw new AwsException("BadRequestException", "TopicPreferences must be an array.", 400);
-        }
-        List<TopicPreference> out = new ArrayList<>();
-        for (JsonNode p : node) {
-            out.add(new TopicPreference(
-                    p.path("TopicName").asText(null),
-                    p.path("SubscriptionStatus").asText(null)));
-        }
-        return out;
-    }
-
-    // UnsubscribeAll is a Boolean; AWS coerces it the same way as any other SES v2 boolean
-    // (see parseSendingEnabled): a JSON string coerces to true, a number/null/array/object is a
-    // SerializationException. Absent leaves it unset.
-    private static Boolean parseUnsubscribeAll(JsonNode request) {
-        if (!request.has("UnsubscribeAll")) {
-            return null;
-        }
-        return coerceBoolean(request.path("UnsubscribeAll"));
-    }
-
-    // AttributesData is a String; a non-string (number/boolean/array/object) is a
-    // SerializationException. Absent or explicit null leaves it unset.
-    private static String parseAttributesData(JsonNode request) {
-        if (!request.has("AttributesData")) {
-            return null;
-        }
-        JsonNode node = request.path("AttributesData");
-        if (node.isNull()) {
-            return null;
-        }
-        if (node.isTextual()) {
-            return node.textValue();
-        }
-        if (node.isNumber()) {
-            throw new AwsException("SerializationException",
-                    "NUMBER_VALUE can not be converted to a String", 400);
-        }
-        if (node.isBoolean()) {
-            throw new AwsException("SerializationException",
-                    (node.booleanValue() ? "TRUE_VALUE" : "FALSE_VALUE")
-                            + " can not be converted to a String", 400);
-        }
-        throw unexpectedStartError(node);
-    }
-
-    private ObjectNode contactJson(Contact c, ContactList list, boolean full) {
-        ObjectNode result = objectMapper.createObjectNode();
-        if (full) {
-            result.put("ContactListName", list.getContactListName());
-        }
-        result.put("EmailAddress", c.getEmailAddress());
-        ArrayNode prefs = result.putArray("TopicPreferences");
-        for (TopicPreference p : c.getTopicPreferences()) {
-            ObjectNode po = prefs.addObject();
-            po.put("TopicName", p.getTopicName());
-            po.put("SubscriptionStatus", p.getSubscriptionStatus());
-        }
-        ArrayNode defaults = result.putArray("TopicDefaultPreferences");
-        for (TopicPreference p : sesService.deriveTopicDefaultPreferences(c, list)) {
-            ObjectNode po = defaults.addObject();
-            po.put("TopicName", p.getTopicName());
-            po.put("SubscriptionStatus", p.getSubscriptionStatus());
-        }
-        result.put("UnsubscribeAll", c.isUnsubscribeAll());
-        if (full && c.getAttributesData() != null) {
-            result.put("AttributesData", c.getAttributesData());
-        }
-        if (full && c.getCreatedTimestamp() != null) {
-            result.put("CreatedTimestamp", c.getCreatedTimestamp().getEpochSecond());
-        }
-        if (c.getLastUpdatedTimestamp() != null) {
-            result.put("LastUpdatedTimestamp", c.getLastUpdatedTimestamp().getEpochSecond());
-        }
-        return result;
-    }
-
     // ──────────────────────────── Account ────────────────────────────
 
     @GET
@@ -1786,7 +1524,7 @@ public class SesController {
         AccountSuppressionAttributes suppression = sesService.getAccountSuppressionAttributes(region);
 
         ObjectNode result = objectMapper.createObjectNode();
-        result.put("DedicatedIpAutoWarmupEnabled", false);
+        result.put("DedicatedIpAutoWarmupEnabled", sesService.isAccountDedicatedIpAutoWarmupEnabled(region));
         result.put("EnforcementStatus", "HEALTHY");
         result.put("ProductionAccessEnabled", true);
         result.put("SendingEnabled", sendingEnabled);
@@ -1802,19 +1540,46 @@ public class SesController {
             reasons.add(r);
         }
 
-        AccountVdmAttributes vdm = sesService.getAccountVdmAttributes(region);
-        ObjectNode vdmNode = result.putObject("VdmAttributes");
-        vdmNode.put("VdmEnabled", vdm.getVdmEnabled() == null ? "DISABLED" : vdm.getVdmEnabled());
-        if (vdm.getEngagementMetrics() != null) {
-            ObjectNode dashboard = vdmNode.putObject("DashboardAttributes");
-            dashboard.put("EngagementMetrics", vdm.getEngagementMetrics());
-        }
-        if (vdm.getOptimizedSharedDelivery() != null) {
-            ObjectNode guardian = vdmNode.putObject("GuardianAttributes");
-            guardian.put("OptimizedSharedDelivery", vdm.getOptimizedSharedDelivery());
-        }
+        // AWS only surfaces VdmAttributes once VDM has been configured for the region (an untouched
+        // region omits the key entirely), and only adds the Dashboard/Guardian sub-attributes while
+        // VdmEnabled is ENABLED.
+        sesService.findAccountVdmAttributes(region).ifPresent(vdm -> {
+            ObjectNode vdmAttrs = result.putObject("VdmAttributes");
+            vdmAttrs.put("VdmEnabled", featureStatus(vdm.vdmEnabled()));
+            if (vdm.vdmEnabled()) {
+                vdmAttrs.putObject("DashboardAttributes")
+                        .put("EngagementMetrics", featureStatus(vdm.engagementMetrics()));
+                vdmAttrs.putObject("GuardianAttributes")
+                        .put("OptimizedSharedDelivery", featureStatus(vdm.optimizedSharedDelivery()));
+            }
+        });
+
+        // Like VdmAttributes, AWS omits Details until PutAccountDetails has run for the region.
+        sesService.findAccountDetails(region).ifPresent(details -> {
+            ObjectNode d = result.putObject("Details");
+            d.put("MailType", details.mailType());
+            d.put("WebsiteURL", details.websiteUrl());
+            if (details.contactLanguage() != null) {
+                d.put("ContactLanguage", details.contactLanguage());
+            }
+            if (details.useCaseDescription() != null) {
+                d.put("UseCaseDescription", details.useCaseDescription());
+            }
+            if (details.additionalContactEmailAddresses() != null
+                    && !details.additionalContactEmailAddresses().isEmpty()) {
+                ArrayNode addrs = d.putArray("AdditionalContactEmailAddresses");
+                details.additionalContactEmailAddresses().forEach(addrs::add);
+            }
+            ObjectNode review = d.putObject("ReviewDetails");
+            review.put("Status", details.reviewStatus());
+            review.put("CaseId", details.caseId());
+        });
 
         return Response.ok(result).build();
+    }
+
+    private static String featureStatus(boolean enabled) {
+        return enabled ? "ENABLED" : "DISABLED";
     }
 
     @PUT
@@ -1822,28 +1587,133 @@ public class SesController {
     public Response putAccountVdmAttributes(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
             requireJsonObject(request);
-            JsonNode vdmNode = request.path("VdmAttributes");
-            if (vdmNode.isMissingNode() || vdmNode.isNull() || !vdmNode.isObject()) {
+            JsonNode vdm = request.path("VdmAttributes");
+            if (!vdm.isObject()) {
                 throw new AwsException("BadRequestException", "VdmAttributes is required.", 400);
             }
-            AccountVdmAttributes attrs = new AccountVdmAttributes();
-            attrs.setVdmEnabled(vdmNode.path("VdmEnabled").asText(null));
-            JsonNode dashboard = vdmNode.path("DashboardAttributes");
-            if (!dashboard.isMissingNode() && dashboard.isObject()) {
-                attrs.setEngagementMetrics(dashboard.path("EngagementMetrics").asText(null));
-            }
-            JsonNode guardian = vdmNode.path("GuardianAttributes");
-            if (!guardian.isMissingNode() && guardian.isObject()) {
-                attrs.setOptimizedSharedDelivery(guardian.path("OptimizedSharedDelivery").asText(null));
-            }
-            sesService.putAccountVdmAttributes(region, attrs);
+            boolean vdmEnabled = parseFeatureStatus(vdm, "VdmEnabled",
+                    "vdmAttributes.vdmEnabled", true);
+            boolean engagement = parseFeatureStatus(
+                    requireObjectOrAbsent(vdm, "DashboardAttributes"), "EngagementMetrics",
+                    "vdmAttributes.dashboardAttributes.engagementMetrics", false);
+            boolean osd = parseFeatureStatus(
+                    requireObjectOrAbsent(vdm, "GuardianAttributes"), "OptimizedSharedDelivery",
+                    "vdmAttributes.guardianAttributes.optimizedSharedDelivery", false);
+            sesService.putAccountVdmAttributes(region,
+                    new AccountVdmAttributes(vdmEnabled, engagement, osd));
+            LOG.infov("SES V2 PutAccountVdmAttributes: enabled={0}, engagement={1}, osd={2}",
+                    vdmEnabled, engagement, osd);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (Exception e) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @POST
+    @Path("/account/details")
+    public Response putAccountDetails(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = (body == null || body.isBlank())
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+            requireJsonObject(request);
+
+            // Parse every member first (rejecting wrong JSON types as a serialization error, the way
+            // AWS does before validation), then validate the parsed values together so all constraint
+            // violations are aggregated into one response.
+            String mailType = stringMemberOrAbsent(request, "MailType");
+            String websiteUrl = stringMemberOrAbsent(request, "WebsiteURL");
+            String contactLanguage = stringMemberOrAbsent(request, "ContactLanguage");
+            String useCaseDescription = stringMemberOrAbsent(request, "UseCaseDescription");
+
+            List<String> additionalContacts = null;
+            JsonNode contacts = request.path("AdditionalContactEmailAddresses");
+            if (!contacts.isMissingNode() && !contacts.isNull()) {
+                // A typed list member: reject a non-array, and reject non-string elements, rather than
+                // coercing (asText would turn 123 into "123"), matching how AWS rejects type mismatches.
+                if (!contacts.isArray()) {
+                    throw new AwsException("SerializationException", null, 400);
+                }
+                additionalContacts = new ArrayList<>();
+                for (JsonNode node : contacts) {
+                    if (!node.isTextual()) {
+                        throw new AwsException("SerializationException", null, 400);
+                    }
+                    additionalContacts.add(node.textValue());
+                }
+            }
+            JsonNode productionAccess = request.path("ProductionAccessEnabled");
+            if (!productionAccess.isMissingNode() && !productionAccess.isNull() && !productionAccess.isBoolean()) {
+                throw new AwsException("SerializationException", null, 400);
+            }
+            boolean productionAccessEnabled = productionAccess.asBoolean(false);
+
+            // The service owns validation and the synthetic review/case so they can't be bypassed; the
+            // controller only parses the REST JSON and rejects wrong JSON types.
+            sesService.putAccountDetails(region, mailType, websiteUrl, contactLanguage,
+                    useCaseDescription, additionalContacts, productionAccessEnabled);
+            LOG.infov("SES V2 PutAccountDetails: region={0}, mailType={1}", region, mailType);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            // AWS reports a malformed JSON body as a SerializationException, the same error type used
+            // for wrong-typed members above.
+            throw new AwsException("SerializationException", null, 400);
+        }
+    }
+
+    // Parse an AWS FeatureStatus (ENABLED/DISABLED) field. A required member that is absent, or any
+    // value outside the enum, is a Smithy BadRequestException the way AWS returns it; an absent
+    // optional member defaults to DISABLED (false).
+    private static boolean parseFeatureStatus(JsonNode parent, String field, String path, boolean required) {
+        JsonNode node = parent.path(field);
+        if (node.isMissingNode() || node.isNull()) {
+            if (required) {
+                throw new AwsException("BadRequestException",
+                        "1 validation error detected: Value null at '" + path
+                                + "' failed to satisfy constraint: Member must not be null", 400);
+            }
+            return false;
+        }
+        if (node.isTextual()) {
+            String value = node.asText();
+            if ("ENABLED".equals(value)) {
+                return true;
+            }
+            if ("DISABLED".equals(value)) {
+                return false;
+            }
+        }
+        throw new AwsException("BadRequestException",
+                "1 validation error detected: Value at '" + path
+                        + "' failed to satisfy constraint: Member must satisfy enum value set: [ENABLED, DISABLED]",
+                400);
+    }
+
+    @PUT
+    @Path("/account/dedicated-ips/warmup")
+    public Response putAccountDedicatedIpWarmupAttributes(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = readOptionBody(objectMapper, body);
+            JsonNode enabledNode = request.path("AutoWarmupEnabled");
+            // AutoWarmupEnabled has a default of false: the SDK omits it when false, so a missing
+            // member is treated as false rather than rejected. A present value goes through the
+            // shared SES v2 boolean coercion (string→true, null/number/container→SerializationException).
+            boolean enabled = enabledNode.isMissingNode() ? false : coerceBoolean(enabledNode);
+            sesService.setAccountDedicatedIpAutoWarmup(region, enabled);
+            LOG.infov("SES V2 PutAccountDedicatedIpWarmupAttributes: {0}", enabled);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
         }
     }
 
@@ -1914,7 +1784,8 @@ public class SesController {
             requireJsonObject(request);
             String emailAddress = readRequiredStringField(request, "EmailAddress");
             String reason = readRequiredStringField(request, "Reason");
-            sesService.putSuppressedDestination(region, emailAddress, reason);
+            String tenantName = stringMemberOrAbsent(request, "TenantName");
+            sesService.putSuppressedDestination(region, emailAddress, reason, tenantName);
             LOG.infov("SES V2 PutSuppressedDestination: {0} ({1})", emailAddress, reason);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
@@ -1924,21 +1795,15 @@ public class SesController {
         }
     }
 
-    private static String readRequiredStringField(JsonNode request, String fieldName) {
-        JsonNode node = request.path(fieldName);
-        if (node.isMissingNode() || node.isNull() || !node.isTextual()) {
-            throw new AwsException("BadRequestException", fieldName + " is required.", 400);
-        }
-        return node.asText();
-    }
-
     @GET
     @Path("/suppression/addresses/{emailAddress}")
     public Response getSuppressedDestination(@Context HttpHeaders headers,
-                                              @PathParam("emailAddress") String emailAddress) {
+                                              @PathParam("emailAddress") String emailAddress,
+                                              @QueryParam("TenantName") String tenantName) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            SuppressedDestination suppressed = sesService.getSuppressedDestination(region, emailAddress);
+            SuppressedDestination suppressed =
+                    sesService.getSuppressedDestination(region, emailAddress, tenantName);
             ObjectNode result = objectMapper.createObjectNode();
             ObjectNode entry = result.putObject("SuppressedDestination");
             entry.put("EmailAddress", suppressed.getEmailAddress());
@@ -1946,6 +1811,8 @@ public class SesController {
             if (suppressed.getLastUpdateTime() != null) {
                 entry.put("LastUpdateTime", suppressed.getLastUpdateTime().getEpochSecond());
             }
+            // AWS renders TenantName on every entry — an explicit null for account-level ones.
+            entry.put("TenantName", suppressed.getTenantName());
             return Response.ok(result).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
@@ -1955,10 +1822,11 @@ public class SesController {
     @DELETE
     @Path("/suppression/addresses/{emailAddress}")
     public Response deleteSuppressedDestination(@Context HttpHeaders headers,
-                                                 @PathParam("emailAddress") String emailAddress) {
+                                                 @PathParam("emailAddress") String emailAddress,
+                                                 @QueryParam("TenantName") String tenantName) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            sesService.deleteSuppressedDestination(region, emailAddress);
+            sesService.deleteSuppressedDestination(region, emailAddress, tenantName);
             LOG.infov("SES V2 DeleteSuppressedDestination: {0}", emailAddress);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
@@ -1969,11 +1837,12 @@ public class SesController {
     @GET
     @Path("/suppression/addresses")
     public Response listSuppressedDestinations(@Context HttpHeaders headers,
-                                                @QueryParam("Reason") List<String> reasons) {
+                                                @QueryParam("Reason") List<String> reasons,
+                                                @QueryParam("TenantName") String tenantName) {
         String region = regionResolver.resolveRegion(headers);
         List<SuppressedDestination> entries;
         try {
-            entries = sesService.listSuppressedDestinations(region, reasons);
+            entries = sesService.listSuppressedDestinations(region, reasons, tenantName);
         } catch (AwsException e) {
             throw remapV1Exception(e);
         }
@@ -2056,207 +1925,312 @@ public class SesController {
         }
     }
 
-    // ──────────────────────────── Tenants ────────────────────────────
+    // ──────────────────────────── Helpers ────────────────────────────
 
-    @POST
-    @Path("/tenants")
-    public Response createTenant(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            requireJsonObject(request);
-            String name = readRequiredStringField(request, "TenantName");
-            List<Tag> tags = parseTagsArray(request.path("Tags"));
-            List<String> reasons = null;
-            String scope = null;
-            JsonNode suppression = request.path("SuppressionAttributes");
-            if (!suppression.isMissingNode() && suppression.isObject()) {
-                JsonNode reasonsNode = suppression.path("SuppressedReasons");
-                if (!reasonsNode.isMissingNode() && !reasonsNode.isNull()) {
-                    reasons = jsonArrayToList(reasonsNode);
-                }
-                if (suppression.has("SuppressionScope") && !suppression.get("SuppressionScope").isNull()) {
-                    scope = suppression.path("SuppressionScope").asText(null);
-                }
-            }
-            Tenant tenant = sesService.createTenant(name, tags, reasons, scope, region);
-            return Response.ok(buildTenantNode(tenant)).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @POST
-    @Path("/tenants/get")
-    public Response getTenant(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            Tenant tenant = sesService.getTenant(readRequiredStringField(request, "TenantName"), region);
-            ObjectNode result = objectMapper.createObjectNode();
-            result.set("Tenant", buildTenantNode(tenant));
-            return Response.ok(result).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @POST
-    @Path("/tenants/list")
-    public Response listTenants(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
+    private ObjectNode buildFullIdentityResponse(Identity identity, String region) {
         ObjectNode result = objectMapper.createObjectNode();
-        ArrayNode tenants = result.putArray("Tenants");
-        for (Tenant tenant : sesService.listTenants(region)) {
-            ObjectNode item = objectMapper.createObjectNode();
-            item.put("TenantName", tenant.getTenantName());
-            item.put("TenantId", tenant.getTenantId());
-            item.put("TenantArn", tenant.getTenantArn());
-            if (tenant.getCreatedTimestamp() != null) {
-                item.put("CreatedTimestamp", tenant.getCreatedTimestamp().getEpochSecond());
-            }
-            tenants.add(item);
+        result.put("IdentityType", toV2IdentityType(identity.getIdentityType()));
+        result.put("VerifiedForSendingStatus",
+                "Success".equals(identity.getVerificationStatus()));
+        result.put("VerificationStatus", toV2Status(identity.getVerificationStatus()));
+        result.put("FeedbackForwardingStatus", identity.isFeedbackForwardingEnabled());
+
+        result.set("DkimAttributes", buildDkimAttributes(identity, region));
+
+        ObjectNode mailFromAttributes = result.putObject("MailFromAttributes");
+        mailFromAttributes.put("BehaviorOnMxFailure", v1BehaviorToV2(identity.getBehaviorOnMxFailure()));
+        String mailFromDomain = identity.getMailFromDomain();
+        if (mailFromDomain != null && !mailFromDomain.isEmpty()) {
+            mailFromAttributes.put("MailFromDomain", mailFromDomain);
+            mailFromAttributes.put("MailFromDomainStatus", toV2Status(identity.getMailFromDomainStatus()));
         }
-        return Response.ok(result).build();
+
+        if (identity.getConfigurationSetName() != null && !identity.getConfigurationSetName().isEmpty()) {
+            result.put("ConfigurationSetName", identity.getConfigurationSetName());
+        }
+
+        result.putObject("Policies");
+        ArrayNode tags = result.putArray("Tags");
+        for (Tag t : identity.getTags()) {
+            ObjectNode tagNode = objectMapper.createObjectNode();
+            tagNode.put("Key", t.key());
+            tagNode.put("Value", t.value());
+            tags.add(tagNode);
+        }
+
+        return result;
     }
 
-    @POST
-    @Path("/tenants/delete")
-    public Response deleteTenant(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
+    private static String v1BehaviorToV2(String v1) {
+        if ("RejectMessage".equals(v1)) {
+            return "REJECT_MESSAGE";
+        }
+        return "USE_DEFAULT_VALUE";
+    }
+
+    private static String v2BehaviorToV1(String v2) {
+        if (v2 == null) {
+            return null;
+        }
+        if ("REJECT_MESSAGE".equals(v2)) {
+            return "RejectMessage";
+        }
+        if ("USE_DEFAULT_VALUE".equals(v2)) {
+            return "UseDefaultValue";
+        }
+        throw new AwsException("BadRequestException",
+                "1 validation error detected: Value at 'behaviorOnMxFailure' failed to satisfy "
+                        + "constraint: Member must satisfy enum value set: [REJECT_MESSAGE, USE_DEFAULT_VALUE]", 400);
+    }
+
+    private ObjectNode buildDkimAttributes(Identity identity, String region) {
+        // An email identity reports its parent domain's DKIM (SigningEnabled / Status / Tokens all
+        // inherit from the domain), matching AWS; a domain reports its own.
+        Identity src = sesService.effectiveDkimSource(identity, region);
+        ObjectNode dkim = objectMapper.createObjectNode();
+        dkim.put("SigningEnabled", src.isDkimEnabled());
+        dkim.put("Status", toV2Status(src.getDkimVerificationStatus()));
+        ArrayNode tokens = dkim.putArray("Tokens");
+        if (src.getDkimTokens() != null) {
+            for (String token : src.getDkimTokens()) {
+                tokens.add(token);
+            }
+        }
+        dkim.put("SigningAttributesOrigin", src.getDkimSigningAttributesOrigin());
+        dkim.put("NextSigningKeyLength", src.getDkimNextSigningKeyLength());
+        dkim.put("CurrentSigningKeyLength", src.getDkimCurrentSigningKeyLength());
+        if (src.getDkimLastKeyGenerationTimestamp() != null) {
+            // SES v2 (restJson1) serializes this timestamp as epoch seconds (a number); emitting an
+            // ISO string breaks the SDK's unixTimestamp unmarshaller.
+            dkim.put("LastKeyGenerationTimestamp",
+                    src.getDkimLastKeyGenerationTimestamp().toEpochMilli() / 1000.0);
+        }
+        return dkim;
+    }
+
+    private static String toV2IdentityType(String v1Type) {
+        return "EmailAddress".equals(v1Type) ? "EMAIL_ADDRESS" : "DOMAIN";
+    }
+
+    private static String toV2Status(String v1Status) {
+        if (v1Status == null) return null;
+        return switch (v1Status) {
+            case "Success" -> "SUCCESS";
+            case "NotStarted" -> "NOT_STARTED";
+            case "Pending" -> "PENDING";
+            case "Failed" -> "FAILED";
+            case "TemporaryFailure" -> "TEMPORARY_FAILURE";
+            default -> v1Status;
+        };
+    }
+
+    private List<String> jsonArrayToList(JsonNode arrayNode) {
+        if (arrayNode == null || arrayNode.isMissingNode() || !arrayNode.isArray()) {
+            return Collections.emptyList();
+        }
+        List<String> list = new ArrayList<>();
+        arrayNode.forEach(node -> list.add(node.asText()));
+        return list;
+    }
+
+    private List<String> mergeLists(List<String> to, List<String> cc, List<String> bcc) {
+        List<String> all = new ArrayList<>(to);
+        all.addAll(cc);
+        all.addAll(bcc);
+        return all;
+    }
+
+    private JsonNode parseTemplateData(JsonNode parent, String fieldName) {
+        if (parent == null || parent.isMissingNode() || parent.isNull()) {
+            return objectMapper.createObjectNode();
+        }
+        if (!parent.isObject()) {
+            throw new AwsException("BadRequestException",
+                    "Parent of " + fieldName + " must be a JSON object.", 400);
+        }
+        JsonNode field = parent.path(fieldName);
+        if (field.isMissingNode() || field.isNull()) {
+            return objectMapper.createObjectNode();
+        }
+        if (!field.isTextual()) {
+            throw new AwsException("BadRequestException",
+                    fieldName + " must be a JSON-encoded string.", 400);
+        }
+        return parseTemplateData(field.asText(""));
+    }
+
+    private JsonNode parseTemplateData(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        JsonNode node;
         try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            sesService.deleteTenant(readRequiredStringField(request, "TenantName"), region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
+            node = objectMapper.readTree(raw);
         } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
+            throw new AwsException("BadRequestException",
+                    "Invalid TemplateData JSON: " + e.getMessage(), 400);
         }
-    }
-
-    // AWS PutTenantSuppressionAttributes is POST (not PUT) on this path.
-    @POST
-    @Path("/tenant/suppression")
-    public Response putTenantSuppressionAttributes(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            requireJsonObject(request);
-            String name = readRequiredStringField(request, "TenantName");
-            List<String> reasons = request.has("SuppressedReasons")
-                    ? jsonArrayToList(request.path("SuppressedReasons")) : null;
-            String scope = request.has("SuppressionScope")
-                    ? request.path("SuppressionScope").asText(null) : null;
-            sesService.putTenantSuppressionAttributes(name, reasons, scope, region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @POST
-    @Path("/tenants/resources")
-    public Response createTenantResourceAssociation(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            sesService.createTenantResourceAssociation(
-                    readRequiredStringField(request, "TenantName"),
-                    readRequiredStringField(request, "ResourceArn"),
-                    region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @POST
-    @Path("/tenants/resources/delete")
-    public Response deleteTenantResourceAssociation(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            sesService.deleteTenantResourceAssociation(
-                    readRequiredStringField(request, "TenantName"),
-                    readRequiredStringField(request, "ResourceArn"),
-                    region);
-            return Response.ok(objectMapper.createObjectNode()).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @POST
-    @Path("/tenants/resources/list")
-    public Response listTenantResources(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            String tenantName = readRequiredStringField(request, "TenantName");
-            String resourceType = null;
-            JsonNode filter = request.path("Filter");
-            if (filter.isObject()) {
-                resourceType = filter.path("RESOURCE_TYPE").asText(null);
-            }
-            ObjectNode result = objectMapper.createObjectNode();
-            ArrayNode resources = result.putArray("TenantResources");
-            for (TenantResource resource : sesService.listTenantResources(tenantName, resourceType, region)) {
-                ObjectNode item = objectMapper.createObjectNode();
-                item.put("ResourceType", resource.getResourceType());
-                item.put("ResourceArn", resource.getResourceArn());
-                resources.add(item);
-            }
-            return Response.ok(result).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    private ObjectNode buildTenantNode(Tenant tenant) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("TenantName", tenant.getTenantName());
-        node.put("TenantId", tenant.getTenantId());
-        node.put("TenantArn", tenant.getTenantArn());
-        if (tenant.getCreatedTimestamp() != null) {
-            node.put("CreatedTimestamp", tenant.getCreatedTimestamp().getEpochSecond());
-        }
-        node.put("SendingStatus", tenant.getSendingStatus());
-        ArrayNode tags = node.putArray("Tags");
-        if (tenant.getTags() != null) {
-            for (Tag t : tenant.getTags()) {
-                ObjectNode tagNode = objectMapper.createObjectNode();
-                tagNode.put("Key", t.key());
-                tagNode.put("Value", t.value());
-                tags.add(tagNode);
-            }
-        }
-        if (tenant.getSuppressedReasons() != null || tenant.getSuppressionScope() != null) {
-            ObjectNode suppression = node.putObject("SuppressionAttributes");
-            if (tenant.getSuppressedReasons() != null) {
-                ArrayNode reasons = suppression.putArray("SuppressedReasons");
-                tenant.getSuppressedReasons().forEach(reasons::add);
-            }
-            if (tenant.getSuppressionScope() != null) {
-                suppression.put("SuppressionScope", tenant.getSuppressionScope());
-            }
+        if (!node.isObject()) {
+            throw new AwsException("BadRequestException",
+                    "TemplateData must be a JSON object.", 400);
         }
         return node;
     }
 
-    // ──────────────────── Multi-region endpoints ─────────────────────
+    /**
+     * Parses a {@code SuppressedReasons} JSON array into a list, validating
+     * structure only; reason values are validated by the service layer.
+     * Structural violations reproduce the AWS deserialization-layer errors
+     * (verified against real AWS SES V2 on 2026-06-13): a non-array node and
+     * non-string scalar / container elements fail with
+     * {@code SerializationException}, while {@code null} elements pass
+     * deserialization and are rejected by the service-layer value validation,
+     * exactly as AWS does. Missing / null yields an empty list for the PUT
+     * path, which AWS treats as an explicit empty override.
+     */
+    private static List<String> parseSuppressedReasons(JsonNode reasonsNode) {
+        List<String> reasons = new ArrayList<>();
+        if (!reasonsNode.isMissingNode() && !reasonsNode.isNull()) {
+            if (!reasonsNode.isArray()) {
+                throw new AwsException("SerializationException", "Expected list or null", 400);
+            }
+            for (JsonNode r : reasonsNode) {
+                if (r.isTextual() || r.isNull()) {
+                    reasons.add(r.asText(null));
+                } else if (r.isNumber()) {
+                    throw new AwsException("SerializationException",
+                            "NUMBER_VALUE can not be converted to a String", 400);
+                } else if (r.isBoolean()) {
+                    throw new AwsException("SerializationException",
+                            (r.booleanValue() ? "TRUE_VALUE" : "FALSE_VALUE")
+                                    + " can not be converted to a String", 400);
+                } else {
+                    throw unexpectedStartError(r);
+                }
+            }
+        }
+        return reasons;
+    }
+
+    /**
+     * Reproduces the AWS deserialization behavior for {@code SendingEnabled}
+     * (verified against real AWS SES V2 on 2026-06-13): a missing member
+     * defaults to {@code false}, any string coerces to {@code true}, and
+     * explicit {@code null} or non-boolean scalars fail with
+     * {@code SerializationException}.
+     */
+    private static boolean parseSendingEnabled(JsonNode enabledNode) {
+        if (enabledNode.isMissingNode()) {
+            return false;
+        }
+        return coerceBoolean(enabledNode);
+    }
+
+    /**
+     * Parse a V2 SES {@code Content.Simple.Headers} / {@code Content.Template.Headers} array
+     * (additional message headers, elements use {@code Name}/{@code Value}). Returns an empty
+     * list when the node is absent so callers can pass it through unconditionally. Both members
+     * are required: an entry that omits {@code Name} or {@code Value} is rejected the way AWS
+     * does, with a Smithy constraint message anchored at {@code location} (e.g.
+     * {@code content.simple.headers}) and the offending 1-based index.
+     */
+    private List<MessageHeader> parseHeadersArray(JsonNode headersNode, String location) {
+        if (headersNode.isMissingNode() || headersNode.isNull()) {
+            return List.of();
+        }
+        if (!headersNode.isArray()) {
+            throw new AwsException("BadRequestException", "Headers must be an array.", 400);
+        }
+        List<MessageHeader> out = new ArrayList<>();
+        int index = 1;
+        for (JsonNode h : headersNode) {
+            if (!h.isObject()) {
+                throw new AwsException("BadRequestException",
+                        "Headers entries must be JSON objects.", 400);
+            }
+            JsonNode nameNode = h.get("Name");
+            JsonNode valueNode = h.get("Value");
+            if (nameNode == null || nameNode.isNull()) {
+                throw missingHeaderMember(location, index, "name");
+            }
+            if (valueNode == null || valueNode.isNull()) {
+                throw missingHeaderMember(location, index, "value");
+            }
+            String name = nameNode.asText();
+            if (name.isBlank()) {
+                throw new AwsException("BadRequestException",
+                        "The header name must be specified.", 400);
+            }
+            out.add(new MessageHeader(name, valueNode.asText()));
+            index++;
+        }
+        return out;
+    }
+
+    private AwsException missingHeaderMember(String location, int index, String member) {
+        return new AwsException("BadRequestException",
+                "1 validation error detected: Value at '" + location + "." + index + ".member." + member
+                        + "' failed to satisfy constraint: Member must not be null", 400);
+    }
+
+    private static ListManagementOptions parseListManagementOptions(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (!node.isObject()) {
+            throw new AwsException("BadRequestException", "ListManagementOptions must be an object.", 400);
+        }
+        JsonNode listNode = node.path("ContactListName");
+        if (!listNode.isTextual() || listNode.textValue().isBlank()) {
+            throw new AwsException("BadRequestException",
+                    "ListManagementOptions.ContactListName is required.", 400);
+        }
+        JsonNode topicNode = node.path("TopicName");
+        String topicName = null;
+        if (!topicNode.isMissingNode() && !topicNode.isNull()) {
+            if (!topicNode.isTextual()) {
+                throw new AwsException("BadRequestException",
+                        "ListManagementOptions.TopicName must be a string.", 400);
+            }
+            topicName = topicNode.textValue();
+        }
+        return new ListManagementOptions(listNode.textValue(), topicName);
+    }
+
+    /**
+     * Parse a V2 SES {@code EmailTags} / {@code DefaultEmailTags} / {@code ReplacementTags}
+     * array (per-message {@link MessageTag} list whose elements use {@code Name}/{@code Value},
+     * distinct from the resource-tag {@link Tag} {@code Key}/{@code Value} shape). Note that
+     * the per-entry name is {@code ReplacementTags} on the wire: only the top-level field
+     * carries the {@code EmailTags} suffix. Returns an empty list when the node is absent so
+     * callers can pass it through unconditionally.
+     * The {@code fieldName} parameter is reported in the error message when the node is
+     * present but not an array.
+     */
+    private List<MessageTag> parseEmailTagsArray(JsonNode tagsNode, String fieldName) {
+        if (tagsNode.isMissingNode() || tagsNode.isNull()) {
+            return List.of();
+        }
+        if (!tagsNode.isArray()) {
+            throw new AwsException("BadRequestException", fieldName + " must be an array.", 400);
+        }
+        List<MessageTag> out = new ArrayList<>();
+        for (JsonNode t : tagsNode) {
+            if (!t.isObject()) {
+                throw new AwsException("BadRequestException",
+                        fieldName + " entries must be JSON objects.", 400);
+            }
+            String name = t.path("Name").asText(null);
+            String value = t.path("Value").asText(null);
+            if (name == null || name.isBlank()) {
+                throw new AwsException("BadRequestException",
+                        "The tag name must be specified.", 400);
+            }
+            out.add(new MessageTag(name, value));
+        }
+        return out;
+    }
+
 
     @POST
     @Path("/multi-region-endpoints")
@@ -2338,28 +2312,6 @@ public class SesController {
         String region = regionResolver.resolveRegion(headers);
         sesService.deleteMultiRegionEndpoint(endpointName, region);
         return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    @POST
-    @Path("/outbound-custom-verification-emails")
-    public Response sendCustomVerificationEmail(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            requireJsonObject(request);
-            String messageId = sesService.sendCustomVerificationEmail(
-                    readRequiredStringField(request, "EmailAddress"),
-                    readRequiredStringField(request, "TemplateName"),
-                    request.path("ConfigurationSetName").asText(null),
-                    region);
-            ObjectNode result = objectMapper.createObjectNode();
-            result.put("MessageId", messageId);
-            return Response.ok(result).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
     }
 
     @GET
@@ -2472,421 +2424,5 @@ public class SesController {
 
     private static boolean isMidnightUtc(Instant instant) {
         return instant.atZone(ZoneOffset.UTC).toLocalTime().equals(LocalTime.MIDNIGHT);
-    }
-
-    // ──────────────────────────── Helpers ────────────────────────────
-
-    private ObjectNode buildFullIdentityResponse(Identity identity) {
-        ObjectNode result = objectMapper.createObjectNode();
-        result.put("IdentityType", toV2IdentityType(identity.getIdentityType()));
-        result.put("VerifiedForSendingStatus",
-                "Success".equals(identity.getVerificationStatus()));
-        result.put("VerificationStatus", toV2Status(identity.getVerificationStatus()));
-        result.put("FeedbackForwardingStatus", identity.isFeedbackForwardingEnabled());
-
-        result.set("DkimAttributes", buildDkimAttributes(identity));
-
-        ObjectNode mailFromAttributes = result.putObject("MailFromAttributes");
-        mailFromAttributes.put("BehaviorOnMxFailure", v1BehaviorToV2(identity.getBehaviorOnMxFailure()));
-        String mailFromDomain = identity.getMailFromDomain();
-        if (mailFromDomain != null && !mailFromDomain.isEmpty()) {
-            mailFromAttributes.put("MailFromDomain", mailFromDomain);
-            mailFromAttributes.put("MailFromDomainStatus", toV2Status(identity.getMailFromDomainStatus()));
-        }
-
-        if (identity.getConfigurationSetName() != null && !identity.getConfigurationSetName().isEmpty()) {
-            result.put("ConfigurationSetName", identity.getConfigurationSetName());
-        }
-
-        result.putObject("Policies");
-        ArrayNode tags = result.putArray("Tags");
-        for (Tag t : identity.getTags()) {
-            ObjectNode tagNode = objectMapper.createObjectNode();
-            tagNode.put("Key", t.key());
-            tagNode.put("Value", t.value());
-            tags.add(tagNode);
-        }
-
-        return result;
-    }
-
-    private static String v1BehaviorToV2(String v1) {
-        if ("RejectMessage".equals(v1)) {
-            return "REJECT_MESSAGE";
-        }
-        return "USE_DEFAULT_VALUE";
-    }
-
-    private static String v2BehaviorToV1(String v2) {
-        if (v2 == null) {
-            return null;
-        }
-        if ("REJECT_MESSAGE".equals(v2)) {
-            return "RejectMessage";
-        }
-        if ("USE_DEFAULT_VALUE".equals(v2)) {
-            return "UseDefaultValue";
-        }
-        throw new AwsException("BadRequestException",
-                "1 validation error detected: Value at 'behaviorOnMxFailure' failed to satisfy "
-                        + "constraint: Member must satisfy enum value set: [REJECT_MESSAGE, USE_DEFAULT_VALUE]", 400);
-    }
-
-    private ObjectNode buildDkimAttributes(Identity identity) {
-        ObjectNode dkim = objectMapper.createObjectNode();
-        dkim.put("SigningEnabled", identity.isDkimEnabled());
-        dkim.put("Status", toV2Status(identity.getDkimVerificationStatus()));
-        ArrayNode tokens = dkim.putArray("Tokens");
-        if (identity.getDkimTokens() != null) {
-            for (String token : identity.getDkimTokens()) {
-                tokens.add(token);
-            }
-        }
-        if (identity.getNextSigningKeyLength() != null) {
-            dkim.put("NextSigningKeyLength", identity.getNextSigningKeyLength());
-        }
-        if (identity.getCurrentSigningKeyLength() != null) {
-            dkim.put("CurrentSigningKeyLength", identity.getCurrentSigningKeyLength());
-        }
-        if (identity.getSigningAttributesOrigin() != null) {
-            dkim.put("SigningAttributesOrigin", identity.getSigningAttributesOrigin());
-        }
-        return dkim;
-    }
-
-    private static String toV2IdentityType(String v1Type) {
-        return "EmailAddress".equals(v1Type) ? "EMAIL_ADDRESS" : "DOMAIN";
-    }
-
-    private static String toV2Status(String v1Status) {
-        if (v1Status == null) return null;
-        return switch (v1Status) {
-            case "Success" -> "SUCCESS";
-            case "NotStarted" -> "NOT_STARTED";
-            case "Pending" -> "PENDING";
-            case "Failed" -> "FAILED";
-            case "TemporaryFailure" -> "TEMPORARY_FAILURE";
-            default -> v1Status;
-        };
-    }
-
-    private List<String> jsonArrayToList(JsonNode arrayNode) {
-        if (arrayNode == null || arrayNode.isMissingNode() || !arrayNode.isArray()) {
-            return Collections.emptyList();
-        }
-        List<String> list = new ArrayList<>();
-        arrayNode.forEach(node -> list.add(node.asText()));
-        return list;
-    }
-
-    private List<String> mergeLists(List<String> to, List<String> cc, List<String> bcc) {
-        List<String> all = new ArrayList<>(to);
-        all.addAll(cc);
-        all.addAll(bcc);
-        return all;
-    }
-
-    private EmailTemplate parseTemplateContent(String templateName, JsonNode content) {
-        String subject = content.path("Subject").asText(null);
-        String text = content.path("Text").asText(null);
-        String html = content.path("Html").asText(null);
-        return new EmailTemplate(templateName, subject, text, html);
-    }
-
-    private ObjectNode buildTemplateResponse(EmailTemplate template) {
-        ObjectNode result = objectMapper.createObjectNode();
-        result.put("TemplateName", template.getTemplateName());
-        ObjectNode content = result.putObject("TemplateContent");
-        if (template.getSubject() != null) {
-            content.put("Subject", template.getSubject());
-        }
-        if (template.getTextPart() != null) {
-            content.put("Text", template.getTextPart());
-        }
-        if (template.getHtmlPart() != null) {
-            content.put("Html", template.getHtmlPart());
-        }
-        ArrayNode tags = result.putArray("Tags");
-        for (Tag t : template.getTags()) {
-            ObjectNode tagNode = objectMapper.createObjectNode();
-            tagNode.put("Key", t.key());
-            tagNode.put("Value", t.value());
-            tags.add(tagNode);
-        }
-        return result;
-    }
-
-    private JsonNode parseTemplateData(JsonNode parent, String fieldName) {
-        if (parent == null || parent.isMissingNode() || parent.isNull()) {
-            return objectMapper.createObjectNode();
-        }
-        if (!parent.isObject()) {
-            throw new AwsException("BadRequestException",
-                    "Parent of " + fieldName + " must be a JSON object.", 400);
-        }
-        JsonNode field = parent.path(fieldName);
-        if (field.isMissingNode() || field.isNull()) {
-            return objectMapper.createObjectNode();
-        }
-        if (!field.isTextual()) {
-            throw new AwsException("BadRequestException",
-                    fieldName + " must be a JSON-encoded string.", 400);
-        }
-        return parseTemplateData(field.asText(""));
-    }
-
-    private JsonNode parseTemplateData(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return objectMapper.createObjectNode();
-        }
-        JsonNode node;
-        try {
-            node = objectMapper.readTree(raw);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException",
-                    "Invalid TemplateData JSON: " + e.getMessage(), 400);
-        }
-        if (!node.isObject()) {
-            throw new AwsException("BadRequestException",
-                    "TemplateData must be a JSON object.", 400);
-        }
-        return node;
-    }
-
-    private static void requireJsonObject(JsonNode root) {
-        if (root == null || !root.isObject()) {
-            throw new AwsException("BadRequestException",
-                    "Request body must be a JSON object.", 400);
-        }
-    }
-
-    private static JsonNode requireObjectOrAbsent(JsonNode parent, String fieldName) {
-        JsonNode child = parent.path(fieldName);
-        if (!child.isMissingNode() && !child.isNull() && !child.isObject()) {
-            throw new AwsException("BadRequestException",
-                    fieldName + " must be a JSON object.", 400);
-        }
-        return child;
-    }
-
-    /**
-     * Parse a JSON {@code Tags} array node into a list of tag records. Returns {@code null}
-     * when the node is missing or null so callers can decide whether that is an error
-     * (TagResource) or a no-op (CreateConfigurationSet / CreateEmailTemplate). Throws
-     * {@code BadRequestException} when the node is present but not an array.
-     */
-    private List<Tag> parseTagsArray(JsonNode tagsNode) {
-        if (tagsNode.isMissingNode() || tagsNode.isNull()) {
-            return null;
-        }
-        if (!tagsNode.isArray()) {
-            throw new AwsException("BadRequestException", "Tags must be an array.", 400);
-        }
-        List<Tag> out = new ArrayList<>();
-        for (JsonNode t : tagsNode) {
-            out.add(new Tag(
-                    t.path("Key").asText(null),
-                    t.path("Value").asText(null)));
-        }
-        return out;
-    }
-
-    /**
-     * Parses a {@code SuppressedReasons} JSON array into a list, validating
-     * structure only; reason values are validated by the service layer.
-     * Structural violations reproduce the AWS deserialization-layer errors
-     * (verified against real AWS SES V2 on 2026-06-13): a non-array node and
-     * non-string scalar / container elements fail with
-     * {@code SerializationException}, while {@code null} elements pass
-     * deserialization and are rejected by the service-layer value validation,
-     * exactly as AWS does. Missing / null yields an empty list for the PUT
-     * path, which AWS treats as an explicit empty override.
-     */
-    private static List<String> parseSuppressedReasons(JsonNode reasonsNode) {
-        List<String> reasons = new ArrayList<>();
-        if (!reasonsNode.isMissingNode() && !reasonsNode.isNull()) {
-            if (!reasonsNode.isArray()) {
-                throw new AwsException("SerializationException", "Expected list or null", 400);
-            }
-            for (JsonNode r : reasonsNode) {
-                if (r.isTextual() || r.isNull()) {
-                    reasons.add(r.asText(null));
-                } else if (r.isNumber()) {
-                    throw new AwsException("SerializationException",
-                            "NUMBER_VALUE can not be converted to a String", 400);
-                } else if (r.isBoolean()) {
-                    throw new AwsException("SerializationException",
-                            (r.booleanValue() ? "TRUE_VALUE" : "FALSE_VALUE")
-                                    + " can not be converted to a String", 400);
-                } else {
-                    throw unexpectedStartError(r);
-                }
-            }
-        }
-        return reasons;
-    }
-
-    /**
-     * Reproduces the AWS deserialization behavior for {@code SendingEnabled}
-     * (verified against real AWS SES V2 on 2026-06-13): a missing member
-     * defaults to {@code false}, any string coerces to {@code true}, and
-     * explicit {@code null} or non-boolean scalars fail with
-     * {@code SerializationException}.
-     */
-    private static boolean parseSendingEnabled(JsonNode enabledNode) {
-        if (enabledNode.isMissingNode()) {
-            return false;
-        }
-        return coerceBoolean(enabledNode);
-    }
-
-    // AWS-verified Jackson coercion for a SES v2 boolean field: a JSON string coerces to true,
-    // while a number/null/array/object is a SerializationException.
-    private static boolean coerceBoolean(JsonNode node) {
-        if (node.isBoolean()) {
-            return node.booleanValue();
-        }
-        if (node.isTextual()) {
-            return true;
-        }
-        if (node.isNull()) {
-            throw new AwsException("SerializationException", null, 400);
-        }
-        if (node.isNumber()) {
-            throw new AwsException("SerializationException",
-                    "NUMBER_VALUE can not be converted to a Boolean", 400);
-        }
-        throw unexpectedStartError(node);
-    }
-
-    private static AwsException unexpectedStartError(JsonNode node) {
-        if (node.isArray()) {
-            return new AwsException("SerializationException",
-                    "Start of list found where not expected", 400);
-        }
-        return new AwsException("SerializationException",
-                "Start of structure or map found where not expected.", 400);
-    }
-
-    /**
-     * Parse a V2 SES {@code Content.Simple.Headers} / {@code Content.Template.Headers} array
-     * (additional message headers, elements use {@code Name}/{@code Value}). Returns an empty
-     * list when the node is absent so callers can pass it through unconditionally. Both members
-     * are required: an entry that omits {@code Name} or {@code Value} is rejected the way AWS
-     * does, with a Smithy constraint message anchored at {@code location} (e.g.
-     * {@code content.simple.headers}) and the offending 1-based index.
-     */
-    private List<MessageHeader> parseHeadersArray(JsonNode headersNode, String location) {
-        if (headersNode.isMissingNode() || headersNode.isNull()) {
-            return List.of();
-        }
-        if (!headersNode.isArray()) {
-            throw new AwsException("BadRequestException", "Headers must be an array.", 400);
-        }
-        List<MessageHeader> out = new ArrayList<>();
-        int index = 1;
-        for (JsonNode h : headersNode) {
-            if (!h.isObject()) {
-                throw new AwsException("BadRequestException",
-                        "Headers entries must be JSON objects.", 400);
-            }
-            JsonNode nameNode = h.get("Name");
-            JsonNode valueNode = h.get("Value");
-            if (nameNode == null || nameNode.isNull()) {
-                throw missingHeaderMember(location, index, "name");
-            }
-            if (valueNode == null || valueNode.isNull()) {
-                throw missingHeaderMember(location, index, "value");
-            }
-            String name = nameNode.asText();
-            if (name.isBlank()) {
-                throw new AwsException("BadRequestException",
-                        "The header name must be specified.", 400);
-            }
-            out.add(new MessageHeader(name, valueNode.asText()));
-            index++;
-        }
-        return out;
-    }
-
-    private AwsException missingHeaderMember(String location, int index, String member) {
-        return new AwsException("BadRequestException",
-                "1 validation error detected: Value at '" + location + "." + index + ".member." + member
-                        + "' failed to satisfy constraint: Member must not be null", 400);
-    }
-
-    /**
-     * Parse a V2 SES {@code EmailTags} / {@code DefaultEmailTags} / {@code ReplacementTags}
-     * array (per-message {@link MessageTag} list whose elements use {@code Name}/{@code Value},
-     * distinct from the resource-tag {@link Tag} {@code Key}/{@code Value} shape). Note that
-     * the per-entry name is {@code ReplacementTags} on the wire — only the top-level field
-     * carries the {@code EmailTags} suffix. Returns an empty list when the node is absent so
-     * callers can pass it through unconditionally.
-     * The {@code fieldName} parameter is reported in the error message when the node is
-     * present but not an array.
-     */
-    private static ListManagementOptions parseListManagementOptions(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        if (!node.isObject()) {
-            throw new AwsException("BadRequestException", "ListManagementOptions must be an object.", 400);
-        }
-        JsonNode listNode = node.path("ContactListName");
-        if (!listNode.isTextual() || listNode.textValue().isBlank()) {
-            throw new AwsException("BadRequestException",
-                    "ListManagementOptions.ContactListName is required.", 400);
-        }
-        JsonNode topicNode = node.path("TopicName");
-        String topicName = null;
-        if (!topicNode.isMissingNode() && !topicNode.isNull()) {
-            if (!topicNode.isTextual()) {
-                throw new AwsException("BadRequestException",
-                        "ListManagementOptions.TopicName must be a string.", 400);
-            }
-            topicName = topicNode.textValue();
-        }
-        return new ListManagementOptions(listNode.textValue(), topicName);
-    }
-
-    private List<MessageTag> parseEmailTagsArray(JsonNode tagsNode, String fieldName) {
-        if (tagsNode.isMissingNode() || tagsNode.isNull()) {
-            return List.of();
-        }
-        if (!tagsNode.isArray()) {
-            throw new AwsException("BadRequestException", fieldName + " must be an array.", 400);
-        }
-        List<MessageTag> out = new ArrayList<>();
-        for (JsonNode t : tagsNode) {
-            if (!t.isObject()) {
-                throw new AwsException("BadRequestException",
-                        fieldName + " entries must be JSON objects.", 400);
-            }
-            String name = t.path("Name").asText(null);
-            String value = t.path("Value").asText(null);
-            if (name == null || name.isBlank()) {
-                throw new AwsException("BadRequestException",
-                        "The tag name must be specified.", 400);
-            }
-            out.add(new MessageTag(name, value));
-        }
-        return out;
-    }
-
-    private static AwsException remapV1Exception(AwsException e) {
-        return switch (e.getErrorCode()) {
-            case "InvalidParameterValue", "InvalidTemplate", "ValidationError",
-                 "InvalidRenderingParameter", "MissingRenderingAttribute" ->
-                    new AwsException("BadRequestException", e.getMessage(), 400);
-            case "TemplateDoesNotExist", "ConfigurationSetDoesNotExist",
-                 "CustomVerificationEmailTemplateDoesNotExist", "FromEmailAddressNotVerified" ->
-                    new AwsException("NotFoundException", e.getMessage(), 404);
-            case "AlreadyExists", "ConfigurationSetAlreadyExists",
-                 "CustomVerificationEmailTemplateAlreadyExists" ->
-                    new AwsException("AlreadyExistsException", e.getMessage(), 400);
-            case "ConfigurationSetSendingPausedException" ->
-                    new AwsException("SendingPausedException", e.getMessage(), 400);
-            default -> e;
-        };
     }
 }

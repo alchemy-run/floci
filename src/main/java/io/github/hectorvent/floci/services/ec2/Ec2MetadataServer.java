@@ -20,6 +20,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -73,11 +74,29 @@ public class Ec2MetadataServer {
         }
     }
 
+    /** Reconcile every Docker attachment without retaining stale addresses after restart. */
+    public void reconcileContainerAddresses(Set<String> addresses, Instance instance) {
+        for (String address : addresses) {
+            registerContainer(address, instance.getInstanceId(), instance);
+        }
+        containerIpToInstance.entrySet().removeIf(entry ->
+                entry.getValue() == instance && !addresses.contains(entry.getKey()));
+    }
+
+    public void unregisterInstance(Instance instance) {
+        if (instance != null) {
+            containerIpToInstance.entrySet().removeIf(entry -> entry.getValue() == instance);
+        }
+    }
+
     Optional<Instance> registeredContainer(String containerIp) {
         return Optional.ofNullable(containerIpToInstance.get(containerIp));
     }
 
-    public CompletableFuture<Void> start() {
+    public synchronized CompletableFuture<Void> start() {
+        if (httpServer != null) {
+            return CompletableFuture.completedFuture(null);
+        }
         CompletableFuture<Void> future = new CompletableFuture<>();
         int port = config.services().ec2().imdsPort();
 
@@ -123,9 +142,10 @@ public class Ec2MetadataServer {
         return future;
     }
 
-    public void stop() {
+    public synchronized void stop() {
         if (httpServer != null) {
             httpServer.close();
+            httpServer = null;
         }
     }
 
@@ -142,6 +162,10 @@ public class Ec2MetadataServer {
         String token = UUID.randomUUID().toString().replace("-", "");
         if (inst != null) {
             tokenToInstance.put(token, inst);
+        }
+        else {
+            LOG.debugv("IMDS: token requested from {0}, which is not a registered EC2 container; "
+                    + "metadata requests with this token will fail", ctx.request().remoteAddress().host());
         }
 
         ctx.response()
@@ -354,10 +378,28 @@ public class Ec2MetadataServer {
         String remoteIp = ctx.request().remoteAddress().host();
         Instance inst = containerIpToInstance.get(remoteIp);
         if (inst == null) {
-            LOG.warnv("IMDS: could not identify instance for request from {0}", remoteIp);
-            ctx.response().setStatusCode(404).end("Instance not found");
+            String message = unregisteredContainerMessage(remoteIp);
+            LOG.warnv("IMDS: {0}", message);
+            ctx.response().setStatusCode(404)
+                    .putHeader("content-type", "text/plain")
+                    .end(message);
         }
         return inst;
+    }
+
+    /**
+     * Explains why IMDS has nothing to serve for a request coming from {@code remoteIp}.
+     *
+     * <p>IMDS only knows about containers that {@link Ec2ContainerManager} launched through EC2
+     * {@code RunInstances}. Registering a container's SSM agent as a managed instance
+     * ({@code UpdateInstanceInformation}) does not create an EC2 instance record, so a container
+     * that was only registered with SSM ends up here.
+     */
+    static String unregisteredContainerMessage(String remoteIp) {
+        return "Instance not found: no EC2 instance is registered for source IP " + remoteIp + ". "
+                + "IMDS only serves containers launched through EC2 RunInstances; "
+                + "registering a container as an SSM managed instance does not register it with IMDS. "
+                + "Launch the container with RunInstances first, then register its SSM agent.";
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────

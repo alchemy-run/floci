@@ -2,10 +2,13 @@ package io.github.hectorvent.floci.services.acm;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.QuarkusTestProfile;
+import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Base64;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -15,7 +18,15 @@ import static org.hamcrest.Matchers.*;
  * {@code UnknownOperationException}: search, options sync, renew, resend, revoke.
  */
 @QuarkusTest
+@TestProfile(AcmAlchemyParityTest.PendingValidationProfile.class)
 class AcmAlchemyParityTest {
+
+    public static class PendingValidationProfile implements QuarkusTestProfile {
+        @Override
+        public Map<String, String> getConfigOverrides() {
+            return Map.of("floci.services.acm.validation-wait-seconds", "-1");
+        }
+    }
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
 

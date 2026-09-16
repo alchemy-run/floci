@@ -1,38 +1,85 @@
 package io.github.hectorvent.floci.services.ssm;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2ImageCatalog;
 import io.github.hectorvent.floci.services.kms.KmsService;
 import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.ssm.model.Parameter;
 import io.github.hectorvent.floci.services.ssm.model.ParameterHistory;
+import io.github.hectorvent.floci.services.ssm.model.ParameterStringFilter;
 import io.github.hectorvent.floci.services.ssm.model.PatchBaselineIdentity;
-import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.services.ssm.model.ServiceSetting;
+import io.github.hectorvent.floci.services.ssm.model.SsmAssociation;
+import io.github.hectorvent.floci.services.ssm.model.SsmDocument;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.regex.PatternSyntaxException;
 
 @ApplicationScoped
-public class SsmService {
+public class SsmService implements ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(SsmService.class);
     static final String AWS_MANAGED_SSM_ALIAS = "alias/aws/ssm";
 
+    private static final String PUBLIC_PARAMETER_PREFIX = "/aws/service/";
+    // Label is a ParameterStringFilter key too, but only GetParametersByPath accepts it.
+    private static final Set<String> DESCRIBE_PARAMETERS_FILTER_KEYS =
+            Set.of("Name", "Type", "KeyId", "Path", "Tier", "DataType");
+    private static final String DEFAULT_SSM_KEY_ID = "alias/aws/ssm";
+
+    /**
+     * Account-default values for the service settings floci models. AWS rejects
+     * unknown setting ids with ServiceSettingNotFound; so do we.
+     */
+    private static final Map<String, String> SERVICE_SETTING_DEFAULTS = Map.of(
+            "/ssm/documents/console/public-sharing-permission", "Enable",
+            "/ssm/parameter-store/default-parameter-tier", "Standard",
+            "/ssm/parameter-store/high-throughput-enabled", "false",
+            "/ssm/managed-instance/activation-tier", "standard"
+    );
+
     private final StorageBackend<String, Parameter> parameterStore;
     private final StorageBackend<String, List<ParameterHistory>> historyStore;
+    private final StorageBackend<String, List<String>> documentPermissionStore;
+    private final StorageBackend<String, SsmDocument> documentStore;
+    private final StorageBackend<String, ServiceSetting> serviceSettingStore;
+    private final StorageBackend<String, SsmAssociation> associationStore;
     private final int maxParameterHistory;
     private final RegionResolver regionResolver;
     private final KmsService kmsService;
+    private final Ec2ImageCatalog imageCatalog;
 
     @Inject
     public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
-                      KmsService kmsService) {
+                      KmsService kmsService, Ec2ImageCatalog imageCatalog) {
         this(
                 storageFactory.create("ssm", "ssm-parameters.json",
                         new TypeReference<>() {
@@ -40,9 +87,21 @@ public class SsmService {
                 storageFactory.create("ssm", "ssm-history.json",
                         new TypeReference<>() {
                         }),
+                storageFactory.create("ssm", "ssm-document-permissions.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-documents.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-service-settings.json",
+                        new TypeReference<>() {
+                        }),
+                storageFactory.create("ssm", "ssm-associations.json",
+                        new TypeReference<>() {
+                        }),
                 config.services().ssm().maxParameterHistory(),
                 regionResolver,
-                kmsService
+                imageCatalog, kmsService
         );
     }
 
@@ -51,9 +110,59 @@ public class SsmService {
      */
     SsmService(StorageBackend<String, Parameter> parameterStore,
                StorageBackend<String, List<ParameterHistory>> historyStore,
+               StorageBackend<String, List<String>> documentPermissionStore,
                int maxParameterHistory) {
-        this(parameterStore, historyStore, maxParameterHistory,
+        this(parameterStore, historyStore, documentPermissionStore, new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), maxParameterHistory,
                 new RegionResolver("us-east-1", "000000000000"));
+    }
+
+    /**
+     * Package-private constructor for testing without CDI.
+     */
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               int maxParameterHistory) {
+        this(parameterStore, historyStore, new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), maxParameterHistory,
+                new RegionResolver("us-east-1", "000000000000"));
+    }
+
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               StorageBackend<String, List<String>> documentPermissionStore,
+               StorageBackend<String, SsmDocument> documentStore,
+               StorageBackend<String, ServiceSetting> serviceSettingStore,
+               int maxParameterHistory, RegionResolver regionResolver) {
+        this(parameterStore, historyStore, documentPermissionStore, documentStore,
+                serviceSettingStore, new InMemoryStorage<>(), maxParameterHistory, regionResolver);
+    }
+
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               StorageBackend<String, List<String>> documentPermissionStore,
+               StorageBackend<String, SsmDocument> documentStore,
+               StorageBackend<String, ServiceSetting> serviceSettingStore,
+               StorageBackend<String, SsmAssociation> associationStore,
+               int maxParameterHistory, RegionResolver regionResolver) {
+        this(parameterStore, historyStore, documentPermissionStore, documentStore,
+                serviceSettingStore, associationStore, maxParameterHistory, regionResolver, null);
+    }
+
+    /**
+     * Package-private constructor for testing without CDI. A null image catalog means no
+     * public parameters are answered.
+     */
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               StorageBackend<String, List<String>> documentPermissionStore,
+               StorageBackend<String, SsmDocument> documentStore,
+               StorageBackend<String, ServiceSetting> serviceSettingStore,
+               StorageBackend<String, SsmAssociation> associationStore,
+               int maxParameterHistory, RegionResolver regionResolver,
+               Ec2ImageCatalog imageCatalog) {
+        this(parameterStore, historyStore, documentPermissionStore, documentStore, serviceSettingStore,
+                associationStore, maxParameterHistory, regionResolver, imageCatalog, null);
     }
 
     SsmService(StorageBackend<String, Parameter> parameterStore,
@@ -64,13 +173,29 @@ public class SsmService {
 
     SsmService(StorageBackend<String, Parameter> parameterStore,
                StorageBackend<String, List<ParameterHistory>> historyStore,
+               int maxParameterHistory, RegionResolver regionResolver, KmsService kmsService) {
+        this(parameterStore, historyStore, new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), maxParameterHistory, regionResolver, null, kmsService);
+    }
+
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               StorageBackend<String, List<String>> documentPermissionStore,
+               StorageBackend<String, SsmDocument> documentStore,
+               StorageBackend<String, ServiceSetting> serviceSettingStore,
+               StorageBackend<String, SsmAssociation> associationStore,
                int maxParameterHistory, RegionResolver regionResolver,
-               KmsService kmsService) {
+               Ec2ImageCatalog imageCatalog, KmsService kmsService) {
         this.parameterStore = parameterStore;
         this.historyStore = historyStore;
+        this.documentPermissionStore = documentPermissionStore;
+        this.documentStore = documentStore;
+        this.serviceSettingStore = serviceSettingStore;
+        this.associationStore = associationStore;
         this.maxParameterHistory = maxParameterHistory;
         this.regionResolver = regionResolver;
         this.kmsService = kmsService;
+        this.imageCatalog = imageCatalog;
     }
 
     /**
@@ -78,16 +203,18 @@ public class SsmService {
      * Returns the version number.
      */
     public long putParameter(String name, String value, String type, String description, boolean overwrite, String region) {
-        return putParameter(name, value, type, description, overwrite, region, Map.of(), null, null, null, null);
+        return putParameter(name, value, type, description, overwrite, null, region);
     }
 
-    /**
-     * Create or update a parameter, optionally applying create-time tags and
-     * metadata (tier, KMS key, allowed pattern, data type).
-     */
+    public long putParameter(String name, String value, String type, String description, boolean overwrite,
+                             Map<String, String> tags, String region) {
+        return putParameter(name, value, type, description, overwrite, region, tags, null, null, null, null);
+    }
+
     public long putParameter(String name, String value, String type, String description, boolean overwrite,
                              String region, Map<String, String> tags, String tier, String keyId,
                              String allowedPattern, String dataType) {
+        rejectReservedName(name);
         String storageKey = regionKey(region, name);
         Parameter existing = parameterStore.get(storageKey).orElse(null);
 
@@ -97,9 +224,11 @@ public class SsmService {
                     400);
         }
 
-        if (existing != null && overwrite && tags != null && !tags.isEmpty()) {
+        if (overwrite && tags != null && !tags.isEmpty()) {
             throw new AwsException("ValidationException",
-                    "Invalid request: Tags and Overwrite can't be used together. Remove the Tags parameter from your request if you want to overwrite an existing parameter.",
+                    "Invalid request: tags and overwrite can't be used together. To create a "
+                            + "parameter with tags, please remove overwrite flag. To update tags for an "
+                            + "existing parameter, please use AddTagsToResource or RemoveTagsFromResource.",
                     400);
         }
 
@@ -111,18 +240,17 @@ public class SsmService {
                             "The parameter value does not match the allowed pattern.",
                             400);
                 }
-            } catch (java.util.regex.PatternSyntaxException e) {
+            } catch (PatternSyntaxException e) {
                 throw new AwsException("ValidationException",
                         "The allowed pattern is not a valid regular expression.",
                         400);
             }
         }
-
         long version = (existing != null) ? existing.getVersion() + 1 : 1;
 
         Parameter parameter = new Parameter(name, value, resolvedType);
         parameter.setVersion(version);
-        parameter.setDescription(description != null ? description : (existing != null ? existing.getDescription() : null));
+        parameter.setDescription(description);
         parameter.setArn(existing != null && existing.getArn() != null
                 ? existing.getArn()
                 : regionResolver.buildArn("ssm", region, parameterResource(name)));
@@ -171,24 +299,75 @@ public class SsmService {
         return result;
     }
 
+    /**
+     * AWS reserves the {@code aws} and {@code ssm} namespaces, with or without a leading slash
+     * and regardless of case, so an account can never write over a public parameter. The rule
+     * keys on the first path segment rather than a bare prefix, so a name such as
+     * {@code ssm-auto-stack-Param-ABC}, which CloudFormation generates for a stack whose name
+     * starts with ssm, is still accepted.
+     */
+    private static void rejectReservedName(String name) {
+        String bare = name == null ? "" : name.startsWith("/") ? name.substring(1) : name;
+        String lower = bare.toLowerCase(Locale.ROOT);
+        if (lower.equals("aws") || lower.equals("ssm")
+                || lower.startsWith("aws/") || lower.startsWith("ssm/")) {
+            throw new AwsException("ValidationException",
+                    "Parameter name: can't be prefixed with \"aws\" or \"ssm\" (case-insensitive). "
+                            + "If formed as a path, it can consist of sub-paths divided by slash symbol; "
+                            + "each sub-path can be formed as a mix of letters, numbers and the following "
+                            + "3 symbols .-_", 400);
+        }
+    }
+
+    /**
+     * AWS publishes read-only AMI id parameters under {@code /aws/service/} in every account
+     * with no setup, so a read of one of those names is answered from the EC2 image catalog.
+     * Nothing is written: like on AWS the parameter is not the account's own, so it never
+     * shows up in DescribeParameters or GetParameterHistory. Any other name under the prefix
+     * is still ParameterNotFound.
+     */
+    private Optional<Parameter> publicParameter(String name, String region) {
+        if (imageCatalog == null || name == null || !name.startsWith(PUBLIC_PARAMETER_PREFIX)) {
+            return Optional.empty();
+        }
+        return imageCatalog.findByPublicParameterName(name).map(image -> {
+            Parameter parameter = new Parameter(name, image.imageId, "String");
+            parameter.setArn("arn:aws:ssm:" + region + "::parameter" + name);
+            parameter.setLastModifiedDate(Instant.parse(image.creationDate));
+            return parameter;
+        });
+    }
+
     public List<Parameter> getParametersByPath(String path, boolean recursive, String region) {
         String normalizedPath = path.endsWith("/") ? path : path + "/";
         String prefix = region + "::";
 
-        return parameterStore.scan(key -> {
+        List<Parameter> result = new ArrayList<>(parameterStore.scan(key -> {
             if (!key.startsWith(prefix)) {
                 return false;
             }
-            String paramName = key.substring(prefix.length());
-            if (!paramName.startsWith(normalizedPath)) {
-                return false;
+            return underPath(key.substring(prefix.length()), normalizedPath, recursive);
+        }));
+        if (imageCatalog != null) {
+            // The public names answer to the same path and Recursive rules as stored ones, so a
+            // recursive query on an ancestor such as /aws lists them too.
+            for (String name : imageCatalog.publicParameterNames()) {
+                if (underPath(name, normalizedPath, recursive)) {
+                    publicParameter(name, region).ifPresent(result::add);
+                }
             }
-            if (recursive) {
-                return true;
-            }
-            String remainder = paramName.substring(normalizedPath.length());
-            return !remainder.contains("/");
-        });
+        }
+        return result;
+    }
+
+    private static boolean underPath(String paramName, String normalizedPath, boolean recursive) {
+        if (!paramName.startsWith(normalizedPath)) {
+            return false;
+        }
+        if (recursive) {
+            return true;
+        }
+        return !paramName.substring(normalizedPath.length()).contains("/");
     }
 
     public void deleteParameter(String name, String region) {
@@ -228,13 +407,76 @@ public class SsmService {
         return describeParameters(List.of(), region);
     }
 
-    public List<Parameter> describeParameters(List<String> nameFilters, String region) {
+    /**
+     * Lists the region's own parameters that pass every filter: filters combine with AND, the
+     * values of one filter with OR. A key or option AWS rejects is an error rather than being
+     * skipped, because dropping a filter silently widens the result.
+     */
+    public List<Parameter> describeParameters(List<ParameterStringFilter> filters, String region) {
+        filters.forEach(SsmService::validateDescribeParametersFilter);
         String prefix = region + "::";
-        return parameterStore.scan(key -> {
-            if (!key.startsWith(prefix)) return false;
-            if (nameFilters.isEmpty()) return true;
-            String name = key.substring(prefix.length());
-            return nameFilters.contains(name);
+        return parameterStore.scan(key -> key.startsWith(prefix)).stream()
+                .filter(p -> filters.stream().allMatch(f -> matchesParameterFilter(p, f)))
+                .toList();
+    }
+
+    private static void validateDescribeParametersFilter(ParameterStringFilter filter) {
+        String key = filter.key();
+        boolean tag = key != null && key.startsWith("tag:") && key.length() > "tag:".length();
+        // Set.of rejects a null lookup, so an absent key is checked before the membership test.
+        if (!tag && (key == null || !DESCRIBE_PARAMETERS_FILTER_KEYS.contains(key))) {
+            throw new AwsException("InvalidFilterKey", "The specified key isn't valid.", 400);
+        }
+        if (filter.option() != null) {
+            Set<String> options = "Path".equals(key) ? Set.of("Recursive", "OneLevel")
+                    : "Name".equals(key) ? Set.of("Equals", "BeginsWith", "Contains")
+                    : Set.of("Equals", "BeginsWith");
+            if (!options.contains(filter.option())) {
+                throw new AwsException("InvalidFilterOption",
+                        "The specified filter option isn't valid. Valid options are Equals and BeginsWith. "
+                                + "For Path filter, valid options are Recursive and OneLevel.", 400);
+            }
+        }
+        // Every key but a tag needs at least one value, and a path value must be absolute.
+        boolean invalidValues = !tag && filter.values().isEmpty()
+                || "Path".equals(key) && filter.values().stream().anyMatch(v -> !v.startsWith("/"));
+        if (invalidValues) {
+            throw new AwsException("InvalidFilterValue",
+                    "The filter value isn't valid. Verify the value and try again.", 400);
+        }
+    }
+
+    private static boolean matchesParameterFilter(Parameter parameter, ParameterStringFilter filter) {
+        String key = filter.key();
+        if (key.startsWith("tag:")) {
+            String tagValue = parameter.getTags() == null ? null
+                    : parameter.getTags().get(key.substring("tag:".length()));
+            // A tag filter without values matches any parameter carrying the tag key.
+            return tagValue != null && (filter.values().isEmpty() || matchesAny(tagValue, filter));
+        }
+        if ("Path".equals(key)) {
+            boolean recursive = "Recursive".equals(filter.option());
+            return filter.values().stream().anyMatch(path ->
+                    underPath(parameter.getName(), path.endsWith("/") ? path : path + "/", recursive));
+        }
+        String actual = switch (key) {
+            case "Name" -> parameter.getName();
+            case "Type" -> parameter.getType();
+            case "DataType" -> parameter.getDataType();
+            case "Tier" -> parameter.getTier() != null ? parameter.getTier() : "Standard";
+            case "KeyId" -> "SecureString".equals(parameter.getType())
+                    ? (parameter.getKeyId() != null ? parameter.getKeyId() : DEFAULT_SSM_KEY_ID) : null;
+            default -> null;
+        };
+        return actual != null && matchesAny(actual, filter);
+    }
+
+    private static boolean matchesAny(String actual, ParameterStringFilter filter) {
+        String option = filter.option() == null ? "Equals" : filter.option();
+        return filter.values().stream().anyMatch(value -> switch (option) {
+            case "BeginsWith" -> actual.startsWith(value);
+            case "Contains" -> actual.contains(value);
+            default -> actual.equals(value);
         });
     }
 
@@ -346,7 +588,8 @@ public class SsmService {
     }
 
     public void addTagsToResource(String resourceId, Map<String, String> tags, String region) {
-        String storageKey = regionKey(region, resourceId);
+        String normalizedId = normalizeResourceId(resourceId);
+        String storageKey = regionKey(region, normalizedId);
         Parameter param = parameterStore.get(storageKey)
                 .orElseThrow(() -> new AwsException("InvalidResourceId",
                         "Resource " + resourceId + " not found.", 400));
@@ -360,7 +603,8 @@ public class SsmService {
     }
 
     public Map<String, String> listTagsForResource(String resourceId, String region) {
-        String storageKey = regionKey(region, resourceId);
+        String normalizedId = normalizeResourceId(resourceId);
+        String storageKey = regionKey(region, normalizedId);
         Parameter param = parameterStore.get(storageKey)
                 .orElseThrow(() -> new AwsException("InvalidResourceId",
                         "Resource " + resourceId + " not found.", 400));
@@ -368,7 +612,8 @@ public class SsmService {
     }
 
     public void removeTagsFromResource(String resourceId, List<String> tagKeys, String region) {
-        String storageKey = regionKey(region, resourceId);
+        String normalizedId = normalizeResourceId(resourceId);
+        String storageKey = regionKey(region, normalizedId);
         Parameter param = parameterStore.get(storageKey)
                 .orElseThrow(() -> new AwsException("InvalidResourceId",
                         "Resource " + resourceId + " not found.", 400));
@@ -380,6 +625,372 @@ public class SsmService {
             parameterStore.put(storageKey, param);
         }
         LOG.debugv("Removed tags from parameter: {0}", resourceId);
+    }
+
+    private static String normalizeResourceId(String resourceId) {
+        if (resourceId != null && resourceId.startsWith("arn:")) {
+            try {
+                AwsArnUtils.Arn arn = AwsArnUtils.parse(resourceId);
+                if ("ssm".equals(arn.service())) {
+                    String resource = arn.resource();
+                    if (resource.startsWith("parameter/")) {
+                        return resource.substring("parameter".length());
+                    }
+                    if (resource.startsWith("parameter")) {
+                        return resource.substring("parameter".length());
+                    }
+                }
+            } catch (IllegalArgumentException e) {
+                // Not a valid ARN; fall through and use resourceId directly so callers
+                // querying parameterStore produce the standard InvalidResourceId error.
+                LOG.debugv("Failed to parse resourceId as ARN: {0}", resourceId);
+            }
+        }
+        return resourceId;
+    }
+
+    // ──────────────────────── Documents and Share Permissions ────────────────
+    // Documents live in documentStore; share state is kept alongside it in
+    // documentPermissionStore so callers like LZA's Custom::SSMShareDocument handler
+    // can round-trip ModifyDocumentPermission -> DescribeDocumentPermission.
+    // Both permission operations resolve the document first, so an unknown document
+    // raises InvalidDocument instead of silently minting or reporting share state for
+    // a document that does not exist.
+
+    public SsmDocument getDocument(String name, String region) {
+        SsmDocument document = documentStore.get(regionKey(region, name))
+                .orElseThrow(() -> new AwsException("InvalidDocument",
+                        "Document " + name + " does not exist.", 400));
+        if (document.getOwner() == null) {
+            document.setOwner(regionResolver.getAccountId());
+        }
+        return document;
+    }
+
+    public synchronized SsmDocument createDocument(String name, String content, String documentType, String region) {
+        String storageKey = regionKey(region, name);
+        if (documentStore.get(storageKey).isPresent()) {
+            throw new AwsException("DocumentAlreadyExists",
+                    "Document " + name + " already exists.", 400);
+        }
+        SsmDocument document = new SsmDocument(name, content, documentType);
+        document.setOwner(regionResolver.getAccountId());
+        documentStore.put(storageKey, document);
+        return document;
+    }
+
+    public SsmDocument updateDocument(String name, String content, String region) {
+        String storageKey = regionKey(region, name);
+        SsmDocument document = documentStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("InvalidDocument",
+                        "Document " + name + " does not exist.", 400));
+        if (Objects.equals(document.getContent(), content)) {
+            throw new AwsException("DuplicateDocumentContent",
+                    "The content of the association document matches another document. "
+                            + "Change the content of the document and try again.", 400);
+        }
+        long newVersion = document.getDocumentVersion() + 1;
+        document.setContent(content);
+        document.setDocumentVersion(newVersion);
+        document.getVersions().put(String.valueOf(newVersion), content);
+        documentStore.put(storageKey, document);
+        return document;
+    }
+
+    /**
+     * Lists the accounts a document is shared with. AWS raises InvalidDocument for a
+     * document that does not exist rather than returning an empty list, so the document
+     * is resolved first.
+     */
+    public List<String> describeDocumentPermission(String name, String region) {
+        getDocument(name, region);
+        return documentPermissionStore.get(regionKey(region, name))
+                .map(List::copyOf)
+                .orElse(List.of());
+    }
+
+    /**
+     * Shares (or un-shares) a document with other accounts.
+     *
+     * <p>Only the document's owner may share it. Ownership here <em>is</em> the storage
+     * partition: {@code documentStore} is an {@code AccountAwareStorageBackend}, whose key
+     * prefix is the caller's account from {@code RequestContext} — the same resolution
+     * {@code RegionResolver.getAccountId()} performs — so {@link #getDocument} can only
+     * resolve a document in the caller's own partition. A caller that does not own the
+     * document therefore gets InvalidDocument, which is AWS's answer for a document the
+     * caller cannot see. Deriving the check from the partition rather than a second stored
+     * owner field keeps the guard and the storage scope from ever disagreeing.
+     */
+    public synchronized void modifyDocumentPermission(String name, List<String> accountIdsToAdd,
+                                         List<String> accountIdsToRemove, String region) {
+        getDocument(name, region);
+        String storageKey = regionKey(region, name);
+        List<String> accountIds = new ArrayList<>(
+                documentPermissionStore.get(storageKey).orElse(List.of()));
+        for (String accountId : accountIdsToAdd) {
+            if (!accountIds.contains(accountId)) {
+                accountIds.add(accountId);
+            }
+        }
+        accountIds.removeAll(accountIdsToRemove);
+        documentPermissionStore.put(storageKey, accountIds);
+        LOG.debugv("Modified document permission for {0}: {1} account(s) shared", name, accountIds.size());
+    }
+
+    public List<SsmDocument> listDocuments(String region, Map<String, List<String>> filters) {
+        String prefix = regionKey(region, "");
+        List<SsmDocument> docs = documentStore.scan(k -> k.startsWith(prefix));
+        String accountId = regionResolver.getAccountId();
+        for (SsmDocument d : docs) {
+            if (d.getOwner() == null) {
+                d.setOwner(accountId);
+            }
+        }
+        if (filters == null || filters.isEmpty()) {
+            return docs;
+        }
+
+        List<String> nameFilters = findFilterValues(filters, "Name");
+        List<String> typeFilters = findFilterValues(filters, "DocumentType");
+        List<String> ownerFilters = findFilterValues(filters, "Owner");
+        List<String> platformFilters = findFilterValues(filters, "PlatformTypes");
+
+        return docs.stream()
+                .filter(d -> nameFilters.isEmpty()
+                        || nameFilters.contains(d.getName())
+                        || nameFilters.stream().anyMatch(n -> !n.isEmpty() && d.getName() != null && d.getName().startsWith(n)))
+                .filter(d -> typeFilters.isEmpty()
+                        || typeFilters.stream().anyMatch(t -> t.equalsIgnoreCase(d.getDocumentType())))
+                .filter(d -> ownerFilters.isEmpty()
+                        || ownerFilters.stream().anyMatch(o -> matchesOwner(o, d.getOwner(), accountId)))
+                .filter(d -> platformFilters.isEmpty()
+                        || (d.getPlatformTypes() != null && platformFilters.stream()
+                                .anyMatch(p -> d.getPlatformTypes().stream().anyMatch(p::equalsIgnoreCase))))
+                .toList();
+    }
+
+    /**
+     * Every document visible through {@code documentStore} already belongs to the caller's
+     * account (it is an account-partitioned store), so "Self"/"Private"/"All" and the caller's own
+     * account id all match every visible document; "Amazon"/"Public"/"ThirdParty" match none, since
+     * no AWS-owned or other-account documents are ever visible here. Documents created before the
+     * {@code Owner} field existed persist with a null owner; since the store already guarantees the
+     * caller's own partition, such a document is normalized to the current caller's account ID so
+     * that it both matches owner filters and serializes its effective owner in list responses.
+     */
+    private boolean matchesOwner(String filterValue, String documentOwner, String accountId) {
+        if ("Self".equalsIgnoreCase(filterValue) || "Private".equalsIgnoreCase(filterValue)
+                || "All".equalsIgnoreCase(filterValue)) {
+            return true;
+        }
+        if ("Amazon".equalsIgnoreCase(filterValue) || "Public".equalsIgnoreCase(filterValue)
+                || "ThirdParty".equalsIgnoreCase(filterValue)) {
+            return false;
+        }
+        String effectiveOwner = documentOwner != null ? documentOwner : accountId;
+        return filterValue.equals(effectiveOwner);
+    }
+
+    private List<String> findFilterValues(Map<String, List<String>> filters, String targetKey) {
+        if (filters == null) {
+            return List.of();
+        }
+        for (Map.Entry<String, List<String>> entry : filters.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(targetKey) && entry.getValue() != null) {
+                return entry.getValue();
+            }
+        }
+        return List.of();
+    }
+
+    /**
+     * Rejects a {@code DocumentVersion} that cannot resolve on the target document.
+     * Stored document versions are retained across updates, so numeric versions are accepted
+     * when they exist in the document's version history; {@code $LATEST}/{@code $DEFAULT}
+     * always resolve to the current version. {@link SsmDocument#hasVersion} also accepts a
+     * numeric version that predates the retained history (see its javadoc) rather than rejecting
+     * a version that legitimately existed just because its content was never captured.
+     * Non-existent versions or malformed inputs throw {@code InvalidDocumentVersion}, matching
+     * AWS SSM behavior.
+     */
+    private void validateDocumentVersion(SsmDocument document, String documentVersion) {
+        if (documentVersion == null || documentVersion.isBlank()
+                || "$LATEST".equals(documentVersion) || "$DEFAULT".equals(documentVersion)) {
+            return;
+        }
+        if (!document.hasVersion(documentVersion)) {
+            throw new AwsException("InvalidDocumentVersion",
+                    "The document version is not valid or does not exist.", 400);
+        }
+    }
+
+    // ──────────────────────── Associations ───────────────────────────────────
+
+    public synchronized SsmAssociation createAssociation(
+            String name,
+            String associationName,
+            String documentVersion,
+            String instanceId,
+            List<SsmAssociation.Target> targets,
+            Map<String, List<String>> parameters,
+            String scheduleExpression,
+            String region) {
+        return createAssociation(name, associationName, documentVersion, instanceId, targets, parameters,
+                scheduleExpression, null, null, null, region);
+    }
+
+    public synchronized SsmAssociation createAssociation(
+            String name,
+            String associationName,
+            String documentVersion,
+            String instanceId,
+            List<SsmAssociation.Target> targets,
+            Map<String, List<String>> parameters,
+            String scheduleExpression,
+            String maxErrors,
+            String maxConcurrency,
+            String complianceSeverity,
+            String region) {
+        SsmDocument document = getDocument(name, region);
+        validateDocumentVersion(document, documentVersion);
+
+        if (instanceId != null && !instanceId.isBlank()) {
+            boolean duplicate = listAssociations(region).stream()
+                    .anyMatch(a -> Objects.equals(a.getName(), name) && Objects.equals(a.getInstanceId(), instanceId));
+            if (duplicate) {
+                throw new AwsException("AssociationAlreadyExists",
+                        "An association already exists for instance " + instanceId + " and document " + name + ".", 400);
+            }
+        } else if (targets != null && !targets.isEmpty()) {
+            boolean duplicate = listAssociations(region).stream()
+                    .anyMatch(a -> Objects.equals(a.getName(), name) && Objects.equals(a.getTargets(), targets));
+            if (duplicate) {
+                throw new AwsException("AssociationAlreadyExists",
+                        "An association already exists for document " + name + " with the given targets.", 400);
+            }
+        }
+
+        String associationId = UUID.randomUUID().toString();
+        Instant now = Instant.now();
+
+        SsmAssociation association = new SsmAssociation();
+        association.setAssociationId(associationId);
+        association.setAssociationName(associationName);
+        association.setName(name);
+        association.setDocumentVersion(documentVersion);
+        association.setInstanceId(instanceId);
+        association.setTargets(targets);
+        association.setParameters(parameters);
+        association.setScheduleExpression(scheduleExpression);
+        association.setMaxErrors(maxErrors);
+        association.setMaxConcurrency(maxConcurrency);
+        association.setComplianceSeverity(complianceSeverity);
+        association.setAssociationVersion("1");
+        // Real SSM starts an association at "Pending" and transitions it to "Success"/"Failed" once
+        // its execution engine runs it. This emulator has no execution engine, so it reports
+        // "Success" immediately rather than modeling a state that would never change on its own.
+        association.setStatus(new SsmAssociation.AssociationStatus("Success", "Success", now, null));
+        association.setOverview(new SsmAssociation.AssociationOverview("Success", "Success"));
+        association.setCreatedDate(now);
+        association.setLastExecutionDate(now);
+
+        associationStore.put(regionKey(region, associationId), association);
+        LOG.infov("Created association {0} ({1}) for document {2} in region {3}",
+                associationId, associationName, name, region);
+        return association;
+    }
+
+    public synchronized SsmAssociation updateAssociation(
+            String associationId,
+            String associationName,
+            String documentVersion,
+            List<SsmAssociation.Target> targets,
+            Map<String, List<String>> parameters,
+            String scheduleExpression,
+            String maxErrors,
+            String maxConcurrency,
+            String complianceSeverity,
+            String region) {
+        String storageKey = regionKey(region, associationId);
+        SsmAssociation association = associationStore.get(storageKey)
+                .orElseThrow(() -> new AwsException("AssociationDoesNotExist",
+                        "The specified association does not exist.", 400));
+
+        if (documentVersion != null) {
+            validateDocumentVersion(getDocument(association.getName(), region), documentVersion);
+        }
+
+        if (associationName != null) association.setAssociationName(associationName);
+        if (documentVersion != null) association.setDocumentVersion(documentVersion);
+        if (targets != null) association.setTargets(targets);
+        if (parameters != null) association.setParameters(parameters);
+        if (scheduleExpression != null) association.setScheduleExpression(scheduleExpression);
+        if (maxErrors != null) association.setMaxErrors(maxErrors);
+        if (maxConcurrency != null) association.setMaxConcurrency(maxConcurrency);
+        if (complianceSeverity != null) association.setComplianceSeverity(complianceSeverity);
+
+        long currentVersion = parseAssociationVersion(association.getAssociationVersion());
+        association.setAssociationVersion(String.valueOf(currentVersion + 1));
+
+        associationStore.put(storageKey, association);
+        LOG.infov("Updated association {0} in region {1}", associationId, region);
+        return association;
+    }
+
+    private static long parseAssociationVersion(String version) {
+        try {
+            return version == null ? 1 : Long.parseLong(version);
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    public List<SsmAssociation> listAssociations(String region) {
+        return listAssociations(region, Map.of());
+    }
+
+    public List<SsmAssociation> listAssociations(String region, Map<String, List<String>> filters) {
+        String prefix = regionKey(region, "");
+        List<SsmAssociation> associations = associationStore.scan(k -> k.startsWith(prefix));
+        if (filters == null || filters.isEmpty()) {
+            return associations;
+        }
+
+        List<String> instanceIdFilters = findFilterValues(filters, "InstanceId");
+        List<String> associationIdFilters = findFilterValues(filters, "AssociationId");
+        List<String> nameFilters = findFilterValues(filters, "Name");
+        List<String> associationNameFilters = findFilterValues(filters, "AssociationName");
+
+        return associations.stream()
+                .filter(a -> instanceIdFilters.isEmpty() || instanceIdFilters.contains(a.getInstanceId()))
+                .filter(a -> associationIdFilters.isEmpty() || associationIdFilters.contains(a.getAssociationId()))
+                .filter(a -> nameFilters.isEmpty() || nameFilters.contains(a.getName()))
+                .filter(a -> associationNameFilters.isEmpty() || associationNameFilters.contains(a.getAssociationName()))
+                .toList();
+    }
+
+    public SsmAssociation describeAssociation(String associationId, String name, String instanceId, String region) {
+        if (associationId != null && !associationId.isBlank()) {
+            return associationStore.get(regionKey(region, associationId))
+                    .orElseThrow(() -> new AwsException("AssociationDoesNotExist",
+                            "The specified association does not exist.", 400));
+        }
+        if (name != null && instanceId != null) {
+            String prefix = regionKey(region, "");
+            return associationStore.scan(k -> k.startsWith(prefix)).stream()
+                    .filter(a -> Objects.equals(a.getName(), name) && Objects.equals(a.getInstanceId(), instanceId))
+                    .findFirst()
+                    .orElseThrow(() -> new AwsException("AssociationDoesNotExist",
+                            "The specified association does not exist.", 400));
+        }
+        throw new AwsException("ValidationException",
+                "Either AssociationId or both Name and InstanceId must be specified.", 400);
+    }
+
+    public synchronized void deleteAssociation(String associationId, String name, String instanceId, String region) {
+        SsmAssociation association = describeAssociation(associationId, name, instanceId, region);
+        associationStore.delete(regionKey(region, association.getAssociationId()));
+        LOG.infov("Deleted association {0} in region {1}", association.getAssociationId(), region);
     }
 
     // ──────────────────────────── Patch Baselines ────────────────────────────
@@ -490,6 +1101,58 @@ public class SsmService {
         }
     }
 
+    /**
+     * Read a service setting for the calling account. Never-customized settings
+     * report their account default with status "Default".
+     */
+    public ServiceSetting getServiceSetting(String settingId, String region) {
+        String defaultValue = requireKnownSetting(settingId);
+        return serviceSettingStore.get(settingKey(region, settingId))
+                .orElseGet(() -> defaultSetting(settingId, defaultValue, region));
+    }
+
+    public void updateServiceSetting(String settingId, String settingValue, String region) {
+        requireKnownSetting(settingId);
+        ServiceSetting setting = new ServiceSetting(settingId, settingValue,
+                settingArn(settingId, region), "Customized",
+                "arn:aws:iam::" + regionResolver.getAccountId() + ":root");
+        serviceSettingStore.put(settingKey(region, settingId), setting);
+    }
+
+    public ServiceSetting resetServiceSetting(String settingId, String region) {
+        String defaultValue = requireKnownSetting(settingId);
+        serviceSettingStore.delete(settingKey(region, settingId));
+        return defaultSetting(settingId, defaultValue, region);
+    }
+
+    private String requireKnownSetting(String settingId) {
+        String defaultValue = SERVICE_SETTING_DEFAULTS.get(settingId);
+        if (defaultValue == null) {
+            throw new AwsException("ServiceSettingNotFound",
+                    "The specified service setting was not found: " + settingId, 400);
+        }
+        return defaultValue;
+    }
+
+    private ServiceSetting defaultSetting(String settingId, String defaultValue, String region) {
+        return new ServiceSetting(settingId, defaultValue, settingArn(settingId, region),
+                "Default", "System");
+    }
+
+    /**
+     * Service settings are per-account per-region: LZA assumes a role into each
+     * member account before updating, so the caller's resolved account scopes the key.
+     */
+    private String settingKey(String region, String settingId) {
+        return regionResolver.getAccountId() + "::" + regionKey(region, settingId);
+    }
+
+    private String settingArn(String settingId, String region) {
+        // Setting ids begin with "/", so concatenation yields .../servicesetting/ssm/...
+        return "arn:aws:ssm:" + region + ":" + regionResolver.getAccountId()
+                + ":servicesetting" + settingId;
+    }
+
     private static String regionKey(String region, String name) {
         return region + "::" + name;
     }
@@ -512,7 +1175,8 @@ public class SsmService {
         if (aliased.isBlank() || aliased.equals(name)) {
             return Optional.empty();
         }
-        return parameterStore.get(regionKey(region, aliased));
+        return parameterStore.get(regionKey(region, aliased))
+                .or(() -> publicParameter(name.startsWith("/") ? name : aliased, region));
     }
 
     /** AWS ARN resource is always {@code parameter/<name-without-leading-slash>}. */
@@ -532,5 +1196,40 @@ public class SsmService {
         }
 
         historyStore.put(storageKey, history);
+    }
+
+    public synchronized void deleteDocument(String name, String region) {
+        String storageKey = regionKey(region, name);
+        if (!documentStore.get(storageKey).isPresent()) {
+            throw new AwsException("InvalidDocument",
+                    "Document " + name + " does not exist.", 400);
+        }
+        documentStore.delete(storageKey);
+        documentPermissionStore.delete(storageKey);
+    }
+
+    // ─── Resource Explorer 2 ───────────────────────────────────────────────────
+
+    @Override
+    public List<ExplorerResource> getResources() {
+        List<ExplorerResource> resources = new ArrayList<>();
+        for (Parameter parameter : parameterStore.scan(k -> true)) {
+            String arn = parameter.getArn();
+            if (arn == null) {
+                continue;
+            }
+            AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+            resources.add(new ExplorerResource(
+                    arn, "ssm:parameter", "ssm",
+                    parsed.region(), parsed.accountId(),
+                    parameter.getLastModifiedDate() != null ? parameter.getLastModifiedDate() : Instant.now(),
+                    parameter.getTags() != null ? parameter.getTags() : Map.of()));
+        }
+        return resources;
+    }
+
+    @Override
+    public Set<SupportedResourceType> getSupportedResourceTypes() {
+        return Set.of(new SupportedResourceType("ssm:parameter", "ssm", true));
     }
 }

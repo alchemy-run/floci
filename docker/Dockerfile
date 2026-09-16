@@ -40,9 +40,8 @@ ENV AWS_ACCESS_KEY_ID=test
 ENV AWS_SECRET_ACCESS_KEY=test
 ENV AWS_CONFIG_FILE=/etc/floci/aws/config
 
-ENV GOSU_VERSION=1.17
-ENV GOSU_AMD64_SHA256=bbc4136d03ab138b1ad66fa4fc051bafc6cc7ffae632b069a53657279a450de3
-ENV GOSU_ARM64_SHA256=c3805a85d17f4454c23d7059bcb97e1ec1af272b90126e79ed002342de08389b
+# Privilege drop happens in the entrypoint through coreutils chroot, so no gosu
+# download; wget stays for the HEALTHCHECK below.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates passwd python3 python3-pip wget nodejs; \
@@ -52,16 +51,7 @@ RUN set -eux; \
     mv "$aws_bin" /usr/bin/aws.real; \
     printf '#!/bin/sh\nexec /usr/bin/aws.real --endpoint-url=http://localhost:4566 "$@"\n' > /usr/bin/aws; \
     chmod +x /usr/bin/aws; \
-    useradd -r -u 1001 -g root -d /app -s /sbin/nologin floci; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-        amd64) gosuArch='amd64'; gosuSha256="$GOSU_AMD64_SHA256" ;; \
-        arm64) gosuArch='arm64'; gosuSha256="$GOSU_ARM64_SHA256" ;; \
-        *) echo >&2 "unsupported arch: $arch"; exit 1 ;; \
-    esac; \
-    wget -q -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-${gosuArch}"; \
-    echo "${gosuSha256}  /usr/local/bin/gosu" | sha256sum -c -; \
-    chmod +x /usr/local/bin/gosu
+    useradd -r -u 1001 -g root -d /app -s /sbin/nologin floci
 
 WORKDIR /app
 
@@ -114,4 +104,5 @@ HEALTHCHECK --interval=5s --timeout=3s --retries=5 \
     CMD wget -q --spider http://localhost:4566/_floci/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["java", "--enable-native-access=ALL-UNNAMED", "-jar", "/app/quarkus-app/quarkus-run.jar"]
+# A published port needs 0.0.0.0 inside the container, which Floci only accepts with explicit consent.
+CMD ["java", "--enable-native-access=ALL-UNNAMED", "-Dquarkus.http.host=0.0.0.0", "-Dfloci.security.allow-unsafe-network-exposure=true", "-jar", "/app/quarkus-app/quarkus-run.jar"]

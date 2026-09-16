@@ -48,6 +48,18 @@
 | `DescribeLimits` | Account shard / on-demand stream limits |
 <!-- floci:actions:end -->
 
+## Local Inspection Endpoints
+
+These endpoints are Floci-local read-only helpers for the UI and tests. AWS SDK
+traffic should continue to use the JSON 1.1 Kinesis API on `/`.
+
+| Endpoint | Description |
+|---|---|
+| `GET /_aws/kinesis/streams` | List streams in the resolved region with shard, mode, tag, and record counts |
+| `GET /_aws/kinesis/records?StreamName=<name>` | Peek up to 100 stream records with shard attribution without consuming them |
+| `GET /_aws/kinesis/records?StreamName=<name>&Limit=<n>` | Peek up to `n` records, capped at 1000 |
+| `GET /_aws/kinesis/records?StreamName=<name>&ShardId=<id>` | Peek records for one shard |
+
 ## Stream Addressing
 
 Most actions accept either `StreamName` or `StreamARN` to identify a stream. When both are provided, `StreamName` takes precedence. `CreateStream` only accepts `StreamName`.
@@ -68,7 +80,29 @@ aws kinesis describe-stream --stream-arn arn:aws:kinesis:us-east-1:000000000000:
 
 `GetShardIterator` supports all five iterator types: `TRIM_HORIZON`, `LATEST`, `AT_SEQUENCE_NUMBER`, `AFTER_SEQUENCE_NUMBER`, `AT_TIMESTAMP`.
 
-A `LATEST` iterator is positioned at the shard tip at the moment the iterator is created, matching AWS: records written after the iterator was obtained are returned, records written before are not. This supports the standard tailing pattern — obtain a `LATEST` iterator, trigger the action that produces the record, then poll `GetRecords` following `NextShardIterator`.
+A `LATEST` iterator is positioned at the shard tip at the moment the iterator is created, matching AWS: records written after the iterator was obtained are returned, records written before are not. This supports the standard tailing pattern: obtain a `LATEST` iterator, trigger the action that produces the record, then poll `GetRecords` following `NextShardIterator`.
+
+## Record Routing
+
+`PutRecord` and `PutRecords` honor `ExplicitHashKey` when it is provided. The value must be a decimal integer in the Kinesis hash-key space, and records are written to the open shard whose `HashKeyRange` contains that value. Without `ExplicitHashKey`, Floci keeps using the partition key to choose a shard.
+
+## Shard Scaling (UpdateShardCount)
+
+`UpdateShardCount` enforces the documented default limits: at most double the current
+open shard count per call, at most ten calls per rolling 24-hour period per stream, a
+10000-shard ceiling, and the asymmetric rule that a stream already above 10000 shards can
+only move to a target strictly below it.
+
+The minimum bound (`TargetShardCount` cannot go below half the current open shard count)
+rounds up for an odd current count, so `current=5` accepts `target=3` but rejects
+`target=2`. AWS's documentation says only "below half" with no stated rounding, so which
+direction an odd count rounds is Floci's own call rather than observed AWS behavior; this
+is the more conservative reading (fewer shards allowed, not more).
+
+AWS also documents a separate 10 TPS call-rate limit on this action ("Make over 10 TPS.
+TPS over 10 will trigger the LimitExceededException"), independent of the ten-calls-per-24h
+limit above. Floci does not simulate real-time request throttling for this or any other
+action, so that limit is intentionally unenforced here.
 
 ## Configuration
 

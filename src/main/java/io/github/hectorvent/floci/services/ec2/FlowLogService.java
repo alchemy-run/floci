@@ -126,6 +126,14 @@ public class FlowLogService {
 
     public FlowLog createFlowLog(String region, String resourceId, String resourceType,
                                  String trafficType, String logDestinationType,
+                                 String logDestination, String deliverLogsPermissionArn,
+                                 String logFormat, int maxAggregationInterval) {
+        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
+                logDestination, logFormat, maxAggregationInterval, null, deliverLogsPermissionArn, List.of());
+    }
+
+    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
+                                 String trafficType, String logDestinationType,
                                  String logDestination, String logFormat, int maxAggregationInterval,
                                  String logGroupName, String deliverLogsPermissionArn, List<Tag> tags) {
         FlowLog fl = new FlowLog();

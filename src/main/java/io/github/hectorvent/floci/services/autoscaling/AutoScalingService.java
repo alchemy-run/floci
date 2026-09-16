@@ -17,6 +17,7 @@ import jakarta.inject.Inject;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -29,6 +30,24 @@ public class AutoScalingService {
     static final String INVALID_LAUNCH_CONFIGURATION_PARAMETERS_MESSAGE =
             "Valid requests must contain either the InstanceID parameter "
                     + "or both the ImageId and InstanceType parameters.";
+    static final Set<String> DESIRED_CAPACITY_TYPES = Set.of("units", "vcpu", "memory-mib");
+    static final int MIN_MAX_INSTANCE_LIFETIME_SECONDS = 86400;
+    static final String INVALID_DESIRED_CAPACITY_TYPE_MESSAGE =
+            "The specified value for DesiredCapacityType is not valid. Valid values are: units, vcpu, memory-mib.";
+    static final String INVALID_MAX_INSTANCE_LIFETIME_MESSAGE =
+            "MaxInstanceLifetime must be equal to 0 or a value greater than or equal to 86400 seconds.";
+    static final String INVALID_DEFAULT_INSTANCE_WARMUP_MESSAGE =
+            "DefaultInstanceWarmup must be greater than or equal to 0, or -1 to remove a previously set value.";
+    static final String INSTANCE_REQUIREMENTS_AND_INSTANCE_TYPE_MESSAGE =
+            "A launch template override must not specify both InstanceType and InstanceRequirements.";
+    static final String DEFAULT_DESIRED_CAPACITY_TYPE = "units";
+    static final String INSTANCE_REQUIREMENTS_MISSING_RANGES_MESSAGE =
+            "You must specify VCpuCount and MemoryMiB when you specify InstanceRequirements "
+                    + "on a launch template override.";
+    static final String DESIRED_CAPACITY_TYPE_NEEDS_INSTANCE_REQUIREMENTS_MESSAGE =
+            "Amazon EC2 Auto Scaling supports DesiredCapacityType for attribute-based instance type "
+                    + "selection only. Specify InstanceRequirements on a MixedInstancesPolicy launch "
+                    + "template override, or use the default DesiredCapacityType of units.";
     static final String ACTIVE_INSTANCE_REFRESH_DESIRED_CONFIGURATION_MESSAGE =
             "An active instance refresh with a desired configuration exists. All configuration options derived from the desired configuration are not available for update while the instance refresh is active.";
 
@@ -48,7 +67,8 @@ public class AutoScalingService {
     private Map<String, ScalingPolicy> policies = new ConcurrentHashMap<>();
     private Map<String, ScalingActivity> activities = new ConcurrentHashMap<>();
     private Map<String, InstanceRefresh> instanceRefreshes = new ConcurrentHashMap<>();
-    private Map<String, ScheduledUpdateGroupAction> scheduledActions = new ConcurrentHashMap<>();
+    private Map<String, ScheduledAction> scheduledActions = new ConcurrentHashMap<>();
+    private Map<String, WarmPoolConfiguration> warmPools = new ConcurrentHashMap<>();
 
     @PostConstruct
     void initializeStorage()
@@ -62,7 +82,8 @@ public class AutoScalingService {
         this.policies = storageBacked("autoscaling-policies.json", new TypeReference<Map<String, ScalingPolicy>>() {});
         this.activities = storageBacked("autoscaling-activities.json", new TypeReference<Map<String, ScalingActivity>>() {});
         this.instanceRefreshes = storageBacked("autoscaling-instance-refreshes.json", new TypeReference<Map<String, InstanceRefresh>>() {});
-        this.scheduledActions = storageBacked("autoscaling-scheduled-actions.json", new TypeReference<Map<String, ScheduledUpdateGroupAction>>() {});
+        this.scheduledActions = storageBacked("autoscaling-scheduled-actions.json", new TypeReference<Map<String, ScheduledAction>>() {});
+        this.warmPools = storageBacked("autoscaling-warm-pools.json", new TypeReference<Map<String, WarmPoolConfiguration>>() {});
     }
 
     private <V> Map<String, V> storageBacked(String fileName, TypeReference<Map<String, V>> typeReference)
@@ -76,7 +97,18 @@ public class AutoScalingService {
                                                           String imageId, String instanceType, String keyName,
                                                           List<String> securityGroups, String userData,
                                                           String iamInstanceProfile,
-                                                          boolean associatePublicIpAddress) {
+                                                          Boolean associatePublicIpAddress) {
+        return createLaunchConfiguration(region, name, instanceId, imageId, instanceType, keyName,
+                securityGroups, userData, iamInstanceProfile, associatePublicIpAddress, null, List.of());
+    }
+
+    public LaunchConfiguration createLaunchConfiguration(String region, String name, String instanceId,
+                                                          String imageId, String instanceType, String keyName,
+                                                          List<String> securityGroups, String userData,
+                                                          String iamInstanceProfile,
+                                                          Boolean associatePublicIpAddress,
+                                                          Boolean instanceMonitoringEnabled,
+                                                          List<LaunchConfigurationBlockDeviceMapping> blockDeviceMappings) {
         String key = lcKey(region, name);
         if (launchConfigs.containsKey(key)) {
             throw new AwsException("AlreadyExists",
@@ -128,6 +160,10 @@ public class AutoScalingService {
         lc.setUserData(userData);
         lc.setIamInstanceProfile(iamInstanceProfile);
         lc.setAssociatePublicIpAddress(associatePublicIpAddress);
+        // AWS documents InstanceMonitoring as enabled by default and always returns the
+        // structure from Describe, unlike AssociatePublicIpAddress whose absence is meaningful.
+        lc.setInstanceMonitoringEnabled(instanceMonitoringEnabled != null ? instanceMonitoringEnabled : Boolean.TRUE);
+        lc.setBlockDeviceMappings(blockDeviceMappings != null ? new ArrayList<>(blockDeviceMappings) : new ArrayList<>());
         lc.setCreatedTime(Instant.now());
         lc.setRegion(region);
         launchConfigs.put(key, lc);
@@ -167,7 +203,8 @@ public class AutoScalingService {
                                                     String healthCheckType, int healthCheckGracePeriod,
                                                     List<String> terminationPolicies,
                                                     Map<String, String> tags,
-                                                    Map<String, Boolean> tagPropagateAtLaunch) {
+                                                    Map<String, Boolean> tagPropagateAtLaunch,
+                                                    AsgOptionalFields optionalFields) {
         String key = asgKey(region, name);
         if (groups.containsKey(key)) {
             throw new AwsException("AlreadyExists",
@@ -182,6 +219,10 @@ public class AutoScalingService {
         }
         validateEffectiveLaunchImage(region, launchConfigName, launchTemplateId, launchTemplateName,
                 launchTemplateVersion, mixedInstancesPolicy);
+        validateOptionalFields(optionalFields);
+        validateDesiredCapacityType(
+                optionalFields != null ? optionalFields.desiredCapacityType() : null,
+                mixedInstancesPolicy);
 
         AutoScalingGroup asg = new AutoScalingGroup();
         asg.setAutoScalingGroupName(name);
@@ -212,6 +253,9 @@ public class AutoScalingService {
         if (tagPropagateAtLaunch != null) {
             asg.getTagPropagateAtLaunch().putAll(tagPropagateAtLaunch);
         }
+        if (optionalFields != null) {
+            optionalFields.applyToNewGroup(asg);
+        }
         groups.put(key, asg);
         return asg;
     }
@@ -225,13 +269,15 @@ public class AutoScalingService {
                                         Integer defaultCooldown, List<String> availabilityZones,
                                         List<String> subnetIds,
                                         String healthCheckType, Integer healthCheckGracePeriod,
-                                        List<String> terminationPolicies) {
+                                        List<String> terminationPolicies,
+                                        AsgOptionalFields optionalFields) {
         AutoScalingGroup asg = requireGroup(region, name);
         validateLaunchSource(launchConfigName, launchTemplateId, launchTemplateName, mixedInstancesPolicy);
         if (launchTemplateVersion != null && launchTemplateId == null && launchTemplateName == null) {
             throw new AwsException("ValidationError",
                     "LaunchTemplateVersion requires a LaunchTemplateId or LaunchTemplateName.", 400);
         }
+        validateOptionalFields(optionalFields);
         rejectDesiredConfigurationUpdateDuringActiveRefresh(region, name,
                 launchConfigName, launchTemplateId, launchTemplateName, launchTemplateVersion, mixedInstancesPolicy);
         LaunchIdentity effectiveIdentity = effectiveLaunchIdentity(asg, launchConfigName,
@@ -241,6 +287,9 @@ public class AutoScalingService {
                 effectiveIdentity.launchTemplateId(),
                 effectiveIdentity.launchTemplateName(),
                 effectiveIdentity.launchTemplateVersion(),
+                effectiveIdentity.mixedInstancesPolicy());
+        validateDesiredCapacityType(
+                effectiveDesiredCapacityType(asg, optionalFields),
                 effectiveIdentity.mixedInstancesPolicy());
         if (launchConfigName != null) {
             asg.setLaunchConfigurationName(launchConfigName);
@@ -272,6 +321,9 @@ public class AutoScalingService {
         if (healthCheckType != null) { asg.setHealthCheckType(healthCheckType); }
         if (healthCheckGracePeriod != null) { asg.setHealthCheckGracePeriod(healthCheckGracePeriod); }
         if (terminationPolicies != null) { asg.setTerminationPolicies(new ArrayList<>(terminationPolicies)); }
+        if (optionalFields != null) {
+            optionalFields.applyToExistingGroup(asg);
+        }
         groups.put(asgKey(region, name), asg);
     }
 
@@ -303,8 +355,9 @@ public class AutoScalingService {
         hooks.entrySet().removeIf(e -> e.getValue().getAutoScalingGroupName().equals(name));
         policies.entrySet().removeIf(e -> e.getValue().getAutoScalingGroupName().equals(name));
         instanceRefreshes.entrySet().removeIf(e -> e.getValue().getAutoScalingGroupName().equals(name));
-        scheduledActions.entrySet().removeIf(e -> name.equals(e.getValue().getAutoScalingGroupName())
-                && region.equals(e.getValue().getRegion()));
+        scheduledActions.entrySet().removeIf(e -> region.equals(e.getValue().getRegion())
+                && name.equals(e.getValue().getAutoScalingGroupName()));
+        warmPools.remove(warmPoolKey(region, name));
     }
 
     public List<AutoScalingGroup> describeAutoScalingGroups(String region, List<String> names) {
@@ -361,6 +414,38 @@ public class AutoScalingService {
         return requireGroup(region, resourceId);
     }
 
+    // Real AWS suspends the named scaling processes ("Launch", "Terminate", "HealthCheck", ...)
+    // so they stop running until resumed; an empty list suspends all of them. Floci has no
+    // scaling loop for these processes to pause, so this only needs to record which processes
+    // are suspended for DescribeAutoScalingGroups to report back - the same "accept and
+    // remember" shape as terminationPolicies. The AWS provider calls this unconditionally
+    // around ASG creation whenever wait_for_capacity_timeout is non-zero (the default), so an
+    // unimplemented SuspendProcesses fails ASG creation outright, not just a feature gap.
+    private static final List<String> ALL_SCALING_PROCESSES = List.of(
+            "Launch", "Terminate", "AddToLoadBalancer", "AlarmNotification", "AZRebalance",
+            "HealthCheck", "InstanceRefresh", "ReplaceUnhealthy", "ScheduledActions");
+
+    public void suspendProcesses(String region, String name, List<String> processes) {
+        AutoScalingGroup asg = requireGroup(region, name);
+        List<String> toSuspend = processes.isEmpty() ? ALL_SCALING_PROCESSES : processes;
+        Set<String> suspended = new LinkedHashSet<>(asg.getSuspendedProcesses());
+        suspended.addAll(toSuspend);
+        asg.setSuspendedProcesses(new ArrayList<>(suspended));
+        groups.put(asgKey(region, name), asg);
+    }
+
+    public void resumeProcesses(String region, String name, List<String> processes) {
+        AutoScalingGroup asg = requireGroup(region, name);
+        if (processes.isEmpty()) {
+            asg.setSuspendedProcesses(new ArrayList<>());
+        } else {
+            List<String> remaining = new ArrayList<>(asg.getSuspendedProcesses());
+            remaining.removeAll(processes);
+            asg.setSuspendedProcesses(remaining);
+        }
+        groups.put(asgKey(region, name), asg);
+    }
+
     // ── Instance management ────────────────────────────────────────────────────
 
     public List<AsgInstance> describeAutoScalingInstances(String region, List<String> instanceIds) {
@@ -373,6 +458,54 @@ public class AutoScalingService {
             return all.stream().filter(i -> ids.contains(i.getInstanceId())).collect(Collectors.toList());
         }
         return all;
+    }
+
+    public void setInstanceProtection(String region, String groupName, List<String> instanceIds,
+                                      boolean protectedFromScaleIn) {
+        if (instanceIds == null || instanceIds.isEmpty()) {
+            throw new AwsException("ValidationError", "At least one instance ID is required.", 400);
+        }
+        AutoScalingGroup asg = requireGroup(region, groupName);
+        Set<String> requested = new HashSet<>(instanceIds);
+        Set<String> found = asg.getInstances().stream()
+                .map(AsgInstance::getInstanceId)
+                .filter(requested::contains)
+                .collect(Collectors.toSet());
+        if (!found.containsAll(requested)) {
+            String missing = requested.stream()
+                    .filter(id -> !found.contains(id))
+                    .collect(Collectors.joining(", "));
+            throw new AwsException("ValidationError",
+                    "Instance(s) '" + missing + "' is/are not part of Auto Scaling group '" + groupName + "'.", 400);
+        }
+        asg.getInstances().stream()
+                .filter(instance -> requested.contains(instance.getInstanceId()))
+                .forEach(instance -> instance.setProtectedFromScaleIn(protectedFromScaleIn));
+        groups.put(asgKey(region, groupName), asg);
+    }
+
+    /**
+     * {@code shouldRespectGracePeriod} is parsed and accepted for wire fidelity (2011-01-01 model)
+     * but not yet enforced — floci does not currently track instance launch time against
+     * {@link AutoScalingGroup#getHealthCheckGracePeriod()}, so the health status change below always
+     * applies immediately regardless of the flag.
+     */
+    public void setInstanceHealth(String region, String instanceId, String healthStatus,
+                                  boolean shouldRespectGracePeriod) {
+        if (isBlank(instanceId)) {
+            throw new AwsException("ValidationError", "InstanceId is required.", 400);
+        }
+        if (!"Healthy".equals(healthStatus) && !"Unhealthy".equals(healthStatus)) {
+            throw new AwsException("ValidationError",
+                    "HealthStatus must be Healthy or Unhealthy.", 400);
+        }
+        AutoScalingGroup asg = groups.values().stream()
+                .filter(g -> region.equals(g.getRegion()))
+                .filter(g -> findInstanceInGroup(g, instanceId).isPresent())
+                .findFirst()
+                .orElseThrow(() -> instanceNotAuthorized("SetInstanceHealth", instanceId));
+        findInstanceInGroup(asg, instanceId).ifPresent(instance -> instance.setHealthStatus(healthStatus));
+        groups.put(asgKey(region, asg.getAutoScalingGroupName()), asg);
     }
 
     public void attachInstances(String region, String name, List<String> instanceIds) {
@@ -556,6 +689,47 @@ public class AutoScalingService {
         groups.put(asgKey(region, name), asg);
     }
 
+    // ── Traffic sources ─────────────────────────────────────────────────────────────
+    // AttachTrafficSources/DetachTrafficSources/DescribeTrafficSources is the modern,
+    // unified ASG-to-load-balancer wiring API (elb, elbv2, vpc-lattice), which
+    // aws_autoscaling_traffic_source_attachment uses instead of the older
+    // AttachLoadBalancerTargetGroups. "accept and remember" like the target-group
+    // attachment above - Floci has no real health-checking loop, so every attached
+    // traffic source is reported InService immediately.
+
+    public record TrafficSourceIdentifier(String identifier, String type) {}
+
+    public void attachTrafficSources(String region, String name, List<TrafficSourceIdentifier> sources) {
+        AutoScalingGroup asg = requireGroup(region, name);
+        for (TrafficSourceIdentifier source : sources) {
+            asg.getTrafficSourceTypeByIdentifier().put(source.identifier(),
+                    source.type() != null ? source.type() : "elbv2");
+        }
+        groups.put(asgKey(region, name), asg);
+    }
+
+    public void detachTrafficSources(String region, String name, List<TrafficSourceIdentifier> sources) {
+        AutoScalingGroup asg = requireGroup(region, name);
+        for (TrafficSourceIdentifier source : sources) {
+            asg.getTrafficSourceTypeByIdentifier().remove(source.identifier());
+        }
+        groups.put(asgKey(region, name), asg);
+    }
+
+    public Map<String, String> describeTrafficSources(String region, String name, String trafficSourceType) {
+        Map<String, String> all = requireGroup(region, name).getTrafficSourceTypeByIdentifier();
+        if (trafficSourceType == null || trafficSourceType.isBlank()) {
+            return all;
+        }
+        Map<String, String> filtered = new LinkedHashMap<>();
+        all.forEach((identifier, type) -> {
+            if (trafficSourceType.equals(type)) {
+                filtered.put(identifier, type);
+            }
+        });
+        return filtered;
+    }
+
     // ── Lifecycle hooks ────────────────────────────────────────────────────────
 
     public void putLifecycleHook(String region, String asgName, String hookName,
@@ -563,6 +737,7 @@ public class AutoScalingService {
                                   String roleArn, String notificationMetadata,
                                   Integer heartbeatTimeout, String defaultResult) {
         requireGroup(region, asgName);
+        validateLifecycleHookName(hookName);
         String key = hookKey(region, asgName, hookName);
         LifecycleHook hook = hooks.computeIfAbsent(key, k -> new LifecycleHook());
         hook.setLifecycleHookName(hookName);
@@ -577,7 +752,36 @@ public class AutoScalingService {
     }
 
     public void deleteLifecycleHook(String region, String asgName, String hookName) {
+        validateLifecycleHookName(hookName);
         hooks.remove(hookKey(region, asgName, hookName));
+    }
+
+    /**
+     * Deletes every hook with this name in the region, whichever group owns it. Callers that only
+     * hold the hook name use this — the CloudFormation delete path is keyed by physical id, and a
+     * lifecycle hook's physical id is its name, not its group.
+     */
+    public void deleteLifecycleHookByName(String region, String hookName) {
+        if (hookName == null) {
+            return;
+        }
+        // The physical id was only ever assigned from a name that already passed this check
+        // (see putLifecycleHook), so this call for parity with deleteLifecycleHook should never
+        // reject a hook created through the normal path — it exists to fail loudly, not silently
+        // no-op, if a corrupted or hand-authored physical id ever reaches this delete path.
+        validateLifecycleHookName(hookName);
+        List<String> keys = new ArrayList<>();
+        for (Map.Entry<String, LifecycleHook> entry : hooks.entrySet()) {
+            LifecycleHook hook = entry.getValue();
+            if (hook == null || !hookName.equals(hook.getLifecycleHookName())) {
+                continue;
+            }
+            if (region != null && !entry.getKey().startsWith(region + "::")) {
+                continue;
+            }
+            keys.add(entry.getKey());
+        }
+        keys.forEach(hooks::remove);
     }
 
     public List<LifecycleHook> describeLifecycleHooks(String region, String asgName, List<String> hookNames) {
@@ -596,6 +800,43 @@ public class AutoScalingService {
                                          String instanceId, String actionResult, String token) {
         // Stored-only — Phase 2 reconciler observes this via the instance lifecycle state
         requireGroup(region, asgName);
+        validateLifecycleHookName(hookName);
+        if (token != null) {
+            validateLifecycleActionToken(token);
+        }
+    }
+
+    /** LifecycleHookName pattern/length from the Auto Scaling model (autoscaling/2011-01-01/service-2.json). */
+    private static final Pattern LIFECYCLE_HOOK_NAME_PATTERN =
+            Pattern.compile("^[A-Za-z0-9\\-_/]+$");
+
+    private static void validateLifecycleHookName(String hookName) {
+        if (hookName == null) {
+            throw new AwsException("ValidationError",
+                    "1 validation error detected: Value null at 'lifecycleHookName' failed to satisfy constraint: "
+                            + "Member must not be null", 400);
+        }
+        if (hookName.length() > 255) {
+            throw new AwsException("ValidationError",
+                    "1 validation error detected: Value '" + hookName
+                            + "' at 'lifecycleHookName' failed to satisfy constraint: Member must have length "
+                            + "less than or equal to 255", 400);
+        }
+        if (!LIFECYCLE_HOOK_NAME_PATTERN.matcher(hookName).matches()) {
+            throw new AwsException("ValidationError",
+                    "1 validation error detected: Value '" + hookName
+                            + "' at 'lifecycleHookName' failed to satisfy constraint: Member must satisfy "
+                            + "regular expression pattern: [A-Za-z0-9\\-_/]+", 400);
+        }
+    }
+
+    /** LifecycleActionToken is modeled as a fixed 36-character token (autoscaling/2011-01-01/service-2.json). */
+    private static void validateLifecycleActionToken(String token) {
+        if (token == null || token.length() != 36) {
+            throw new AwsException("ValidationError",
+                    "1 validation error detected: Value at 'lifecycleActionToken' failed to satisfy constraint: "
+                            + "Member must have length equal to 36", 400);
+        }
     }
 
     // ── Scaling policies ───────────────────────────────────────────────────────
@@ -638,6 +879,119 @@ public class AutoScalingService {
                 .collect(Collectors.toList());
     }
 
+    // ── Scheduled actions ───────────────────────────────────────────────────
+    // PutScheduledUpdateGroupAction/DescribeScheduledActions/DeleteScheduledAction -
+    // aws_autoscaling_schedule's whole lifecycle. Floci has no cron scheduler to
+    // actually run these, so - same "accept and remember" shape as scaling
+    // policies above - this only needs to record and read back the schedule
+    // definition itself; the AWS provider's own Read never expects a scheduled
+    // action to have fired inside an emulator.
+
+    public ScheduledAction putScheduledUpdateGroupAction(String region, String asgName, String actionName,
+                                                           Instant startTime, Instant endTime, String recurrence,
+                                                           String timeZone, Integer minSize, Integer maxSize,
+                                                           Integer desiredCapacity) {
+        requireGroup(region, asgName);
+        if (isBlank(actionName)) {
+            throw new AwsException("ValidationError", "ScheduledActionName is required.", 400);
+        }
+        String key = scheduledActionKey(region, asgName, actionName);
+        ScheduledAction action = scheduledActions.computeIfAbsent(key, k -> new ScheduledAction());
+        action.setScheduledActionName(actionName);
+        action.setAutoScalingGroupName(asgName);
+        if (action.getScheduledActionArn() == null) {
+            action.setScheduledActionArn(AwsArnUtils.Arn.of("autoscaling", region, regionResolver.getAccountId(),
+                    "scheduledUpdateGroupAction:" + UUID.randomUUID()
+                            + ":autoScalingGroupName/" + asgName
+                            + ":scheduledActionName/" + actionName).toString());
+        }
+        action.setStartTime(startTime);
+        action.setEndTime(endTime);
+        action.setRecurrence(recurrence);
+        action.setTimeZone(timeZone);
+        action.setMinSize(minSize);
+        action.setMaxSize(maxSize);
+        action.setDesiredCapacity(desiredCapacity);
+        action.setRegion(region);
+        scheduledActions.put(key, action);
+        return action;
+    }
+
+    public void deleteScheduledAction(String region, String asgName, String actionName) {
+        scheduledActions.remove(scheduledActionKey(region, asgName, actionName));
+    }
+
+    public List<ScheduledAction> describeScheduledActions(String region, String asgName, List<String> actionNames) {
+        if (notBlank(asgName) && actionNames != null && !actionNames.isEmpty()) {
+            requireGroup(region, asgName);
+        }
+        return scheduledActions.values().stream()
+                .filter(a -> region.equals(a.getRegion()))
+                .filter(a -> asgName == null || asgName.equals(a.getAutoScalingGroupName()))
+                .filter(a -> actionNames == null || actionNames.isEmpty() || actionNames.contains(a.getScheduledActionName()))
+                .sorted(Comparator.comparing(ScheduledAction::getScheduledActionName))
+                .collect(Collectors.toList());
+    }
+
+    // ── Warm pools ──────────────────────────────────────────────────────────
+    // PutWarmPool/DescribeWarmPool/DeleteWarmPool - aws_autoscaling_group's
+    // warm_pool block. Verified directly against botocore's
+    // autoscaling/2011-01-01/service-2.json wire model rather than docs prose:
+    // PutWarmPoolType/DeleteWarmPoolType/DescribeWarmPoolType
+    // and their *Answer response shapes, WarmPoolConfiguration, WarmPoolState,
+    // InstanceReusePolicy. PutWarmPool is a full replace: MinSize's own shape
+    // doc says "Defaults to 0 if not specified" and PoolState's says "Default is
+    // Stopped" - an omitted field resets to that default, it does not carry the
+    // prior value forward, which is why putWarmPool always rebuilds the
+    // configuration from scratch rather than mutating the stored one in place.
+    // MaxGroupPreparedCapacity has no default (absent unless set), and the shape
+    // doc calls out -1 as the caller's own documented sentinel for "clear a
+    // previously-set value" - not a real capacity, so it maps back to null and
+    // is never rendered as -1.
+    //
+    // Floci has no scaling loop that actually launches pre-initialized instances
+    // into the pool, so DescribeWarmPool's own Instances list is always empty
+    // and WarmPoolConfiguration.Status ("PendingDelete") is never set - the
+    // "accept and remember" shape scaling policies and scheduled actions above
+    // already use for AWS features with no local reconciler. DeleteWarmPool
+    // removes the stored configuration outright and is silently idempotent when
+    // no warm pool exists, matching deletePolicy above rather than throwing.
+
+    public WarmPoolConfiguration putWarmPool(String region, String asgName,
+                                              Integer maxGroupPreparedCapacity,
+                                              Integer minSize,
+                                              String poolState,
+                                              Boolean reuseOnScaleIn) {
+        requireGroup(region, asgName);
+        WarmPoolConfiguration pool = new WarmPoolConfiguration();
+        pool.setAutoScalingGroupName(asgName);
+        pool.setRegion(region);
+        // -1 is the wire model's own documented sentinel for "remove a
+        // previously-set value" - not a literal capacity.
+        pool.setMaxGroupPreparedCapacity(
+                maxGroupPreparedCapacity != null && maxGroupPreparedCapacity != -1
+                        ? maxGroupPreparedCapacity : null);
+        pool.setMinSize(minSize != null ? minSize : 0);
+        pool.setPoolState(poolState != null && !poolState.isBlank() ? poolState : "Stopped");
+        pool.setReuseOnScaleIn(Boolean.TRUE.equals(reuseOnScaleIn));
+        warmPools.put(warmPoolKey(region, asgName), pool);
+        return pool;
+    }
+
+    public WarmPoolConfiguration describeWarmPool(String region, String asgName) {
+        requireGroup(region, asgName);
+        return warmPools.get(warmPoolKey(region, asgName));
+    }
+
+    public void deleteWarmPool(String region, String asgName, boolean forceDelete) {
+        requireGroup(region, asgName);
+        warmPools.remove(warmPoolKey(region, asgName));
+    }
+
+    private static String warmPoolKey(String region, String asgName) {
+        return region + "::" + asgName;
+    }
+
     // ── Scaling activities ─────────────────────────────────────────────────────
 
     public List<ScalingActivity> describeScalingActivities(String region, String asgName) {
@@ -676,56 +1030,6 @@ public class AutoScalingService {
 
     // ── Scheduled actions ─────────────────────────────────────────────────────
 
-    public ScheduledUpdateGroupAction putScheduledUpdateGroupAction(
-            String region, String asgName, String actionName, String recurrence,
-            Instant startTime, Instant endTime, String timeZone,
-            Integer minSize, Integer maxSize, Integer desiredCapacity) {
-        requireGroup(region, asgName);
-        if (isBlank(actionName)) {
-            throw new AwsException("ValidationError", "ScheduledActionName is required.", 400);
-        }
-        String key = scheduledActionKey(region, asgName, actionName);
-        ScheduledUpdateGroupAction existing = scheduledActions.get(key);
-        ScheduledUpdateGroupAction action = existing != null ? existing : new ScheduledUpdateGroupAction();
-        action.setAutoScalingGroupName(asgName);
-        action.setScheduledActionName(actionName);
-        if (existing == null) {
-            action.setScheduledActionArn(AwsArnUtils.Arn.of("autoscaling", region, regionResolver.getAccountId(),
-                    "scheduledUpdateGroupAction:" + UUID.randomUUID()
-                            + ":autoScalingGroupName/" + asgName
-                            + ":scheduledActionName/" + actionName).toString());
-        }
-        action.setRecurrence(recurrence);
-        action.setStartTime(startTime);
-        action.setEndTime(endTime);
-        action.setTimeZone(timeZone);
-        action.setMinSize(minSize);
-        action.setMaxSize(maxSize);
-        action.setDesiredCapacity(desiredCapacity);
-        action.setRegion(region);
-        scheduledActions.put(key, action);
-        return action;
-    }
-
-    public List<ScheduledUpdateGroupAction> describeScheduledActions(
-            String region, String asgName, List<String> actionNames) {
-        if (asgName != null && !asgName.isBlank()) {
-            requireGroup(region, asgName);
-        }
-        return scheduledActions.values().stream()
-                .filter(a -> region.equals(a.getRegion()))
-                .filter(a -> asgName == null || asgName.isBlank() || asgName.equals(a.getAutoScalingGroupName()))
-                .filter(a -> actionNames == null || actionNames.isEmpty()
-                        || actionNames.contains(a.getScheduledActionName()))
-                .sorted(Comparator.comparing(ScheduledUpdateGroupAction::getScheduledActionName))
-                .collect(Collectors.toList());
-    }
-
-    public void deleteScheduledAction(String region, String asgName, String actionName) {
-        requireGroup(region, asgName);
-        scheduledActions.remove(scheduledActionKey(region, asgName, actionName));
-    }
-
     // ── Instance refresh cancel / rollback ────────────────────────────────────
 
     public InstanceRefresh cancelInstanceRefresh(String region, String asgName) {
@@ -759,40 +1063,6 @@ public class AutoScalingService {
     }
 
     // ── Instance health / protection / standby ────────────────────────────────
-
-    public void setInstanceProtection(String region, String asgName, List<String> instanceIds,
-                                      boolean protectedFromScaleIn) {
-        AutoScalingGroup asg = requireGroup(region, asgName);
-        if (instanceIds == null || instanceIds.isEmpty()) {
-            throw new AwsException("ValidationError", "InstanceIds is required.", 400);
-        }
-        for (String instanceId : instanceIds) {
-            AsgInstance instance = findInstanceInGroup(asg, instanceId)
-                    .orElseThrow(() -> new AwsException("ValidationError",
-                            "Instance '" + instanceId + "' is not part of Auto Scaling group '"
-                                    + asgName + "'.", 400));
-            instance.setProtectedFromScaleIn(protectedFromScaleIn);
-        }
-        groups.put(asgKey(region, asgName), asg);
-    }
-
-    public void setInstanceHealth(String region, String instanceId, String healthStatus,
-                                  boolean shouldRespectGracePeriod) {
-        if (isBlank(instanceId)) {
-            throw new AwsException("ValidationError", "InstanceId is required.", 400);
-        }
-        if (!"Healthy".equals(healthStatus) && !"Unhealthy".equals(healthStatus)) {
-            throw new AwsException("ValidationError",
-                    "HealthStatus must be Healthy or Unhealthy.", 400);
-        }
-        AutoScalingGroup asg = groups.values().stream()
-                .filter(g -> region.equals(g.getRegion()))
-                .filter(g -> findInstanceInGroup(g, instanceId).isPresent())
-                .findFirst()
-                .orElseThrow(() -> instanceNotAuthorized("SetInstanceHealth", instanceId));
-        findInstanceInGroup(asg, instanceId).ifPresent(instance -> instance.setHealthStatus(healthStatus));
-        groups.put(asgKey(region, asg.getAutoScalingGroupName()), asg);
-    }
 
     public List<ScalingActivity> enterStandby(String region, String asgName, List<String> instanceIds,
                                               boolean decrementDesiredCapacity) {
@@ -947,6 +1217,97 @@ public class AutoScalingService {
                     "A MixedInstancesPolicy must specify a LaunchTemplate with a LaunchTemplateId "
                             + "or LaunchTemplateName.", 400);
         }
+        validateLaunchTemplateOverrides(mixedInstancesPolicy);
+    }
+
+    private static void validateLaunchTemplateOverrides(MixedInstancesPolicy mixedInstancesPolicy) {
+        for (MixedInstancesPolicy.LaunchTemplateOverride override : overridesOf(mixedInstancesPolicy)) {
+            MixedInstancesPolicy.InstanceRequirements requirements = override.getInstanceRequirements();
+            if (requirements == null || requirements.isEmpty()) {
+                continue;
+            }
+            if (override.getInstanceType() != null) {
+                throw new AwsException("ValidationError",
+                        INSTANCE_REQUIREMENTS_AND_INSTANCE_TYPE_MESSAGE, 400);
+            }
+            if (requirements.getVCpuCount() == null || requirements.getMemoryMiB() == null) {
+                throw new AwsException("ValidationError",
+                        INSTANCE_REQUIREMENTS_MISSING_RANGES_MESSAGE, 400);
+            }
+        }
+    }
+
+    /**
+     * Botocore documents {@code DesiredCapacityType} as supported "for attribute-based instance type
+     * selection only", and it types the member as a plain string rather than an enum, so the rule
+     * lives in prose and not in the model constraints.
+     *
+     * <p>Attribute-based selection here means the mixed instances policy that the request leaves in
+     * effect carries at least one launch template override holding a non-empty
+     * {@code InstanceRequirements}. On create that is the policy the request supplies. On update it
+     * is the policy the request supplies, or the stored one when the request names no launch source
+     * at all, or none when the request switches the group to a launch configuration or a plain
+     * launch template.
+     *
+     * <p>{@code units} is the documented default and stays legal for every group.
+     */
+    private static void validateDesiredCapacityType(String desiredCapacityType,
+                                                    MixedInstancesPolicy effectivePolicy) {
+        if (desiredCapacityType == null || DEFAULT_DESIRED_CAPACITY_TYPE.equals(desiredCapacityType)) {
+            return;
+        }
+        if (!usesInstanceRequirements(effectivePolicy)) {
+            throw new AwsException("ValidationError",
+                    DESIRED_CAPACITY_TYPE_NEEDS_INSTANCE_REQUIREMENTS_MESSAGE, 400);
+        }
+    }
+
+    private static String effectiveDesiredCapacityType(AutoScalingGroup asg,
+                                                       AsgOptionalFields optionalFields) {
+        if (optionalFields != null && optionalFields.desiredCapacityType() != null) {
+            return optionalFields.desiredCapacityType();
+        }
+        return asg.getDesiredCapacityType();
+    }
+
+    private static boolean usesInstanceRequirements(MixedInstancesPolicy mixedInstancesPolicy) {
+        for (MixedInstancesPolicy.LaunchTemplateOverride override : overridesOf(mixedInstancesPolicy)) {
+            MixedInstancesPolicy.InstanceRequirements requirements = override.getInstanceRequirements();
+            if (requirements != null && !requirements.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<MixedInstancesPolicy.LaunchTemplateOverride> overridesOf(
+            MixedInstancesPolicy mixedInstancesPolicy) {
+        if (mixedInstancesPolicy == null || mixedInstancesPolicy.getLaunchTemplate() == null) {
+            return List.of();
+        }
+        List<MixedInstancesPolicy.LaunchTemplateOverride> overrides =
+                mixedInstancesPolicy.getLaunchTemplate().getOverrides();
+        return overrides != null ? overrides : List.of();
+    }
+
+    private static void validateOptionalFields(AsgOptionalFields optionalFields) {
+        if (optionalFields == null) {
+            return;
+        }
+        String desiredCapacityType = optionalFields.desiredCapacityType();
+        if (desiredCapacityType != null && !DESIRED_CAPACITY_TYPES.contains(desiredCapacityType)) {
+            throw new AwsException("ValidationError", INVALID_DESIRED_CAPACITY_TYPE_MESSAGE, 400);
+        }
+        Integer maxInstanceLifetime = optionalFields.maxInstanceLifetime();
+        if (maxInstanceLifetime != null && maxInstanceLifetime != 0
+                && maxInstanceLifetime < MIN_MAX_INSTANCE_LIFETIME_SECONDS) {
+            throw new AwsException("ValidationError", INVALID_MAX_INSTANCE_LIFETIME_MESSAGE, 400);
+        }
+        Integer defaultInstanceWarmup = optionalFields.defaultInstanceWarmup();
+        if (defaultInstanceWarmup != null
+                && defaultInstanceWarmup < AsgOptionalFields.DEFAULT_INSTANCE_WARMUP_REMOVAL_SENTINEL) {
+            throw new AwsException("ValidationError", INVALID_DEFAULT_INSTANCE_WARMUP_MESSAGE, 400);
+        }
     }
 
     private static boolean hasUsableLaunchTemplate(MixedInstancesPolicy mixedInstancesPolicy) {
@@ -1028,7 +1389,7 @@ public class AutoScalingService {
         if (launchTemplateVersions.isEmpty()) {
             throw invalidLaunchTemplate();
         }
-        if (isBlank(launchTemplateVersions.getFirst().getImageId())) {
+        if (isBlank(launchTemplateVersions.getFirst().getData().getImageId())) {
             throw missingLaunchTemplateImageId();
         }
     }

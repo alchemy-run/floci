@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.firehose;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.KinesisStreamSource;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.S3Destination;
 import io.github.hectorvent.floci.services.firehose.model.Record;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -45,24 +46,28 @@ public class FirehoseJsonHandler {
                 S3Destination s3 = null;
                 if (request.has("S3DestinationConfiguration")) {
                     s3 = mapper.treeToValue(request.get("S3DestinationConfiguration"), S3Destination.class);
+                    dropExtendedOnlyMembersFromLegacyShape(s3);
+                    S3DestinationValidator.validateWireShape(s3, "s3DestinationConfiguration");
                 } else if (request.has("ExtendedS3DestinationConfiguration")) {
                     s3 = mapper.treeToValue(request.get("ExtendedS3DestinationConfiguration"), S3Destination.class);
+                    S3DestinationValidator.validateWireShape(s3, "extendedS3DestinationConfiguration");
                 }
                 List<io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.Tag> tags = new ArrayList<>();
                 if (request.has("Tags")) {
+                    requireListSize(request.get("Tags"), "Tags", 1, 50);
                     for (JsonNode tNode : request.get("Tags")) {
                         tags.add(mapper.treeToValue(tNode, io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.Tag.class));
                     }
                 }
                 String deliveryStreamType = request.has("DeliveryStreamType")
                         ? request.get("DeliveryStreamType").asText() : null;
-                io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.KinesisStreamSourceDescription kinesisSource = null;
-                if (request.has("KinesisStreamSourceConfiguration")
-                        && !request.get("KinesisStreamSourceConfiguration").isNull()) {
-                    kinesisSource = mapper.treeToValue(
-                            request.get("KinesisStreamSourceConfiguration"),
-                            io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.KinesisStreamSourceDescription.class);
+                if (deliveryStreamType != null && !DELIVERY_STREAM_TYPES.contains(deliveryStreamType)) {
+                    throw new AwsException("InvalidArgumentException",
+                            "DeliveryStreamType must be one of " + DELIVERY_STREAM_TYPES + ".", 400);
                 }
+                KinesisStreamSource source = request.has("KinesisStreamSourceConfiguration")
+                        ? mapper.treeToValue(request.get("KinesisStreamSourceConfiguration"), KinesisStreamSource.class)
+                        : null;
                 io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption = null;
                 if (request.has("DeliveryStreamEncryptionConfigurationInput")
                         && !request.get("DeliveryStreamEncryptionConfigurationInput").isNull()) {
@@ -71,7 +76,7 @@ public class FirehoseJsonHandler {
                             io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.class);
                 }
                 String arn = firehoseService.createDeliveryStream(
-                        name, s3, tags, deliveryStreamType, kinesisSource, encryption);
+                        region, name, s3, tags, deliveryStreamType, source, encryption);
                 yield Response.ok(Map.of("DeliveryStreamARN", arn)).build();
             }
             case "UpdateDestination" -> {
@@ -81,10 +86,38 @@ public class FirehoseJsonHandler {
                 S3Destination update = null;
                 if (request.has("ExtendedS3DestinationUpdate")) {
                     update = mapper.treeToValue(request.get("ExtendedS3DestinationUpdate"), S3Destination.class);
+                    S3DestinationValidator.validateWireShape(update, "extendedS3DestinationUpdate");
                 } else if (request.has("S3DestinationUpdate")) {
                     update = mapper.treeToValue(request.get("S3DestinationUpdate"), S3Destination.class);
+                    dropExtendedOnlyMembersFromLegacyShape(update);
+                    S3DestinationValidator.validateWireShape(update, "s3DestinationUpdate");
                 }
                 firehoseService.updateDestination(name, currentVersionId, destinationId, update);
+                yield Response.ok(Map.of()).build();
+            }
+            case "StartDeliveryStreamEncryption" -> {
+                String name = getDeliveryStreamName(request);
+                JsonNode input = request.get("DeliveryStreamEncryptionConfigurationInput");
+                // DeliveryStreamEncryptionConfigurationInput is optional (Required: No):
+                // omitting it is the documented way to enable SSE with the service-owned
+                // key (KeyType defaults to AWS_OWNED_CMK). KeyType is only required when
+                // the input object itself is present.
+                String keyType = null;
+                String keyArn = null;
+                if (input != null && !input.isNull()) {
+                    keyType = input.has("KeyType") && !input.get("KeyType").isNull()
+                            ? input.get("KeyType").asText() : null;
+                    keyArn = input.has("KeyARN") && !input.get("KeyARN").isNull()
+                            ? input.get("KeyARN").asText() : null;
+                    if (keyType == null || keyType.isBlank()) {
+                        throw new AwsException("InvalidArgumentException", "KeyType is required.", 400);
+                    }
+                }
+                firehoseService.startDeliveryStreamEncryption(name, keyType, keyArn);
+                yield Response.ok(Map.of()).build();
+            }
+            case "StopDeliveryStreamEncryption" -> {
+                firehoseService.stopDeliveryStreamEncryption(getDeliveryStreamName(request));
                 yield Response.ok(Map.of()).build();
             }
             case "DescribeDeliveryStream" -> {
@@ -103,23 +136,6 @@ public class FirehoseJsonHandler {
                         "DeliveryStreamNames", page.names(),
                         "HasMoreDeliveryStreams", page.hasMore())).build();
             }
-            case "StartDeliveryStreamEncryption" -> {
-                String name = getDeliveryStreamName(request);
-                io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption = null;
-                if (request.has("DeliveryStreamEncryptionConfigurationInput")
-                        && !request.get("DeliveryStreamEncryptionConfigurationInput").isNull()) {
-                    encryption = mapper.treeToValue(
-                            request.get("DeliveryStreamEncryptionConfigurationInput"),
-                            io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.class);
-                }
-                firehoseService.startDeliveryStreamEncryption(name, encryption);
-                yield Response.ok(Map.of()).build();
-            }
-            case "StopDeliveryStreamEncryption" -> {
-                String name = getDeliveryStreamName(request);
-                firehoseService.stopDeliveryStreamEncryption(name);
-                yield Response.ok(Map.of()).build();
-            }
             case "DeleteDeliveryStream" -> {
                 String name = getDeliveryStreamName(request);
                 firehoseService.deleteDeliveryStream(name);
@@ -134,6 +150,7 @@ public class FirehoseJsonHandler {
             case "PutRecordBatch" -> {
                 String name = getDeliveryStreamName(request);
                 List<Record> records = new ArrayList<>();
+                requireListSize(request.get("Records"), "Records", 1, 500);
                 for (JsonNode recordNode : request.get("Records")) {
                     records.add(mapper.treeToValue(recordNode, Record.class));
                 }
@@ -146,10 +163,9 @@ public class FirehoseJsonHandler {
             case "TagDeliveryStream" -> {
                 String name = getDeliveryStreamName(request);
                 List<io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.Tag> tags = new ArrayList<>();
-                if (request.has("Tags")) {
-                    for (JsonNode tNode : request.get("Tags")) {
-                        tags.add(mapper.treeToValue(tNode, io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.Tag.class));
-                    }
+                requireListSize(request.get("Tags"), "Tags", 1, 50);
+                for (JsonNode tNode : request.get("Tags")) {
+                    tags.add(mapper.treeToValue(tNode, io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.Tag.class));
                 }
                 firehoseService.tagDeliveryStream(name, tags);
                 yield Response.ok(Map.of()).build();
@@ -157,10 +173,9 @@ public class FirehoseJsonHandler {
             case "UntagDeliveryStream" -> {
                 String name = getDeliveryStreamName(request);
                 List<String> keys = new ArrayList<>();
-                if (request.has("TagKeys")) {
-                    for (JsonNode kNode : request.get("TagKeys")) {
-                        keys.add(kNode.asText());
-                    }
+                requireListSize(request.get("TagKeys"), "TagKeys", 1, 50);
+                for (JsonNode kNode : request.get("TagKeys")) {
+                    keys.add(kNode.asText());
                 }
                 firehoseService.untagDeliveryStream(name, keys);
                 yield Response.ok(Map.of()).build();
@@ -193,5 +208,48 @@ public class FirehoseJsonHandler {
             }
             default -> throw new AwsException("InvalidAction", "Action " + action + " is not supported", 400);
         };
+    }
+
+    /**
+     * Clears {@code DataFormatConversionConfiguration} and
+     * {@code ProcessingConfiguration} from a legacy {@code S3DestinationConfiguration}
+     * or {@code S3DestinationUpdate}, which AWS models only on the extended shapes. The
+     * two share one class here, which would otherwise let a legacy request store members
+     * its contract does not define.
+     *
+     * Dropped rather than rejected: AWS's JSON protocol ignores a member the shape does
+     * not model, so a request carrying one succeeds with the member disregarded. The
+     * SDKs cannot even send them, since both are absent from the legacy shape's model.
+     * That was probed for the conversion member; the processing member is the same
+     * mechanism on the same shape.
+     *
+     * Only these two are cleared. {@code FileExtension}, {@code CustomTimeZone} and
+     * {@code S3BackupMode} are extended-only too and reach the legacy shapes the same
+     * way, a deviation that predates this change and is recorded in
+     * docs/services/firehose.md; widening the clearing would change behavior those
+     * members already have.
+     */
+    private static void dropExtendedOnlyMembersFromLegacyShape(S3Destination s3) {
+        if (s3 != null) {
+            s3.setDataFormatConversionConfiguration(null);
+            s3.setProcessingConfiguration(null);
+        }
+    }
+
+    /** DeliveryStreamType values the 2015-08-04 model enumerates. */
+    private static final java.util.Set<String> DELIVERY_STREAM_TYPES = java.util.Set.of(
+            "DirectPut", "KinesisStreamAsSource", "MSKAsSource", "DatabaseAsSource");
+
+    /**
+     * Enforces a modeled list min/max. A missing member on the tag operations is
+     * treated as the modeled min-1 violation, matching real Firehose, which
+     * requires the list on TagDeliveryStream/UntagDeliveryStream/PutRecordBatch.
+     */
+    private static void requireListSize(JsonNode list, String member, int min, int max) {
+        int size = list == null || list.isNull() || !list.isArray() ? 0 : list.size();
+        if (size < min || size > max) {
+            throw new AwsException("InvalidArgumentException",
+                    member + " must contain between " + min + " and " + max + " entries.", 400);
+        }
     }
 }

@@ -8,13 +8,13 @@
 <!-- floci:actions:start -->
 | Action | Description |
 | --- | --- |
-| `RequestCertificate` | Request a new certificate (auto-issued for emulation) |
+| `RequestCertificate` | Request a new certificate and its validation metadata |
 | `DescribeCertificate` | Get certificate details and validation status |
 | `GetCertificate` | Retrieve the certificate and chain in PEM format |
 | `ListCertificates` | List all certificates with optional status filtering |
 | `DeleteCertificate` | Delete a certificate |
 | `ImportCertificate` | - |
-| `ExportCertificate` | Export certificate with encrypted private key (PRIVATE type only) |
+| `ExportCertificate` | Export an eligible certificate with its encrypted private key |
 | `AddTagsToCertificate` | Add tags to a certificate |
 | `ListTagsForCertificate` | List tags for a certificate |
 | `RemoveTagsFromCertificate` | Remove tags from a certificate |
@@ -29,21 +29,25 @@
 
 ## Emulation Behavior
 
-- **Public certificates stay `PENDING_VALIDATION`:** Amazon-issued certs are not auto-issued. `GetCertificate` returns `RequestInProgressException` until the certificate is private or imported. This matches live ACM when DNS/email validation never completes.
+- **Public validation:** `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS=0` issues public certificates immediately, matching upstream's default. A positive value starts at `PENDING_VALIDATION` and converges on a read after the delay. Set a negative value, such as `-1`, to retain the fork's unvalidated-certificate workflow: public certificates stay pending, and `GetCertificate` returns `RequestInProgressException`. No DNS or email approval is performed. Issued certificates report `ValidationStatus: SUCCESS` for every domain.
 - **Private / imported certificates are `ISSUED` immediately:** providing `CertificateAuthorityArn` or calling `ImportCertificate` produces an issued cert that `GetCertificate` / `ExportCertificate` can read.
+- **Validation Artefacts:** `DomainValidationOptions` follows the validation method as on AWS. `DNS` validation carries the `ResourceRecord` CNAME to publish; `EMAIL` validation carries no record but `ValidationEmails`, the five conventional mailboxes (`admin@`, `administrator@`, `hostmaster@`, `postmaster@`, `webmaster@`) of the `ValidationDomain`, which is the domain itself (wildcard stripped) or the one given in the request's `DomainValidationOptions`. An option naming a domain that is not on the certificate, or a `ValidationDomain` that is not the domain or one of its parents, is rejected with `InvalidDomainValidationOptionsException`. Real ACM also mails the WHOIS contacts, which Floci cannot know.
 - **Real Cryptography:** Certificates are generated with real RSA/EC keys and valid X.509 structure
-- **Key Algorithms:** Supports `RSA_2048`, `RSA_3072`, `RSA_4096`, `EC_prime256v1`, `EC_secp384r1`, `EC_secp521r1`
+- **One Local CA:** Every issued certificate (`AMAZON_ISSUED` and `PRIVATE`) is signed by Floci's local root CA, and `GetCertificate` returns that CA as `CertificateChain`. Trust it once (`GET /_floci/ca.pem`, see [TLS](../configuration/tls.md)) and both Floci's HTTPS endpoint and every ACM certificate validate. `DescribeCertificate` reports `Issuer` as the CA's name, `CN=Floci Local CA`, where AWS reports `Amazon`. `ImportCertificate` keeps the chain you upload.
+- **CA on First Use:** The CA is created under `{persistent-path}/tls/` the first time a certificate is issued, also with TLS off and in `memory` storage mode, so that directory must be writable. A certificate keeps the chain it was issued with; after a CA regeneration, delete and re-request it.
+- **Key Algorithms:** `RequestCertificate` accepts `RSA_2048`, `EC_prime256v1`, and `EC_secp384r1` and rejects the rest with a `ValidationException`, matching real ACM; the wider list (`RSA_1024`, `RSA_3072`, `RSA_4096`, `EC_secp521r1`) remains valid for `ImportCertificate`
 - **Certificate Types:** `AMAZON_ISSUED` (default) and `PRIVATE` (when `CertificateAuthorityArn` is provided)
 - **Export:** `PRIVATE`, `IMPORTED`, or `Options.Export=ENABLED` certificates can be exported. `UpdateCertificateOptions` cannot change Export (`InvalidStateException`).
 - **Revoke:** only certificates that have been exported at least once can be revoked (`ConflictException` otherwise).
 - **ACMPCA:** there is no Floci ACM PCA service. `CertificateAuthorityArn` is stored as an opaque string so ACM private-cert emulation works; PCA APIs stay remote-only.
+- **In use:** `DescribeCertificate` lists under `InUseBy` the CloudFront distribution of each Cognito custom domain that uses the certificate, and `DeleteCertificate` refuses with `ResourceInUseException` while that list is not empty. Other consumers, such as load balancers and API Gateway domain names, are not tracked yet.
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_ACM_ENABLED` | `true` | Enable or disable the service |
-| `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS` | `0` | Seconds to wait before transitioning a certificate from `PENDING_VALIDATION` to `ISSUED` (0 = immediate) |
+| `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS` | `0` | Public validation delay in seconds: `0` issues immediately, positive values issue on a read after the delay, negative values leave certificates pending |
 
 ## Examples
 
@@ -63,7 +67,7 @@ aws acm describe-certificate \
   --certificate-arn $CERT_ARN \
   --endpoint-url $AWS_ENDPOINT_URL
 
-# Public certs stay PENDING — GetCertificate returns RequestInProgressException.
+# GetCertificate returns RequestInProgressException while validation is pending.
 # Request a private cert (CertificateAuthorityArn) or import one to retrieve PEM.
 
 # List all certificates

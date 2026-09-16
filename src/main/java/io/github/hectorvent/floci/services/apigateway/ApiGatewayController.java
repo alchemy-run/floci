@@ -1,10 +1,14 @@
 package io.github.hectorvent.floci.services.apigateway;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +33,7 @@ import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlan;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlanKey;
 import io.github.hectorvent.floci.services.apigateway.model.V2DomainName;
+import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2OpenApiImporter;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Api;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Authorizer;
@@ -66,16 +71,62 @@ public class ApiGatewayController {
 
     private final ApiGatewayService service;
     private final ApiGatewayV2Service v2Service;
+    private final ApiGatewayV2OpenApiImporter v2OpenApiImporter;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
     public ApiGatewayController(ApiGatewayService service, ApiGatewayV2Service v2Service,
+                                ApiGatewayV2OpenApiImporter v2OpenApiImporter,
                                 RegionResolver regionResolver, ObjectMapper objectMapper) {
         this.service = service;
         this.v2Service = v2Service;
+        this.v2OpenApiImporter = v2OpenApiImporter;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
+    }
+
+    private static final TypeReference<List<Map<String, String>>> PATCH_OPERATIONS =
+            new TypeReference<>() { };
+
+    /**
+     * The {@code op} enum, verbatim from the model. Wider than what any one handler implements on
+     * purpose: whether a handler supports {@code move} is its own business, but a value outside the
+     * enum never reaches a handler at all.
+     */
+    private static final Set<String> PATCH_OPS = Set.of("add", "remove", "replace", "move", "copy", "test");
+
+    /**
+     * Reads the {@code patchOperations} envelope shared by every PATCH operation. A body that is not
+     * JSON, an envelope that is not an array of string-valued operations, and a structured operation
+     * value are all client errors; AWS answers BadRequestException for each.
+     *
+     * <p>The {@code op} value is checked here too. Handlers each decide which operations they
+     * implement, and several skip anything they do not recognise — so without a boundary check an
+     * unmodelled {@code op} was answered 200 with the resource silently untouched.
+     */
+    private List<Map<String, String>> parsePatchOperations(String body) {
+        List<Map<String, String>> patchOperations;
+        try {
+            patchOperations =
+                    objectMapper.convertValue(objectMapper.readTree(body).path("patchOperations"), PATCH_OPERATIONS);
+        } catch (IOException | IllegalArgumentException e) {
+            throw new AwsException("BadRequestException", "Invalid patchOperations: " + e.getMessage(), 400);
+        }
+        if (patchOperations != null) {
+            for (Map<String, String> operation : patchOperations) {
+                if (operation == null) {
+                    throw new AwsException("BadRequestException", "Invalid patch operation", 400);
+                }
+                String op = operation.get("op");
+                if (op != null && !PATCH_OPS.contains(op)) {
+                    throw new AwsException("BadRequestException",
+                            "Invalid patch operation '" + op + "'. Must be one of: add, remove, replace, "
+                                    + "move, copy, test", 400);
+                }
+            }
+        }
+        return patchOperations;
     }
 
     // ──────────────────────────── Specific v1 Paths (ORDER MATTERS) ────────────────────────────
@@ -110,6 +161,18 @@ public class ApiGatewayController {
         }
     }
 
+    @DELETE
+    @Path("/restapis/{apiId}/resources/{resourceId}/methods/{httpMethod}/responses/{statusCode}")
+    public Response deleteMethodResponse(@Context HttpHeaders headers,
+                                         @PathParam("apiId") String apiId,
+                                         @PathParam("resourceId") String resourceId,
+                                         @PathParam("httpMethod") String httpMethod,
+                                         @PathParam("statusCode") String statusCode) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteMethodResponse(region, apiId, resourceId, httpMethod, statusCode);
+        return Response.noContent().build();
+    }
+
     @GET
     @Path("/restapis/{apiId}/resources/{resourceId}/methods/{httpMethod}/integration/responses/{statusCode}")
     public Response getIntegrationResponse(@Context HttpHeaders headers,
@@ -140,6 +203,32 @@ public class ApiGatewayController {
         }
     }
 
+    @DELETE
+    @Path("/restapis/{apiId}/resources/{resourceId}/methods/{httpMethod}/integration/responses/{statusCode}")
+    public Response deleteIntegrationResponse(@Context HttpHeaders headers,
+                                              @PathParam("apiId") String apiId,
+                                              @PathParam("resourceId") String resourceId,
+                                              @PathParam("httpMethod") String httpMethod,
+                                              @PathParam("statusCode") String statusCode) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteIntegrationResponse(region, apiId, resourceId, httpMethod, statusCode);
+        return Response.noContent().build();
+    }
+
+    @PATCH
+    @Path("/restapis/{apiId}/resources/{resourceId}/methods/{httpMethod}/integration/responses/{statusCode}")
+    public Response updateIntegrationResponse(@Context HttpHeaders headers,
+                                              @PathParam("apiId") String apiId,
+                                              @PathParam("resourceId") String resourceId,
+                                              @PathParam("httpMethod") String httpMethod,
+                                              @PathParam("statusCode") String statusCode,
+                                              String body) {
+        String region = regionResolver.resolveRegion(headers);
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        io.github.hectorvent.floci.services.apigateway.model.IntegrationResponse integrationResponse = service.updateIntegrationResponse(region, apiId, resourceId, httpMethod, statusCode, patchOperations);
+        return Response.ok(toIntegrationResponseNode(integrationResponse).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
     @GET
     @Path("/restapis/{apiId}/authorizers/{authorizerId}")
     public Response getAuthorizer(@Context HttpHeaders headers,
@@ -149,27 +238,9 @@ public class ApiGatewayController {
         return Response.ok(toAuthorizerNode(service.getAuthorizer(region, apiId, authorizerId)).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
-    @PATCH
-    @Path("/restapis/{apiId}/authorizers/{authorizerId}")
-    public Response updateAuthorizer(@Context HttpHeaders headers,
-                                     @PathParam("apiId") String apiId,
-                                     @PathParam("authorizerId") String authorizerId,
-                                     String body) {
-        String region = regionResolver.resolveRegion(headers);
-        io.github.hectorvent.floci.services.apigateway.model.Authorizer authorizer =
-                service.updateAuthorizer(region, apiId, authorizerId, parsePatchOperations(body));
-        return Response.ok(toAuthorizerNode(authorizer).toString()).type(MediaType.APPLICATION_JSON).build();
-    }
 
-    @DELETE
-    @Path("/restapis/{apiId}/authorizers/{authorizerId}")
-    public Response deleteAuthorizer(@Context HttpHeaders headers,
-                                     @PathParam("apiId") String apiId,
-                                     @PathParam("authorizerId") String authorizerId) {
-        String region = regionResolver.resolveRegion(headers);
-        service.deleteAuthorizer(region, apiId, authorizerId);
-        return Response.accepted().build();
-    }
+
+
 
     @GET
     @Path("/restapis/{apiId}/authorizers")
@@ -259,13 +330,13 @@ public class ApiGatewayController {
         String region = regionResolver.resolveRegion(headers);
         if ("import".equals(mode)) {
             RestApi api = service.importRestApi(region, body);
-            return Response.status(201).entity(toApiNode(api).toString()).type(MediaType.APPLICATION_JSON).build();
+            return Response.status(201).entity(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
         }
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> request = objectMapper.readValue(body, Map.class);
             RestApi api = service.createRestApi(region, request);
-            return Response.status(201).entity(toApiNode(api).toString()).type(MediaType.APPLICATION_JSON).build();
+            return Response.status(201).entity(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
         } catch (IOException e) {
             throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
@@ -280,7 +351,7 @@ public class ApiGatewayController {
                                String body) {
         String region = regionResolver.resolveRegion(headers);
         RestApi api = service.putRestApi(region, apiId, mode, body);
-        return Response.ok(toApiNode(api).toString()).type(MediaType.APPLICATION_JSON).build();
+        return Response.ok(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @GET
@@ -290,7 +361,7 @@ public class ApiGatewayController {
         List<RestApi> apis = service.getRestApis(region);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("item");
-        apis.forEach(a -> items.add(toApiNode(a)));
+        apis.forEach(a -> items.add(toApiNode(region, a)));
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -298,22 +369,16 @@ public class ApiGatewayController {
     @Path("/restapis/{apiId}")
     public Response getRestApi(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toApiNode(service.getRestApi(region, apiId)).toString()).type(MediaType.APPLICATION_JSON).build();
+        return Response.ok(toApiNode(region, service.getRestApi(region, apiId)).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @PATCH
     @Path("/restapis/{apiId}")
     public Response updateRestApi(@Context HttpHeaders headers, @PathParam("apiId") String apiId, String body) {
         String region = regionResolver.resolveRegion(headers);
-        try {
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(body).path("patchOperations");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> patchOperations = objectMapper.convertValue(node, List.class);
-            RestApi api = service.updateRestApi(region, apiId, patchOperations);
-            return Response.ok(toApiNode(api).toString()).type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        RestApi api = service.updateRestApi(region, apiId, patchOperations);
+        return Response.ok(toApiNode(region, api).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
@@ -357,15 +422,9 @@ public class ApiGatewayController {
                                    @PathParam("resourceId") String resourceId,
                                    String body) {
         String region = regionResolver.resolveRegion(headers);
-        try {
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(body).path("patchOperations");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> patchOperations = objectMapper.convertValue(node, List.class);
-            ApiGatewayResource resource = service.updateResource(region, apiId, resourceId, patchOperations);
-            return Response.ok(toResourceNode(resource).toString()).type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        ApiGatewayResource resource = service.updateResource(region, apiId, resourceId, patchOperations);
+        return Response.ok(toResourceNode(resource).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @POST
@@ -392,7 +451,7 @@ public class ApiGatewayController {
                                    @PathParam("resourceId") String resourceId) {
         String region = regionResolver.resolveRegion(headers);
         service.deleteResource(region, apiId, resourceId);
-        return Response.noContent().build();
+        return Response.accepted().build();
     }
 
     // ──────────────────────────── Methods (v1) ────────────────────────────
@@ -433,15 +492,9 @@ public class ApiGatewayController {
                                  @PathParam("httpMethod") String httpMethod,
                                  String body) {
         String region = regionResolver.resolveRegion(headers);
-        try {
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(body).path("patchOperations");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> patchOperations = objectMapper.convertValue(node, List.class);
-            MethodConfig method = service.updateMethod(region, apiId, resourceId, httpMethod, patchOperations);
-            return Response.ok(toMethodNode(method).toString()).type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        MethodConfig method = service.updateMethod(region, apiId, resourceId, httpMethod, patchOperations);
+        return Response.ok(toMethodNode(method).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
@@ -493,15 +546,9 @@ public class ApiGatewayController {
                                       @PathParam("httpMethod") String httpMethod,
                                       String body) {
         String region = regionResolver.resolveRegion(headers);
-        try {
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(body).path("patchOperations");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> patchOperations = objectMapper.convertValue(node, List.class);
-            io.github.hectorvent.floci.services.apigateway.model.Integration integration = service.updateIntegration(region, apiId, resourceId, httpMethod, patchOperations);
-            return Response.ok(toIntegrationNode(integration).toString()).type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        io.github.hectorvent.floci.services.apigateway.model.Integration integration = service.updateIntegration(region, apiId, resourceId, httpMethod, patchOperations);
+        return Response.ok(toIntegrationNode(integration).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
@@ -555,6 +602,15 @@ public class ApiGatewayController {
                 .type(MediaType.APPLICATION_JSON).build();
     }
 
+    @PATCH
+    @Path("/restapis/{apiId}/deployments/{deploymentId}")
+    public Response updateDeployment(@Context HttpHeaders headers, @PathParam("apiId") String apiId, @PathParam("deploymentId") String deploymentId, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        io.github.hectorvent.floci.services.apigateway.model.Deployment deployment = service.updateDeployment(region, apiId, deploymentId, patchOperations);
+        return Response.ok(toDeploymentNode(deployment).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
     @DELETE
     @Path("/restapis/{apiId}/deployments/{deploymentId}")
     public Response deleteDeployment(@Context HttpHeaders headers,
@@ -562,19 +618,10 @@ public class ApiGatewayController {
                                      @PathParam("deploymentId") String deploymentId) {
         String region = regionResolver.resolveRegion(headers);
         service.deleteDeployment(region, apiId, deploymentId);
-        return Response.noContent().build();
+        return Response.accepted().build();
     }
 
-    @PATCH
-    @Path("/restapis/{apiId}/deployments/{deploymentId}")
-    public Response updateDeployment(@Context HttpHeaders headers,
-                                     @PathParam("apiId") String apiId,
-                                     @PathParam("deploymentId") String deploymentId,
-                                     String body) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toDeploymentNode(service.updateDeployment(region, apiId, deploymentId, parsePatchOperations(body))).toString())
-                .type(MediaType.APPLICATION_JSON).build();
-    }
+
 
     @POST
     @Path("/restapis/{apiId}/stages")
@@ -599,15 +646,9 @@ public class ApiGatewayController {
                                 @PathParam("stageName") String stageName,
                                 String body) {
         String region = regionResolver.resolveRegion(headers);
-        try {
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(body).path("patchOperations");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> patchOperations = objectMapper.convertValue(node, List.class);
-            io.github.hectorvent.floci.services.apigateway.model.Stage stage = service.updateStage(region, apiId, stageName, patchOperations);
-            return Response.ok(toStageNode(stage).toString()).type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        io.github.hectorvent.floci.services.apigateway.model.Stage stage = service.updateStage(region, apiId, stageName, patchOperations);
+        return Response.ok(toStageNode(stage).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
@@ -638,9 +679,43 @@ public class ApiGatewayController {
         }
     }
 
+    @PATCH
+    @Path("/restapis/{apiId}/authorizers/{authorizerId}")
+    public Response updateAuthorizer(@Context HttpHeaders headers, @PathParam("apiId") String apiId, @PathParam("authorizerId") String authorizerId, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        io.github.hectorvent.floci.services.apigateway.model.Authorizer authorizer = service.updateAuthorizer(region, apiId, authorizerId, patchOperations);
+        return Response.ok(toAuthorizerNode(authorizer).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @DELETE
+    @Path("/restapis/{apiId}/authorizers/{authorizerId}")
+    public Response deleteAuthorizer(@Context HttpHeaders headers, @PathParam("apiId") String apiId, @PathParam("authorizerId") String authorizerId) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteAuthorizer(region, apiId, authorizerId);
+        return Response.accepted().build();
+    }
+
+    /**
+     * CreateApiKey and ImportApiKeys share {@code POST /apikeys} and are told apart by the
+     * {@code mode} query parameter, never by media type: botocore sends ImportApiKeys with no
+     * Content-Type at all, so a media-type-keyed handler is unreachable from a real client.
+     */
     @POST
     @Path("/apikeys")
-    public Response createApiKey(@Context HttpHeaders headers, String body) {
+    @Consumes(MediaType.WILDCARD)
+    public Response postApiKeys(@Context HttpHeaders headers,
+                                @QueryParam("mode") String mode,
+                                @QueryParam("format") String format,
+                                @QueryParam("failonwarnings") boolean failOnWarnings,
+                                String body) {
+        if (mode == null && format == null) {
+            return createApiKey(headers, body);
+        }
+        return importApiKeys(headers, mode, format, failOnWarnings, body);
+    }
+
+    private Response createApiKey(HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
             @SuppressWarnings("unchecked")
@@ -650,6 +725,23 @@ public class ApiGatewayController {
         } catch (IOException e) {
             throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
+    }
+
+    private Response importApiKeys(HttpHeaders headers, String mode, String format, boolean failOnWarnings, String body) {
+        if (!"import".equals(mode) || !"csv".equals(format)) {
+            throw new AwsException("BadRequestException", "mode=import and format=csv are required", 400);
+        }
+        String region = regionResolver.resolveRegion(headers);
+        ApiGatewayService.ImportApiKeysResult result = service.importApiKeys(region, body);
+        if (failOnWarnings && !result.warnings().isEmpty()) {
+            throw new AwsException("BadRequestException", String.join("; ", result.warnings()), 400);
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode idArray = root.putArray("ids");
+        result.ids().forEach(idArray::add);
+        ArrayNode warningArray = root.putArray("warnings");
+        result.warnings().forEach(warningArray::add);
+        return Response.status(201).entity(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @GET
@@ -685,15 +777,19 @@ public class ApiGatewayController {
 
     @PATCH
     @Path("/apikeys/{apiKeyId}")
-    public Response updateApiKey(@Context HttpHeaders headers, @PathParam("apiKeyId") String apiKeyId, String body) {
+    public Response updateApiKey(@Context HttpHeaders headers,
+                                 @PathParam("apiKeyId") String apiKeyId,
+                                 String body) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toApiKeyNode(service.updateApiKey(region, apiKeyId, parsePatchOperations(body))).toString())
-                .type(MediaType.APPLICATION_JSON).build();
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        ApiKey key = service.updateApiKey(region, apiKeyId, patchOperations);
+        return Response.ok(toApiKeyNode(key).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
     @Path("/apikeys/{apiKeyId}")
-    public Response deleteApiKey(@Context HttpHeaders headers, @PathParam("apiKeyId") String apiKeyId) {
+    public Response deleteApiKey(@Context HttpHeaders headers,
+                                 @PathParam("apiKeyId") String apiKeyId) {
         String region = regionResolver.resolveRegion(headers);
         service.deleteApiKey(region, apiKeyId);
         return Response.accepted().build();
@@ -728,16 +824,18 @@ public class ApiGatewayController {
     @Path("/usageplans/{usagePlanId}")
     public Response getUsagePlan(@Context HttpHeaders headers, @PathParam("usagePlanId") String usagePlanId) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toUsagePlanNode(service.getUsagePlan(region, usagePlanId)).toString())
-                .type(MediaType.APPLICATION_JSON).build();
+        UsagePlan plan = service.getUsagePlan(region, usagePlanId);
+        ObjectNode node = toUsagePlanNode(plan);
+        return Response.ok(node.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @PATCH
     @Path("/usageplans/{usagePlanId}")
     public Response updateUsagePlan(@Context HttpHeaders headers, @PathParam("usagePlanId") String usagePlanId, String body) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toUsagePlanNode(service.updateUsagePlan(region, usagePlanId, parsePatchOperations(body))).toString())
-                .type(MediaType.APPLICATION_JSON).build();
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        UsagePlan plan = service.updateUsagePlan(region, usagePlanId, patchOperations);
+        return Response.ok(toUsagePlanNode(plan).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
@@ -760,6 +858,57 @@ public class ApiGatewayController {
         } catch (IOException e) {
             throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
+    }
+
+    /**
+     * {@code GetUsage}. Returns the real response envelope with an entry per attached key and one
+     * pair per day of the requested range.
+     *
+     * <p>Paginated over the API key entries with {@code limit} and {@code position}, defaulting to
+     * 25 keys a page.
+     *
+     * <p>Each pair is {@code [used, remaining]}, not {@code [used, quota]}: measured against real
+     * API Gateway, the second element is the quota limit minus the cumulative use so far in the
+     * period. Both elements are {@code 0} here because the emulator neither meters requests per API
+     * key nor stores a quota on a usage plan. Once a quota lives on {@code UsagePlan} and the
+     * execute path counts per key, this method is where both feed in; until then a caller that sums
+     * the used counts gets the same zero it already gets from an unsupported action, without having
+     * to special-case a missing endpoint.
+     */
+    @GET
+    @Path("/usageplans/{usagePlanId}/usage")
+    public Response getUsage(@Context HttpHeaders headers,
+                             @PathParam("usagePlanId") String usagePlanId,
+                             @QueryParam("startDate") String startDate,
+                             @QueryParam("endDate") String endDate,
+                             @QueryParam("keyId") String keyId,
+                             @QueryParam("limit") Integer limit,
+                             @QueryParam("position") String position) {
+        String region = regionResolver.resolveRegion(headers);
+        ApiGatewayService.UsageReport report =
+                service.getUsage(region, usagePlanId, startDate, endDate, keyId, limit, position);
+
+        ObjectNode root = objectMapper.createObjectNode();
+        // The wire key is "values", not "items": the Usage shape models this map with
+        // locationName "values", and "items" is only the SDK-side member name. A body keyed
+        // "items" parses to nothing in a real client.
+        ObjectNode values = root.putObject("values");
+        report.items().forEach((apiKeyId, perDay) -> {
+            ArrayNode days = values.putArray(apiKeyId);
+            for (long[] pair : perDay) {
+                ArrayNode entry = days.addArray();
+                entry.add(pair[0]);
+                entry.add(pair[1]);
+            }
+        });
+        root.put("usagePlanId", report.usagePlanId());
+        root.put("startDate", report.startDate());
+        root.put("endDate", report.endDate());
+        // Only present when another page exists, matching the terminal page captured from AWS.
+        if (report.position() != null) {
+            root.put("position", report.position());
+        }
+        return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @GET
@@ -788,17 +937,6 @@ public class ApiGatewayController {
         return Response.accepted().build();
     }
 
-    @GET
-    @Path("/usageplans/{usagePlanId}/usage")
-    public Response getUsage(@Context HttpHeaders headers,
-                             @PathParam("usagePlanId") String usagePlanId,
-                             @QueryParam("keyId") String keyId,
-                             @QueryParam("startDate") String startDate,
-                             @QueryParam("endDate") String endDate) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toUsageNode(service.getUsage(region, usagePlanId, keyId, startDate, endDate)).toString())
-                .type(MediaType.APPLICATION_JSON).build();
-    }
 
     @PATCH
     @Path("/usageplans/{usagePlanId}/keys/{keyId}/usage")
@@ -809,6 +947,71 @@ public class ApiGatewayController {
         String region = regionResolver.resolveRegion(headers);
         return Response.ok(toUsageNode(service.updateUsage(region, usagePlanId, keyId, parsePatchOperations(body))).toString())
                 .type(MediaType.APPLICATION_JSON).build();
+    }
+
+    // ──────────────────────────── Gateway Responses (v1) ────────────────────────────
+
+    @PUT
+    @Path("/restapis/{apiId}/gatewayresponses/{responseType}")
+    public Response putGatewayResponse(@Context HttpHeaders headers,
+                                       @PathParam("apiId") String apiId,
+                                       @PathParam("responseType") String responseType,
+                                       String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> request = body == null || body.isBlank()
+                    ? new HashMap<>()
+                    : objectMapper.readValue(body, Map.class);
+            GatewayResponse response = service.putGatewayResponse(region, apiId, responseType, request);
+            return Response.status(201).entity(toGatewayResponseNode(response).toString())
+                    .type(MediaType.APPLICATION_JSON).build();
+        } catch (IOException e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @GET
+    @Path("/restapis/{apiId}/gatewayresponses")
+    public Response getGatewayResponses(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
+        String region = regionResolver.resolveRegion(headers);
+        List<GatewayResponse> responses = service.getGatewayResponses(region, apiId);
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode items = root.putArray("item");
+        responses.forEach(response -> items.add(toGatewayResponseNode(response)));
+        return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @GET
+    @Path("/restapis/{apiId}/gatewayresponses/{responseType}")
+    public Response getGatewayResponse(@Context HttpHeaders headers,
+                                       @PathParam("apiId") String apiId,
+                                       @PathParam("responseType") String responseType) {
+        String region = regionResolver.resolveRegion(headers);
+        GatewayResponse response = service.getGatewayResponse(region, apiId, responseType);
+        return Response.ok(toGatewayResponseNode(response).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @PATCH
+    @Path("/restapis/{apiId}/gatewayresponses/{responseType}")
+    public Response updateGatewayResponse(@Context HttpHeaders headers,
+                                          @PathParam("apiId") String apiId,
+                                          @PathParam("responseType") String responseType,
+                                          String body) {
+        String region = regionResolver.resolveRegion(headers);
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        GatewayResponse response = service.updateGatewayResponse(region, apiId, responseType, patchOperations);
+        return Response.ok(toGatewayResponseNode(response).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @DELETE
+    @Path("/restapis/{apiId}/gatewayresponses/{responseType}")
+    public Response deleteGatewayResponse(@Context HttpHeaders headers,
+                                          @PathParam("apiId") String apiId,
+                                          @PathParam("responseType") String responseType) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteGatewayResponse(region, apiId, responseType);
+        return Response.accepted().build();
     }
 
     // ──────────────────────────── Request Validators (v1) ────────────────────────────
@@ -845,6 +1048,18 @@ public class ApiGatewayController {
                                         @PathParam("validatorId") String validatorId) {
         String region = regionResolver.resolveRegion(headers);
         return Response.ok(toRequestValidatorNode(service.getRequestValidator(region, apiId, validatorId)).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @PATCH
+    @Path("/restapis/{apiId}/requestvalidators/{validatorId}")
+    public Response updateRequestValidator(@Context HttpHeaders headers,
+                                           @PathParam("apiId") String apiId,
+                                           @PathParam("validatorId") String validatorId,
+                                           String body) {
+        String region = regionResolver.resolveRegion(headers);
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        RequestValidator validator = service.updateRequestValidator(region, apiId, validatorId, patchOperations);
+        return Response.ok(toRequestValidatorNode(validator).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
@@ -893,6 +1108,15 @@ public class ApiGatewayController {
         return Response.ok(toModelNode(service.getModel(region, apiId, modelName)).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
+    @PATCH
+    @Path("/restapis/{apiId}/models/{modelName}")
+    public Response updateModel(@Context HttpHeaders headers, @PathParam("apiId") String apiId, @PathParam("modelName") String modelName, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        io.github.hectorvent.floci.services.apigateway.model.Model model = service.updateModel(region, apiId, modelName, patchOperations);
+        return Response.ok(toModelNode(model).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
     @DELETE
     @Path("/restapis/{apiId}/models/{modelName}")
     public Response deleteModel(@Context HttpHeaders headers,
@@ -913,7 +1137,7 @@ public class ApiGatewayController {
             @SuppressWarnings("unchecked")
             Map<String, Object> request = objectMapper.readValue(body, Map.class);
             CustomDomain domain = service.createDomainName(region, request);
-            return Response.status(201).entity(toDomainNode(domain).toString()).type(MediaType.APPLICATION_JSON).build();
+            return Response.status(201).entity(toDomainNode(region, domain).toString()).type(MediaType.APPLICATION_JSON).build();
         } catch (IOException e) {
             throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
@@ -926,7 +1150,7 @@ public class ApiGatewayController {
         List<CustomDomain> domains = service.getDomainNames(region);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("item");
-        domains.forEach(d -> items.add(toDomainNode(d)));
+        domains.forEach(d -> items.add(toDomainNode(region, d)));
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -934,16 +1158,19 @@ public class ApiGatewayController {
     @Path("/domainnames/{domainName}")
     public Response getDomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toDomainNode(service.getDomainName(region, domainName)).toString()).type(MediaType.APPLICATION_JSON).build();
+        return Response.ok(toDomainNode(region, service.getDomainName(region, domainName)).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @PATCH
     @Path("/domainnames/{domainName}")
     public Response updateDomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName, String body) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toDomainNode(service.updateDomainName(region, domainName, parsePatchOperations(body))).toString())
-                .type(MediaType.APPLICATION_JSON).build();
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        CustomDomain domain = service.updateDomainName(region, domainName, patchOperations);
+        return Response.ok(toDomainNode(region, domain).toString()).type(MediaType.APPLICATION_JSON).build();
     }
+
+
 
     @DELETE
     @Path("/domainnames/{domainName}")
@@ -955,54 +1182,6 @@ public class ApiGatewayController {
 
     // ──────────────────────────── Gateway Responses (v1) ────────────────────────────
 
-    @PUT
-    @Path("/restapis/{apiId}/gatewayresponses/{responseType}")
-    public Response putGatewayResponse(@Context HttpHeaders headers,
-                                       @PathParam("apiId") String apiId,
-                                       @PathParam("responseType") String responseType,
-                                       String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = body == null || body.isBlank()
-                    ? Map.of()
-                    : objectMapper.readValue(body, Map.class);
-            return Response.ok(toGatewayResponseNode(service.putGatewayResponse(region, apiId, responseType, request)).toString())
-                    .type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
-
-    @GET
-    @Path("/restapis/{apiId}/gatewayresponses/{responseType}")
-    public Response getGatewayResponse(@Context HttpHeaders headers,
-                                       @PathParam("apiId") String apiId,
-                                       @PathParam("responseType") String responseType) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toGatewayResponseNode(service.getGatewayResponse(region, apiId, responseType)).toString())
-                .type(MediaType.APPLICATION_JSON).build();
-    }
-
-    @GET
-    @Path("/restapis/{apiId}/gatewayresponses")
-    public Response getGatewayResponses(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
-        String region = regionResolver.resolveRegion(headers);
-        ObjectNode root = objectMapper.createObjectNode();
-        ArrayNode items = root.putArray("item");
-        service.getGatewayResponses(region, apiId).forEach(r -> items.add(toGatewayResponseNode(r)));
-        return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
-    }
-
-    @DELETE
-    @Path("/restapis/{apiId}/gatewayresponses/{responseType}")
-    public Response deleteGatewayResponse(@Context HttpHeaders headers,
-                                          @PathParam("apiId") String apiId,
-                                          @PathParam("responseType") String responseType) {
-        String region = regionResolver.resolveRegion(headers);
-        service.deleteGatewayResponse(region, apiId, responseType);
-        return Response.accepted().build();
-    }
 
     // ──────────────────────────── VPC Links (v1) ────────────────────────────
 
@@ -1110,13 +1289,11 @@ public class ApiGatewayController {
 
     @PATCH
     @Path("/domainnames/{domainName}/basepathmappings/{basePath}")
-    public Response updateBasePathMapping(@Context HttpHeaders headers,
-                                          @PathParam("domainName") String domainName,
-                                          @PathParam("basePath") String basePath,
-                                          String body) {
+    public Response updateBasePathMapping(@Context HttpHeaders headers, @PathParam("domainName") String domainName, @PathParam("basePath") String basePath, String body) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toMappingNode(service.updateBasePathMapping(region, domainName, basePath, parsePatchOperations(body))).toString())
-                .type(MediaType.APPLICATION_JSON).build();
+        List<Map<String, String>> patchOperations = parsePatchOperations(body);
+        BasePathMapping mapping = service.updateBasePathMapping(region, domainName, basePath, patchOperations);
+        return Response.ok(toMappingNode(mapping).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     @DELETE
@@ -1143,6 +1320,19 @@ public class ApiGatewayController {
         }
     }
 
+    @PUT
+    @Path("/v2/apis")
+    @Consumes(MediaType.WILDCARD)
+    public Response importApi(@Context HttpHeaders headers,
+                              @QueryParam("basepath") String basePath,
+                              @QueryParam("failOnWarnings") Boolean failOnWarnings,
+                              String body) {
+        String region = regionResolver.resolveRegion(headers);
+        Api api = v2OpenApiImporter.importApi(region, extractOpenApiBody(body), basePath,
+                Boolean.TRUE.equals(failOnWarnings));
+        return Response.status(201).entity(toV2ApiNode(api).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
     @GET
     @Path("/v2/apis")
     public Response getApis(@Context HttpHeaders headers) {
@@ -1165,6 +1355,7 @@ public class ApiGatewayController {
     @Path("/v2/apis/{apiId}")
     public Response deleteApi(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
         String region = regionResolver.resolveRegion(headers);
+        service.requireNoApiMappings(apiId);
         v2Service.deleteApi(region, apiId);
         return Response.noContent().build();
     }
@@ -1181,6 +1372,48 @@ public class ApiGatewayController {
         } catch (IOException e) {
             throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
+    }
+
+    @DELETE
+    @Path("/v2/apis/{apiId}/cors")
+    public Response deleteCorsConfiguration(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
+        String region = regionResolver.resolveRegion(headers);
+        v2Service.deleteCorsConfiguration(region, apiId);
+        return Response.noContent().build();
+    }
+
+    @PUT
+    @Path("/v2/apis/{apiId}")
+    @Consumes(MediaType.WILDCARD)
+    public Response reimportApi(@Context HttpHeaders headers,
+                                @PathParam("apiId") String apiId,
+                                @QueryParam("basepath") String basePath,
+                                @QueryParam("failOnWarnings") Boolean failOnWarnings,
+                                String body) {
+        String region = regionResolver.resolveRegion(headers);
+        Api api = v2OpenApiImporter.reimportApi(region, apiId, extractOpenApiBody(body), basePath,
+                Boolean.TRUE.equals(failOnWarnings));
+        return Response.status(201).entity(toV2ApiNode(api).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * ImportApi/ReimportApi wrap the OpenAPI document in a restJson1 envelope — {@code {"body": "..."}} —
+     * unlike the v1 ImportRestApi/PutRestApi pair, which post the document as the raw HTTP body.
+     * Fall back to treating the payload as the document itself so a hand-rolled curl still works.
+     */
+    private String extractOpenApiBody(String payload) {
+        if (payload == null || payload.isBlank()) {
+            throw new AwsException("BadRequestException", "Body is required for OpenAPI import", 400);
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(payload);
+            if (root.isObject() && root.hasNonNull("body") && root.get("body").isTextual()) {
+                return root.get("body").asText();
+            }
+        } catch (IOException e) {
+            // Not JSON at all — a raw YAML/JSON OpenAPI document.
+        }
+        return payload;
     }
 
     @POST
@@ -1355,6 +1588,118 @@ public class ApiGatewayController {
         String region = regionResolver.resolveRegion(headers);
         v2Service.deleteVpcLink(region, vpcLinkId);
         return Response.accepted().build();
+    }
+
+    // ──────────────────────────── Custom Domains (v2) ────────────────────────────
+    //
+    // A custom domain is one resource in AWS, reachable through both APIs, so these read and write
+    // the same records the v1 endpoints do. That also means a domain created here resolves through
+    // the Host-header routing that already exists for v1.
+
+    @POST
+    @Path("/v2/domainnames")
+    public Response createV2DomainName(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        Map<String, Object> request = readJsonBody(body);
+        return Response.status(201).entity(toV2DomainNode(service.createV2DomainName(region, request)).toString())
+                .type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @GET
+    @Path("/v2/domainnames")
+    public Response getV2DomainNames(@Context HttpHeaders headers) {
+        String region = regionResolver.resolveRegion(headers);
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode items = root.putArray("items");
+        service.getV2DomainNames(region).forEach(d -> items.add(toV2DomainNode(d)));
+        return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @GET
+    @Path("/v2/domainnames/{domainName}")
+    public Response getV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(toV2DomainNode(service.getV2DomainName(region, domainName)).toString())
+                .type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @DELETE
+    @Path("/v2/domainnames/{domainName}")
+    public Response deleteV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteDomainName(region, domainName);
+        return Response.noContent().build();
+    }
+
+    // ──────────────────────────── API Mappings (v2) ────────────────────────────
+
+    @POST
+    @Path("/v2/domainnames/{domainName}/apimappings")
+    public Response createApiMapping(@Context HttpHeaders headers,
+                                     @PathParam("domainName") String domainName,
+                                     String body) {
+        String region = regionResolver.resolveRegion(headers);
+        Map<String, Object> request = readJsonBody(body);
+        if (request.get("apiId") == null || request.get("stage") == null) {
+            throw new AwsException("BadRequestException", "apiId and stage are required", 400);
+        }
+        String apiId = String.valueOf(request.get("apiId"));
+        String stage = String.valueOf(request.get("stage"));
+        // A mapping to an API or stage that does not exist would route nowhere, so AWS refuses it
+        // rather than answering 201 with something unusable.
+        requireApiAndStageExist(region, apiId, stage);
+
+        String basePath = ApiGatewayService.canonicalBasePath(
+                request.get("apiMappingKey") == null ? null : String.valueOf(request.get("apiMappingKey")));
+        boolean keyTaken = service.basePathMappingsByStoredPath(region, domainName).keySet().stream()
+                .anyMatch(existing -> ApiGatewayService.canonicalBasePath(existing).equals(basePath));
+        if (keyTaken) {
+            throw new AwsException("ConflictException",
+                    "ApiMapping key already exists for this domain name", 409);
+        }
+
+        Map<String, Object> v1Request = new HashMap<>();
+        v1Request.put("restApiId", apiId);
+        v1Request.put("stage", stage);
+        v1Request.put("basePath", basePath);
+        BasePathMapping mapping = service.createBasePathMapping(region, domainName, v1Request);
+        return Response.status(201).entity(toApiMappingNode(basePath, mapping).toString())
+                .type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @GET
+    @Path("/v2/domainnames/{domainName}/apimappings")
+    public Response getApiMappings(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
+        String region = regionResolver.resolveRegion(headers);
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode items = root.putArray("items");
+        service.basePathMappingsByStoredPath(region, domainName)
+                .forEach((storedPath, mapping) -> items.add(toApiMappingNode(storedPath, mapping)));
+        return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @GET
+    @Path("/v2/domainnames/{domainName}/apimappings/{apiMappingId}")
+    public Response getApiMapping(@Context HttpHeaders headers,
+                                  @PathParam("domainName") String domainName,
+                                  @PathParam("apiMappingId") String apiMappingId) {
+        String region = regionResolver.resolveRegion(headers);
+        StoredMapping found = findApiMapping(region, domainName, apiMappingId);
+        return Response.ok(toApiMappingNode(found.storedPath(), found.mapping()).toString())
+                .type(MediaType.APPLICATION_JSON).build();
+    }
+
+    @DELETE
+    @Path("/v2/domainnames/{domainName}/apimappings/{apiMappingId}")
+    public Response deleteApiMapping(@Context HttpHeaders headers,
+                                     @PathParam("domainName") String domainName,
+                                     @PathParam("apiMappingId") String apiMappingId) {
+        String region = regionResolver.resolveRegion(headers);
+        // Deleted by the path the selected record is stored under, so the record that answered the
+        // lookup is the record that goes.
+        StoredMapping found = findApiMapping(region, domainName, apiMappingId);
+        service.deleteBasePathMappingRecord(region, domainName, found.storedPath());
+        return Response.noContent().build();
     }
 
     // ──────────────────────────── Route Responses (v2) ────────────────────────────
@@ -1788,15 +2133,7 @@ public class ApiGatewayController {
         return Response.ok(spec.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
-    @DELETE
-    @Path("/v2/apis/{apiId}/cors")
-    public Response deleteCorsConfiguration(@Context HttpHeaders headers, @PathParam("apiId") String apiId) {
-        String region = regionResolver.resolveRegion(headers);
-        java.util.HashMap<String, Object> request = new java.util.HashMap<>();
-        request.put("corsConfiguration", null);
-        v2Service.updateApi(region, apiId, request);
-        return Response.noContent().build();
-    }
+
 
     @DELETE
     @Path("/v2/apis/{apiId}/stages/{stageName}/cache/authorizers")
@@ -1808,37 +2145,11 @@ public class ApiGatewayController {
         return Response.noContent().build();
     }
 
-    @POST
-    @Path("/v2/domainnames")
-    public Response createV2DomainName(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = objectMapper.readValue(body, Map.class);
-            return Response.status(201).entity(toV2DomainNode(service.createV2DomainName(region, request)).toString())
-                    .type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
 
-    @GET
-    @Path("/v2/domainnames")
-    public Response getV2DomainNames(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        ObjectNode root = objectMapper.createObjectNode();
-        ArrayNode items = root.putArray("items");
-        service.getV2DomainNames(region).forEach(d -> items.add(toV2DomainNode(d)));
-        return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
-    }
 
-    @GET
-    @Path("/v2/domainnames/{domainName}")
-    public Response getV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toV2DomainNode(service.getV2DomainName(region, domainName)).toString())
-                .type(MediaType.APPLICATION_JSON).build();
-    }
+
+
+
 
     @PATCH
     @Path("/v2/domainnames/{domainName}")
@@ -1856,23 +2167,17 @@ public class ApiGatewayController {
         }
     }
 
-    @DELETE
-    @Path("/v2/domainnames/{domainName}")
-    public Response deleteV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
-        String region = regionResolver.resolveRegion(headers);
-        service.deleteV2DomainName(region, domainName);
-        return Response.noContent().build();
-    }
+
 
     // ──────────────────────────── Helpers ────────────────────────────
 
-    private ObjectNode toApiNode(RestApi api) {
+    private ObjectNode toApiNode(String region, RestApi api) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("id", api.getId());
         node.put("name", api.getName());
         if (api.getDescription() != null) node.put("description", api.getDescription());
         node.put("createdDate", api.getCreatedDate());
-        if (api.getRootResourceId() != null) node.put("rootResourceId", api.getRootResourceId());
+        node.put("apiStatus", "AVAILABLE");
         if (api.getTags() != null && !api.getTags().isEmpty()) {
             ObjectNode tagsNode = objectMapper.createObjectNode();
             api.getTags().forEach(tagsNode::put);
@@ -1896,6 +2201,25 @@ public class ApiGatewayController {
             ArrayNode binary = node.putArray("binaryMediaTypes");
             api.getBinaryMediaTypes().forEach(binary::add);
         }
+
+        // The root resource is created with the API and is already reachable through
+        // GetResources, but AWS also reports its id on the API itself. Terraform reads it
+        // as aws_api_gateway_rest_api.root_resource_id, which is how the first resource
+        // under "/" gets its parent, so leaving it out breaks the conventional way of
+        // building a REST API.
+        if (api.getRootResourceId() != null) {
+            node.put("rootResourceId", api.getRootResourceId());
+        } else {
+            service.findRootResourceId(region, api.getId()).ifPresent(id -> node.put("rootResourceId", id));
+        }
+
+        // Neither member is settable on a REST API here: createRestApi ignores both and
+        // updateRestApi patches only /name and /description, so the emulated value is always
+        // the AWS default. Report the defaults rather than omitting them, because a client
+        // that reads an absent member back as "" or null sees it as a difference from the
+        // configuration it just sent and never converges.
+        node.put("apiKeySource", "HEADER");
+        node.put("disableExecuteApiEndpoint", false);
 
         return node;
     }
@@ -1964,6 +2288,7 @@ public class ApiGatewayController {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("httpMethod", m.getHttpMethod());
         node.put("authorizationType", m.getAuthorizationType());
+        node.put("apiKeyRequired", m.isApiKeyRequired());
         if (m.getAuthorizerId() != null) node.put("authorizerId", m.getAuthorizerId());
         if (m.getRequestValidatorId() != null) node.put("requestValidatorId", m.getRequestValidatorId());
         if (m.getRequestModels() != null && !m.getRequestModels().isEmpty()) {
@@ -1989,6 +2314,19 @@ public class ApiGatewayController {
         node.put("httpMethod", i.getHttpMethod());
         node.put("uri", i.getUri());
         node.put("passthroughBehavior", i.getPassthroughBehavior());
+        if (!i.getRequestParameters().isEmpty()) {
+            ObjectNode params = node.putObject("requestParameters");
+            i.getRequestParameters().forEach(params::put);
+        }
+        if (!i.getRequestTemplates().isEmpty()) {
+            ObjectNode templates = node.putObject("requestTemplates");
+            i.getRequestTemplates().forEach(templates::put);
+        }
+        if (!i.getIntegrationResponses().isEmpty()) {
+            ObjectNode responses = node.putObject("integrationResponses");
+            i.getIntegrationResponses().forEach((status, ir) ->
+                    responses.set(status, toIntegrationResponseNode(ir)));
+        }
         return node;
     }
 
@@ -1996,6 +2334,14 @@ public class ApiGatewayController {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("statusCode", r.statusCode());
         node.put("selectionPattern", r.selectionPattern());
+        if (r.responseParameters() != null && !r.responseParameters().isEmpty()) {
+            ObjectNode params = node.putObject("responseParameters");
+            r.responseParameters().forEach(params::put);
+        }
+        if (r.responseTemplates() != null && !r.responseTemplates().isEmpty()) {
+            ObjectNode templates = node.putObject("responseTemplates");
+            r.responseTemplates().forEach(templates::put);
+        }
         return node;
     }
 
@@ -2061,6 +2407,9 @@ public class ApiGatewayController {
         node.put("name", k.getName());
         node.put("value", k.getValue());
         node.put("enabled", k.isEnabled());
+        if (k.getDescription() != null) {
+            node.put("description", k.getDescription());
+        }
         if (k.getTags() != null && !k.getTags().isEmpty()) {
             ObjectNode tags = node.putObject("tags");
             k.getTags().forEach(tags::put);
@@ -2110,15 +2459,101 @@ public class ApiGatewayController {
         return node;
     }
 
-    private ObjectNode toDomainNode(CustomDomain d) {
+    private Map<String, Object> readJsonBody(String body) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> request = objectMapper.readValue(body, Map.class);
+            return request;
+        } catch (IOException e) {
+            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        }
+    }
+
+    private ObjectNode toApiMappingNode(String storedPath, BasePathMapping mapping) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("apiMappingId", apiMappingId(storedPath));
+        node.put("apiId", mapping.getRestApiId());
+        node.put("stage", mapping.getStage());
+        // v1 stores the root mapping as "(none)"; v2 expresses it as an empty key.
+        // The key reported is the one the record is stored under, so it matches its id.
+        String canonical = ApiGatewayService.canonicalBasePath(storedPath);
+        node.put("apiMappingKey", "(none)".equals(canonical) ? "" : canonical);
+        return node;
+    }
+
+    /** Rejects a mapping whose API or stage does not exist, with the errors AWS gives for each. */
+    private void requireApiAndStageExist(String region, String apiId, String stage) {
+        try {
+            v2Service.getApi(region, apiId);
+        } catch (AwsException e) {
+            throw new AwsException("BadRequestException", "Invalid API identifier specified: " + apiId, 400);
+        }
+        try {
+            v2Service.getStage(region, apiId, stage);
+        } catch (AwsException e) {
+            throw new AwsException("BadRequestException", "Invalid stage identifier specified", 400);
+        }
+    }
+
+    /**
+     * Derives the mapping id from what identifies the mapping, so it survives a restart and is the
+     * same id whichever API created it. The base path is encoded rather than hashed: two base paths
+     * sharing a hash would share an id, and a read or delete by that id would pick between them.
+     */
+    // Package-private so the identity property can be tested against records that only persisted
+    // state can hold: no API path creates a non-canonical base path any more.
+    static String apiMappingId(String storedPath) {
+        // Encoded from the key the record is stored under — not its canonical form, and not the
+        // record's own field, which BasePathMapping normalises on construction. State written
+        // before writes were canonicalised can sit under "" or "/" beside "(none)", and reading
+        // identity from anywhere but the key hands several records one id for a read or a delete
+        // to choose between. The prefix keeps an empty stored path from producing an empty id.
+        return "m" + HexFormat.of().formatHex(
+                (storedPath == null ? "" : storedPath).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** A mapping together with the base path it is stored under, which is what identifies it. */
+    private record StoredMapping(String storedPath, BasePathMapping mapping) {}
+
+    private StoredMapping findApiMapping(String region, String domainName, String apiMappingId) {
+        return service.basePathMappingsByStoredPath(region, domainName).entrySet().stream()
+                .filter(entry -> apiMappingId(entry.getKey()).equals(apiMappingId))
+                .map(entry -> new StoredMapping(entry.getKey(), entry.getValue()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Unable to find ApiMapping with ID " + apiMappingId, 404));
+    }
+
+    private ObjectNode toDomainNode(String region, CustomDomain d) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("domainName", d.getDomainName());
+        node.put("domainNameArn", "arn:aws:apigateway:" + region + "::/domainnames/" + d.getDomainName());
         node.put("domainNameStatus", d.getDomainNameStatus());
         node.put("endpointConfigurationType", d.getEndpointConfigurationType());
+        node.putObject("endpointConfiguration").putArray("types").add(d.getEndpointConfigurationType());
         if (d.getCertificateName() != null) node.put("certificateName", d.getCertificateName());
         if (d.getCertificateArn() != null) node.put("certificateArn", d.getCertificateArn());
         node.put("regionalDomainName", d.getRegionalDomainName());
         node.put("regionalHostedZoneId", d.getRegionalHostedZoneId());
+        if (d.getRegionalCertificateName() != null) {
+            node.put("regionalCertificateName", d.getRegionalCertificateName());
+        }
+        if (d.getRegionalCertificateArn() != null) {
+            node.put("regionalCertificateArn", d.getRegionalCertificateArn());
+        }
+        if (d.getDistributionDomainName() != null) {
+            node.put("distributionDomainName", d.getDistributionDomainName());
+        }
+        if (d.getDistributionHostedZoneId() != null) {
+            node.put("distributionHostedZoneId", d.getDistributionHostedZoneId());
+        }
+        if (d.getSecurityPolicy() != null) {
+            node.put("securityPolicy", d.getSecurityPolicy());
+        }
+        if (d.getTags() != null && !d.getTags().isEmpty()) {
+            ObjectNode tags = node.putObject("tags");
+            d.getTags().forEach(tags::put);
+        }
         return node;
     }
 
@@ -2137,6 +2572,20 @@ public class ApiGatewayController {
         if (m.getDescription() != null) node.put("description", m.getDescription());
         node.put("contentType", m.getContentType());
         if (m.getSchema() != null) node.put("schema", m.getSchema());
+        return node;
+    }
+
+    private ObjectNode toGatewayResponseNode(GatewayResponse response) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("responseType", response.getResponseType());
+        if (response.getStatusCode() != null) {
+            node.put("statusCode", response.getStatusCode());
+        }
+        ObjectNode parameters = node.putObject("responseParameters");
+        response.getResponseParameters().forEach(parameters::put);
+        ObjectNode templates = node.putObject("responseTemplates");
+        response.getResponseTemplates().forEach(templates::put);
+        node.put("defaultResponse", response.isDefaultResponse());
         return node;
     }
 
@@ -2180,9 +2629,21 @@ public class ApiGatewayController {
         node.put("protocolType", api.getProtocolType());
         node.put("apiEndpoint", api.getApiEndpoint());
         node.put("createdDate", java.time.Instant.ofEpochMilli(api.getCreatedDate()).toString());
+        node.put("disableExecuteApiEndpoint", api.isDisableExecuteApiEndpoint());
         if (api.getRouteSelectionExpression() != null) node.put("routeSelectionExpression", api.getRouteSelectionExpression());
         if (api.getDescription() != null) node.put("description", api.getDescription());
         if (api.getApiKeySelectionExpression() != null) node.put("apiKeySelectionExpression", api.getApiKeySelectionExpression());
+        if (api.getVersion() != null) {
+            node.put("version", api.getVersion());
+        }
+        if (api.getWarnings() != null && !api.getWarnings().isEmpty()) {
+            ArrayNode warnings = node.putArray("warnings");
+            api.getWarnings().forEach(warnings::add);
+        }
+        if (api.getImportInfo() != null && !api.getImportInfo().isEmpty()) {
+            ArrayNode importInfo = node.putArray("importInfo");
+            api.getImportInfo().forEach(importInfo::add);
+        }
         if (api.getTags() != null && !api.getTags().isEmpty()) {
             ObjectNode tagsNode = objectMapper.createObjectNode();
             api.getTags().forEach(tagsNode::put);
@@ -2223,6 +2684,10 @@ public class ApiGatewayController {
         node.put("routeKey", r.getRouteKey());
         node.put("authorizationType", r.getAuthorizationType());
         if (r.getAuthorizerId() != null) node.put("authorizerId", r.getAuthorizerId());
+        if (r.getAuthorizationScopes() != null && !r.getAuthorizationScopes().isEmpty()) {
+            ArrayNode scopes = node.putArray("authorizationScopes");
+            r.getAuthorizationScopes().forEach(scopes::add);
+        }
         if (r.getTarget() != null) node.put("target", r.getTarget());
         if (r.getRouteResponseSelectionExpression() != null) node.put("routeResponseSelectionExpression", r.getRouteResponseSelectionExpression());
         return node;
@@ -2296,8 +2761,47 @@ public class ApiGatewayController {
             s.getStageVariables().forEach(stageVariables::put);
         }
         if (s.getTags() != null && !s.getTags().isEmpty()) {
-            ObjectNode tagsNode = node.putObject("tags");
-            s.getTags().forEach(tagsNode::put);
+            ObjectNode tags = node.putObject("tags");
+            s.getTags().forEach(tags::put);
+        }
+        if (s.getDescription() != null) {
+            node.put("description", s.getDescription());
+        }
+        if (s.getAccessLogSettings() != null) {
+            ObjectNode logs = node.putObject("accessLogSettings");
+            if (s.getAccessLogSettings().destinationArn() != null) {
+                logs.put("destinationArn", s.getAccessLogSettings().destinationArn());
+            }
+            if (s.getAccessLogSettings().format() != null) {
+                logs.put("format", s.getAccessLogSettings().format());
+            }
+        }
+        if (s.getDefaultRouteSettings() != null) {
+            node.set("defaultRouteSettings", toV2RouteSettingsNode(s.getDefaultRouteSettings()));
+        }
+        if (s.getRouteSettings() != null && !s.getRouteSettings().isEmpty()) {
+            ObjectNode routeSettings = node.putObject("routeSettings");
+            s.getRouteSettings().forEach((k, v) -> routeSettings.set(k, toV2RouteSettingsNode(v)));
+        }
+        return node;
+    }
+
+    private ObjectNode toV2RouteSettingsNode(Stage.RouteSettings rs) {
+        ObjectNode node = objectMapper.createObjectNode();
+        if (rs.detailedMetricsEnabled() != null) {
+            node.put("detailedMetricsEnabled", rs.detailedMetricsEnabled());
+        }
+        if (rs.dataTraceEnabled() != null) {
+            node.put("dataTraceEnabled", rs.dataTraceEnabled());
+        }
+        if (rs.loggingLevel() != null) {
+            node.put("loggingLevel", rs.loggingLevel());
+        }
+        if (rs.throttlingBurstLimit() != null) {
+            node.put("throttlingBurstLimit", rs.throttlingBurstLimit());
+        }
+        if (rs.throttlingRateLimit() != null) {
+            node.put("throttlingRateLimit", rs.throttlingRateLimit());
         }
         return node;
     }
@@ -2394,36 +2898,9 @@ public class ApiGatewayController {
         return node;
     }
 
-    private List<Map<String, String>> parsePatchOperations(String body) {
-        try {
-            if (body == null || body.isBlank()) {
-                return List.of();
-            }
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(body).path("patchOperations");
-            if (node.isMissingNode() || node.isNull()) {
-                return List.of();
-            }
-            return objectMapper.convertValue(node, new TypeReference<List<Map<String, String>>>() {});
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
 
-    private ObjectNode toGatewayResponseNode(GatewayResponse r) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("responseType", r.getResponseType());
-        if (r.getStatusCode() != null) node.put("statusCode", r.getStatusCode());
-        node.put("defaultResponse", r.isDefaultResponse());
-        if (r.getResponseParameters() != null && !r.getResponseParameters().isEmpty()) {
-            ObjectNode params = node.putObject("responseParameters");
-            r.getResponseParameters().forEach(params::put);
-        }
-        if (r.getResponseTemplates() != null && !r.getResponseTemplates().isEmpty()) {
-            ObjectNode templates = node.putObject("responseTemplates");
-            r.getResponseTemplates().forEach(templates::put);
-        }
-        return node;
-    }
+
+
 
     private ObjectNode toV1VpcLinkNode(io.github.hectorvent.floci.services.apigateway.model.VpcLink link) {
         ObjectNode node = objectMapper.createObjectNode();

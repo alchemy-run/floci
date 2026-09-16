@@ -1,22 +1,32 @@
 package io.github.hectorvent.floci.services.cognito;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.config.TlsCertificateManager;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ReservedTags;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.acm.AcmService;
+import io.github.hectorvent.floci.services.acm.model.Certificate;
+import io.github.hectorvent.floci.services.acm.model.CertificateStatus;
 import io.github.hectorvent.floci.services.cognito.model.CognitoGroup;
 import io.github.hectorvent.floci.services.cognito.model.CognitoUser;
 import io.github.hectorvent.floci.services.cognito.model.IdentityProvider;
+import io.github.hectorvent.floci.services.cognito.model.ResourceServerScope;
+import io.github.hectorvent.floci.services.cognito.model.RevokedTokenInfo;
 import io.github.hectorvent.floci.services.cognito.model.UserPool;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolClient;
 import io.github.hectorvent.floci.services.cognito.model.UserPoolDomain;
 import io.github.hectorvent.floci.services.cognito.verification.CognitoMessageDispatcher;
 import io.github.hectorvent.floci.services.cognito.verification.VerificationCode;
+import io.github.hectorvent.floci.services.cognito.verification.VerificationCodeException;
 import io.github.hectorvent.floci.services.cognito.verification.VerificationCodeService;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -26,41 +36,55 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class CognitoServiceTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private CognitoService service;
+    private InMemoryStorage<String, UserPool> poolStore;
     private InMemoryStorage<String, CognitoUser> userStore;
     private InMemoryStorage<String, CognitoGroup> groupStore;
+    private InMemoryStorage<String, RevokedTokenInfo> revokedTokenStore;
     private RegionResolver regionResolver;
+    private AcmService acmService;
 
     @BeforeEach
     void setUp() {
+        poolStore = new InMemoryStorage<>();
         userStore = new InMemoryStorage<>();
         groupStore = new InMemoryStorage<>();
+        revokedTokenStore = new InMemoryStorage<>();
         regionResolver = new RegionResolver("us-east-1", "000000000000");
+        acmService = mock(AcmService.class);
+        // Every certificate exists and is issued unless a test says otherwise.
+        when(acmService.describeCertificate(anyString(), eq("us-east-1")))
+                .thenAnswer(inv -> issuedCertificate(inv.getArgument(0)));
         service = new CognitoService(
-                new InMemoryStorage<>(),
+                poolStore,
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 userStore,
                 groupStore,
-                new InMemoryStorage<>(), // revokedTokenStore
+                revokedTokenStore,
                 "http://localhost:4566",
                 regionResolver,
-                null
+                null,
+                acmService
         );
     }
 
@@ -69,6 +93,23 @@ class CognitoServiceTest {
         service.adminCreateUser(pool.getId(), "alice", Map.of("email", "alice@example.com"), "TempPass1!");
         service.adminSetUserPassword(pool.getId(), "alice", "Perm1234!", true);
         return pool;
+    }
+
+    private UserPool createPoolWithStrictPasswordPolicy() {
+        return service.createUserPool(Map.of(
+                "PoolName", "StrictPasswordPool",
+                "Policies", Map.of(
+                        "PasswordPolicy", Map.of(
+                                "MinimumLength", 12,
+                                "RequireUppercase", true,
+                                "RequireLowercase", true,
+                                "RequireNumbers", true,
+                                "RequireSymbols", true,
+                                "PasswordHistorySize", 10,
+                                "TemporaryPasswordValidityDays", 2
+                        )
+                )
+        ), "us-east-1");
     }
 
     @Test
@@ -93,8 +134,163 @@ class CognitoServiceTest {
         assertEquals("arn:aws:cognito-idp:us-east-1:000000000000:userpool/" + pool.getId(), pool.getArn());
         assertEquals(List.of(Map.of("Name", "custom:my-attr", "AttributeDataType", "String")),
                 pool.getSchemaAttributes());
-        assertEquals(policies, pool.getPolicies());
+        // A supplied PasswordPolicy is normalized with AWS's defaults for the fields left unset
+        // (MinimumLength here was explicit; the rest were not), matching what DescribeUserPool
+        // returns on real Cognito for a policy submitted this way.
+        Map<String, Object> expectedPasswordPolicy = new HashMap<>();
+        expectedPasswordPolicy.put("MinimumLength", 12);
+        expectedPasswordPolicy.put("RequireUppercase", true);
+        expectedPasswordPolicy.put("RequireLowercase", true);
+        expectedPasswordPolicy.put("RequireNumbers", true);
+        expectedPasswordPolicy.put("RequireSymbols", true);
+        expectedPasswordPolicy.put("TemporaryPasswordValidityDays", 7);
+        assertEquals(Map.of("PasswordPolicy", expectedPasswordPolicy), pool.getPolicies());
         assertEquals(List.of("email"), pool.getUsernameAttributes());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "Short1!a",
+            "lowercase123!",
+            "UPPERCASE123!",
+            "NoNumbersHere!",
+            "NoSymbols1234",
+            "NoSymbols 123"
+    })
+    void signUpRejectsPasswordsThatDoNotMatchTheUserPoolPolicy(String password) {
+        UserPool pool = createPoolWithStrictPasswordPolicy();
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "strict-client", false, false, List.of(), List.of());
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                service.signUp(client.getClientId(), "alice@example.com", password, Map.of(
+                        "email", "alice@example.com",
+                        "phone_number", "+4915112345678"
+                )));
+
+        assertEquals("InvalidPasswordException", exception.getErrorCode());
+    }
+
+    @Test
+    void signUpAcceptsAPasswordThatMatchesTheUserPoolPolicy() {
+        UserPool pool = createPoolWithStrictPasswordPolicy();
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "strict-client", false, false, List.of(), List.of());
+
+        CognitoUser user = service.signUp(
+                client.getClientId(),
+                "alice@example.com",
+                "ValidPassword1!",
+                Map.of("email", "alice@example.com", "phone_number", "+4915112345678")
+        );
+
+        assertEquals("alice@example.com", user.getUsername());
+    }
+
+    @Test
+    void passwordHistoryRejectsARecentlyUsedPassword() {
+        UserPool pool = createPoolWithStrictPasswordPolicy();
+        service.adminCreateUser(
+                pool.getId(),
+                "alice",
+                Map.of("email", "alice@example.com"),
+                "InitialPass1!"
+        );
+        service.adminSetUserPassword(pool.getId(), "alice", "Replacement2!", true);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                service.adminSetUserPassword(pool.getId(), "alice", "InitialPass1!", true));
+
+        // AWS declares PasswordHistoryPolicyViolationException specifically for password reuse,
+        // distinct from InvalidPasswordException for a password that fails the complexity rules.
+        assertEquals("PasswordHistoryPolicyViolationException", exception.getErrorCode());
+        assertEquals(400, exception.getHttpStatus());
+    }
+
+    @Test
+    void passwordHistoryCountsTheCurrentPasswordAsOneOfN() {
+        // PasswordHistorySize: 1 blocks the current password and nothing else — AWS counts the
+        // current password as one of the n, not an extra entry on top of n stored ones.
+        UserPool pool = service.createUserPool(Map.of(
+                "PoolName", "HistorySizeOnePool",
+                "Policies", Map.of("PasswordPolicy", Map.of("PasswordHistorySize", 1))
+        ), "us-east-1");
+        service.adminCreateUser(pool.getId(), "alice", Map.of("email", "alice@example.com"), "PasswordA1!");
+        service.adminSetUserPassword(pool.getId(), "alice", "PasswordB1!", true);
+
+        AwsException reuseOfCurrent = assertThrows(AwsException.class, () ->
+                service.adminSetUserPassword(pool.getId(), "alice", "PasswordB1!", true));
+        assertEquals("PasswordHistoryPolicyViolationException", reuseOfCurrent.getErrorCode());
+
+        // Two changes back, real Cognito allows this at PasswordHistorySize: 1.
+        assertDoesNotThrow(() -> service.adminSetUserPassword(pool.getId(), "alice", "PasswordA1!", true));
+    }
+
+    @Test
+    void adminResetUserPasswordDoesNotBypassPasswordHistory() {
+        UserPool pool = createPoolWithStrictPasswordPolicy();
+        service.adminCreateUser(
+                pool.getId(), "alice", Map.of("email", "alice@example.com"), "InitialPass1!");
+        service.adminSetUserPassword(pool.getId(), "alice", "Replacement2!", true);
+
+        // Resetting must archive the outgoing password into history rather than discarding it,
+        // or an admin reset becomes a way around PasswordHistorySize.
+        service.adminResetUserPassword(pool.getId(), "alice");
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                service.adminSetUserPassword(pool.getId(), "alice", "Replacement2!", true));
+        assertEquals("PasswordHistoryPolicyViolationException", exception.getErrorCode());
+    }
+
+    @Test
+    void adminResetUserPasswordDoesNotShortenTheHistoryWindow() {
+        // A reset clears the current password without replacing it, so the freed slot must go
+        // to history, not be dropped: with PasswordHistorySize 2, Pass1 -> Pass2 -> Pass3 already
+        // ages Pass1 out (only Pass3 + Pass2 are within the window) -- a reset right after must
+        // not additionally age Pass2 out just because the current slot is temporarily empty.
+        UserPool pool = service.createUserPool(Map.of(
+                "PoolName", "ResetHistoryWindowPool",
+                "Policies", Map.of("PasswordPolicy", Map.of("PasswordHistorySize", 2))
+        ), "us-east-1");
+        service.adminCreateUser(pool.getId(), "alice", Map.of("email", "alice@example.com"), "Pass1word!");
+        service.adminSetUserPassword(pool.getId(), "alice", "Pass2word!", true);
+        service.adminSetUserPassword(pool.getId(), "alice", "Pass3word!", true);
+
+        service.adminResetUserPassword(pool.getId(), "alice");
+
+        // Both passwords still within the window (Pass3 was current, Pass2 was the one prior)
+        // must still be blocked immediately after the reset, before any new password is set.
+        assertEquals("PasswordHistoryPolicyViolationException", assertThrows(AwsException.class, () ->
+                service.adminSetUserPassword(pool.getId(), "alice", "Pass3word!", true)).getErrorCode());
+        assertEquals("PasswordHistoryPolicyViolationException", assertThrows(AwsException.class, () ->
+                service.adminSetUserPassword(pool.getId(), "alice", "Pass2word!", true)).getErrorCode());
+
+        // Setting a new password re-occupies the current slot, so the window shrinks back to
+        // n-1 in history and Pass2 (now two changes back) is free to reuse again.
+        service.adminSetUserPassword(pool.getId(), "alice", "Pass4word!", true);
+        assertDoesNotThrow(() -> service.adminSetUserPassword(pool.getId(), "alice", "Pass2word!", true));
+    }
+
+    @Test
+    void createUserPoolDefaultsAnUnsetMinimumLengthToEight() {
+        // A policy present but silent on MinimumLength gets AWS's default (8), not policyInt's
+        // fallback of 0 for an absent key — and the unset RequireUppercase/Lowercase/Numbers
+        // default to enabled too, the same "Cognito defaults" a console-created pool gets.
+        UserPool pool = service.createUserPool(Map.of(
+                "PoolName", "SymbolsOnlyPool",
+                "Policies", Map.of("PasswordPolicy", Map.of("RequireSymbols", true))
+        ), "us-east-1");
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "symbols-only-client", false, false, List.of(), List.of());
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                service.signUp(client.getClientId(), "alice@example.com", "a!", Map.of(
+                        "email", "alice@example.com", "phone_number", "+4915112345678")));
+        assertEquals("InvalidPasswordException", exception.getErrorCode());
+
+        assertDoesNotThrow(() -> service.signUp(
+                client.getClientId(), "bob@example.com", "Eightplus1!", Map.of(
+                        "email", "bob@example.com", "phone_number", "+4915112345679")));
     }
 
     @Test
@@ -674,6 +870,37 @@ class CognitoServiceTest {
     }
 
     @Test
+    void deterministicClientIdFollowsThePoolOverrideAndIsNullWithoutOne() {
+        UserPool plain = service.createUserPool(Map.of("PoolName", "plain"), "us-east-1");
+        assertNull(service.deterministicClientIdFor(plain.getId(), "web"));
+
+        UserPool useName = service.createUserPool(Map.of("PoolName", "use-name",
+                "UserPoolTags", Map.of(ReservedTags.OVERRIDE_COGNITO_CLIENT_ID_KEY, "use-name")), "us-east-1");
+        assertEquals("web", service.deterministicClientIdFor(useName.getId(), "web"));
+
+        UserPool append = service.createUserPool(Map.of("PoolName", "append",
+                "UserPoolTags", Map.of(ReservedTags.OVERRIDE_COGNITO_CLIENT_ID_KEY, "append-to-name:-id")), "us-east-1");
+        assertEquals("web-id", service.deterministicClientIdFor(append.getId(), "web"));
+
+        UserPool prepend = service.createUserPool(Map.of("PoolName", "prepend",
+                "UserPoolTags", Map.of(ReservedTags.OVERRIDE_COGNITO_CLIENT_ID_KEY, "prepend-to-name:app-")), "us-east-1");
+        assertEquals("app-web", service.deterministicClientIdFor(prepend.getId(), "web"));
+        assertEquals("app-web", service.createUserPoolClient(prepend.getId(), "web", false, false,
+                List.of(), List.of()).getClientId());
+    }
+
+    @Test
+    void updateUserPoolRenamesThePoolWhenPoolNameIsGiven() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "before"), "us-east-1");
+
+        service.updateUserPool(Map.of("UserPoolId", pool.getId(), "PoolName", "after"), "us-east-1");
+        assertEquals("after", service.describeUserPool(pool.getId()).getName());
+
+        service.updateUserPool(Map.of("UserPoolId", pool.getId(), "MfaConfiguration", "OFF"), "us-east-1");
+        assertEquals("after", service.describeUserPool(pool.getId()).getName());
+    }
+
+    @Test
     void updateUserPoolWithReservedTagStripsIt() {
         UserPool pool = service.createUserPool(Map.of("PoolName", "PinnedPool"), "us-east-1");
 
@@ -1217,11 +1444,15 @@ class CognitoServiceTest {
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
                 "http://localhost:4566",
                 regionResolver,
                 null,
+                acmService,
                 verificationCodeService,
-                messageDispatcher
+                messageDispatcher,
+                mock(TlsCertificateManager.class)
         );
 
         UserPool pool = serviceWithVerification.createUserPool(Map.of("PoolName", "TestPool"), "us-east-1");
@@ -1245,9 +1476,11 @@ class CognitoServiceTest {
         when(verificationCodeService.issue(any(), any(), eq(VerificationCode.Purpose.SIGNUP_CONFIRMATION), any()))
                 .thenReturn("123456");
         doThrow(new RuntimeException("SES unavailable")).when(messageDispatcher)
-                .dispatch(any(), any(), eq(VerificationCode.Purpose.SIGNUP_CONFIRMATION), eq("123456"), any());
+                .dispatch(any(), any(), eq(VerificationCode.Purpose.SIGNUP_CONFIRMATION), eq("123456"), any(), any());
 
         CognitoService serviceWithVerification = new CognitoService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -1257,8 +1490,10 @@ class CognitoServiceTest {
                 "http://localhost:4566",
                 regionResolver,
                 null,
+                acmService,
                 verificationCodeService,
-                messageDispatcher
+                messageDispatcher,
+                mock(TlsCertificateManager.class)
         );
 
         UserPool pool = serviceWithVerification.createUserPool(Map.of("PoolName", "TestPool"), "us-east-1");
@@ -1294,6 +1529,297 @@ class CognitoServiceTest {
                 service.confirmSignUp("missing-client", "carol", "123456"));
         assertEquals("ResourceNotFoundException", ex.getErrorCode());
         assertEquals(400, ex.getHttpStatus());
+    }
+
+    @Test
+    void confirmSignUpNamesMissingUserPoolInResourceNotFoundMessage() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "TestPool"), "us-east-1");
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "test-client", false, false, List.of(), List.of());
+        // DeleteUserPool takes the pool's clients with it, so an orphaned client cannot be
+        // produced through the API. Drop the pool record alone to reach the defensive path.
+        poolStore.delete(pool.getId());
+
+        AwsException ex = assertThrows(AwsException.class, () ->
+                service.confirmSignUp(client.getClientId(), "carol", "123456"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+        assertEquals("User pool " + pool.getId() + " does not exist.", ex.getMessage());
+        assertEquals(400, ex.getHttpStatus());
+    }
+
+    @Test
+    void confirmSignUpRejectsAClientIdBelongingToADeletedUserPool() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "TestPool"), "us-east-1");
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "test-client", false, false, List.of(), List.of());
+        service.deleteUserPool(pool.getId());
+
+        AwsException ex = assertThrows(AwsException.class, () ->
+                service.confirmSignUp(client.getClientId(), "carol", "123456"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+        assertEquals("Client not found", ex.getMessage());
+        assertEquals(400, ex.getHttpStatus());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"email_verified", "phone_number_verified"})
+    @SuppressWarnings("unchecked")
+    void updateUserAttributesRejectsSelfManagedVerificationStatusWithoutPartialPersistence(
+            String verificationStatusAttribute) {
+        UserPool pool = createPoolAndUser();
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "verification-status-client", false, false, List.of(), List.of());
+        Map<String, Object> authResult = service.initiateAuth(
+                client.getClientId(), "USER_PASSWORD_AUTH",
+                Map.of("USERNAME", "alice", "PASSWORD", "Perm1234!"));
+        String accessToken = (String) ((Map<String, Object>) authResult.get("AuthenticationResult"))
+                .get("AccessToken");
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.updateUserAttributes(accessToken, Map.of(
+                        verificationStatusAttribute, "true",
+                        "name", "must-not-be-persisted")));
+
+        assertEquals("InvalidParameterException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        CognitoUser unchanged = service.adminGetUser(pool.getId(), "alice");
+        assertFalse(unchanged.getAttributes().containsKey(verificationStatusAttribute));
+        assertFalse(unchanged.getAttributes().containsKey("name"));
+
+        service.adminUpdateUserAttributes(
+                pool.getId(), "alice", Map.of(verificationStatusAttribute, "true"));
+        assertEquals("true", service.adminGetUser(pool.getId(), "alice")
+                .getAttributes().get(verificationStatusAttribute));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void expiredPendingEmailCodeLeavesActiveAttributeAndVerifiedFlagUnchanged() {
+        VerificationCodeService verificationCodeService = mock(VerificationCodeService.class);
+        CognitoMessageDispatcher messageDispatcher = mock(CognitoMessageDispatcher.class);
+        when(verificationCodeService.issue(any(), any(),
+                eq(VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION), any()))
+                .thenReturn("123456");
+
+        CognitoService serviceWithVerification = new CognitoService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                "http://localhost:4566",
+                regionResolver,
+                null,
+                acmService,
+                verificationCodeService,
+                messageDispatcher,
+                mock(TlsCertificateManager.class));
+        UserPool pool = serviceWithVerification.createUserPool(Map.of(
+                "PoolName", "PendingEmailExpiryPool",
+                "AutoVerifiedAttributes", List.of("email"),
+                "UserAttributeUpdateSettings", Map.of(
+                        "AttributesRequireVerificationBeforeUpdate", List.of("email"))),
+                "us-east-1");
+        UserPoolClient client = serviceWithVerification.createUserPoolClient(
+                pool.getId(), "pending-email-expiry-client", false, false, List.of(), List.of());
+        serviceWithVerification.adminCreateUser(pool.getId(), "alice", Map.of(
+                "email", "old@example.com",
+                "email_verified", "true"), "TempPass1!");
+        serviceWithVerification.adminSetUserPassword(
+                pool.getId(), "alice", "Permanent1!", true);
+
+        Map<String, Object> authResult = serviceWithVerification.initiateAuth(
+                client.getClientId(), "USER_PASSWORD_AUTH",
+                Map.of("USERNAME", "alice", "PASSWORD", "Permanent1!"));
+        String accessToken = (String) ((Map<String, Object>) authResult.get("AuthenticationResult"))
+                .get("AccessToken");
+
+        serviceWithVerification.updateUserAttributes(
+                accessToken, Map.of("email", "new@example.com"));
+        doThrow(new VerificationCodeException(
+                VerificationCodeException.Kind.EXPIRED,
+                "Invalid code provided, please request code again"))
+                .when(verificationCodeService)
+                .consume(pool.getId(), "alice",
+                        VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION, "123456");
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> serviceWithVerification.verifyUserAttribute(accessToken, "email", "123456"));
+
+        assertEquals("ExpiredCodeException", error.getErrorCode());
+        CognitoUser unchanged = serviceWithVerification.adminGetUser(pool.getId(), "alice");
+        assertEquals("old@example.com", unchanged.getAttributes().get("email"));
+        assertEquals("true", unchanged.getAttributes().get("email_verified"));
+        assertEquals("new@example.com", unchanged.getPendingAttributes().get("email"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void verificationCodeForRequiredEmailUpdateUsesPendingDestination() {
+        VerificationCodeService verificationCodeService = mock(VerificationCodeService.class);
+        CognitoMessageDispatcher messageDispatcher = mock(CognitoMessageDispatcher.class);
+        when(verificationCodeService.issue(any(), any(),
+                eq(VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION), any()))
+                .thenReturn("123456");
+
+        CognitoService serviceWithVerification = new CognitoService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                "http://localhost:4566",
+                regionResolver,
+                null,
+                acmService,
+                verificationCodeService,
+                messageDispatcher,
+                mock(TlsCertificateManager.class));
+        UserPool pool = serviceWithVerification.createUserPool(Map.of(
+                "PoolName", "PendingEmailDeliveryPool",
+                "AutoVerifiedAttributes", List.of("email"),
+                "UserAttributeUpdateSettings", Map.of(
+                        "AttributesRequireVerificationBeforeUpdate", List.of("email"))),
+                "us-east-1");
+        UserPoolClient client = serviceWithVerification.createUserPoolClient(
+                pool.getId(), "pending-email-delivery-client", false, false, List.of(), List.of());
+        serviceWithVerification.adminCreateUser(pool.getId(), "alice", Map.of(
+                "email", "old@example.com",
+                "email_verified", "true"), "TempPass1!");
+        serviceWithVerification.adminSetUserPassword(
+                pool.getId(), "alice", "Permanent1!", true);
+
+        Map<String, Object> authResult = serviceWithVerification.initiateAuth(
+                client.getClientId(), "USER_PASSWORD_AUTH",
+                Map.of("USERNAME", "alice", "PASSWORD", "Permanent1!"));
+        String accessToken = (String) ((Map<String, Object>) authResult.get("AuthenticationResult"))
+                .get("AccessToken");
+        serviceWithVerification.updateUserAttributes(
+                accessToken, Map.of("email", "new@example.com"));
+        clearInvocations(messageDispatcher);
+
+        Map<String, Object> delivery = serviceWithVerification
+                .getUserAttributeVerificationCode(accessToken, "email");
+
+        assertEquals("n***@e***", delivery.get("Destination"));
+        ArgumentCaptor<CognitoUser> deliveryUser = ArgumentCaptor.forClass(CognitoUser.class);
+        verify(messageDispatcher).dispatch(
+                eq(pool), deliveryUser.capture(),
+                eq(VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION),
+                eq("123456"), eq(List.of("EMAIL")));
+        assertEquals("new@example.com", deliveryUser.getValue().getAttributes().get("email"));
+        assertEquals("old@example.com",
+                serviceWithVerification.adminGetUser(pool.getId(), "alice").getAttributes().get("email"));
+    }
+
+    @Test
+    void adminContactUpdateClearsOnlyMatchingPendingValueAndVerificationCode() {
+        VerificationCodeService verificationCodeService = mock(VerificationCodeService.class);
+        CognitoMessageDispatcher messageDispatcher = mock(CognitoMessageDispatcher.class);
+        PendingContactFixture fixture = createPendingContactFixture(
+                verificationCodeService, messageDispatcher);
+        clearInvocations(verificationCodeService);
+
+        fixture.service().adminUpdateUserAttributes(fixture.pool().getId(), "alice", Map.of(
+                "email", "admin@example.com",
+                "custom:note", "updated"));
+        fixture.service().adminUpdateUserAttributes(fixture.pool().getId(), "alice", Map.of(
+                "email", "admin@example.com"));
+
+        CognitoUser updated = fixture.service().adminGetUser(fixture.pool().getId(), "alice");
+        assertEquals("admin@example.com", updated.getAttributes().get("email"));
+        assertEquals("updated", updated.getAttributes().get("custom:note"));
+        assertFalse(updated.getPendingAttributes().containsKey("email"));
+        assertEquals("+12025550101", updated.getPendingAttributes().get("phone_number"));
+        verify(verificationCodeService, times(2)).invalidatePrevious(
+                fixture.pool().getId(), "alice",
+                VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION);
+        verify(verificationCodeService, never()).invalidatePrevious(
+                fixture.pool().getId(), "alice",
+                VerificationCode.Purpose.PHONE_ATTRIBUTE_VERIFICATION);
+    }
+
+    @Test
+    void adminContactDeleteClearsOnlyMatchingPendingValueAndVerificationCode() {
+        VerificationCodeService verificationCodeService = mock(VerificationCodeService.class);
+        CognitoMessageDispatcher messageDispatcher = mock(CognitoMessageDispatcher.class);
+        PendingContactFixture fixture = createPendingContactFixture(
+                verificationCodeService, messageDispatcher);
+        clearInvocations(verificationCodeService);
+
+        fixture.service().adminDeleteUserAttributes(
+                fixture.pool().getId(), "alice", List.of("phone_number", "custom:note"));
+        fixture.service().adminDeleteUserAttributes(
+                fixture.pool().getId(), "alice", List.of("phone_number"));
+
+        CognitoUser updated = fixture.service().adminGetUser(fixture.pool().getId(), "alice");
+        assertFalse(updated.getAttributes().containsKey("phone_number"));
+        assertFalse(updated.getAttributes().containsKey("custom:note"));
+        assertFalse(updated.getPendingAttributes().containsKey("phone_number"));
+        assertEquals("new@example.com", updated.getPendingAttributes().get("email"));
+        verify(verificationCodeService, times(2)).invalidatePrevious(
+                fixture.pool().getId(), "alice",
+                VerificationCode.Purpose.PHONE_ATTRIBUTE_VERIFICATION);
+        verify(verificationCodeService, never()).invalidatePrevious(
+                fixture.pool().getId(), "alice",
+                VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION);
+    }
+
+    @SuppressWarnings("unchecked")
+    private PendingContactFixture createPendingContactFixture(
+            VerificationCodeService verificationCodeService,
+            CognitoMessageDispatcher messageDispatcher) {
+        when(verificationCodeService.issue(any(), any(), any(), any())).thenReturn("123456");
+        CognitoService serviceWithVerification = new CognitoService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                "http://localhost:4566",
+                regionResolver,
+                null,
+                acmService,
+                verificationCodeService,
+                messageDispatcher,
+                mock(TlsCertificateManager.class));
+        UserPool pool = serviceWithVerification.createUserPool(Map.of(
+                "PoolName", "AdminPendingContactPool",
+                "AutoVerifiedAttributes", List.of("email", "phone_number"),
+                "UserAttributeUpdateSettings", Map.of(
+                        "AttributesRequireVerificationBeforeUpdate", List.of("email", "phone_number"))),
+                "us-east-1");
+        UserPoolClient client = serviceWithVerification.createUserPoolClient(
+                pool.getId(), "admin-pending-contact-client", false, false, List.of(), List.of());
+        serviceWithVerification.adminCreateUser(pool.getId(), "alice", Map.of(
+                "email", "old@example.com",
+                "email_verified", "true",
+                "phone_number", "+12025550100",
+                "phone_number_verified", "true",
+                "custom:note", "original"), "TempPass1!");
+        serviceWithVerification.adminSetUserPassword(
+                pool.getId(), "alice", "Permanent1!", true);
+        Map<String, Object> authResult = serviceWithVerification.initiateAuth(
+                client.getClientId(), "USER_PASSWORD_AUTH",
+                Map.of("USERNAME", "alice", "PASSWORD", "Permanent1!"));
+        String accessToken = (String) ((Map<String, Object>) authResult.get("AuthenticationResult"))
+                .get("AccessToken");
+        serviceWithVerification.updateUserAttributes(accessToken, Map.of(
+                "email", "new@example.com",
+                "phone_number", "+12025550101"));
+        return new PendingContactFixture(serviceWithVerification, pool);
+    }
+
+    private record PendingContactFixture(CognitoService service, UserPool pool) {
     }
 
     @Test
@@ -1633,10 +2159,13 @@ class CognitoServiceTest {
                 Map.of("PoolName", "TestPool", "UsernameAttributes", List.of("email")),
                 "us-east-1"
         );
-        service.adminCreateUser(pool.getId(), "bob", Map.of("email", "bob@example.com"), null);
+        // UsernameAttributes=email pools mint a UUID username; the supplied email is the alias.
+        CognitoUser created = service.adminCreateUser(pool.getId(), "bob@example.com",
+                Map.of("email", "bob@example.com"), null);
 
         CognitoUser found = service.adminGetUser(pool.getId(), "bob@example.com");
-        assertEquals("bob", found.getUsername());
+        assertEquals(created.getUsername(), found.getUsername());
+        assertEquals(found.getAttributes().get("sub"), found.getUsername());
     }
 
     @Test
@@ -1645,10 +2174,12 @@ class CognitoServiceTest {
                 Map.of("PoolName", "TestPool", "UsernameAttributes", List.of("phone_number")),
                 "us-east-1"
         );
-        service.adminCreateUser(pool.getId(), "bob", Map.of("phone_number", "+15551234567"), null);
+        CognitoUser created = service.adminCreateUser(pool.getId(), "+15551234567",
+                Map.of("phone_number", "+15551234567"), null);
 
         CognitoUser found = service.adminGetUser(pool.getId(), "+15551234567");
-        assertEquals("bob", found.getUsername());
+        assertEquals(created.getUsername(), found.getUsername());
+        assertEquals(found.getAttributes().get("sub"), found.getUsername());
     }
 
     @Test
@@ -1678,9 +2209,12 @@ class CognitoServiceTest {
 
     @Test
     void adminGetUserRejectsUnknownPoolWithResourceNotFound() {
+        String missingPoolId = "us-east-1_missing";
+
         AwsException ex = assertThrows(AwsException.class,
-                () -> service.adminGetUser("us-east-1_missing", "bob"));
+                () -> service.adminGetUser(missingPoolId, "bob"));
         assertEquals("ResourceNotFoundException", ex.getErrorCode());
+        assertEquals("User pool " + missingPoolId + " does not exist.", ex.getMessage());
         assertEquals(400, ex.getHttpStatus());
     }
 
@@ -1772,6 +2306,43 @@ class CognitoServiceTest {
 
         List<CognitoUser> result = service.listUsers(pool.getId(), "email = \"nobody@example.com\"");
         assertTrue(result.isEmpty());
+    }
+
+    // =========================================================================
+    // Issue #2952 - listUsers/listUserPoolClients against an absent user pool
+    // =========================================================================
+
+    @Test
+    void listUsersAgainstAnAbsentUserPoolFails() {
+        // listUsers scanned by a "{poolId}::" prefix without ever touching poolStore, so an
+        // absent pool was indistinguishable from an empty one. list-groups and
+        // list-resource-servers already resolve the pool and are correct; this brought
+        // list-users in line with them.
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.listUsers("us-east-1_nonexistent", null));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void listUserPoolClientsAgainstAnAbsentUserPoolFails() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.listUserPoolClients("us-east-1_nonexistent"));
+        assertEquals("ResourceNotFoundException", ex.getErrorCode());
+    }
+
+    @Test
+    void listUsersAgainstAnExistingEmptyPoolStillReturnsEmpty() {
+        // The existence check must not turn a real, merely-empty pool into an error.
+        UserPool pool = service.createUserPool(Map.of("PoolName", "EmptyPool"), "us-east-1");
+
+        assertTrue(service.listUsers(pool.getId(), null).isEmpty());
+    }
+
+    @Test
+    void listUserPoolClientsAgainstAnExistingEmptyPoolStillReturnsEmpty() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "EmptyPool"), "us-east-1");
+
+        assertTrue(service.listUserPoolClients(pool.getId()).isEmpty());
     }
 
     /** Signs a hand-crafted {@code poolId|username|clientId|issuedAt|nonce} payload the same way buildRefreshToken does. */
@@ -1895,6 +2466,70 @@ class CognitoServiceTest {
 
         assertNotNull(refreshed.get("AccessToken"));
         assertNotNull(refreshed.get("IdToken"));
+    }
+
+    @Test
+    void refreshTokenAuthFlowExpiredTokenThrows() {
+        UserPool pool = createPoolAndUser();
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(),
+                "c",
+                false,
+                false,
+                List.of(),
+                List.of(),
+                null,
+                List.of(),
+                null,
+                List.of(),
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                1,
+                List.of(),
+                Map.of("RefreshToken", "seconds"),
+                List.of(),
+                null,
+                null
+        );
+
+        // issued-at is epoch MILLISECONDS, exactly as buildRefreshToken writes it. A token
+        // issued 10s ago against a 1s refresh lifetime is expired only if isRefreshTokenExpired
+        // converts millis to seconds before comparing — before the fix the InitiateAuth
+        // REFRESH_TOKEN_AUTH path never called the check at all, so this minted fresh tokens.
+        long issuedAtMillis = System.currentTimeMillis() - 10_000L;
+        String raw = pool.getId() + "|alice|" + client.getClientId() + "|" + issuedAtMillis + "|"
+                + java.util.UUID.randomUUID();
+        String expiredRefreshToken = signRawRefreshToken(pool, raw);
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                service.initiateAuth(client.getClientId(), "REFRESH_TOKEN_AUTH",
+                        Map.of("REFRESH_TOKEN", expiredRefreshToken)));
+        assertEquals("NotAuthorizedException", exception.getErrorCode());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void refreshTokenAuthFlowRejectsTokenFromAnotherPool() {
+        // Two independent pools, each with an "alice". A refresh token minted for poolB is
+        // validly HMAC-signed (by poolB) and its username resolves in poolA too, so the only
+        // thing that can reject it against poolA's client is the embedded pool-id check.
+        UserPool poolA = createPoolAndUser();
+        UserPool poolB = createPoolAndUser();
+        UserPoolClient clientA = service.createUserPoolClient(poolA.getId(), "ca", false, false, List.of(), List.of());
+        UserPoolClient clientB = service.createUserPoolClient(poolB.getId(), "cb", false, false, List.of(), List.of());
+
+        Map<String, Object> authB = (Map<String, Object>) service.initiateAuth(
+                clientB.getClientId(), "USER_PASSWORD_AUTH",
+                Map.of("USERNAME", "alice", "PASSWORD", "Perm1234!")).get("AuthenticationResult");
+        String foreignRefreshToken = (String) authB.get("RefreshToken");
+
+        AwsException exception = assertThrows(AwsException.class, () ->
+                service.initiateAuth(clientA.getClientId(), "REFRESH_TOKEN_AUTH",
+                        Map.of("REFRESH_TOKEN", foreignRefreshToken)));
+        assertEquals("NotAuthorizedException", exception.getErrorCode());
     }
 
     // =========================================================================
@@ -2306,7 +2941,7 @@ class CognitoServiceTest {
     // =========================================================================
 
     @ParameterizedTest
-    @CsvSource( {
+    @CsvSource({
             "use-name,basic-client",
             "prepend-to-name:prepended-,prepended-basic-client",
             "append-to-name:-appended,basic-client-appended",
@@ -2323,7 +2958,7 @@ class CognitoServiceTest {
                 "us-east-1"
         );
 
-        assertEquals("test",pool.getUserPoolTags().get("env"));
+        assertEquals("test", pool.getUserPoolTags().get("env"));
         assertFalse(pool.getUserPoolTags().containsKey(ReservedTags.OVERRIDE_COGNITO_CLIENT_ID_KEY));
         assertFalse(pool.getUserPoolTags().containsKey(ReservedTags.OVERRIDE_COGNITO_CLIENT_SECRET_KEY));
 
@@ -2342,7 +2977,7 @@ class CognitoServiceTest {
     }
 
     @ParameterizedTest
-    @CsvSource( {
+    @CsvSource({
             "prepend-to-name: prepended- ,secret",
             "append-to-name: -appended ,secret",
             "append-to-name:-appended,",
@@ -2350,7 +2985,7 @@ class CognitoServiceTest {
     })
     void createUserPoolWithInvalidOverrideForClientIdAndClientSecret(String overrideClientId, String secret) {
         Map<String, Object> createUserPool = new HashMap<>();
-        Map<String,String> userPoolTags = new HashMap<>();
+        Map<String, String> userPoolTags = new HashMap<>();
         userPoolTags.put(ReservedTags.OVERRIDE_COGNITO_CLIENT_ID_KEY, overrideClientId);
         userPoolTags.put(ReservedTags.OVERRIDE_COGNITO_CLIENT_SECRET_KEY, secret);
         createUserPool.put("PoolName", "InvalidOverridesPool");
@@ -2420,31 +3055,432 @@ class CognitoServiceTest {
     }
 
     @Test
-    void userPoolDomainRoundTripAndMissingDescribeIsEmpty() {
+    void userPoolDomainRoundTripAndMissingDescribeIsNotFound() {
         UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
-        UserPoolDomain created = service.createUserPoolDomain(pool.getId(), "my-app-auth", 2, null);
+        UserPoolDomain created = service.createUserPoolDomain("my-app-auth", pool.getId(), null, 2);
         assertEquals("ACTIVE", created.getStatus());
-        assertTrue(created.getCloudFrontDistribution().endsWith(".cloudfront.net"));
+        assertNull(created.getCloudFrontDistribution());
         assertEquals(2, created.getManagedLoginVersion());
 
-        UserPoolDomain described = service.describeUserPoolDomain("my-app-auth").orElseThrow();
+        UserPoolDomain described = service.describeUserPoolDomain("my-app-auth");
         assertEquals(pool.getId(), described.getUserPoolId());
-        assertTrue(service.describeUserPoolDomain("missing-prefix").isEmpty());
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain("missing-prefix"));
 
-        UserPoolDomain updated = service.updateUserPoolDomain(pool.getId(), "my-app-auth", 1, null);
+        UserPoolDomain updated = service.updateUserPoolDomain("my-app-auth", pool.getId(), null, 1);
         assertEquals(1, updated.getManagedLoginVersion());
 
-        service.deleteUserPoolDomain(pool.getId(), "my-app-auth");
-        assertTrue(service.describeUserPoolDomain("my-app-auth").isEmpty());
+        service.deleteUserPoolDomain("my-app-auth", pool.getId());
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain("my-app-auth"));
     }
 
     @Test
     void createUserPoolDomainRejectsDuplicateDomain() {
         UserPool first = service.createUserPool(Map.of("PoolName", "DomainOne"), "us-east-1");
         UserPool second = service.createUserPool(Map.of("PoolName", "DomainTwo"), "us-east-1");
-        service.createUserPoolDomain(first.getId(), "shared-prefix", null, null);
+        service.createUserPoolDomain("shared-prefix", first.getId(), null, null);
         AwsException ex = assertThrows(AwsException.class, () ->
-                service.createUserPoolDomain(second.getId(), "shared-prefix", null, null));
+                service.createUserPoolDomain("shared-prefix", second.getId(), null, null));
+        assertEquals("InvalidParameterException", ex.getErrorCode());
+    }
+
+    @Test
+    void updateIdentityProviderDoesNotMutateAlreadyReturnedInstances() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "IdpCopyPool"), "us-east-1");
+        Map<String, String> details = Map.of(
+                "client_id", "before",
+                "client_secret", "secret",
+                "attributes_request_method", "GET",
+                "oidc_issuer", "https://issuer.example.com",
+                "authorize_scopes", "openid");
+        service.createIdentityProvider(pool.getId(), "CopyOidc", "OIDC", details, null, null);
+
+        IdentityProvider held = service.describeIdentityProvider(pool.getId(), "CopyOidc");
+
+        Map<String, String> updated = new java.util.LinkedHashMap<>(details);
+        updated.put("client_id", "after");
+        service.updateIdentityProvider(pool.getId(), "CopyOidc", updated, null, null);
+
+        assertEquals("before", held.getProviderDetails().get("client_id"),
+                "update must write a copy, not mutate the instance the store already handed out");
+        assertEquals("after",
+                service.describeIdentityProvider(pool.getId(), "CopyOidc").getProviderDetails().get("client_id"));
+    }
+
+    // Issue #1654: ConfirmSignUp updates verified attribute
+    @Nested
+    class ConfirmSignUpVerifiedAttributes {
+
+        private CognitoService svc;
+
+        @BeforeEach
+        void setUpVerificationService() {
+            svc = createVerificationEnabledService();
+        }
+
+        @Test
+        void confirmSignUpSetsEmailVerifiedAndDoesNotWritePhoneVerifiedForEmailOnlyUser() {
+            String poolName = "EmailVerifyPool";
+            String username = "alice@example.com";
+            String password = "Passw0rd!";
+
+            UserPool pool = svc.createUserPool(Map.of(
+                    "PoolName", poolName,
+                    "AutoVerifiedAttributes", List.of("email")
+            ), "us-east-1");
+            UserPoolClient client = svc.createUserPoolClient(
+                    pool.getId(), "c", false, false, List.of(), List.of());
+
+            svc.signUp(client.getClientId(), username, password,
+                    Map.of("email", username));
+            svc.confirmSignUp(client.getClientId(), username, "123456");
+
+            CognitoUser user = svc.adminGetUser(pool.getId(), username);
+
+            assertEquals("CONFIRMED", user.getUserStatus());
+            assertEquals("true", user.getAttributes().get("email_verified"),
+                    "ConfirmSignUp should set email_verified=true when email is the auto-verified attribute");
+            assertFalse(user.getAttributes().containsKey("phone_number_verified"),
+                    "ConfirmSignUp should not proactively write phone_number_verified when the user has no phone");
+        }
+
+        @Test
+        void confirmSignUpSetsPhoneNumberVerifiedAndDoesNotWriteEmailVerifiedForPhoneOnlyUser() {
+            String poolName = "PhoneVerifyPool";
+            String username = "phone-user";
+            String password = "Passw0rd!";
+            String phoneNumber = "+491701234567";
+
+            UserPool pool = svc.createUserPool(Map.of(
+                    "PoolName", poolName,
+                    "AutoVerifiedAttributes", List.of("phone_number")
+            ), "us-east-1");
+            UserPoolClient client = svc.createUserPoolClient(
+                    pool.getId(), "c", false, false, List.of(), List.of());
+
+            svc.signUp(client.getClientId(), username, password,
+                    Map.of("phone_number", phoneNumber));
+            svc.confirmSignUp(client.getClientId(), username, "123456");
+
+            CognitoUser user = svc.adminGetUser(pool.getId(), username);
+
+            assertEquals("CONFIRMED", user.getUserStatus());
+            assertEquals("true", user.getAttributes().get("phone_number_verified"),
+                    "ConfirmSignUp should set phone_number_verified=true when phone_number is the auto-verified attribute");
+            assertFalse(user.getAttributes().containsKey("email_verified"),
+                    "ConfirmSignUp should not proactively write email_verified when the user has no email");
+        }
+
+        @Test
+        void confirmSignUpMarksOnlyPhoneNumberVerifiedWhenBothAutoVerifiedEvenWhenEmailListedFirst() {
+            String poolName = "BothVerifyEmailFirstPool";
+            String email = "dual-user@example.com";
+            String password = "Passw0rd!";
+            String phoneNumber = "+491701234567";
+
+            UserPool pool = svc.createUserPool(Map.of(
+                    "PoolName", poolName,
+                    "AutoVerifiedAttributes", List.of("email", "phone_number")
+            ), "us-east-1");
+            UserPoolClient client = svc.createUserPoolClient(
+                    pool.getId(), "c", false, false, List.of(), List.of());
+
+            svc.signUp(client.getClientId(), email, password,
+                    Map.of("email", email, "phone_number", phoneNumber));
+            svc.confirmSignUp(client.getClientId(), email, "123456");
+
+            CognitoUser user = svc.adminGetUser(pool.getId(), email);
+
+            assertEquals("CONFIRMED", user.getUserStatus());
+            assertEquals("true", user.getAttributes().get("phone_number_verified"),
+                    "ConfirmSignUp should set phone_number_verified=true when both contacts are auto-verified, regardless of list order");
+            assertFalse(user.getAttributes().containsKey("email_verified"),
+                    "ConfirmSignUp should not set email_verified when the code was delivered to phone, not email");
+        }
+
+        @Test
+        void confirmSignUpMarksOnlyPhoneNumberVerifiedWhenBothAutoVerifiedAndPhoneIsFirstDeliveryTarget() {
+            String poolName = "BothVerifyPhoneFirstPool";
+            String email = "dual-user2@example.com";
+            String password = "Passw0rd!";
+            String phoneNumber = "+491701234567";
+
+            UserPool pool = svc.createUserPool(Map.of(
+                    "PoolName", poolName,
+                    "AutoVerifiedAttributes", List.of("phone_number", "email")
+            ), "us-east-1");
+            UserPoolClient client = svc.createUserPoolClient(
+                    pool.getId(), "c", false, false, List.of(), List.of());
+
+            svc.signUp(client.getClientId(), email, password,
+                    Map.of("email", email, "phone_number", phoneNumber));
+            svc.confirmSignUp(client.getClientId(), email, "123456");
+
+            CognitoUser user = svc.adminGetUser(pool.getId(), email);
+
+            assertEquals("CONFIRMED", user.getUserStatus());
+            assertEquals("true", user.getAttributes().get("phone_number_verified"),
+                    "ConfirmSignUp should set phone_number_verified=true when phone_number is the first auto-verified delivery target");
+            assertFalse(user.getAttributes().containsKey("email_verified"),
+                    "ConfirmSignUp should not set email_verified when the code was delivered to phone, not email");
+        }
+
+        @Test
+        void confirmSignUpDoesNotSetVerifiedFlagsWhenPoolHasNoAutoVerifiedAttributes() {
+            String poolName = "NoAutoVerifyPool";
+            String username = "no-auto-verify@example.com";
+            String password = "Passw0rd!";
+
+            UserPool pool = svc.createUserPool(Map.of("PoolName", poolName), "us-east-1");
+            UserPoolClient client = svc.createUserPoolClient(
+                    pool.getId(), "c", false, false, List.of(), List.of());
+
+            svc.signUp(client.getClientId(), username, password,
+                    Map.of("email", username));
+            svc.confirmSignUp(client.getClientId(), username, "123456");
+
+            CognitoUser user = svc.adminGetUser(pool.getId(), username);
+
+            assertEquals("CONFIRMED", user.getUserStatus());
+            assertFalse(user.getAttributes().containsKey("email_verified"),
+                    "ConfirmSignUp should not set email_verified when the pool has no auto-verified attributes");
+            assertFalse(user.getAttributes().containsKey("phone_number_verified"),
+                    "ConfirmSignUp should not set phone_number_verified when the pool has no auto-verified attributes");
+        }
+
+        @Test
+        void confirmSignUpDoesNotSetVerifiedFlagsWhenVerificationServiceIsAbsent() {
+            String poolName = "NoVerificationServicePool";
+            String username = "no-verification@example.com";
+            String password = "Passw0rd!";
+
+            // The default service from setUp() has verificationCodeService == null.
+            UserPool pool = service.createUserPool(Map.of(
+                    "PoolName", poolName,
+                    "AutoVerifiedAttributes", List.of("email")
+            ), "us-east-1");
+            UserPoolClient client = service.createUserPoolClient(
+                    pool.getId(), "c", false, false, List.of(), List.of());
+
+            service.signUp(client.getClientId(), username, password,
+                    Map.of("email", username));
+
+            service.confirmSignUp(client.getClientId(), username);
+
+            CognitoUser user = service.adminGetUser(pool.getId(), username);
+
+            assertEquals("CONFIRMED", user.getUserStatus());
+            assertFalse(user.getAttributes().containsKey("email_verified"),
+                    "ConfirmSignUp should not set email_verified when no verification service is configured");
+            assertFalse(user.getAttributes().containsKey("phone_number_verified"),
+                    "ConfirmSignUp should not set phone_number_verified when no verification service is configured");
+        }
+
+        @Test
+        void confirmSignUpDoesNotSetVerifiedFlagsWhenDeliveryTargetIsNull() {
+            String poolName = "NullDeliveryTargetPool";
+            String username = "email-only@example.com";
+            String password = "Passw0rd!";
+
+            UserPool pool = svc.createUserPool(Map.of(
+                    "PoolName", poolName,
+                    "AutoVerifiedAttributes", List.of("email")
+            ), "us-east-1");
+            UserPoolClient client = svc.createUserPoolClient(
+                    pool.getId(), "c", false, false, List.of(), List.of());
+
+            svc.signUp(client.getClientId(), username, password,
+                    Map.of("email", username));
+            svc.updateUserPool(Map.of(
+                    "UserPoolId", pool.getId(),
+                    "AutoVerifiedAttributes", List.of("phone_number")
+            ), "us-east-1");
+
+            svc.confirmSignUp(client.getClientId(), username, "123456");
+
+            CognitoUser user = svc.adminGetUser(pool.getId(), username);
+
+            assertEquals("CONFIRMED", user.getUserStatus());
+            assertFalse(user.getAttributes().containsKey("email_verified"),
+                    "ConfirmSignUp should not set email_verified when the user has no matching attribute for the updated auto verified attribute");
+            assertFalse(user.getAttributes().containsKey("phone_number_verified"),
+                    "ConfirmSignUp should not set phone_number_verified when the delivery target is null");
+        }
+
+        private CognitoService createVerificationEnabledService() {
+            VerificationCodeService verificationCodeService = mock(VerificationCodeService.class);
+            CognitoMessageDispatcher messageDispatcher = mock(CognitoMessageDispatcher.class);
+            when(verificationCodeService.issue(any(), any(), eq(VerificationCode.Purpose.SIGNUP_CONFIRMATION), any()))
+                    .thenReturn("123456");
+            return new CognitoService(
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    "http://localhost:4566",
+                    regionResolver,
+                    null,
+                    acmService,
+                    verificationCodeService,
+                    messageDispatcher,
+                    mock(TlsCertificateManager.class)
+            );
+        }
+    }
+
+    // KenkoGeek review, PR #2018: VerifyUserAttribute must require an access token (not an
+    // ID token) carrying the aws.cognito.signin.user.admin scope.
+    @Nested
+    class VerifyUserAttributeAuthorization {
+
+        private CognitoService svc;
+        private VerificationCodeService verificationCodeService;
+        private UserPool pool;
+        private UserPoolClient client;
+        private CognitoUser user;
+
+        @BeforeEach
+        void setUpVerification() {
+            verificationCodeService = mock(VerificationCodeService.class);
+            CognitoMessageDispatcher messageDispatcher = mock(CognitoMessageDispatcher.class);
+            svc = new CognitoService(
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    new InMemoryStorage<>(),
+                    "http://localhost:4566",
+                    regionResolver,
+                    null,
+                    acmService,
+                    verificationCodeService,
+                    messageDispatcher,
+                    mock(TlsCertificateManager.class)
+            );
+            pool = svc.createUserPool(Map.of("PoolName", "ScopeTestPool"), "us-east-1");
+            client = svc.createUserPoolClient(pool.getId(), "c", false, false, List.of(), List.of());
+            svc.adminCreateUser(pool.getId(), "alice", Map.of("email", "alice@example.com"), "TempPass1!");
+            svc.adminSetUserPassword(pool.getId(), "alice", "Perm1234!", true);
+            user = svc.adminGetUser(pool.getId(), "alice");
+        }
+
+        @Test
+        void rejectsIdTokenEvenThoughItSharesTheSameClaims() {
+            // ID tokens never carry a scope claim (matching real Cognito), so this must be
+            // rejected on token_use alone, before the scope check ever runs.
+            String idToken = svc.generateSignedJwt(user, pool, "id", client, null);
+
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> svc.verifyUserAttribute(idToken, "email", "123456"));
+
+            assertEquals("NotAuthorizedException", ex.getErrorCode());
+            verify(verificationCodeService, never()).consume(any(), any(), any(), any());
+        }
+
+        @Test
+        void rejectsAccessTokenMissingTheRequiredScope() {
+            // Access tokens carry aws.cognito.signin.user.admin by default (generateSignedJwt),
+            // so building one that lacks it means explicitly suppressing the default and
+            // substituting something else, the way a Pre-Token-Generation V2 Lambda trigger would.
+            String accessToken = svc.generateSignedJwt(user, pool, "access", client,
+                    new CognitoService.ClaimsOverride(null, null, null, null,
+                            List.of("openid"), List.of("aws.cognito.signin.user.admin"),
+                            null, null, null));
+
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> svc.verifyUserAttribute(accessToken, "email", "123456"));
+
+            assertEquals("NotAuthorizedException", ex.getErrorCode());
+            verify(verificationCodeService, never()).consume(any(), any(), any(), any());
+        }
+
+        @Test
+        void acceptsDefaultAccessTokenSinceItAlreadyCarriesTheRequiredScope() {
+            String accessToken = svc.generateSignedJwt(user, pool, "access", client, null);
+
+            svc.verifyUserAttribute(accessToken, "email", "123456");
+
+            verify(verificationCodeService).consume(pool.getId(), user.getUsername(),
+                    VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION, "123456");
+        }
+    }
+
+    // ──────── UsernameAttributes=email: immutable UUID username + mutable email alias ────────
+
+    private UserPool createEmailAliasPool() {
+        Map<String, Object> req = new HashMap<>();
+        req.put("PoolName", "EmailAliasPool");
+        req.put("UsernameAttributes", List.of("email"));
+        return service.createUserPool(req, "us-east-1");
+    }
+
+    private static boolean isUuid(String value) {
+        try {
+            java.util.UUID.fromString(value);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    @Test
+    void emailAliasPoolMintsUuidUsernameEqualToSub() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser user = service.adminCreateUser(pool.getId(), "ew@gmail.com",
+                new HashMap<>(Map.of("email", "ew@gmail.com")), null);
+
+        assertTrue(isUuid(user.getUsername()), "canonical username must be a generated UUID");
+        assertEquals(user.getAttributes().get("sub"), user.getUsername(), "username must equal sub");
+        assertNotEquals("ew@gmail.com", user.getUsername());
+        assertEquals("ew@gmail.com", user.getAttributes().get("email"));
+    }
+
+    @Test
+    void emailAliasPoolResolvesByUuidAndByEmail() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser created = service.adminCreateUser(pool.getId(), "a@b.com",
+                new HashMap<>(Map.of("email", "a@b.com")), null);
+        String uuid = created.getUsername();
+
+        assertEquals(uuid, service.adminGetUser(pool.getId(), uuid).getUsername());
+        assertEquals(uuid, service.adminGetUser(pool.getId(), "a@b.com").getUsername());
+    }
+
+    @Test
+    void emailAliasPoolListUsersReturnsUuidUsername() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser created = service.adminCreateUser(pool.getId(), "list@b.com",
+                new HashMap<>(Map.of("email", "list@b.com")), null);
+
+        List<CognitoUser> users = service.listUsers(pool.getId(), null);
+        assertEquals(1, users.size());
+        assertEquals(created.getUsername(), users.get(0).getUsername());
+        assertTrue(isUuid(users.get(0).getUsername()));
+    }
+
+    @Test
+    void emailAliasPoolRejectsDuplicateEmail() {
+        UserPool pool = createEmailAliasPool();
+        service.adminCreateUser(pool.getId(), "dup@b.com",
+                new HashMap<>(Map.of("email", "dup@b.com")), null);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.adminCreateUser(pool.getId(), "dup@b.com",
+                        new HashMap<>(Map.of("email", "dup@b.com")), null));
+        assertEquals("UsernameExistsException", ex.getErrorCode());
+    }
+
+    @Test
+    void emailAliasPoolRejectsNonEmailUsername() {
+        UserPool pool = createEmailAliasPool();
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.adminCreateUser(pool.getId(), "not-an-email", new HashMap<>(), null));
         assertEquals("InvalidParameterException", ex.getErrorCode());
     }
 
@@ -2465,5 +3501,781 @@ class CognitoServiceTest {
         assertEquals(pool.getId(), described.get("UserPoolId"));
         assertEquals("BLOCK", ((Map<?, ?>) ((Map<?, ?>) described.get("CompromisedCredentialsRiskConfiguration"))
                 .get("Actions")).get("EventAction"));
+    }
+
+    @Test
+    void emailAliasPoolEmailChangeRebindsSignInAndKeepsSub() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser created = service.adminCreateUser(pool.getId(), "old@b.com",
+                new HashMap<>(Map.of("email", "old@b.com")), null);
+        String uuid = created.getUsername();
+        String sub = created.getAttributes().get("sub");
+
+        service.adminUpdateUserAttributes(pool.getId(), uuid, Map.of("email", "new@b.com"));
+
+        assertEquals(uuid, service.adminGetUser(pool.getId(), "new@b.com").getUsername());
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.adminGetUser(pool.getId(), "old@b.com"));
+        assertEquals("UserNotFoundException", ex.getErrorCode());
+
+        CognitoUser after = service.adminGetUser(pool.getId(), uuid);
+        assertEquals(uuid, after.getUsername());
+        assertEquals(sub, after.getAttributes().get("sub"));
+        assertEquals("new@b.com", after.getAttributes().get("email"));
+    }
+
+    @Test
+    void emailAliasPoolRejectsEmailChangeToTakenEmail() {
+        UserPool pool = createEmailAliasPool();
+        service.adminCreateUser(pool.getId(), "taken@b.com",
+                new HashMap<>(Map.of("email", "taken@b.com")), null);
+        CognitoUser second = service.adminCreateUser(pool.getId(), "mover@b.com",
+                new HashMap<>(Map.of("email", "mover@b.com")), null);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.adminUpdateUserAttributes(pool.getId(), second.getUsername(),
+                        Map.of("email", "taken@b.com")));
+        assertEquals("AliasExistsException", ex.getErrorCode());
+    }
+
+    @Test
+    void classicPoolKeepsLiteralUsername() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "ClassicPool"), "us-east-1");
+        CognitoUser user = service.adminCreateUser(pool.getId(), "bob",
+                new HashMap<>(Map.of("email", "bob@example.com")), null);
+
+        assertEquals("bob", user.getUsername());
+        assertNotEquals(user.getAttributes().get("sub"), user.getUsername());
+        assertEquals("bob", service.adminGetUser(pool.getId(), "bob").getUsername());
+    }
+
+    @Test
+    void emailAliasPoolIgnoresCallerSuppliedSub() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser user = service.adminCreateUser(pool.getId(), "hijack@b.com",
+                new HashMap<>(Map.of("email", "hijack@b.com", "sub", "attacker-controlled")), null);
+
+        assertNotEquals("attacker-controlled", user.getUsername());
+        assertNotEquals("attacker-controlled", user.getAttributes().get("sub"));
+        assertTrue(isUuid(user.getUsername()));
+        assertEquals(user.getUsername(), user.getAttributes().get("sub"));
+    }
+
+    @Test
+    void emailAliasPoolResendByUuidRefreshesUser() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser created = service.adminCreateUser(pool.getId(), "resend@example.com",
+                new HashMap<>(Map.of("email", "resend@example.com")), "Temp123!", null);
+        String uuid = created.getUsername();
+        assertEquals("FORCE_CHANGE_PASSWORD", created.getUserStatus());
+
+        // RESEND addressed by the minted canonical UUID (not a valid email alias) must
+        // refresh the invitation, not throw InvalidParameterException.
+        CognitoUser resentByUuid = service.adminCreateUser(pool.getId(), uuid,
+                new HashMap<>(), null, "RESEND");
+        assertEquals(uuid, resentByUuid.getUsername(), "RESEND by UUID must return the same user");
+
+        // RESEND addressed by the email alias must keep working too.
+        CognitoUser resentByAlias = service.adminCreateUser(pool.getId(), "resend@example.com",
+                new HashMap<>(), null, "RESEND");
+        assertEquals(uuid, resentByAlias.getUsername(), "RESEND by alias must return the same user");
+    }
+
+    @Test
+    void emailAliasPoolRejectsMalformedEmail() {
+        UserPool pool = createEmailAliasPool();
+        for (String bad : List.of("@", "a@", "notvalid@", "@domain.com")) {
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> service.adminCreateUser(pool.getId(), bad, new HashMap<>(), null),
+                    "malformed email must be rejected: " + bad);
+            assertEquals("InvalidParameterException", ex.getErrorCode(),
+                    "malformed email must be rejected: " + bad);
+        }
+    }
+
+    @Test
+    void emailAliasPoolMigrationIgnoresLambdaSuppliedSub() {
+        UserPool pool = createEmailAliasPool();
+        Map<String, String> lambdaAttributes = new HashMap<>(Map.of(
+                "email", "migrated@example.com", "sub", "attacker-controlled"));
+        service.adminCreateMigratedUser(pool.getId(), "migrated@example.com", "Passw0rd!",
+                lambdaAttributes, "CONFIRMED");
+
+        CognitoUser user = service.adminGetUser(pool.getId(), "migrated@example.com");
+        assertNotEquals("attacker-controlled", user.getUsername());
+        assertNotEquals("attacker-controlled", user.getAttributes().get("sub"));
+        assertTrue(isUuid(user.getUsername()), "migrated canonical username must be a generated UUID");
+        assertEquals(user.getUsername(), user.getAttributes().get("sub"), "username must equal sub");
+        assertEquals("migrated@example.com", user.getAttributes().get("email"));
+    }
+
+    @Test
+    void selfServiceRejectsForgedAccessTokenClaims() throws Exception {
+        UserPool pool = createPoolAndUser();
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "self-service-client", false, false, List.of(), List.of());
+        CognitoUser user = service.adminGetUser(pool.getId(), "alice");
+        String valid = service.generateSignedJwt(user, pool, "access", client, null, null);
+        UserPool otherPool = service.createUserPool(Map.of("PoolName", "OtherPool"), "us-east-1");
+        CognitoUser otherUser = service.adminCreateUser(otherPool.getId(), "alice", Map.of(), null);
+        UserPoolClient otherClient = service.createUserPoolClient(
+                otherPool.getId(), "other-client", false, false, List.of(), List.of());
+
+        String[] parts = valid.split("\\.");
+        String unsigned = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("{\"alg\":\"none\",\"typ\":\"JWT\"}".getBytes(StandardCharsets.UTF_8))
+                + "." + parts[1] + ".";
+        assertInvalidAccessToken(unsigned, "alg=none");
+        assertInvalidAccessToken(withClaim(valid, "username", "mallory"), "modified payload");
+        assertInvalidAccessToken(withClaim(valid, "iss", service.getIssuer(otherPool.getId())), "wrong user pool");
+        String wrongKey = withClaim(service.generateSignedJwt(otherUser, otherPool, "access", otherClient, null, null),
+                "iss", service.getIssuer(pool.getId()));
+        wrongKey = withClaim(wrongKey, "client_id", client.getClientId());
+        assertInvalidAccessToken(wrongKey, "wrong signing key");
+        assertInvalidAccessToken(withClaim(valid, "iss", "https://attacker.example/issuer"), "wrong issuer");
+        assertInvalidAccessToken(withClaim(valid, "client_id", "not-a-client"), "wrong client");
+        assertInvalidAccessToken(withClaim(valid, "token_use", "id"), "wrong token_use");
+        assertInvalidAccessToken(withClaim(valid, "exp", 1), "expired token");
+
+        Map<String, Object> claims = MAPPER.readValue(jwtPayload(valid), new TypeReference<>() {});
+        String jti = (String) claims.get("jti");
+        long now = System.currentTimeMillis();
+        revokedTokenStore.put("revoked:" + pool.getId() + ":" + jti,
+                new RevokedTokenInfo(jti, "access", user.getUsername(), pool.getId(), now, now / 1000L + 3600));
+        assertInvalidAccessToken(valid, "revoked jti");
+    }
+
+    @Test
+    void everySelfServiceEntryPointRejectsInvalidAccessToken() {
+        UserPool pool = createPoolAndUser();
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "self-service-client", false, false, List.of(), List.of());
+        CognitoUser user = service.adminGetUser(pool.getId(), "alice");
+        String signed = service.generateSignedJwt(user, pool, "access", client, null, null);
+        String[] parts = signed.split("\\.");
+        String invalid = parts[0] + "." + parts[1] + ".tampered";
+
+        assertThrows(AwsException.class, () -> service.getUser(invalid));
+        assertThrows(AwsException.class, () -> service.changePassword(invalid, "Perm1234!", "NewPass123!"));
+        assertThrows(AwsException.class, () -> service.updateUserAttributes(invalid, Map.of("email", "x@example.com")));
+        assertThrows(AwsException.class, () -> service.deleteUserAttributes(invalid, List.of("email")));
+        assertThrows(AwsException.class, () -> service.getUserAttributeVerificationCode(invalid, "email"));
+        assertThrows(AwsException.class, () -> service.globalSignOut(invalid));
+        assertThrows(AwsException.class, () -> service.setUserMFAPreference(invalid, true, false));
+    }
+
+    private void assertInvalidAccessToken(String token, String reason) {
+        AwsException failure = assertThrows(AwsException.class, () -> service.getUser(token), reason);
+        assertEquals("NotAuthorizedException", failure.getErrorCode(), reason);
+    }
+
+    private static String withClaim(String token, String name, Object value) throws Exception {
+        String[] parts = token.split("\\.");
+        Map<String, Object> claims = MAPPER.readValue(jwtPayload(token), new TypeReference<>() {});
+        claims.put(name, value);
+        String payload = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(MAPPER.writeValueAsBytes(claims));
+        return parts[0] + "." + payload + "." + parts[2];
+    }
+
+    @Test
+    void phoneAliasPoolTokenDoesNotLeakUuidAsEmailClaim() {
+        UserPool pool = service.createUserPool(
+                Map.of("PoolName", "PhonePool", "UsernameAttributes", List.of("phone_number")),
+                "us-east-1");
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "c", false, false, List.of(), List.of());
+        CognitoUser user = service.adminCreateUser(pool.getId(), "+15551234567",
+                new HashMap<>(Map.of("phone_number", "+15551234567")), null);
+
+        String idToken = service.generateSignedJwt(user, pool, "id", client, null, null);
+        String segment = idToken.split("\\.")[1];
+        int pad = (4 - segment.length() % 4) % 4;
+        segment += "=".repeat(pad);
+        String payload = new String(Base64.getUrlDecoder().decode(segment), StandardCharsets.UTF_8);
+
+        assertTrue(payload.contains("\"sub\":\"" + user.getUsername() + "\""));
+        assertFalse(payload.contains("\"email\""),
+                "no email claim must be emitted for a user without an email attribute: " + payload);
+    }
+
+    @Test
+    void accessAndIdTokensSplitClaimsLikeAws() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "ClaimsPool"), "us-east-1");
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "c", false, false, List.of(), List.of());
+        CognitoUser user = service.adminCreateUser(pool.getId(), "claims@example.com",
+                new HashMap<>(Map.of("email", "claims@example.com", "email_verified", "true")), null);
+
+        String access = jwtPayload(service.generateSignedJwt(user, pool, "access", client, null, null));
+        String id = jwtPayload(service.generateSignedJwt(user, pool, "id", client, null, null));
+
+        // Access token: `username` + reserved scope; no user attributes, no cognito:username.
+        assertTrue(access.contains("\"username\":\"" + user.getUsername() + "\""));
+        assertTrue(access.contains("\"scope\":\"aws.cognito.signin.user.admin\""));
+        assertFalse(access.contains("\"email\""), "access token must not carry email: " + access);
+        assertFalse(access.contains("\"cognito:username\""),
+                "access token must not carry cognito:username: " + access);
+
+        // ID token: `cognito:username` + email; no bare `username`.
+        assertTrue(id.contains("\"cognito:username\":\"" + user.getUsername() + "\""));
+        assertTrue(id.contains("\"email\":\"claims@example.com\""));
+        assertFalse(id.contains("\"username\""), "id token must not carry a bare username claim: " + id);
+    }
+
+    @Test
+    void emailAliasPoolVerifiedDuplicateThrowsAliasExists() {
+        UserPool pool = createEmailAliasPool();
+        service.adminCreateUser(pool.getId(), "dupe@b.com",
+                new HashMap<>(Map.of("email", "dupe@b.com", "email_verified", "true")), null);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.adminCreateUser(pool.getId(), "dupe@b.com",
+                        new HashMap<>(Map.of("email", "dupe@b.com", "email_verified", "true")), null));
+        assertEquals("AliasExistsException", ex.getErrorCode());
+    }
+
+    @Test
+    void emailAliasPoolAliasExistsUsesExistingVerificationNotIncoming() {
+        UserPool pool = createEmailAliasPool();
+        // Existing owner holds a *verified* alias.
+        service.adminCreateUser(pool.getId(), "owner@b.com",
+                new HashMap<>(Map.of("email", "owner@b.com", "email_verified", "true")), null);
+
+        // The second create omits email_verified from its own payload. The exception
+        // type must be driven by the existing owner's verified alias -> AliasExistsException.
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.adminCreateUser(pool.getId(), "owner@b.com",
+                        new HashMap<>(Map.of("email", "owner@b.com")), null));
+        assertEquals("AliasExistsException", ex.getErrorCode());
+    }
+
+    @Test
+    void emailAliasPoolIncomingVerifiedFlagCannotForceAliasExists() {
+        UserPool pool = createEmailAliasPool();
+        // Existing owner's alias is *unverified*, so the alias is not reserved.
+        service.adminCreateUser(pool.getId(), "unv@b.com",
+                new HashMap<>(Map.of("email", "unv@b.com")), null);
+
+        // A caller-supplied email_verified=true must not upgrade the decision:
+        // the existing owner is unverified -> UsernameExistsException, not AliasExistsException.
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.adminCreateUser(pool.getId(), "unv@b.com",
+                        new HashMap<>(Map.of("email", "unv@b.com", "email_verified", "true")), null));
+        assertEquals("UsernameExistsException", ex.getErrorCode());
+    }
+
+    @Test
+    void emailAliasPoolForceAliasCreationReclaimsWithoutIncomingVerifiedFlag() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser first = service.adminCreateUser(pool.getId(), "reclaim@b.com",
+                new HashMap<>(Map.of("email", "reclaim@b.com", "email_verified", "true")), null);
+
+        // ForceAliasCreation reclaim keys off the existing owner's verified alias and
+        // must not require the caller to re-send email_verified in the new payload.
+        CognitoUser second = service.adminCreateUser(pool.getId(), "reclaim@b.com",
+                new HashMap<>(Map.of("email", "reclaim@b.com")), null, null, true);
+
+        assertNotEquals(first.getUsername(), second.getUsername());
+        assertEquals(second.getUsername(), service.adminGetUser(pool.getId(), "reclaim@b.com").getUsername());
+        assertNull(service.adminGetUser(pool.getId(), first.getUsername()).getAttributes().get("email"));
+    }
+
+    @Test
+    void emailAliasPoolForceAliasCreationMigratesVerifiedAlias() {
+        UserPool pool = createEmailAliasPool();
+        CognitoUser first = service.adminCreateUser(pool.getId(), "move@b.com",
+                new HashMap<>(Map.of("email", "move@b.com", "email_verified", "true")), null);
+
+        CognitoUser second = service.adminCreateUser(pool.getId(), "move@b.com",
+                new HashMap<>(Map.of("email", "move@b.com", "email_verified", "true")), null, null, true);
+
+        assertNotEquals(first.getUsername(), second.getUsername());
+        // The alias now resolves to the new user; the previous user lost it.
+        assertEquals(second.getUsername(), service.adminGetUser(pool.getId(), "move@b.com").getUsername());
+        assertNull(service.adminGetUser(pool.getId(), first.getUsername()).getAttributes().get("email"));
+    }
+
+    @Test
+    void idTokenFiltersAttributesByReadAttributes() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "ReadAttrPool"), "us-east-1");
+        UserPoolClient client = service.createUserPoolClient(
+                pool.getId(), "c", false, false, List.of(), List.of());
+        client.setReadAttributes(List.of("email")); // readable: email only, not name
+        CognitoUser user = service.adminCreateUser(pool.getId(), "reader@example.com",
+                new HashMap<>(Map.of("email", "reader@example.com", "name", "Ada Lovelace")), null);
+
+        String id = jwtPayload(service.generateSignedJwt(user, pool, "id", client, null, null));
+        assertTrue(id.contains("\"email\":\"reader@example.com\""), "readable attribute present: " + id);
+        assertFalse(id.contains("\"name\""), "non-readable attribute must be filtered out: " + id);
+    }
+    @Test
+    void adminSetUserMFAPreferenceUpdatesEmailMfaSettings() {
+        UserPool pool = createPoolAndUser();
+
+        service.adminSetUserMFAPreference(pool.getId(), "alice", true, true);
+
+        CognitoUser user = service.adminGetUser(pool.getId(), "alice");
+
+        assertNotNull(user.getEmailMfaSettings());
+        assertTrue(user.getEmailMfaSettings().isEnabled());
+        assertTrue(user.getEmailMfaSettings().isPreferredMfa());
+    }
+
+    @Test
+    void adminSetUserMFAPreferenceDoesNotMutateOnInvalidUpdate() {
+        UserPool pool = createPoolAndUser();
+
+        service.adminSetUserMFAPreference(pool.getId(), "alice", true, true);
+
+        assertThrows(AwsException.class, () ->
+                service.adminSetUserMFAPreference(pool.getId(), "alice", false, true));
+
+        CognitoUser user = service.adminGetUser(pool.getId(), "alice");
+
+        assertTrue(user.getEmailMfaSettings().isEnabled());
+        assertTrue(user.getEmailMfaSettings().isPreferredMfa());
+    }
+    @Test
+    void adminSetUserMFAPreferenceDisablingEmailMfaClearsPreferredMfa() {
+        UserPool pool = createPoolAndUser();
+
+        service.adminSetUserMFAPreference(pool.getId(), "alice", true, true);
+
+        service.adminSetUserMFAPreference(pool.getId(), "alice", false, null);
+
+        CognitoUser user = service.adminGetUser(pool.getId(), "alice");
+
+        assertFalse(user.getEmailMfaSettings().isEnabled());
+        assertFalse(user.getEmailMfaSettings().isPreferredMfa());
+   }
+    // ──────────────────────────── User Pool Domains ────────────────────────────
+
+    private static final String CERTIFICATE_ARN =
+            "arn:aws:acm:us-east-1:000000000000:certificate/11111111-2222-3333-4444-555555555555";
+    private static final String RENEWED_CERTIFICATE_ARN =
+            "arn:aws:acm:us-east-1:000000000000:certificate/99999999-2222-3333-4444-555555555555";
+
+    private UserPool createPoolWithCustomDomain(String domain) {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        service.createUserPoolDomain(domain, pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), 1);
+        return pool;
+    }
+
+    private static final String AWS_CERTIFICATE_MESSAGE = "The specified SSL certificate doesn't exist, "
+            + "isn't in us-east-1 region, isn't valid, or doesn't include a valid certificate chain.";
+
+    private static Certificate issuedCertificate(String arn) {
+        Certificate certificate = new Certificate();
+        certificate.setArn(arn);
+        certificate.setStatus(CertificateStatus.ISSUED);
+        return certificate;
+    }
+
+    /** The ARN a domain registers on its certificate: the CloudFront distribution serving it. */
+    private String consumerArn(String domain) {
+        String distribution = service.describeUserPoolDomain(domain).getCloudFrontDistribution();
+        return "arn:aws:cloudfront::000000000000:distribution/"
+                + distribution.substring(0, distribution.indexOf('.')).toUpperCase(Locale.ROOT);
+    }
+
+    @Test
+    void createUserPoolDomainRejectsACertificateAcmDoesNotKnow() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        when(acmService.describeCertificate(CERTIFICATE_ARN, "us-east-1")).thenThrow(
+                new AwsException("ResourceNotFoundException", "The certificate " + CERTIFICATE_ARN + " does not exist.", 404));
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.createUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(AWS_CERTIFICATE_MESSAGE, failure.getMessage());
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain("auth.example.com"));
+        verify(acmService, never()).addInUseBy(any(), any(), any());
+    }
+
+    @Test
+    void createUserPoolDomainRejectsACertificateOutsideUsEast1() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        String elsewhere = "arn:aws:acm:eu-west-1:000000000000:certificate/11111111-2222-3333-4444-555555555555";
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.createUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", elsewhere), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(AWS_CERTIFICATE_MESSAGE, failure.getMessage());
+        verify(acmService, never()).describeCertificate(any(), any());
+    }
+
+    @Test
+    void createUserPoolDomainRejectsACertificateThatIsNotIssued() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        Certificate pending = issuedCertificate(CERTIFICATE_ARN);
+        pending.setStatus(CertificateStatus.PENDING_VALIDATION);
+        when(acmService.describeCertificate(CERTIFICATE_ARN, "us-east-1")).thenReturn(pending);
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.createUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(AWS_CERTIFICATE_MESSAGE, failure.getMessage());
+    }
+
+    @Test
+    void createUserPoolDomainRejectsAnAcmArnThatIsNotACertificate() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        String notACertificate = "arn:aws:acm:us-east-1:000000000000:certificate-authority/11111111-2222-3333-4444-555555555555";
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.createUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", notACertificate), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(AWS_CERTIFICATE_MESSAGE, failure.getMessage());
+        verify(acmService, never()).describeCertificate(any(), any());
+    }
+
+    @Test
+    void createUserPoolDomainRejectsAMalformedCertificateArn() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.createUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", "not-an-arn"), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        verify(acmService, never()).describeCertificate(any(), any());
+    }
+
+    @Test
+    void createUserPoolDomainStoresNothingWhenTheCertificateVanishesBeforeRegistration() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        doThrow(new AwsException("ResourceNotFoundException", "gone", 404))
+                .when(acmService).addInUseBy(eq(CERTIFICATE_ARN), any(), eq("us-east-1"));
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.createUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(AWS_CERTIFICATE_MESSAGE, failure.getMessage());
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain("auth.example.com"));
+    }
+
+    @Test
+    void updateUserPoolDomainKeepsTheCurrentCertificateWhenTheNewOneVanishesBeforeRegistration() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+        doThrow(new AwsException("ResourceNotFoundException", "gone", 404))
+                .when(acmService).addInUseBy(eq(RENEWED_CERTIFICATE_ARN), any(), eq("us-east-1"));
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.updateUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        UserPoolDomain stored = service.describeUserPoolDomain("auth.example.com");
+        assertEquals(CERTIFICATE_ARN, stored.getCertificateArn());
+        assertEquals(1, stored.getManagedLoginVersion());
+        verify(acmService, never()).removeInUseBy(any(), any(), any());
+    }
+
+    @Test
+    void createUserPoolDomainRegistersTheDomainAsACertificateConsumer() {
+        createPoolWithCustomDomain("auth.example.com");
+
+        verify(acmService).addInUseBy(CERTIFICATE_ARN, consumerArn("auth.example.com"), "us-east-1");
+    }
+
+    @Test
+    void updateUserPoolDomainMovesTheRegistrationToTheNewCertificate() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+        String consumer = consumerArn("auth.example.com");
+
+        service.updateUserPoolDomain("auth.example.com", pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), null);
+
+        verify(acmService).removeInUseBy(CERTIFICATE_ARN, consumer, "us-east-1");
+        verify(acmService).addInUseBy(RENEWED_CERTIFICATE_ARN, consumer, "us-east-1");
+    }
+
+    @Test
+    void updateUserPoolDomainWithTheSameCertificateKeepsTheRegistration() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+
+        service.updateUserPoolDomain("auth.example.com", pool.getId(),
+                Map.of("CertificateArn", CERTIFICATE_ARN), 2);
+
+        verify(acmService, never()).removeInUseBy(any(), any(), any());
+        verify(acmService, times(1)).addInUseBy(any(), any(), any());
+    }
+
+    @Test
+    void updateUserPoolDomainRejectsAnUnknownCertificateAndKeepsTheCurrentOne() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+        when(acmService.describeCertificate(RENEWED_CERTIFICATE_ARN, "us-east-1")).thenThrow(
+                new AwsException("ResourceNotFoundException", "does not exist", 404));
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.updateUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(CERTIFICATE_ARN, service.describeUserPoolDomain("auth.example.com").getCertificateArn());
+        verify(acmService, never()).removeInUseBy(any(), any(), any());
+    }
+
+    @Test
+    void findCustomDomainMatchesOnlyCustomDomains() {
+        String poolId = createPoolWithCustomDomain("auth.teos.localhost.floci.io").getId();
+        service.createUserPoolDomain("teos-prefix", poolId, null, null);
+
+        assertEquals(poolId, service.findCustomDomain("auth.teos.localhost.floci.io").orElseThrow().getUserPoolId());
+        assertEquals(poolId, service.findCustomDomain("AUTH.teos.localhost.floci.io").orElseThrow().getUserPoolId());
+        assertTrue(service.findCustomDomain("teos-prefix").isEmpty());
+        assertTrue(service.findCustomDomain("nobody.localhost.floci.io").isEmpty());
+        assertTrue(service.findCustomDomain(null).isEmpty());
+        assertEquals("auth.teos.localhost.floci.io",
+                service.findCustomDomainForPool(poolId).orElseThrow().getDomain());
+    }
+
+    /** The uniqueness check and the write are one step, so a burst of creates leaves one owner. */
+    @Test
+    void concurrentCreatesOfTheSameDomainLetExactlyOneWin() throws Exception {
+        int threads = 16;
+        List<String> pools = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            pools.add(service.createUserPool(Map.of("PoolName", "race-" + i), "us-east-1").getId());
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Boolean>> outcomes = new ArrayList<>();
+            for (String poolId : pools) {
+                outcomes.add(executor.submit(() -> {
+                    start.await();
+                    try {
+                        service.createUserPoolDomain("auth.race.localhost.floci.io", poolId,
+                                Map.of("CertificateArn", CERTIFICATE_ARN), null);
+                        return true;
+                    } catch (AwsException e) {
+                        assertEquals("InvalidParameterException", e.getErrorCode());
+                        return false;
+                    }
+                }));
+            }
+            start.countDown();
+            int winners = 0;
+            for (Future<Boolean> outcome : outcomes) {
+                if (outcome.get(10, TimeUnit.SECONDS)) {
+                    winners++;
+                }
+            }
+            assertEquals(1, winners);
+            verify(acmService, times(1)).addInUseBy(eq(CERTIFICATE_ARN), any(), eq("us-east-1"));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /** Two accounts holding the same name can only come from data persisted before names were global. */
+    @Test
+    void ambiguousCustomDomainIsNotRouted() {
+        InMemoryStorage<String, UserPoolDomain> domains = new InMemoryStorage<>();
+        domains.put("111111111111/auth.dup.localhost.floci.io", customDomain("auth.dup.localhost.floci.io", "us-east-1_a"));
+        domains.put("222222222222/auth.dup.localhost.floci.io", customDomain("auth.dup.localhost.floci.io", "us-east-1_b"));
+        CognitoService ambiguous = new CognitoService(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), domains, new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), "http://localhost:4566", regionResolver, null,
+                acmService, null, null, mock(TlsCertificateManager.class));
+
+        assertTrue(ambiguous.findCustomDomain("auth.dup.localhost.floci.io").isEmpty());
+    }
+
+    private static UserPoolDomain customDomain(String name, String poolId) {
+        UserPoolDomain domain = new UserPoolDomain();
+        domain.setDomain(name);
+        domain.setUserPoolId(poolId);
+        domain.setCertificateArn(CERTIFICATE_ARN);
+        return domain;
+    }
+
+    @Test
+    void findCustomDomainForPoolIgnoresPrefixDomainsAndOtherPools() {
+        String prefixOnly = service.createUserPool(Map.of("PoolName", "prefix-only"), "us-east-1").getId();
+        service.createUserPoolDomain("prefix-only", prefixOnly, null, null);
+        createPoolWithCustomDomain("auth.other.localhost.floci.io");
+
+        assertTrue(service.findCustomDomainForPool(prefixOnly).isEmpty());
+    }
+
+    @Test
+    void clientCredentialsTokenIsRefusedWhenTheClientBelongsToAnotherPool() {
+        String poolA = service.createUserPool(Map.of("PoolName", "pool-a"), "us-east-1").getId();
+        String poolB = service.createUserPool(Map.of("PoolName", "pool-b"), "us-east-1").getId();
+        ResourceServerScope read = new ResourceServerScope();
+        read.setScopeName("read");
+        service.createResourceServer(poolB, "notes", "Notes", List.of(read));
+        UserPoolClient clientB = service.createUserPoolClient(poolB, "b", true, true,
+                List.of("client_credentials"), List.of("notes/read"));
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.issueClientCredentialsToken(
+                clientB.getClientId(), clientB.getClientSecret(), null, poolA));
+        assertEquals("ResourceNotFoundException", failure.getErrorCode());
+
+        assertNotNull(service.issueClientCredentialsToken(clientB.getClientId(), clientB.getClientSecret(), null, poolB)
+                .get("access_token"));
+        assertNotNull(service.issueClientCredentialsToken(clientB.getClientId(), clientB.getClientSecret(), null, null)
+                .get("access_token"));
+    }
+
+    /** The pool check precedes the secret check, so a wrong domain never reveals whether a secret is right. */
+    @Test
+    void poolScopeIsCheckedBeforeTheClientSecret() {
+        String poolA = service.createUserPool(Map.of("PoolName", "pool-a"), "us-east-1").getId();
+        String poolB = service.createUserPool(Map.of("PoolName", "pool-b"), "us-east-1").getId();
+        UserPoolClient clientB = service.createUserPoolClient(poolB, "b", true, true,
+                List.of("client_credentials"), List.of("openid"));
+
+        AwsException wrongPool = assertThrows(AwsException.class, () -> service.issueClientCredentialsToken(
+                clientB.getClientId(), "wrong-secret", null, poolA));
+        assertEquals("ResourceNotFoundException", wrongPool.getErrorCode());
+
+        AwsException rightPool = assertThrows(AwsException.class, () -> service.issueClientCredentialsToken(
+                clientB.getClientId(), "wrong-secret", null, poolB));
+        assertNotEquals("ResourceNotFoundException", rightPool.getErrorCode());
+    }
+
+    @Test
+    void endpointsUseTheCustomDomainWhenThePoolHasOne() {
+        String withDomain = createPoolWithCustomDomain("auth2.teos.localhost.floci.io").getId();
+        String without = service.createUserPool(Map.of("PoolName", "without-domain"), "us-east-1").getId();
+        service.createUserPoolDomain("prefix-only", without, null, null);
+
+        assertEquals("https://auth2.teos.localhost.floci.io/oauth2/token", service.getTokenEndpoint(withDomain));
+        assertEquals("https://auth2.teos.localhost.floci.io/oauth2/userInfo", service.getUserInfoEndpoint(withDomain));
+        assertEquals("http://localhost:4566/cognito-idp/oauth2/token", service.getTokenEndpoint(without));
+        assertEquals("http://localhost:4566/cognito-idp/oauth2/userInfo", service.getUserInfoEndpoint(without));
+    }
+
+    @Test
+    void deleteUserPoolDomainReleasesTheCertificate() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+        String consumer = consumerArn("auth.example.com");
+
+        service.deleteUserPoolDomain("auth.example.com", pool.getId());
+
+        verify(acmService).removeInUseBy(CERTIFICATE_ARN, consumer, "us-east-1");
+    }
+
+    @Test
+    void updateUserPoolDomainReplacesTheCertificateAndKeepsTheCloudFrontDistribution() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+        String cloudFront = service.describeUserPoolDomain("auth.example.com").getCloudFrontDistribution();
+
+        UserPoolDomain updated = service.updateUserPoolDomain("auth.example.com", pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2);
+
+        assertEquals(RENEWED_CERTIFICATE_ARN, updated.getCertificateArn());
+        assertEquals(cloudFront, updated.getCloudFrontDistribution());
+        assertEquals(2, updated.getManagedLoginVersion());
+        UserPoolDomain stored = service.describeUserPoolDomain("auth.example.com");
+        assertEquals(RENEWED_CERTIFICATE_ARN, stored.getCertificateArn());
+        assertEquals(2, stored.getManagedLoginVersion());
+    }
+
+    @Test
+    void updateUserPoolDomainLeavesOmittedSettingsUnchanged() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+
+        service.updateUserPoolDomain("auth.example.com", pool.getId(), null, null);
+
+        UserPoolDomain stored = service.describeUserPoolDomain("auth.example.com");
+        assertEquals(CERTIFICATE_ARN, stored.getCertificateArn());
+        assertEquals(1, stored.getManagedLoginVersion());
+    }
+
+    @Test
+    void updateUserPoolDomainSetsTheManagedLoginVersionOfAPrefixDomain() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        service.createUserPoolDomain("my-prefix", pool.getId(), null, null);
+
+        UserPoolDomain updated = service.updateUserPoolDomain("my-prefix", pool.getId(), null, 2);
+
+        assertEquals(2, updated.getManagedLoginVersion());
+        assertFalse(updated.isCustomDomain());
+        assertNull(updated.getCloudFrontDistribution());
+    }
+
+    @Test
+    void updateUserPoolDomainRejectsACustomDomainConfigOnAPrefixDomain() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+        service.createUserPoolDomain("my-prefix", pool.getId(), null, null);
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.updateUserPoolDomain(
+                "my-prefix", pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), null));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertFalse(service.describeUserPoolDomain("my-prefix").isCustomDomain());
+    }
+
+    @Test
+    void updateUserPoolDomainRequiresACertificateArnInTheCustomDomainConfig() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.updateUserPoolDomain(
+                "auth.example.com", pool.getId(), Map.of(), 2));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(CERTIFICATE_ARN, service.describeUserPoolDomain("auth.example.com").getCertificateArn());
+    }
+
+    @Test
+    void updateUserPoolDomainOfAnotherPoolsDomainIsNotFound() {
+        createPoolWithCustomDomain("auth.example.com");
+        UserPool otherPool = service.createUserPool(Map.of("PoolName", "OtherPool"), "us-east-1");
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.updateUserPoolDomain(
+                "auth.example.com", otherPool.getId(), Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), null));
+
+        assertEquals("ResourceNotFoundException", failure.getErrorCode());
+        assertEquals(CERTIFICATE_ARN, service.describeUserPoolDomain("auth.example.com").getCertificateArn());
+    }
+
+    @Test
+    void updateUserPoolDomainOfAnUnknownDomainIsNotFound() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.updateUserPoolDomain(
+                "nobody.example.com", pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), null));
+
+        assertEquals("ResourceNotFoundException", failure.getErrorCode());
+    }
+
+    @Test
+    void updateUserPoolDomainReplacesTheSecurityPolicyAndKeepsItWhenOmitted() {
+        UserPool pool = createPoolWithCustomDomain("auth.example.com");
+        assertEquals("TLS_V1_2_2021", service.describeUserPoolDomain("auth.example.com").getSecurityPolicy());
+
+        service.updateUserPoolDomain("auth.example.com", pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN, "SecurityPolicy", "TLS_V1_2_2019"), null);
+        assertEquals("TLS_V1_2_2019", service.describeUserPoolDomain("auth.example.com").getSecurityPolicy());
+
+        service.updateUserPoolDomain("auth.example.com", pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), null);
+
+        UserPoolDomain stored = service.describeUserPoolDomain("auth.example.com");
+        assertEquals("TLS_V1_2_2019", stored.getSecurityPolicy());
+        assertEquals(CERTIFICATE_ARN, stored.getCertificateArn());
+    }
+
+    @Test
+    void updateUserPoolDomainOfAnUnknownPoolIsNotFound() {
+        createPoolWithCustomDomain("auth.example.com");
+
+        AwsException failure = assertThrows(AwsException.class, () -> service.updateUserPoolDomain(
+                "auth.example.com", "us-east-1_missing", Map.of("CertificateArn", CERTIFICATE_ARN), null));
+
+        assertEquals("ResourceNotFoundException", failure.getErrorCode());
+    }
+
+    private static String jwtPayload(String token) {
+        String segment = token.split("\\.")[1];
+        int pad = (4 - segment.length() % 4) % 4;
+        segment += "=".repeat(pad);
+        return new String(Base64.getUrlDecoder().decode(segment), StandardCharsets.UTF_8);
     }
 }

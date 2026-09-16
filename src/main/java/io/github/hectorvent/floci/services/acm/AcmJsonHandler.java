@@ -60,6 +60,17 @@ public class AcmJsonHandler {
         };
     }
 
+    private Response handleResendValidationEmail(JsonNode request, String region) {
+        String certificateArn = request.path("CertificateArn").asText(null);
+        String domain = request.path("Domain").asText(null);
+        String validationDomain = request.path("ValidationDomain").asText(null);
+        if (certificateArn == null || certificateArn.isBlank() || domain == null || domain.isBlank() || validationDomain == null || validationDomain.isBlank()) {
+            return Response.status(400).entity(new AwsErrorResponse("ValidationException", "Required parameter is missing")).build();
+        }
+        service.resendValidationEmail(certificateArn, domain, validationDomain, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
     private Response handleRequestCertificate(JsonNode request, String region) {
         String domainName = request.path("DomainName").asText(null);
         if (domainName == null || domainName.isBlank()) {
@@ -75,9 +86,10 @@ public class AcmJsonHandler {
         String certAuthorityArn = request.path("CertificateAuthorityArn").asText(null);
         CertificateOptions options = parseOptions(request.path("Options"));
         Map<String, String> tags = parseTags(request.path("Tags"));
+        Map<String, String> validationDomains = parseDomainValidationOptions(request.path("DomainValidationOptions"));
 
         Certificate cert = service.requestCertificate(domainName, sans, validationMethod,
-            idempotencyToken, keyAlgorithm, certAuthorityArn, options, tags, region);
+            idempotencyToken, keyAlgorithm, certAuthorityArn, options, tags, validationDomains, region);
 
         ObjectNode response = objectMapper.createObjectNode();
         response.put("CertificateArn", cert.getArn());
@@ -232,13 +244,6 @@ public class AcmJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleUpdateCertificateOptions(JsonNode request, String region) {
-        String certificateArn = request.path("CertificateArn").asText();
-        CertificateOptions options = parseOptions(request.path("Options"));
-        service.updateCertificateOptions(certificateArn, options, region);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
     private Response handleSearchCertificates(JsonNode request, String region) {
         int maxItems = request.path("MaxResults").asInt(100);
         String nextToken = request.path("NextToken").asText(null);
@@ -260,27 +265,81 @@ public class AcmJsonHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleRevokeCertificate(JsonNode request, String region) {
+        String certificateArn = request.path("CertificateArn").asText(null);
+        if (certificateArn == null || certificateArn.isBlank()) {
+            return Response.status(400)
+                .entity(new AwsErrorResponse("ValidationException", "CertificateArn is required"))
+                .build();
+        }
+
+        String reasonStr = request.path("RevocationReason").asText(null);
+        if (reasonStr == null || reasonStr.isBlank()) {
+            return Response.status(400)
+                .entity(new AwsErrorResponse("ValidationException", "RevocationReason is required"))
+                .build();
+        }
+
+        RevocationReason reason;
+        try {
+            reason = RevocationReason.valueOf(reasonStr);
+        } catch (IllegalArgumentException e) {
+            return Response.status(400)
+                .entity(new AwsErrorResponse("ValidationException", "Invalid RevocationReason: " + reasonStr))
+                .build();
+        }
+
+        Certificate cert = service.revokeCertificate(certificateArn, reason, region);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("CertificateArn", cert.getArn());
+        return Response.ok(response).build();
+    }
+
     private Response handleRenewCertificate(JsonNode request, String region) {
-        String certificateArn = request.path("CertificateArn").asText();
+        String certificateArn = request.path("CertificateArn").asText(null);
+        if (certificateArn == null || certificateArn.isBlank()) {
+            return Response.status(400)
+                .entity(new AwsErrorResponse("ValidationException", "CertificateArn is required"))
+                .build();
+        }
         service.renewCertificate(certificateArn, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleResendValidationEmail(JsonNode request, String region) {
-        String certificateArn = request.path("CertificateArn").asText();
-        String domain = request.path("Domain").asText(null);
-        String validationDomain = request.path("ValidationDomain").asText(null);
-        service.resendValidationEmail(certificateArn, domain, validationDomain, region);
+    private Response handleUpdateCertificateOptions(JsonNode request, String region) {
+        String certificateArn = request.path("CertificateArn").asText(null);
+        if (certificateArn == null || certificateArn.isBlank()) {
+            return Response.status(400)
+                .entity(new AwsErrorResponse("ValidationException", "CertificateArn is required"))
+                .build();
+        }
+        JsonNode optionsNode = request.path("Options");
+        if (!optionsNode.isObject()) {
+            return Response.status(400)
+                .entity(new AwsErrorResponse("ValidationException", "Options is required"))
+                .build();
+        }
+        service.updateCertificateOptions(certificateArn, parseUpdateOptions(optionsNode), region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleRevokeCertificate(JsonNode request, String region) {
-        String certificateArn = request.path("CertificateArn").asText();
-        String reason = request.path("RevocationReason").asText(null);
-        Certificate cert = service.revokeCertificate(certificateArn, reason, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("CertificateArn", cert.getArn());
-        return Response.ok(response).build();
+    private CertificateOptions parseUpdateOptions(JsonNode optionsNode) {
+        return new CertificateOptions(
+            parseOptionValue(optionsNode, "CertificateTransparencyLoggingPreference"),
+            parseOptionValue(optionsNode, "Export"));
+    }
+
+    private String parseOptionValue(JsonNode optionsNode, String field) {
+        if (!optionsNode.has(field)) {
+            return null;
+        }
+        String value = optionsNode.path(field).asText();
+        if (!"ENABLED".equals(value) && !"DISABLED".equals(value)) {
+            throw new io.github.hectorvent.floci.core.common.AwsException(
+                "ValidationException", field + " must be ENABLED or DISABLED", 400);
+        }
+        return value;
     }
 
     // ============ Helper Methods ============
@@ -356,6 +415,11 @@ public class AcmJsonHandler {
                     rrNode.put("Type", dv.resourceRecord().type());
                     rrNode.put("Value", dv.resourceRecord().value());
                     dvNode.set("ResourceRecord", rrNode);
+                }
+                if (dv.validationEmails() != null && !dv.validationEmails().isEmpty()) {
+                    ArrayNode emails = objectMapper.createArrayNode();
+                    dv.validationEmails().forEach(emails::add);
+                    dvNode.set("ValidationEmails", emails);
                 }
                 validations.add(dvNode);
             }
@@ -515,6 +579,30 @@ public class AcmJsonHandler {
             tags.put(key, value);
         }
         return tags;
+    }
+
+    /**
+     * Reads the requested {@code DomainValidationOptions} into a {@code ValidationDomain} per
+     * {@code DomainName}. Both members are required, so an entry missing either is rejected rather
+     * than dropped back to the default of validating the domain against itself.
+     */
+    private Map<String, String> parseDomainValidationOptions(JsonNode optionsNode) {
+        if (!optionsNode.isArray()) {
+            return Map.of();
+        }
+        Map<String, String> validationDomains = new LinkedHashMap<>();
+        for (JsonNode option : optionsNode) {
+            String domainName = option.path("DomainName").asText(null);
+            String validationDomain = option.path("ValidationDomain").asText(null);
+            if (domainName == null || domainName.isBlank() || validationDomain == null || validationDomain.isBlank()) {
+                throw new io.github.hectorvent.floci.core.common.AwsException(
+                    "InvalidDomainValidationOptionsException",
+                    "One or more values in the DomainValidationOption structure is incorrect.",
+                    400);
+            }
+            validationDomains.put(domainName, validationDomain);
+        }
+        return validationDomains;
     }
 
     private ValidationMethod parseValidationMethod(String method) {

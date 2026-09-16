@@ -65,7 +65,7 @@ public class ContainerBuilder {
         return new Builder(resolveImage(image), config, dockerHostResolver, embeddedDnsServer, currentContainerNetworkResolver);
     }
 
-    private String resolveImage(String image) {
+    public String resolveImage(String image) {
         return resolveImage(image, configuredImageRegistryBase(config));
     }
 
@@ -115,11 +115,13 @@ public class ContainerBuilder {
         private String workingDir;
         private Long memoryBytes;
         private final Map<Integer, Integer> portBindings = new HashMap<>();
+        private final List<Integer> loopbackPortBindings = new ArrayList<>();
         private final List<Integer> exposedPorts = new ArrayList<>();
         private String networkMode;
         private final List<Mount> mounts = new ArrayList<>();
         private final List<Bind> binds = new ArrayList<>();
         private final List<String> extraHosts = new ArrayList<>();
+        private final Map<String, String> labels = new HashMap<>();
         private LogConfig logConfig;
         private boolean privileged;
         private String cgroupnsMode;
@@ -214,6 +216,19 @@ public class ContainerBuilder {
          */
         public Builder withPortBinding(int containerPort, int hostPort) {
             this.portBindings.put(containerPort, hostPort);
+            this.exposedPorts.add(containerPort);
+            return this;
+        }
+
+        /**
+         * Publishes a container port to the host loopback interface only.
+         *
+         * <p>Use this for implementation backends reached through Floci's public data plane,
+         * not for customer-facing service endpoints.
+         */
+        public Builder withLoopbackPortBinding(int containerPort, int hostPort) {
+            this.portBindings.put(containerPort, hostPort);
+            this.loopbackPortBindings.add(containerPort);
             this.exposedPorts.add(containerPort);
             return this;
         }
@@ -320,6 +335,24 @@ public class ContainerBuilder {
         }
 
         /**
+         * Adds a single Docker label. Merged over the default floci-aws labels at
+         * container creation; a per-spec label wins on key conflicts.
+         */
+        public Builder withLabel(String key, String value) {
+            this.labels.put(key, value);
+            return this;
+        }
+
+        /**
+         * Adds multiple Docker labels. Merged over the default floci-aws labels at
+         * container creation; per-spec labels win on key conflicts.
+         */
+        public Builder withLabels(Map<String, String> labels) {
+            this.labels.putAll(labels);
+            return this;
+        }
+
+        /**
          * Enables log rotation with default settings from configuration.
          * Uses json-file driver with max-size and max-file from config.
          */
@@ -421,11 +454,13 @@ public class ContainerBuilder {
                     entrypoint != null ? List.copyOf(entrypoint) : null,
                     memoryBytes,
                     Map.copyOf(portBindings),
+                    List.copyOf(loopbackPortBindings),
                     List.copyOf(exposedPorts),
                     networkMode,
                     List.copyOf(mounts),
                     List.copyOf(binds),
                     List.copyOf(extraHosts),
+                    Map.copyOf(labels),
                     logConfig,
                     privileged,
                     cgroupnsMode,

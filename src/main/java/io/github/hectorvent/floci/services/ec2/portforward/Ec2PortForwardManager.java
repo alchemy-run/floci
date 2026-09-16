@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.model.ContainerNetwork;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -79,6 +80,11 @@ public class Ec2PortForwardManager {
         this.httpPortMux = httpPortMux;
     }
 
+    @PreDestroy
+    void stop() {
+        executor.shutdownNow();
+    }
+
     /**
      * Reconciles the instance's live forwards against the desired port set: publishes ports
      * that are newly opened and unpublishes ports that no longer have an ingress rule. Runs
@@ -130,7 +136,9 @@ public class Ec2PortForwardManager {
     }
 
     boolean enabled() {
-        return config.services().ec2().publishSecurityGroupPorts() && !config.services().ec2().mock();
+        return config.services().ec2().publishSecurityGroupPorts() && !config.services().ec2().mock()
+                && (config.network() == null || config.network().securityGroupEnforcement() == null
+                || !config.network().securityGroupEnforcement().enabled());
     }
 
     /** Sets the callback used to persist an instance after its forwards change. */

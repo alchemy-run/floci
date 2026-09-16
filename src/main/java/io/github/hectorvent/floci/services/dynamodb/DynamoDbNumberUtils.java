@@ -64,6 +64,71 @@ final class DynamoDbNumberUtils {
         return toNormalizedString(stripped);
     }
 
+    // AWS checks every number in a request before the table lookup. Single-item write
+    // APIs wrap the error in the validation envelope, Query and Scan do not.
+    static void requireStorable(JsonNode attributes, boolean inValidationEnvelope) {
+        if (attributes == null || !attributes.isObject()) {
+            return;
+        }
+        for (var value : attributes) {
+            requireStorableValue(value, inValidationEnvelope ? "1 validation error detected: " : "");
+        }
+    }
+
+    private static void requireStorableValue(JsonNode value, String prefix) {
+        if (!value.isObject()) {
+            return;
+        }
+        if (value.has("N")) {
+            requireStorableNumber(value.get("N").asText(), prefix);
+        }
+        for (var n : value.path("NS")) {
+            requireStorableNumber(n.asText(), prefix);
+        }
+        for (var element : value.path("L")) {
+            requireStorableValue(element, prefix);
+        }
+        for (var entry : value.path("M")) {
+            requireStorableValue(entry, prefix);
+        }
+    }
+
+    private static void requireStorableNumber(String numStr, String prefix) {
+        BigDecimal bd;
+        try {
+            bd = new BigDecimal(numStr);
+        } catch (NumberFormatException e) {
+            throw new AwsException("ValidationException",
+                    "The parameter cannot be converted to a numeric value: " + numStr, 400);
+        }
+        var stripped = bd.stripTrailingZeros();
+        if (stripped.precision() > 38) {
+            throw new AwsException("ValidationException",
+                    prefix + "Attempting to store more than 38 significant digits in a Number", 400);
+        }
+        var abs = stripped.abs();
+        if (abs.compareTo(MAX_ABS) >= 0) {
+            throw new AwsException("ValidationException",
+                    prefix + "Number overflow. Attempting to store a number with magnitude larger than supported range", 400);
+        }
+        if (abs.signum() > 0 && abs.compareTo(MIN_ABS_NONZERO) < 0) {
+            throw new AwsException("ValidationException",
+                    prefix + "Number underflow. Attempting to store a number with magnitude smaller than supported range", 400);
+        }
+    }
+
+    // AWS answers with the overflow wording for any arithmetic result it cannot store,
+    // a magnitude too small or too many significant digits included.
+    static void checkArithmeticResult(BigDecimal result) {
+        var stripped = result.stripTrailingZeros();
+        var abs = stripped.abs();
+        if (stripped.precision() > 38 || abs.compareTo(MAX_ABS) >= 0
+                || (abs.signum() > 0 && abs.compareTo(MIN_ABS_NONZERO) < 0)) {
+            throw new AwsException("ValidationException",
+                    "Number overflow. Attempting to store a number with magnitude larger than supported range", 400);
+        }
+    }
+
     private static String toNormalizedString(BigDecimal bd) {
         // -0 -> 0
         if (bd.compareTo(BigDecimal.ZERO) == 0) {
@@ -89,6 +154,13 @@ final class DynamoDbNumberUtils {
 
     private static JsonNode normalizeAttrValue(JsonNode attr) {
         if (attr == null) return null;
+
+        // A well-formed AttributeValue has exactly one type member. Rebuilding a
+        // malformed one (e.g. {"S":"x","N":"1"}) around its "N" member would launder
+        // it into a valid value before validation can reject it — pass it through.
+        if (attr.isObject() && attr.size() != 1) {
+            return attr;
+        }
 
         if (attr.has("N")) {
             String raw = attr.get("N").asText();

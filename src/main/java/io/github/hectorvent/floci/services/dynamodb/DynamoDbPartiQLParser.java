@@ -5,14 +5,14 @@ import io.github.hectorvent.floci.core.common.AwsException;
 
 import java.util.*;
 
-class DynamoDbPartiQLParser {
+public class DynamoDbPartiQLParser {
 
     enum TType {
         SELECT, FROM, WHERE, INSERT, INTO, VALUE,
         UPDATE, SET, REMOVE, DELETE, AND, BETWEEN,
         IDENT, STRING, NUMBER, BOOL, NULL, QUESTION,
         EQ, NE, LT, LE, GT, GE,
-        LPAREN, RPAREN, LBRACE, RBRACE, COMMA, COLON,
+        LPAREN, RPAREN, LBRACE, RBRACE, COMMA, COLON, DOT,
         EOF
     }
 
@@ -20,18 +20,51 @@ class DynamoDbPartiQLParser {
 
     // --- AST node types ---
 
-    sealed interface Stmt permits Stmt.Select, Stmt.Insert, Stmt.Update, Stmt.Delete {
-        record Select(String table, List<String> columns, List<Cond> where) implements Stmt {}
+    public sealed interface Stmt permits Stmt.Select, Stmt.Insert, Stmt.Update, Stmt.Delete {
+        String table();
+        record Select(String table, String index, List<String> columns, List<Cond> where) implements Stmt {}
         record Insert(String table, Map<String, PVal> item)                 implements Stmt {}
         record Update(String table, List<Assign> sets, List<String> removes, List<Cond> where) implements Stmt {}
         record Delete(String table, List<Cond> where)                       implements Stmt {}
     }
 
-    sealed interface PVal permits PVal.Str, PVal.Num, PVal.Bool, PVal.Null {
+    /**
+     * Extracts the target table name from a PartiQL statement using the parser tokenizer,
+     * ensuring quoted attribute names containing SQL keywords are not mistakenly treated as table names.
+     */
+    public static String extractTable(String statement) {
+        if (statement == null || statement.isBlank()) {
+            return null;
+        }
+        try {
+            return parse(statement, List.of()).table();
+        } catch (Exception e) {
+            try {
+                List<Token> tokens = tokenize(statement.trim());
+                for (int i = 0; i < tokens.size(); i++) {
+                    Token t = tokens.get(i);
+                    if (t.type() == TType.FROM || t.type() == TType.INTO || t.type() == TType.UPDATE) {
+                        if (i + 1 < tokens.size()) {
+                            Token next = tokens.get(i + 1);
+                            if (next.type() == TType.IDENT || next.type() == TType.STRING) {
+                                return next.value();
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            return null;
+        }
+    }
+
+    sealed interface PVal permits PVal.Str, PVal.Num, PVal.Bool, PVal.Null, PVal.Av {
         record Str(String v)       implements PVal {}
         record Num(String v)       implements PVal {}
         record Bool(boolean v)     implements PVal {}
         record Null()              implements PVal {}
+        // A parameter of a type with no literal syntax, kept as its wire node.
+        record Av(String type, JsonNode node) implements PVal {}
     }
 
     sealed interface Cond permits Cond.Eq, Cond.Cmp, Cond.Between, Cond.BeginsWith {
@@ -85,6 +118,7 @@ class DynamoDbPartiQLParser {
             if (c == '}') { tokens.add(new Token(TType.RBRACE, "}")); i++; continue; }
             if (c == ',') { tokens.add(new Token(TType.COMMA, ",")); i++; continue; }
             if (c == ':') { tokens.add(new Token(TType.COLON, ":")); i++; continue; }
+            if (c == '.') { tokens.add(new Token(TType.DOT, ".")); i++; continue; }
             if (Character.isDigit(c) || (c == '-' && i + 1 < n && Character.isDigit(input.charAt(i + 1)))) {
                 int start = i;
                 if (c == '-') i++;
@@ -135,6 +169,8 @@ class DynamoDbPartiQLParser {
     }
 
     static Stmt parse(String statement, List<JsonNode> parameters) {
+        parameters.forEach(DynamoDbAttributeValueValidator::validate);
+        parameters.forEach(DynamoDbAttributeValueValidator::requireParameterNestingWithinLimit);
         return new DynamoDbPartiQLParser(tokenize(statement.trim()), parameters).parseStmt();
     }
 
@@ -148,7 +184,7 @@ class DynamoDbPartiQLParser {
         };
     }
 
-    // SELECT col [, col …] | * FROM "Table" [WHERE cond [AND cond …]]
+    // SELECT col [, col …] | * FROM "Table"["." "Index"] [WHERE cond [AND cond …]]
     private Stmt.Select parseSelect() {
         consume(TType.SELECT);
         List<String> cols = new ArrayList<>();
@@ -160,9 +196,14 @@ class DynamoDbPartiQLParser {
         }
         consume(TType.FROM);
         String table = expectIdent();
+        String index = null;
+        if (peek().type() == TType.DOT) {
+            advance();
+            index = expectIdent();
+        }
         List<Cond> where = new ArrayList<>();
         if (peek().type() == TType.WHERE) { advance(); where = parseConditions(); }
-        return new Stmt.Select(table, cols, where);
+        return new Stmt.Select(table, index, cols, where);
     }
 
     // INSERT INTO "Table" VALUE {'key': val, …}
@@ -220,6 +261,27 @@ class DynamoDbPartiQLParser {
         return conds;
     }
 
+    // S, N and B are the only types DynamoDB gives an ordering.
+    private static final Set<String> ORDERED_TYPES = Set.of("S", "N", "B");
+
+    private static String typeCode(PVal val) {
+        return switch (val) {
+            case PVal.Str ignored  -> "S";
+            case PVal.Num ignored  -> "N";
+            case PVal.Bool ignored -> "BOOL";
+            case PVal.Null ignored -> "NULL";
+            case PVal.Av av        -> av.type();
+        };
+    }
+
+    private static void requireOrdered(String op, PVal val) {
+        String type = typeCode(val);
+        if (!ORDERED_TYPES.contains(type)) {
+            throw validationEx("Incorrect operand type for operator or function; "
+                    + "operator or function: " + op + ", operand type: " + type);
+        }
+    }
+
     private Cond parseCond() {
         if (peek().type() == TType.IDENT && "begins_with".equalsIgnoreCase(peek().value())) {
             advance();
@@ -236,11 +298,19 @@ class DynamoDbPartiQLParser {
             PVal lo = parseValue();
             consume(TType.AND);
             PVal hi = parseValue();
+            requireOrdered("BETWEEN", lo);
+            requireOrdered("BETWEEN", hi);
             return new Cond.Between(attr, lo, hi);
         }
         String op = parseOp();
         PVal val = parseValue();
-        return "=".equals(op) ? new Cond.Eq(attr, val) : new Cond.Cmp(attr, op, val);
+        if ("=".equals(op)) {
+            return new Cond.Eq(attr, val);
+        }
+        if (!"<>".equals(op)) {
+            requireOrdered(op, val);
+        }
+        return new Cond.Cmp(attr, op, val);
     }
 
     private String parseOp() {
@@ -276,11 +346,14 @@ class DynamoDbPartiQLParser {
             throw validationEx("Not enough parameters supplied for ? placeholders");
         }
         JsonNode p = parameters.get(paramIdx++);
-        if (p.has("S"))    return new PVal.Str(p.get("S").asText());
-        if (p.has("N"))    return new PVal.Num(p.get("N").asText());
-        if (p.has("BOOL")) return new PVal.Bool(p.get("BOOL").asBoolean());
-        if (p.has("NULL")) return new PVal.Null();
-        throw validationEx("Unsupported parameter type in parameters array");
+        var type = DynamoDbAttributeValueValidator.typeOf(p);
+        return switch (type) {
+            case "S"    -> new PVal.Str(p.get("S").asText());
+            case "N"    -> new PVal.Num(p.get("N").asText());
+            case "BOOL" -> new PVal.Bool(p.get("BOOL").asBoolean());
+            case "NULL" -> new PVal.Null();
+            default     -> new PVal.Av(type, p);
+        };
     }
 
     private String expectIdent() {

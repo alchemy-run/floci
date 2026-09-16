@@ -448,6 +448,351 @@ class BatchIntegrationTest {
     }
 
     @Test
+    void updateAndDeleteJobQueueSupportsTeardownFlow() {
+        String suffix = uniqueSuffix();
+        String queueName = "teardown-queue-" + suffix;
+        String queueArn = createQueue(queueName, createComputeEnvironment("teardown-ce-" + suffix));
+
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueName))
+        .when()
+            .post("/v1/deletejobqueue")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ClientException"));
+
+        givenJson("{\"jobQueue\":\"%s\",\"state\":\"DISABLED\",\"priority\":9}".formatted(queueName))
+        .when()
+            .post("/v1/updatejobqueue")
+        .then()
+            .statusCode(200)
+            .body("jobQueueName", equalTo(queueName))
+            .body("jobQueueArn", equalTo(queueArn));
+
+        givenJson("{\"jobQueues\":[\"%s\"]}".formatted(queueArn))
+        .when()
+            .post("/v1/describejobqueues")
+        .then()
+            .statusCode(200)
+            .body("jobQueues", hasSize(1))
+            .body("jobQueues[0].state", equalTo("DISABLED"))
+            .body("jobQueues[0].priority", equalTo(9));
+
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueName))
+        .when()
+            .post("/v1/deletejobqueue")
+        .then()
+            .statusCode(200)
+            .body("isEmpty()", equalTo(true));
+
+        givenJson("{\"jobQueues\":[\"%s\"]}".formatted(queueArn))
+        .when()
+            .post("/v1/describejobqueues")
+        .then()
+            .statusCode(200)
+            .body("jobQueues", hasSize(0));
+
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueName))
+        .when()
+            .post("/v1/deletejobqueue")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void updateAndDeleteComputeEnvironmentSupportsTeardownFlow() {
+        String suffix = uniqueSuffix();
+        String ceName = "teardown-ce-" + suffix;
+        String ceArn = createComputeEnvironment(ceName);
+        String queueName = "teardown-ce-queue-" + suffix;
+        createQueue(queueName, ceArn);
+
+        // AWS Batch requires DISABLED before delete: rejected while ENABLED.
+        givenJson("{\"computeEnvironment\":\"%s\"}".formatted(ceName))
+        .when()
+            .post("/v1/deletecomputeenvironment")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ClientException"));
+
+        givenJson("""
+                {
+                  "computeEnvironment": "%s",
+                  "state": "DISABLED",
+                  "serviceRole": "arn:aws:iam::000000000000:role/BatchServiceRole",
+                  "computeResources": {"desiredvCpus": 0}
+                }
+                """.formatted(ceName))
+        .when()
+            .post("/v1/updatecomputeenvironment")
+        .then()
+            .statusCode(200)
+            .body("computeEnvironmentName", equalTo(ceName))
+            .body("computeEnvironmentArn", equalTo(ceArn));
+
+        givenJson("{\"computeEnvironments\":[\"%s\"]}".formatted(ceArn))
+        .when()
+            .post("/v1/describecomputeenvironments")
+        .then()
+            .statusCode(200)
+            .body("computeEnvironments", hasSize(1))
+            .body("computeEnvironments[0].state", equalTo("DISABLED"))
+            .body("computeEnvironments[0].serviceRole",
+                    equalTo("arn:aws:iam::000000000000:role/BatchServiceRole"));
+
+        // DISABLED but still referenced by a job queue's computeEnvironmentOrder: still rejected.
+        givenJson("{\"computeEnvironment\":\"%s\"}".formatted(ceName))
+        .when()
+            .post("/v1/deletecomputeenvironment")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ClientException"));
+
+        givenJson("{\"jobQueue\":\"%s\",\"state\":\"DISABLED\"}".formatted(queueName))
+        .when()
+            .post("/v1/updatejobqueue")
+        .then()
+            .statusCode(200);
+        givenJson("{\"jobQueue\":\"%s\"}".formatted(queueName))
+        .when()
+            .post("/v1/deletejobqueue")
+        .then()
+            .statusCode(200);
+
+        givenJson("{\"computeEnvironment\":\"%s\"}".formatted(ceName))
+        .when()
+            .post("/v1/deletecomputeenvironment")
+        .then()
+            .statusCode(200)
+            .body("isEmpty()", equalTo(true));
+
+        givenJson("{\"computeEnvironments\":[\"%s\"]}".formatted(ceArn))
+        .when()
+            .post("/v1/describecomputeenvironments")
+        .then()
+            .statusCode(200)
+            .body("computeEnvironments", hasSize(0));
+
+        givenJson("{\"computeEnvironment\":\"%s\"}".formatted(ceName))
+        .when()
+            .post("/v1/deletecomputeenvironment")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void submitArrayJobOverTheWireFansOutAndAggregates() {
+        String suffix = uniqueSuffix();
+        String queueArn = createQueue("batch-array-queue-" + suffix, createComputeEnvironment("batch-array-ce-" + suffix));
+        String definitionArn = registerJobDefinition("batch-array-job-" + suffix, "[\"ok\"]", "[]");
+
+        String parentId = givenJson("""
+                {
+                  "jobName": "batch-array-submit-%s",
+                  "jobQueue": "%s",
+                  "jobDefinition": "%s",
+                  "arrayProperties": {"size": 3}
+                }
+                """.formatted(suffix, queueArn, definitionArn))
+        .when()
+            .post("/v1/submitjob")
+        .then()
+            .statusCode(200)
+            .body("jobId", notNullValue())
+            .extract().path("jobId");
+
+        givenJson("{\"jobs\":[\"%s\"]}".formatted(parentId))
+        .when()
+            .post("/v1/describejobs")
+        .then()
+            .statusCode(200)
+            .body("jobs[0].status", equalTo("SUCCEEDED"))
+            .body("jobs[0].arrayProperties.size", equalTo(3))
+            .body("jobs[0].arrayProperties.statusSummary.SUCCEEDED", equalTo(3));
+
+        givenJson("{\"jobs\":[\"%s:0\",\"%s:1\",\"%s:2\"]}".formatted(parentId, parentId, parentId))
+        .when()
+            .post("/v1/describejobs")
+        .then()
+            .statusCode(200)
+            .body("jobs", hasSize(3))
+            .body("jobs[0].arrayProperties.index", equalTo(0))
+            .body("jobs[0].status", equalTo("SUCCEEDED"));
+
+        givenJson("{\"arrayJobId\":\"%s\"}".formatted(parentId))
+        .when()
+            .post("/v1/listjobs")
+        .then()
+            .statusCode(200)
+            .body("jobSummaryList", hasSize(3));
+
+        givenJson("{\"jobQueue\":\"%s\",\"jobStatus\":\"SUCCEEDED\"}".formatted(queueArn))
+        .when()
+            .post("/v1/listjobs")
+        .then()
+            .statusCode(200)
+            .body("jobSummaryList.findAll { it.jobId.startsWith('%s') }".formatted(parentId), hasSize(1));
+    }
+
+    @Test
+    void submitArrayJobRejectsSizeOutOfRange() {
+        String suffix = uniqueSuffix();
+        String queueArn = createQueue("batch-array-bad-queue-" + suffix, createComputeEnvironment("batch-array-bad-ce-" + suffix));
+        String definitionArn = registerJobDefinition("batch-array-bad-job-" + suffix, "[\"ok\"]", "[]");
+
+        givenJson("""
+                {"jobName":"array-too-small-%s","jobQueue":"%s","jobDefinition":"%s","arrayProperties":{"size":1}}
+                """.formatted(suffix, queueArn, definitionArn))
+        .when()
+            .post("/v1/submitjob")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ClientException"));
+    }
+
+    @Test
+    void submitMultiNodeJobOverTheWireRunsAllNodes() {
+        String suffix = uniqueSuffix();
+        String queueArn = createQueue("batch-mnp-queue-" + suffix, createComputeEnvironment("batch-mnp-ce-" + suffix));
+        String definitionArn = givenJson("""
+                {
+                  "jobDefinitionName": "batch-mnp-job-%s",
+                  "type": "multinode",
+                  "nodeProperties": {
+                    "numNodes": 2,
+                    "mainNode": 0,
+                    "nodeRangeProperties": [
+                      {"targetNodes": "0:0", "container": {"image": "public.ecr.aws/example/main:latest"}},
+                      {"targetNodes": "1:1", "container": {"image": "public.ecr.aws/example/worker:latest"}}
+                    ]
+                  }
+                }
+                """.formatted(suffix))
+        .when()
+            .post("/v1/registerjobdefinition")
+        .then()
+            .statusCode(200)
+            .extract().path("jobDefinitionArn");
+
+        String jobId = givenJson("""
+                {"jobName":"batch-mnp-submit-%s","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(suffix, queueArn, definitionArn))
+        .when()
+            .post("/v1/submitjob")
+        .then()
+            .statusCode(200)
+            .extract().path("jobId");
+
+        givenJson("{\"jobs\":[\"%s\"]}".formatted(jobId))
+        .when()
+            .post("/v1/describejobs")
+        .then()
+            .statusCode(200)
+            .body("jobs[0].status", equalTo("SUCCEEDED"))
+            .body("jobs[0].nodeProperties.numNodes", equalTo(2))
+            .body("jobs[0].nodeProperties.mainNode", equalTo(0))
+            .body("jobs[0].container", nullValue());
+
+        givenJson("{\"multiNodeJobId\":\"%s\"}".formatted(jobId))
+        .when()
+            .post("/v1/listjobs")
+        .then()
+            .statusCode(200)
+            .body("jobSummaryList", hasSize(2))
+            .body("jobSummaryList.find { it.nodeProperties.nodeIndex == 0 }.nodeProperties.isMainNode", equalTo(true))
+            .body("jobSummaryList.find { it.nodeProperties.nodeIndex == 1 }.nodeProperties.isMainNode", equalTo(false));
+    }
+
+    @Test
+    void describeUnknownJobsReturnsEmptyList() {
+        givenJson("{\"jobs\":[\"does-not-exist\"]}")
+        .when()
+            .post("/v1/describejobs")
+        .then()
+            .statusCode(200)
+            .body("jobs", hasSize(0));
+    }
+
+    private static io.restassured.specification.RequestSpecification givenJson(String body) {
+        return given()
+                .header("Authorization", AUTH)
+                .contentType("application/json")
+                .body(body);
+    }
+
+    private String createComputeEnvironment(String name) {
+        return givenJson("""
+                {
+                  "computeEnvironmentName": "%s",
+                  "type": "MANAGED",
+                  "computeResources": {"type":"FARGATE","maxvCpus":4}
+                }
+                """.formatted(name))
+        .when()
+            .post("/v1/createcomputeenvironment")
+        .then()
+            .statusCode(200)
+            .extract().path("computeEnvironmentArn");
+    }
+
+    private String createQueue(String name, String computeEnvironmentArn) {
+        return givenJson("""
+                {
+                  "jobQueueName": "%s",
+                  "priority": 1,
+                  "computeEnvironmentOrder": [{
+                    "order": 1,
+                    "computeEnvironment": "%s"
+                  }]
+                }
+                """.formatted(name, computeEnvironmentArn))
+        .when()
+            .post("/v1/createjobqueue")
+        .then()
+            .statusCode(200)
+            .extract().path("jobQueueArn");
+    }
+
+    private String registerJobDefinition(String name, String commandJson, String environmentJson) {
+        return givenJson("""
+                {
+                  "jobDefinitionName": "%s",
+                  "type": "container",
+                  "platformCapabilities": ["FARGATE"],
+                  "containerProperties": {
+                    "image": "public.ecr.aws/example/job:latest",
+                    "command": %s,
+                    "environment": %s,
+                    "resourceRequirements": [
+                      {"type":"VCPU","value":"1"},
+                      {"type":"MEMORY","value":"512"}
+                    ]
+                  },
+                  "retryStrategy": {"attempts": 2}
+                }
+                """.formatted(name, commandJson, environmentJson))
+        .when()
+            .post("/v1/registerjobdefinition")
+        .then()
+            .statusCode(200)
+            .extract().path("jobDefinitionArn");
+    }
+
+    private String submit(String queueArn, String definitionArn, String jobName) {
+        return givenJson("""
+                {"jobName":"%s","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(jobName, queueArn, definitionArn))
+        .when()
+            .post("/v1/submitjob")
+        .then()
+            .statusCode(200)
+            .extract().path("jobId");
+    }
+
+    private static String uniqueSuffix() {
+        return Long.toString(System.nanoTime(), 36);
+    }
+
+    @Test
     void updateDeleteAndTagComputeEnvironmentAndQueue() {
         String suffix = uniqueSuffix();
         String envName = "batch-upd-ce-" + suffix;
@@ -583,95 +928,5 @@ class BatchIntegrationTest {
             .statusCode(400)
             .body("__type", equalTo("ClientException"))
             .body("message", containsString("compute-environment/missing-ce-" + suffix + " does not exist"));
-    }
-
-    @Test
-    void describeUnknownJobsReturnsEmptyList() {
-        givenJson("{\"jobs\":[\"does-not-exist\"]}")
-        .when()
-            .post("/v1/describejobs")
-        .then()
-            .statusCode(200)
-            .body("jobs", hasSize(0));
-    }
-
-    private static io.restassured.specification.RequestSpecification givenJson(String body) {
-        return given()
-                .header("Authorization", AUTH)
-                .contentType("application/json")
-                .body(body);
-    }
-
-    private String createComputeEnvironment(String name) {
-        return givenJson("""
-                {
-                  "computeEnvironmentName": "%s",
-                  "type": "MANAGED",
-                  "computeResources": {"type":"FARGATE","maxvCpus":4}
-                }
-                """.formatted(name))
-        .when()
-            .post("/v1/createcomputeenvironment")
-        .then()
-            .statusCode(200)
-            .extract().path("computeEnvironmentArn");
-    }
-
-    private String createQueue(String name, String computeEnvironmentArn) {
-        return givenJson("""
-                {
-                  "jobQueueName": "%s",
-                  "priority": 1,
-                  "computeEnvironmentOrder": [{
-                    "order": 1,
-                    "computeEnvironment": "%s"
-                  }]
-                }
-                """.formatted(name, computeEnvironmentArn))
-        .when()
-            .post("/v1/createjobqueue")
-        .then()
-            .statusCode(200)
-            .extract().path("jobQueueArn");
-    }
-
-    private String registerJobDefinition(String name, String commandJson, String environmentJson) {
-        return givenJson("""
-                {
-                  "jobDefinitionName": "%s",
-                  "type": "container",
-                  "platformCapabilities": ["FARGATE"],
-                  "containerProperties": {
-                    "image": "public.ecr.aws/example/job:latest",
-                    "command": %s,
-                    "environment": %s,
-                    "resourceRequirements": [
-                      {"type":"VCPU","value":"1"},
-                      {"type":"MEMORY","value":"512"}
-                    ]
-                  },
-                  "retryStrategy": {"attempts": 2}
-                }
-                """.formatted(name, commandJson, environmentJson))
-        .when()
-            .post("/v1/registerjobdefinition")
-        .then()
-            .statusCode(200)
-            .extract().path("jobDefinitionArn");
-    }
-
-    private String submit(String queueArn, String definitionArn, String jobName) {
-        return givenJson("""
-                {"jobName":"%s","jobQueue":"%s","jobDefinition":"%s"}
-                """.formatted(jobName, queueArn, definitionArn))
-        .when()
-            .post("/v1/submitjob")
-        .then()
-            .statusCode(200)
-            .extract().path("jobId");
-    }
-
-    private static String uniqueSuffix() {
-        return Long.toString(System.nanoTime(), 36);
     }
 }

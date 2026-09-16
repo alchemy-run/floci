@@ -128,7 +128,7 @@ class ApiGatewayParityIntegrationTest {
                 .body("{\"statusCode\":\"404\",\"responseTemplates\":{\"application/json\":\"{\\\"message\\\":\\\"gone\\\"}\"}}")
                 .when().put("/restapis/" + apiId + "/gatewayresponses/DEFAULT_4XX")
                 .then()
-                .statusCode(200)
+                .statusCode(201)
                 .body("responseType", equalTo("DEFAULT_4XX"))
                 .body("statusCode", equalTo("404"))
                 .body("defaultResponse", equalTo(false));

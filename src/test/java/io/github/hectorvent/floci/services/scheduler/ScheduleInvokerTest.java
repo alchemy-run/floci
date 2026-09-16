@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.scheduler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.ecs.EcsService;
 import io.github.hectorvent.floci.services.ecs.model.ContainerOverride;
 import io.github.hectorvent.floci.services.ecs.model.LaunchType;
@@ -12,6 +13,7 @@ import io.github.hectorvent.floci.services.scheduler.model.AwsVpcConfiguration;
 import io.github.hectorvent.floci.services.scheduler.model.EcsParameters;
 import io.github.hectorvent.floci.services.scheduler.model.NetworkConfiguration;
 import io.github.hectorvent.floci.services.scheduler.model.SqsParameters;
+import io.github.hectorvent.floci.services.scheduler.model.Schedule;
 import io.github.hectorvent.floci.services.scheduler.model.Target;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.SqsService;
@@ -20,12 +22,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -33,6 +40,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ScheduleInvokerTest {
@@ -82,6 +90,16 @@ class ScheduleInvokerTest {
                         && "my-subject".equals(attrs.get("EventName").getStringValue())
                         && "String".equals(attrs.get("EventName").getDataType())),
                 isNull(), isNull(), eq("us-east-1"));
+    }
+
+    @Test
+    void materializesSqsRequestForDeadLetterBody() {
+        Target target = new Target();
+        target.setArn("arn:aws:sqs:us-east-1:000000000000:queue");
+        target.setInput("payload");
+
+        assertEquals("{\"MessageBody\":\"payload\",\"QueueUrl\":\"http://localhost:4566/000000000000/queue\"}",
+                invoker.materializeRequest(target, "us-east-1"));
     }
 
     @Test
@@ -143,17 +161,83 @@ class ScheduleInvokerTest {
     }
 
     @Test
-    void universalSqsSendMessageReadsQueueUrlBodyAndGroupIdFromInput() {
+    void universalSqsSendMessageReadsQueueUrlBodyAndFifoIdsFromInputWithoutAttributes() {
         Target target = new Target();
         target.setArn("arn:aws:scheduler:::aws-sdk:sqs:sendMessage");
         target.setRoleArn("arn:aws:iam::000000000000:role/x");
         target.setInput("{\"QueueUrl\":\"http://localhost:4566/000000000000/q.fifo\","
-                + "\"MessageBody\":\"hi\",\"MessageGroupId\":\"g1\"}");
+                + "\"MessageBody\":\"hi\",\"MessageGroupId\":\"g1\","
+                + "\"MessageDeduplicationId\":\"dedup-1\"}");
 
         invoker.invoke(target, "us-east-1");
 
         verify(sqsService).sendMessage(eq("http://localhost:4566/000000000000/q.fifo"),
-                eq("hi"), eq(0), eq("g1"), isNull(), eq("us-east-1"));
+                eq("hi"), eq(0), eq("g1"), eq("dedup-1"),
+                argThat(attrs -> attrs == null || attrs.isEmpty()), eq("us-east-1"));
+    }
+
+    @Test
+    void universalSqsSendMessageForwardsStringAndBase64BinaryMessageAttributes() {
+        String queueUrl = "http://localhost:4566/000000000000/q.fifo";
+        String binaryValueBase64 = "aGVsbG8=";
+        Target target = new Target();
+        target.setArn("arn:aws:scheduler:::aws-sdk:sqs:sendMessage");
+        target.setRoleArn("arn:aws:iam::000000000000:role/x");
+        target.setInput("{\"QueueUrl\":\"" + queueUrl + "\","
+                + "\"MessageBody\":\"hi\","
+                + "\"MessageGroupId\":\"g1\","
+                + "\"MessageDeduplicationId\":\"dedup-1\","
+                + "\"MessageAttributes\":{"
+                + "\"StringAttr\":{\"DataType\":\"String.Custom\",\"StringValue\":\"value\"},"
+                + "\"BinaryAttr\":{\"DataType\":\"Binary.Custom\",\"BinaryValue\":\""
+                + binaryValueBase64 + "\"}}}");
+
+        invoker.invoke(target, "us-east-1");
+
+        ArgumentCaptor<Map<String, MessageAttributeValue>> attributesCaptor = ArgumentCaptor.captor();
+        verify(sqsService).sendMessage(eq(queueUrl), eq("hi"), eq(0), eq("g1"), eq("dedup-1"),
+                attributesCaptor.capture(), eq("us-east-1"));
+
+        Map<String, MessageAttributeValue> attributes = attributesCaptor.getValue();
+        assertEquals(2, attributes.size());
+
+        MessageAttributeValue stringAttribute = attributes.get("StringAttr");
+        assertNotNull(stringAttribute);
+        assertEquals("String.Custom", stringAttribute.getDataType());
+        assertEquals("value", stringAttribute.getStringValue());
+        assertNull(stringAttribute.getBinaryValue());
+
+        MessageAttributeValue binaryAttribute = attributes.get("BinaryAttr");
+        assertNotNull(binaryAttribute);
+        assertEquals("Binary.Custom", binaryAttribute.getDataType());
+        assertArrayEquals("hello".getBytes(StandardCharsets.UTF_8), binaryAttribute.getBinaryValue());
+        assertNull(binaryAttribute.getStringValue());
+    }
+
+    @Test
+    void universalSqsSendMessageSkipsAttributesWithoutDataType() {
+        String queueUrl = "http://localhost:4566/000000000000/q.fifo";
+        Target target = new Target();
+        target.setArn("arn:aws:scheduler:::aws-sdk:sqs:sendMessage");
+        target.setRoleArn("arn:aws:iam::000000000000:role/x");
+        target.setInput("{\"QueueUrl\":\"" + queueUrl + "\","
+                + "\"MessageBody\":\"hi\","
+                + "\"MessageGroupId\":\"g1\","
+                + "\"MessageDeduplicationId\":\"dedup-1\","
+                + "\"MessageAttributes\":{"
+                + "\"MissingType\":{\"StringValue\":\"ignored\"},"
+                + "\"Valid\":{\"DataType\":\"String\",\"StringValue\":\"value\"}"
+                + "}}");
+
+        invoker.invoke(target, "us-east-1");
+
+        ArgumentCaptor<Map<String, MessageAttributeValue>> attributesCaptor = ArgumentCaptor.captor();
+        verify(sqsService).sendMessage(eq(queueUrl), eq("hi"), eq(0), eq("g1"), eq("dedup-1"),
+                attributesCaptor.capture(), eq("us-east-1"));
+
+        Map<String, MessageAttributeValue> attributes = attributesCaptor.getValue();
+        assertEquals(1, attributes.size());
+        assertEquals("value", attributes.get("Valid").getStringValue());
     }
 
     @Test
@@ -167,6 +251,22 @@ class ScheduleInvokerTest {
 
         verify(sqsService).sendMessage(anyString(), eq("{\"hello\":\"world\"}"), eq(0),
                 eq("group-7"), isNull(), eq("us-east-1"));
+    }
+
+    @Test
+    void lambdaTargetPreservesArnAccount() {
+        String arn = "arn:aws:lambda:ap-south-1:100000000012:function:cross-account-function";
+        Target target = new Target();
+        target.setArn(arn);
+        target.setInput("{\"detail\":{\"job\":\"workflow-recovery\"}}");
+
+        invoker.invoke(target, "ap-south-1");
+
+        verify(lambdaService).invokeArn(
+                eq(arn),
+                org.mockito.AdditionalMatchers.aryEq(
+                        "{\"detail\":{\"job\":\"workflow-recovery\"}}".getBytes()),
+                eq(io.github.hectorvent.floci.services.lambda.model.InvocationType.Event));
     }
 
     @Test
@@ -279,15 +379,58 @@ class ScheduleInvokerTest {
     }
 
     @Test
-    void unsupportedUniversalActionDoesNotThrowOrDispatch() {
+    void unsupportedUniversalActionFailsWithoutDispatch() {
         Target target = new Target();
         target.setArn("arn:aws:scheduler:::aws-sdk:dynamodb:putItem");
         target.setInput("{}");
 
-        invoker.invoke(target, "us-east-1");
+        assertThrows(UnsupportedOperationException.class, () -> invoker.invoke(target, "us-east-1"));
 
-        verify(sqsService, never()).sendMessage(anyString(), anyString(), anyInt(), anyString(), any(), anyString());
-        verify(snsService, never()).publish(anyString(), any(), anyString(), anyString(), anyString());
+        verifyNoInteractions(sqsService, lambdaService, snsService, eventBridgeService, ecsService);
+    }
+
+    @Test
+    void malformedUniversalInputFailsWithoutDispatch() {
+        Target target = new Target();
+        target.setArn("arn:aws:scheduler:::aws-sdk:sqs:sendMessage");
+        target.setInput("{not-json");
+
+        assertThrows(AwsException.class, () -> invoker.invoke(target, "us-east-1"));
+
+        verifyNoInteractions(sqsService, lambdaService, snsService, eventBridgeService, ecsService);
+    }
+
+    @Test
+    void unsupportedTargetArnFailsWithoutDispatch() {
+        Target target = new Target();
+        target.setArn("arn:aws:dynamodb:us-east-1:000000000000:table/orders");
+        target.setInput("{}");
+
+        assertThrows(UnsupportedOperationException.class, () -> invoker.invoke(target, "us-east-1"));
+
+        verifyNoInteractions(sqsService, lambdaService, snsService, eventBridgeService, ecsService);
+    }
+
+    @Test
+    void retryContextMatchesMaterializedDeadLetterRequest() throws Exception {
+        Schedule schedule = new Schedule();
+        schedule.setArn("arn:aws:scheduler:us-east-1:000000000000:schedule/default/retry");
+        Target target = new Target();
+        target.setArn("arn:aws:sqs:us-east-1:000000000000:queue");
+        target.setInput("<aws.scheduler.execution-id>:<aws.scheduler.attempt-number>:<aws.scheduler.scheduled-time>");
+        schedule.setTarget(target);
+        Instant scheduledTime = Instant.parse("2026-08-18T19:00:00Z");
+
+        String request = invoker.materializeRequest(schedule, scheduledTime, 2, "execution-id");
+        String deliveredRequest = invoker.invoke(schedule, scheduledTime, 2, "execution-id");
+
+        assertEquals(request, deliveredRequest);
+        String payload = new ObjectMapper().readTree(request).path("MessageBody").asText();
+        assertEquals("execution-id:2:2026-08-18T19:00:00Z", payload);
+        verify(sqsService).sendMessage(eq("http://localhost:4566/000000000000/queue"),
+                eq(payload), eq(0), isNull(), isNull(), eq("us-east-1"));
+        assertEquals("<aws.scheduler.execution-id>:<aws.scheduler.attempt-number>:<aws.scheduler.scheduled-time>",
+                target.getInput());
     }
 
     @Test
@@ -308,7 +451,7 @@ class ScheduleInvokerTest {
         invoker.invoke(schedule, scheduled);
 
         org.mockito.ArgumentCaptor<byte[]> payload = org.mockito.ArgumentCaptor.forClass(byte[].class);
-        verify(lambdaService).invoke(eq("us-east-1"), eq("handler"), payload.capture(), any());
+        verify(lambdaService).invokeArn(eq(target.getArn()), payload.capture(), any());
         String json = new String(payload.getValue());
         assertEquals(false, json.contains("<aws.scheduler."));
         assertEquals(true, json.contains("arn:aws:scheduler:us-east-1:000000000000:schedule/default/cron-job"));

@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.route53.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
@@ -12,9 +13,11 @@ public class HostedZone {
     private String name;
     private String callerReference;
     private String comment;
+    private String ownerAccountId;
     private boolean privateZone;
     private int resourceRecordSetCount;
-    private List<ZoneVpc> vpcs = new ArrayList<>();
+    @JsonAlias("vpcs")
+    private List<VpcAssociation> vpcAssociations = new ArrayList<>();
 
     public HostedZone() {}
 
@@ -26,6 +29,14 @@ public class HostedZone {
         this.comment = comment;
         this.privateZone = privateZone;
         this.resourceRecordSetCount = 2;
+    }
+
+    public HostedZone(String id, String name, String callerReference,
+                      String comment, VpcAssociation vpcAssociation) {
+        this(id, name, callerReference, comment, vpcAssociation != null);
+        if (vpcAssociation != null) {
+            this.vpcAssociations.add(vpcAssociation);
+        }
     }
 
     public String getId() { return id; }
@@ -40,6 +51,9 @@ public class HostedZone {
     public String getComment() { return comment; }
     public void setComment(String comment) { this.comment = comment; }
 
+    public String getOwnerAccountId() { return ownerAccountId; }
+    public void setOwnerAccountId(String ownerAccountId) { this.ownerAccountId = ownerAccountId; }
+
     public boolean isPrivateZone() { return privateZone; }
     public void setPrivateZone(boolean privateZone) { this.privateZone = privateZone; }
 
@@ -48,8 +62,8 @@ public class HostedZone {
         this.resourceRecordSetCount = resourceRecordSetCount;
     }
 
-    public List<ZoneVpc> getVpcs() { return vpcs; }
-    public void setVpcs(List<ZoneVpc> vpcs) {
-        this.vpcs = vpcs != null ? vpcs : new ArrayList<>();
+    public List<VpcAssociation> getVpcAssociations() { return vpcAssociations; }
+    public void setVpcAssociations(List<VpcAssociation> vpcAssociations) {
+        this.vpcAssociations = vpcAssociations != null ? vpcAssociations : new ArrayList<>();
     }
 }

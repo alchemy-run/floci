@@ -6,7 +6,7 @@
 Floci serves pool-specific discovery and JWKS endpoints, plus a relaxed OAuth token endpoint, so local clients can mint and validate Cognito-like access tokens against RS256 signing keys.
 
 `CreateUserPool` supports overiding several values using user-pool tags **only** at creation time:
-* `floci:override-id`, to pin the resulting `UserPool.Id`. 
+* `floci:override-id`, to pin the resulting `UserPool.Id`. Because a pinned id is caller-chosen it can be reused, which AWS never does. `DeleteUserPool` therefore deletes everything the pool owns (users, groups, app clients, resource servers, revoked token records and outstanding verification codes) so a pool recreated on the same id starts empty rather than inheriting the deleted pool's password hashes and client secrets.
 * `floci:override-cognito-client-id`
   * set to `use-name` to use the client name as client ID.
   * set to `append-to-name:-somestring` to append a string to the client name to be used as client ID.
@@ -16,6 +16,8 @@ Floci serves pool-specific discovery and JWKS endpoints, plus a relaxed OAuth to
 Floci strips reserved `floci:*` tags from stored and returned `UserPoolTags` on both create and update paths, so the tag namespace acts as an input-only control channel and is never persisted as user-visible metadata.
 
 Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` and `UntagResource` operate on the persisted user-pool tag map.
+
+An action given a user pool ID that does not resolve returns `ResourceNotFoundException` with the live service's wording, `User pool <poolId> does not exist.`, so tooling that matches Cognito error text behaves the same way locally.
 
 ## Supported Actions
 
@@ -28,7 +30,9 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | ListUserPools | Lists local user pools visible in the request region. |
 | UpdateUserPool | Updates mutable user pool settings and persisted user-pool tags. |
 | AddCustomAttributes | Adds custom schema attributes in place (AWS-prefixes `custom:` / `dev:`). |
-| DeleteUserPool | Deletes a local user pool and cascades groups, users, clients, resource servers, identity providers, domains, and risk configuration. |
+| DeleteUserPool | Deletes a local user pool and everything it owns: users, groups, app clients, resource servers, identity providers, revoked tokens and verification codes. Refused with `InvalidParameterException` while a domain is still configured. |
+| GetUserPoolMfaConfig | Returns the pool's MFA mode and, once configured, its software-token setting. |
+| SetUserPoolMfaConfig | Sets `MfaConfiguration` (`OFF`/`ON`/`OPTIONAL`) and `SoftwareTokenMfaConfiguration`. An absent `MfaConfiguration` means `OFF`, and turning MFA off drops the factor configuration with it. Validation follows the live service: `OFF` alongside a software-token, email or SMS factor is rejected, and `ON`/`OPTIONAL` with none of those three is rejected, in both cases on the member being present, not on its `Enabled` value. `WebAuthnConfiguration` sits outside both rules, as it does in AWS. SMS, email and WebAuthn configurations are validated and not stored: Floci cannot deliver those factors, so keeping the config would imply a capability it does not have. |
 
 ### User Pool Tags
 
@@ -64,17 +68,93 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | CreateIdentityProvider | Registers a SAML, OIDC, or social IdP on a user pool. |
 | DescribeIdentityProvider | Returns a registered identity provider. |
 | UpdateIdentityProvider | Updates provider details, attribute mapping, and identifiers. |
-| ListIdentityProviders | Lists identity providers for a user pool. |
+| ListIdentityProviders | Lists a user pool's providers as name/type/date summaries. |
 | DeleteIdentityProvider | Deletes an identity provider from a user pool. |
+
+Providers are stored configuration only. Floci does not perform the federated sign-in
+flow: there is no `/oauth2/authorize` or `/oauth2/idpresponse` endpoint, so a registered
+provider cannot be used to authenticate. This covers infrastructure tooling that creates
+and reads provider configuration, not federated login.
+
+Two deliberate divergences from AWS, both consequences of not calling out to a third
+party:
+
+- **No create-time validation of `ProviderDetails`.** AWS resolves an OIDC provider's
+  `oidc_issuer` discovery document while handling `CreateIdentityProvider`, and rejects
+  the call when it is unreachable. Floci stores `ProviderDetails` opaquely and makes no
+  outbound request, so it also does not enforce the per-provider-type required keys.
+- **No injected provider defaults.** AWS adds keys such as
+  `attributes_url_add_attributes` to an OIDC provider's stored details; Floci returns
+  only what was supplied.
+
+`AttributeMapping` and `IdpIdentifiers` follow AWS's update semantics: a member the
+request omits is left unchanged, and an explicitly empty map or list is what clears it.
+`IdpIdentifiers` is echoed by `CreateIdentityProvider` and `UpdateIdentityProvider` only
+when the request supplied it, whatever the stored value, while `DescribeIdentityProvider`
+always returns it.
 
 ### User Pool Domains
 
 | Action | Description |
 |--------|-------------|
-| CreateUserPoolDomain | Creates a Cognito-prefix or custom domain. Status is `ACTIVE` immediately and a CloudFront distribution hostname is issued. |
-| DescribeUserPoolDomain | Returns the domain description, or an empty `DomainDescription` (no `UserPoolId`) when the domain does not exist. |
-| UpdateUserPoolDomain | Updates managed-login version and custom-domain certificate config. |
-| DeleteUserPoolDomain | Deletes a user pool domain. |
+| CreateUserPoolDomain | Creates a Cognito prefix domain, or a custom domain when `CustomDomainConfig.CertificateArn` is given. As on AWS, the certificate must exist in ACM in us-east-1 with status `ISSUED`; the domain is listed under the certificate's `InUseBy` until it is deleted. |
+| DescribeUserPoolDomain | Returns a domain's description, including `CloudFrontDistribution` for custom domains. |
+| UpdateUserPoolDomain | Replaces a custom domain's certificate or changes the managed login version in place. The domain keeps its `CloudFrontDistribution`, and its `InUseBy` entry moves to the new certificate. |
+| DeleteUserPoolDomain | Deletes a domain from its user pool. |
+
+#### Custom domains
+
+A domain created with `CustomDomainConfig` answers the OAuth endpoints on that host, as on AWS:
+
+```
+POST https://auth.example.localhost.floci.io/oauth2/token
+GET  https://auth.example.localhost.floci.io/oauth2/userInfo
+```
+
+Requests are matched on the `Host` header, so the name must resolve to Floci (any
+`*.localhost.floci.io` does) and, for `https`, TLS must be enabled. The domain pins its user pool and
+the account that created it, since these requests carry no AWS credential: a `client_id` from
+another pool is refused with `invalid_client`, and an access token issued by another pool with
+`invalid_token`. Domain names are unique across all accounts, as on AWS. The pool's `openid-configuration` advertises the custom-domain
+URLs when one exists. Prefix domains (`<prefix>.auth.<region>.amazoncognito.com`) are stored but not
+routed, since that hostname never reaches Floci. `/oauth2/authorize`, `/login` and `/logout` are not
+served on any host.
+
+With TLS enabled, a custom domain (`CustomDomainConfig` set) is added to Floci's server
+certificate as soon as it is created, so `https://<domain>` verifies without a restart; see
+[TLS](../configuration/tls.md) for the accepted suffixes. A prefix domain is served under
+`amazoncognito.com` on AWS, not by Floci, and is left alone.
+
+### Log Delivery
+
+| Action | Description |
+|--------|-------------|
+| SetLogDeliveryConfiguration | Replaces a user pool's log delivery configuration. |
+| GetLogDeliveryConfiguration | Returns a user pool's log delivery configuration. |
+
+`LogLevel` accepts `ERROR` or `INFO`, and `EventSource` accepts `userNotification` or
+`userAuthEvents`. `LogConfigurations` holds at most 2 entries, and an event source may
+appear only once across them. Each entry must name a destination:
+`CloudWatchLogsConfiguration`, `FirehoseConfiguration` or `S3Configuration`, and a request
+that omits one is rejected the way AWS rejects it. `Set` replaces the whole list rather
+than merging, so an empty `LogConfigurations` is what clears it, and `Get` always returns
+the member, as `[]` when nothing is configured.
+
+The length and enum checks run before the pool is looked up, so an oversized or malformed
+request naming a pool that does not exist reports the request problem rather than
+`ResourceNotFoundException`, and every violation of them is reported in one message.
+
+Floci stores the configuration and never delivers anything to the destination: the log
+group, delivery stream or bucket is not written to, and is not required to exist. Two
+further divergences, both deliberate:
+
+- **No pricing-tier gate.** AWS refuses `userAuthEvents` on a pool in the `ESSENTIALS`
+  tier with `FeatureUnavailableInTierException`; Floci accepts either event source
+  whatever `UserPoolTier` says.
+- **No destination validation.** AWS checks the ARN it is handed; Floci stores it as
+  given.
+
+`DescribeUserPoolDomain` returns an empty `DomainDescription` when the domain does not exist.
 
 ### Risk Configuration
 
@@ -106,6 +186,8 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | SignUp | Creates a self-service user for an app client. |
 | ConfirmSignUp | Confirms a pending self-service signup. |
 | GetUser | Returns attributes for the authenticated access-token user. |
+| GetUserAttributeVerificationCode | Issues a verification code for the authenticated user's email or phone_number attribute. |
+| VerifyUserAttribute | Verifies an email or phone_number attribute with its issued verification code. |
 | UpdateUserAttributes | Updates attributes for the authenticated access-token user. |
 | ChangePassword | Changes the authenticated user's password. |
 | ForgotPassword | Starts the local forgot-password flow for a user. |
@@ -127,6 +209,27 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | Action | Description |
 |--------|-------------|
 | ListUsers | Lists users stored in a user pool. |
+
+## User Attribute Update Verification
+
+`CreateUserPool`, `UpdateUserPool`, and `DescribeUserPool` support
+`UserAttributeUpdateSettings.AttributesRequireVerificationBeforeUpdate` for
+`email` and `phone_number`.
+
+For attributes listed in this setting, `UpdateUserAttributes` keeps the existing
+verified value and sign-in alias active while the new value is pending. It sends
+a verification code to the pending destination and returns the corresponding
+entry in `CodeDeliveryDetailsList`. A successful `VerifyUserAttribute` promotes
+the pending value, switches the alias, and sets the matching `*_verified`
+attribute to `true`.
+
+Without the setting, `UpdateUserAttributes` replaces the value immediately and
+sets the matching `*_verified` attribute to `false` until verification succeeds.
+A verification code is still sent to the replacement value, but Cognito no
+longer retains or exposes the old value. For alias attributes, the old alias is
+removed immediately and the replacement becomes usable for sign-in only after
+successful verification. Incorrect or expired codes don't promote a pending
+value or change its verified state.
 
 ### Groups
 
@@ -161,6 +264,46 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 | DeleteIdentities | Deletes identities by id. |
 | TagResource / UntagResource / ListTagsForResource | Identity-pool tag APIs (`arn:aws:cognito-identity:…:identitypool/…`). |
 
+### Managed Login Branding
+
+| Action | Description |
+|--------|-------------|
+| CreateManagedLoginBranding | Creates the branding for an app client. |
+| DescribeManagedLoginBranding | Returns a branding by its id. |
+| DescribeManagedLoginBrandingByClient | Returns the branding attached to an app client. |
+| UpdateManagedLoginBranding | Updates a branding's settings, assets or provided-values flag. |
+| DeleteManagedLoginBranding | Deletes a branding from its app client. |
+
+`CreateManagedLoginBranding` must name either `UseCognitoProvidedValues` or `Settings`; a
+request with neither is rejected. One branding per app client: a second
+`CreateManagedLoginBranding` for the same client is rejected with
+`ManagedLoginBrandingExistsException`. `ManagedLoginBrandingId` must be a
+version 4 UUID, and a malformed one is rejected before the lookup, as AWS does.
+`Assets` holds at most 40 entries on create and on update.
+`Settings` is omitted from the response when the caller supplied none, while `Assets` is
+always returned. Members an update omits are left unchanged.
+
+The asset-count and branding-id checks run before the pool, client or branding is looked
+up, so an oversized request naming something that does not exist reports the request
+problem rather than `ResourceNotFoundException`, and an update violating both reports them
+in one message with the asset list first.
+
+Branding is presentation for the hosted UI, which Floci does not serve, so it is stored
+and returned rather than rendered. Two divergences follow from that:
+
+- **`Settings` is stored opaquely.** AWS validates it against a deep schema, rejecting
+  unknown properties with `Invalid settings provided. Validation errors: [{property:
+  $.components...., errorType: UnknownProperty}]`. That schema is not published, so Floci
+  accepts any object.
+- **A wrongly typed `Settings` returns a client error.** AWS answers that particular input
+  with `InternalErrorException` and a 500; Floci returns
+  `SerializationException: Unexpected field type`, which is what AWS returns for a wrongly
+  typed `Assets`. Reproducing someone else's 500 seemed worse than being consistent.
+- **`ReturnMergedResources` is not honoured.** Against AWS it merges Cognito's own default
+  settings and assets into the response: on a pool with 8 configured assets it returns 38.
+  Reproducing that needs Cognito's default corpus, so Floci returns the stored branding
+  either way.
+
 ## Well-Known And OAuth Endpoints
 
 | Endpoint                                             | Description                                                      |
@@ -178,7 +321,48 @@ Standalone `TagResource` rejects reserved `floci:*` keys. `ListTagsForResource` 
 - It doesn't require a Cognito domain.
 - It returns only `access_token`, `token_type`, and `expires_in`.
 - It validates requested OAuth scopes against the app client's `AllowedOAuthScopes` and the pool's registered resource-server scopes.
-- It advertises the prefixed token endpoint in `/{userPoolId}/.well-known/openid-configuration`.
+- It advertises the prefixed token endpoint in `/{userPoolId}/.well-known/openid-configuration`, or
+  `https://<domain>/oauth2/token` when the pool has a custom domain (see Custom domains above).
+
+## Sign-in Identifiers (`UsernameAttributes`)
+
+Floci follows real Cognito semantics for pools created with `UsernameAttributes` (e.g.
+`--username-attributes email`):
+
+- `AdminCreateUser`/`SignUp` accept the email (or phone number) as the sign-in value, but the
+  **canonical `Username` is an auto-generated, immutable UUID equal to `sub`**. The supplied email is
+  stored as a mutable alias attribute.
+- `ListUsers`, `AdminGetUser` and Lambda trigger `event.userName` all report the **UUID**, never the
+  email; the email lives in the `email` attribute and in `event.request.userAttributes.email`.
+- Sign-in resolves by the **current** email alias **or** the UUID. `SECRET_HASH` is validated against
+  the exact `USERNAME` value sent: `Base64(HMAC-SHA256(USERNAME + clientId, clientSecret))`.
+- In `CUSTOM_AUTH` / SRP flows, `ChallengeParameters.USERNAME` echoes the **UUID** (as real AWS does);
+  the `RespondToAuthChallenge` `SECRET_HASH` is validated against the `USERNAME` sent that round. That
+  `USERNAME` must still resolve to the session's user : the UUID or any of its current aliases : and a
+  value naming a different user is rejected with `NotAuthorizedException`.
+- `AdminUpdateUserAttributes` can change the email; afterwards sign-in works with the new email and
+  fails with the old one, while `Username`/`sub` stay fixed.
+- Duplicate email/phone on `AdminCreateUser`: `UsernameExistsException` when the incoming alias is
+  unverified, `AliasExistsException` when it is verified (`email_verified=true`); pass
+  `ForceAliasCreation=true` to migrate a verified alias off the previous owner. On
+  `AdminUpdateUserAttributes`, changing to an in-use alias throws `AliasExistsException`.
+
+Pools **without** `UsernameAttributes` (classic pools, and pools using `AliasAttributes`) keep the
+literal `Username` you supply, unchanged.
+
+### Token claims
+
+Floci mirrors AWS's access-token / ID-token split:
+
+- **Access token:** `sub`, `username` (the UUID), `scope` (`aws.cognito.signin.user.admin` for API
+  sign-in), `client_id`, `cognito:groups`, `jti`/`origin_jti`. It does **not** carry `cognito:username`
+  or user attributes like `email`.
+- **ID token:** `sub`, `cognito:username`, `aud`, and readable user attributes (`email`,
+  `email_verified`, `phone_number`, `custom:*`, ...). Attribute claims are filtered by the app client's
+  `ReadAttributes` (an unset/empty list means all attributes are readable).
+
+Not-found errors (`ResourceNotFoundException`, `UserNotFoundException`) return HTTP `400`, matching the
+Cognito JSON protocol.
 
 ## Configuration
 

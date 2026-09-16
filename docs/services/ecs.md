@@ -30,6 +30,12 @@ ECS emulates clusters, task definitions, tasks, and services. In the default con
 | `DeregisterTaskDefinition` | Mark a revision INACTIVE |
 | `DeleteTaskDefinitions` | Delete one or more task definitions |
 
+`runtimePlatform` and a container's `logConfiguration` are stored and returned exactly as
+registered, so a client that reads back what it wrote (Terraform, or a deploy tool verifying its
+own `RegisterTaskDefinition`) sees no drift. Neither changes how a local task runs: Floci launches
+every task on the host's own architecture, and a task's output stays with its Docker container
+rather than being routed to the configured log driver.
+
 ### Tasks
 
 | Operation | Description |
@@ -70,15 +76,50 @@ deployment, and moves with it thereafter.
 
 Known differences from AWS:
 
-- There is never a second `ACTIVE` deployment draining alongside the `PRIMARY` one;
-  Floci swaps the task definition in place.
+- There is never a second `ACTIVE` deployment draining alongside the `PRIMARY` one.
+  The running tasks *are* rolled onto a changed task definition (replacements on the new
+  revision start first, then the stale tasks are drained, one reconciler tick apart), but
+  the deployments list reports only the single `PRIMARY` throughout.
 - `deployments` is reported for every service. AWS omits it for services that use the
-  `CODE_DEPLOY` or `EXTERNAL` deployment controller, but Floci does not yet record
-  `deploymentController`, and `ECS` is the AWS default.
+  `CODE_DEPLOY` or `EXTERNAL` deployment controller; Floci records and echoes
+  `deploymentController` (along with `schedulingStrategy` and
+  `availabilityZoneRebalancing`; AWS defaults `ECS` / `REPLICA` / `ENABLED` on create) but
+  still synthesises the `deployments` list regardless of the controller type.
+- `DAEMON` scheduling runs exactly one task per `ACTIVE` container instance and derives
+  `desiredCount` from that count; it is rejected for the Fargate launch type and for the
+  `CODE_DEPLOY` / `EXTERNAL` controllers, as on AWS. Placement constraints are not evaluated.
 - `pendingCount` is always `0`, matching the top-level service field.
-- `forceNewDeployment` does not mint a new deployment `id`.
+- `forceNewDeployment` (with an unchanged task definition) mints a new deployment `id`
+  and rolls the running tasks: a replacement on the new deployment starts first, then
+  the task from the previous deployment is drained one reconciler tick later. The
+  `deployments` list still reports a single `PRIMARY` throughout.
 - `updatedAt` equals `createdAt`. AWS advances it as a rollout progresses; Floci has no
   intermediate rollout state to report.
+
+#### ECS EventBridge events
+
+Floci publishes AWS-shaped lifecycle events to the **default** EventBridge bus
+(`source: aws.ecs`). Rules matching `aws.ecs` fire from ECS activity, in both docker
+and mock mode.
+
+| `detail-type` | When | Key `detail` fields |
+|---|---|---|
+| `ECS Task State Change` | a task starts or stops | `lastStatus`, `desiredStatus`, `taskDefinitionArn`, `group`, `startedBy`, `stoppedReason`, `containers[].exitCode` |
+| `ECS Deployment State Change` | a service deployment starts, is in progress, or reaches steady state | `eventType` (always `INFO`), `eventName`, `deploymentId` |
+
+`eventName` is one of `SERVICE_DEPLOYMENT_STARTED`, `SERVICE_DEPLOYMENT_IN_PROGRESS`,
+`SERVICE_DEPLOYMENT_COMPLETED`.
+
+Known differences from AWS:
+
+- The task phase ladder is **synthesized**. Floci's task model only occupies
+  `PENDING`, `RUNNING` and `STOPPED`, but a start emits
+  `PROVISIONING -> PENDING -> ACTIVATING -> RUNNING` and a stop emits
+  `DEACTIVATING -> STOPPING -> DEPROVISIONING -> STOPPED`, one `ECS Task State Change`
+  per phase, so rules that filter on `detail.lastStatus` behave as on AWS.
+- `SERVICE_DEPLOYMENT_FAILED` and the deployment circuit breaker are not emitted.
+- `SubmitTaskStateChange` / `SubmitContainerStateChange` remain ACK-only; Floci drives
+  the task lifecycle itself rather than via agent submissions.
 
 #### Unknown services
 
@@ -158,6 +199,8 @@ unchanged.
 
 ## Configuration
 
+Docker-backed `awsvpc` tasks receive an emulated ENI and share one protected network namespace across their containers when `FLOCI_NETWORK_SECURITY_GROUP_ENFORCEMENT_ENABLED=true`. A task without explicit security groups uses its subnet VPC's default group. Containers in the same task can communicate over localhost. Bridge and host task networking do not attach task-level `awsvpc` security groups. Mock mode reports control-plane state and does not enforce packet filtering.
+
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_ECS_ENABLED` | `true` | Enable or disable the ECS service |
@@ -165,6 +208,34 @@ unchanged.
 | `FLOCI_SERVICES_ECS_DOCKER_NETWORK` | *(unset)* | Docker network for task containers |
 | `FLOCI_SERVICES_ECS_DEFAULT_MEMORY_MB` | `512` | Default memory (MB) when the task definition omits it |
 | `FLOCI_SERVICES_ECS_DEFAULT_CPU_UNITS` | `256` | Default CPU units when the task definition omits it |
+| `FLOCI_SERVICES_ECS_HOST_VOLUME_ROOTS` | *(unset)* | Approved parent directories for host volume bind mounts (`volumes[].host.sourcePath`) |
+| `FLOCI_SERVICES_ECS_ALLOW_UNSAFE_HOST_VOLUMES` | `false` | Allow any host path, bypassing the `HOST_VOLUME_ROOTS` allowlist; traversal, the bare root, and the Docker socket are still always rejected |
+
+### Host volume safety
+
+A task definition's `volumes[].host.sourcePath` is a caller-controlled filesystem path that Floci bind-mounts straight into the launched container, so both `RegisterTaskDefinition` and the actual bind mount at `RunTask` time validate it (the second check narrows the window between validation and mount, and also covers task definitions registered before this policy existed).
+
+Always rejected, regardless of configuration:
+
+- Relative paths, and any path containing a `..` segment.
+- The bare filesystem root (`/`).
+- The Docker daemon socket and any directory that contains it (e.g. `/var/run`, `/run`, `/var`), including via a symlink that resolves onto one of these paths. The protected socket is the one Floci's own Docker client connects to, resolved the same way the client resolves it: `floci.docker.docker-host`, then `DOCKER_HOST`, then the active Docker context (Colima, OrbStack, Rancher Desktop, Podman), then `/var/run/docker.sock`. The conventional locations `/var/run/docker.sock` and `/run/docker.sock` are always protected as well.
+
+**By default, with no configuration, every host `sourcePath` is rejected.** You must explicitly opt in with one of:
+
+- `FLOCI_SERVICES_ECS_HOST_VOLUME_ROOTS`: a comma-separated allowlist of approved parent directories. A `sourcePath` must resolve (symlinks included) under one of them:
+
+  ```yaml
+  services:
+    floci:
+      image: floci/floci:latest
+      environment:
+        FLOCI_SERVICES_ECS_HOST_VOLUME_ROOTS: /srv/floci/volumes,/data
+  ```
+
+- `FLOCI_SERVICES_ECS_ALLOW_UNSAFE_HOST_VOLUMES=true`: allow any host path (for local development where any host path should be mountable). The traversal, bare-root, and Docker socket blocks above are never bypassed by this flag.
+
+A rejected `sourcePath` fails `RegisterTaskDefinition` with `InvalidParameterException`; a rejection caught again at `RunTask` time (e.g. a task definition registered before this policy existed) stops the task with that message as its `stoppedReason`. Named Docker volumes, EFS volumes, and host volumes with no `sourcePath` (ephemeral, container-local storage) are unaffected by these checks.
 
 ### EFS volume ownership
 

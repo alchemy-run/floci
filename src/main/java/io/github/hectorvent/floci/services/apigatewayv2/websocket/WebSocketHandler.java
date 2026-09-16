@@ -2,9 +2,11 @@ package io.github.hectorvent.floci.services.apigatewayv2.websocket;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiRoutingFilter;
+import io.github.hectorvent.floci.services.apigateway.ApiGatewayExecuteApiHostFilter;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Api;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Integration;
@@ -47,6 +49,7 @@ public class WebSocketHandler {
     private final WebSocketIntegrationInvoker integrationInvoker;
     private final WebSocketAuthorizerService authorizerService;
     private final RegionResolver regionResolver;
+    private final String baseHostname;
     private final ObjectMapper objectMapper;
     private final io.vertx.core.Vertx vertx;
 
@@ -58,6 +61,7 @@ public class WebSocketHandler {
                             WebSocketIntegrationInvoker integrationInvoker,
                             WebSocketAuthorizerService authorizerService,
                             RegionResolver regionResolver,
+                            EmulatorConfig config,
                             ObjectMapper objectMapper,
                             io.vertx.core.Vertx vertx) {
         this.apiGatewayV2Service = apiGatewayV2Service;
@@ -67,6 +71,7 @@ public class WebSocketHandler {
         this.integrationInvoker = integrationInvoker;
         this.authorizerService = authorizerService;
         this.regionResolver = regionResolver;
+        this.baseHostname = config.hostname().orElse("localhost");
         this.objectMapper = objectMapper;
         this.vertx = vertx;
     }
@@ -106,10 +111,9 @@ public class WebSocketHandler {
             ctx.next();
             return;
         }
-        String apiId = ApiGatewayExecuteApiRoutingFilter.extractApiId(
-                ApiGatewayExecuteApiRoutingFilter.resolveHost(
-                        ctx.request().getHeader("Host"),
-                        URI.create(ctx.request().absoluteURI())));
+        String host = ApiGatewayExecuteApiRoutingFilter.resolveHost(
+                ctx.request().getHeader("Host"), URI.create(ctx.request().absoluteURI()));
+        String apiId = ApiGatewayExecuteApiHostFilter.extractApiId(host, baseHostname);
         if (apiId == null) {
             ctx.next();
             return;
@@ -158,8 +162,16 @@ public class WebSocketHandler {
      */
     private void beginUpgrade(RoutingContext ctx, String apiId, String stageName) {
         // Resolve region from the request Authorization header
-        String region = resolveRegionFromVertxRequest(ctx);
+        String region = apiGatewayV2Service.resolveApiRegion(resolveRegionFromVertxRequest(ctx), apiId);
+        processUpgrade(ctx, apiId, stageName, region);
+    }
 
+    /**
+     * Validate the API and stage, run the $connect lifecycle, and complete the upgrade.
+     * Shared by the path form ({@code /ws/{apiId}/{stage}}) and the AWS-style execute-api
+     * subdomain host route.
+     */
+    private void processUpgrade(RoutingContext ctx, String apiId, String stageName, String region) {
         // Validate the API exists and is a WEBSOCKET protocol API
         Api api;
         try {
@@ -736,14 +748,22 @@ public class WebSocketHandler {
      * Extracts the Authorization header and delegates to RegionResolver's parsing logic.
      * Falls back to the default region if no Authorization header is present.
      */
+    private static String resolveRequestHost(RoutingContext ctx) {
+        return ApiGatewayExecuteApiRoutingFilter.resolveHost(
+                ctx.request().getHeader("Host"), URI.create(ctx.request().absoluteURI()));
+    }
+
     private String resolveRegionFromVertxRequest(RoutingContext ctx) {
         String authHeader = ctx.request().getHeader("Authorization");
-        if (authHeader == null || authHeader.isEmpty()) {
-            return regionResolver.getDefaultRegion();
+        if (authHeader != null && !authHeader.isEmpty()) {
+            // Use a simple JAX-RS HttpHeaders adapter to delegate to RegionResolver
+            jakarta.ws.rs.core.HttpHeaders headers = new SimpleHttpHeaders(authHeader);
+            return regionResolver.resolveRegion(headers);
         }
-        // Use a simple JAX-RS HttpHeaders adapter to delegate to RegionResolver
-        jakarta.ws.rs.core.HttpHeaders headers = new SimpleHttpHeaders(authHeader);
-        return regionResolver.resolveRegion(headers);
+        // A WebSocket handshake carries no SigV4 Authorization header, so fall back to the
+        // region embedded in an execute-api subdomain host, else the configured default.
+        String region = regionResolver.resolveRegionFromHost(resolveRequestHost(ctx));
+        return region != null ? region : regionResolver.getDefaultRegion();
     }
 
     /**
