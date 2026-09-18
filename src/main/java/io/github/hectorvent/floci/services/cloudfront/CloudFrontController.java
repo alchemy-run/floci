@@ -14,16 +14,17 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
-import java.io.StringReader;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 
 @Path("/2020-05-31")
 public class CloudFrontController {
@@ -32,15 +33,32 @@ public class CloudFrontController {
 
     private static final String NS = AwsNamespaces.CLOUDFRONT;
     private static final String XML = "application/xml";
+    private static final String OCTET_STREAM = "application/octet-stream";
+    private static final String GEO_RESTRICTION = "GeoRestriction";
+    private static final String ORIGIN_GROUPS = "OriginGroups";
+    private static final String ITEMS = "Items";
+    private static final String LOCATION = "Location";
+    private static final String LOCATIONS = "Locations";
+    private static final String QUANTITY = "Quantity";
+    private static final String RESTRICTION_TYPE = "RestrictionType";
+    private static final String RESTRICTIONS = "Restrictions";
+    private static final String DEFAULT_GEO_RESTRICTION_TYPE = "none";
+    private static final int EMPTY_QUANTITY = 0;
 
-    private static final XMLInputFactory XML_FACTORY;
-
-    static {
-        XML_FACTORY = XMLInputFactory.newInstance();
-        XML_FACTORY.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, true);
-        XML_FACTORY.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
-        XML_FACTORY.setProperty(XMLInputFactory.SUPPORT_DTD, false);
-    }
+    /**
+     * Origin timeout constraints from the CloudFront {@code CustomOriginConfig} and
+     * {@code Origin} API references. {@code OriginReadTimeout} accepts 1-120 seconds, default 30.
+     * {@code OriginKeepaliveTimeout} accepts 1-300 seconds, default 5. {@code ResponseCompletionTimeout}
+     * has no enforced maximum when unset (represented here as 0), but when set must be at least
+     * {@code OriginReadTimeout}.
+     */
+    private static final int DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS = 30;
+    private static final int MIN_ORIGIN_READ_TIMEOUT_SECONDS = 1;
+    private static final int MAX_ORIGIN_READ_TIMEOUT_SECONDS = 120;
+    private static final int DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 5;
+    private static final int MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 1;
+    private static final int MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 300;
+    private static final int DEFAULT_RESPONSE_COMPLETION_TIMEOUT_SECONDS = 0;
 
     private final CloudFrontService service;
     private final CloudFrontFunctionRuntime functionRuntime;
@@ -150,25 +168,24 @@ public class CloudFrontController {
     public Response listDistributions(@QueryParam("Marker") String marker,
                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<Distribution> dists = service.listDistributions(marker, maxItems);
-            long total = service.listDistributions(null, Integer.MAX_VALUE).size();
-            boolean truncated = dists.size() == maxItems && dists.size() < total;
+            Page<Distribution> page = page(
+                    service.listDistributions(marker, paginationFetchLimit(maxItems)),
+                    maxItems, Distribution::getId);
+            int totalDistributions =
+                    service.listDistributions(null, Integer.MAX_VALUE).size();
 
             XmlBuilder xml = new XmlBuilder()
                     .start("DistributionList", NS)
                     .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated);
-            if (truncated && !dists.isEmpty()) {
-                xml.elem("NextMarker", dists.get(dists.size() - 1).getId());
-            }
-            xml.elem("Quantity", dists.size())
+                    .elem("IsTruncated", page.truncated())
+                    .elem("Quantity", totalDistributions)
                     .start("Items");
-            for (Distribution d : dists) {
+            for (Distribution d : page.items()) {
                 xml.raw(xmlDistributionSummary(d));
             }
-            xml.end("Items")
-                    .end("DistributionList");
+            xml.end("Items").end("DistributionList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -233,17 +250,19 @@ public class CloudFrontController {
                                       @QueryParam("Marker") String marker,
                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<Invalidation> invs = service.listInvalidations(id, marker, maxItems);
-            boolean truncated = invs.size() == maxItems;
+            Page<Invalidation> page = page(
+                    service.listInvalidations(id, marker, paginationFetchLimit(maxItems)),
+                    maxItems, Invalidation::getId);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("InvalidationList", NS)
                     .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", invs.size())
+                    .elem("IsTruncated", page.truncated())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (Invalidation inv : invs) {
+            for (Invalidation inv : page.items()) {
                 xml.start("InvalidationSummary")
                         .elem("Id", inv.getId())
                         .elem("Status", inv.getStatus())
@@ -346,17 +365,17 @@ public class CloudFrontController {
                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems,
                                       @QueryParam("Type") String type) {
         try {
-            List<CachePolicy> policies = service.listCachePolicies(marker, maxItems);
-            boolean truncated = policies.size() == maxItems;
+            Page<CachePolicy> page = page(
+                    service.listCachePolicies(marker, paginationFetchLimit(maxItems)),
+                    maxItems, CachePolicy::getId);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("CachePolicyList", NS)
-                    .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", policies.size())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (CachePolicy p : policies) {
+            for (CachePolicy p : page.items()) {
                 xml.start("CachePolicySummary")
                         .elem("Type", "custom")
                         .raw(xmlCachePolicyResponse(p))
@@ -458,17 +477,17 @@ public class CloudFrontController {
                                               @QueryParam("MaxItems") @DefaultValue("100") int maxItems,
                                               @QueryParam("Type") String type) {
         try {
-            List<OriginRequestPolicy> policies = service.listOriginRequestPolicies(marker, maxItems);
-            boolean truncated = policies.size() == maxItems;
+            Page<OriginRequestPolicy> page = page(
+                    service.listOriginRequestPolicies(marker, paginationFetchLimit(maxItems)),
+                    maxItems, OriginRequestPolicy::getId);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("OriginRequestPolicyList", NS)
-                    .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", policies.size())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (OriginRequestPolicy p : policies) {
+            for (OriginRequestPolicy p : page.items()) {
                 xml.start("OriginRequestPolicySummary")
                         .elem("Type", "custom")
                         .raw(xmlOriginRequestPolicyResponse(p))
@@ -518,12 +537,12 @@ public class CloudFrontController {
     public Response getResponseHeadersPolicyConfig(@PathParam("Id") String id) {
         try {
             ResponseHeadersPolicy policy = service.getResponseHeadersPolicy(id);
-            String xml = new XmlBuilder()
+            XmlBuilder builder = new XmlBuilder()
                     .start("ResponseHeadersPolicyConfig", NS)
                     .elem("Name", policy.getName())
-                    .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
-                    .end("ResponseHeadersPolicyConfig")
-                    .build();
+                    .elem("Comment", policy.getComment() != null ? policy.getComment() : "");
+            ResponseHeadersPolicyConfigCodec.serialize(builder, policy.getConfig());
+            String xml = builder.end("ResponseHeadersPolicyConfig").build();
             return Response.ok(xml, XML).header("ETag", policy.getEtag()).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -571,23 +590,32 @@ public class CloudFrontController {
                                                 @QueryParam("MaxItems") @DefaultValue("100") int maxItems,
                                                 @QueryParam("Type") String type) {
         try {
-            List<ResponseHeadersPolicy> policies = service.listResponseHeadersPolicies(marker, maxItems);
-            boolean truncated = policies.size() == maxItems;
+            if (maxItems < 1 || maxItems > 100) {
+                throw new AwsException("InvalidArgument",
+                        "MaxItems must be between 1 and 100.", 400);
+            }
+            Page<ResponseHeadersPolicy> page = page(
+                    service.listResponseHeadersPolicies(
+                            marker, paginationFetchLimit(maxItems), type),
+                    maxItems, ResponseHeadersPolicy::getId);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("ResponseHeadersPolicyList", NS)
-                    .elem("Marker", marker != null ? marker : "")
-                    .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", policies.size())
                     .start("Items");
-            for (ResponseHeadersPolicy p : policies) {
+            for (ResponseHeadersPolicy p : page.items()) {
                 xml.start("ResponseHeadersPolicySummary")
-                        .elem("Type", "custom")
+                        .elem("Type", CloudFrontService.isManagedResponseHeadersPolicy(p.getId())
+                                ? "managed" : "custom")
                         .raw(xmlResponseHeadersPolicyResponse(p))
                         .end("ResponseHeadersPolicySummary");
             }
-            xml.end("Items").end("ResponseHeadersPolicyList");
+            xml.end("Items")
+                    .elem("MaxItems", maxItems);
+            if (page.nextMarker() != null) {
+                xml.elem("NextMarker", page.nextMarker());
+            }
+            xml.elem("Quantity", page.items().size())
+                    .end("ResponseHeadersPolicyList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -685,17 +713,19 @@ public class CloudFrontController {
     public Response listOriginAccessControls(@QueryParam("Marker") String marker,
                                              @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<OriginAccessControl> oacs = service.listOriginAccessControls(marker, maxItems);
-            boolean truncated = oacs.size() == maxItems;
+            Page<OriginAccessControl> page = page(
+                    service.listOriginAccessControls(marker, paginationFetchLimit(maxItems)),
+                    maxItems, OriginAccessControl::getId);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("OriginAccessControlList", NS)
                     .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", oacs.size())
+                    .elem("IsTruncated", page.truncated())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (OriginAccessControl o : oacs) {
+            for (OriginAccessControl o : page.items()) {
                 xml.raw(xmlOriginAccessControlSummary(o));
             }
             xml.end("Items").end("OriginAccessControlList");
@@ -793,27 +823,27 @@ public class CloudFrontController {
             @QueryParam("Marker") String marker,
             @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<CloudFrontOriginAccessIdentity> oais =
-                    service.listCloudFrontOriginAccessIdentities(marker, maxItems);
-            boolean truncated = oais.size() == maxItems;
+            Page<CloudFrontOriginAccessIdentity> page = page(
+                    service.listCloudFrontOriginAccessIdentities(
+                            marker, paginationFetchLimit(maxItems)),
+                    maxItems, CloudFrontOriginAccessIdentity::getId);
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListCloudFrontOriginAccessIdentitiesResult", NS)
-                    .start("CloudFrontOriginAccessIdentityList")
+                    .start("CloudFrontOriginAccessIdentityList", NS)
                     .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", oais.size())
+                    .elem("IsTruncated", page.truncated())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (CloudFrontOriginAccessIdentity o : oais) {
+            for (CloudFrontOriginAccessIdentity o : page.items()) {
                 xml.start("CloudFrontOriginAccessIdentitySummary")
                         .elem("Id", o.getId())
                         .elem("S3CanonicalUserId", o.getS3CanonicalUserId())
                         .elem("Comment", o.getComment() != null ? o.getComment() : "")
                         .end("CloudFrontOriginAccessIdentitySummary");
             }
-            xml.end("Items").end("CloudFrontOriginAccessIdentityList")
-                    .end("ListCloudFrontOriginAccessIdentitiesResult");
+            xml.end("Items").end("CloudFrontOriginAccessIdentityList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -845,7 +875,9 @@ public class CloudFrontController {
                                 @QueryParam("Stage") String stage) {
         try {
             CloudFrontFunction fn = service.describeFunction(name, stage);
-            return Response.ok(xmlFunctionResponse(fn), XML).header("ETag", fn.getEtag()).build();
+            return Response.ok(fn.getFunctionCode() != null ? fn.getFunctionCode() : "", OCTET_STREAM)
+                    .header("ETag", fn.getEtag())
+                    .build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
         }
@@ -996,13 +1028,16 @@ public class CloudFrontController {
                                   @QueryParam("Marker") String marker,
                                   @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<CloudFrontFunction> fns = service.listFunctions(stage);
+            Page<CloudFrontFunction> page = page(
+                    service.listFunctions(stage, marker, paginationFetchLimit(maxItems)),
+                    maxItems, CloudFrontFunction::getName);
             XmlBuilder xml = new XmlBuilder()
                     .start("FunctionList", NS)
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("Quantity", fns.size())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (CloudFrontFunction fn : fns) {
+            for (CloudFrontFunction fn : page.items()) {
                 xml.start("FunctionSummary")
                         .elem("Name", fn.getName())
                         .elem("Status", fn.getStatus())
@@ -1036,8 +1071,7 @@ public class CloudFrontController {
         try {
             Map<String, String> tags = service.listTagsForResource(resource);
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListTagsForResourceResult", NS)
-                    .start("Tags")
+                    .start("Tags", NS)
                     .start("Items");
             for (Map.Entry<String, String> entry : tags.entrySet()) {
                 xml.start("Tag")
@@ -1045,7 +1079,7 @@ public class CloudFrontController {
                         .elem("Value", entry.getValue())
                         .end("Tag");
             }
-            xml.end("Items").end("Tags").end("ListTagsForResourceResult");
+            xml.end("Items").end("Tags");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1144,26 +1178,26 @@ public class CloudFrontController {
     public Response listContinuousDeploymentPolicies(@QueryParam("Marker") String marker,
                                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<ContinuousDeploymentPolicy> policies =
-                    service.listContinuousDeploymentPolicies(marker, maxItems);
-            boolean truncated = policies.size() == maxItems;
+            Page<ContinuousDeploymentPolicy> page = page(
+                    service.listContinuousDeploymentPolicies(
+                            marker, paginationFetchLimit(maxItems)),
+                    maxItems, ContinuousDeploymentPolicy::getId);
+            int totalPolicies = service.listContinuousDeploymentPolicies(
+                    null, Integer.MAX_VALUE).size();
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListContinuousDeploymentPoliciesResult", NS)
-                    .start("ContinuousDeploymentPolicyList")
-                    .elem("Marker", marker != null ? marker : "")
+                    .start("ContinuousDeploymentPolicyList", NS)
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", policies.size())
+                    .elem("Quantity", totalPolicies)
                     .start("Items");
-            for (ContinuousDeploymentPolicy p : policies) {
+            for (ContinuousDeploymentPolicy p : page.items()) {
                 xml.start("ContinuousDeploymentPolicySummary")
                         .elem("Type", "custom")
                         .raw(xmlContinuousDeploymentPolicyResponse(p))
                         .end("ContinuousDeploymentPolicySummary");
             }
-            xml.end("Items").end("ContinuousDeploymentPolicyList")
-                    .end("ListContinuousDeploymentPoliciesResult");
+            xml.end("Items").end("ContinuousDeploymentPolicyList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1279,17 +1313,17 @@ public class CloudFrontController {
     public Response listPublicKeys(@QueryParam("Marker") String marker,
                                    @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<PublicKey> keys = service.listPublicKeys(marker, maxItems);
-            boolean truncated = keys.size() == maxItems;
+            Page<PublicKey> page = page(
+                    service.listPublicKeys(marker, paginationFetchLimit(maxItems)),
+                    maxItems, PublicKey::getId);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("PublicKeyList", NS)
-                    .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", keys.size())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (PublicKey k : keys) {
+            for (PublicKey k : page.items()) {
                 xml.raw(xmlPublicKeySummary(k));
             }
             xml.end("Items").end("PublicKeyList");
@@ -1339,7 +1373,7 @@ public class CloudFrontController {
                     .start("KeyGroupConfig", NS)
                     .elem("Name", group.getName() != null ? group.getName() : "")
                     .elem("Comment", group.getComment() != null ? group.getComment() : "")
-                    .raw(xmlPublicKeyItems(items))
+                    .raw(xmlDirectItems("Items", "PublicKey", items))
                     .end("KeyGroupConfig")
                     .build();
             return Response.ok(xml, XML).header("ETag", group.getEtag()).build();
@@ -1387,17 +1421,17 @@ public class CloudFrontController {
     public Response listKeyGroups(@QueryParam("Marker") String marker,
                                   @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<KeyGroup> groups = service.listKeyGroups(marker, maxItems);
-            boolean truncated = groups.size() == maxItems;
+            Page<KeyGroup> page = page(
+                    service.listKeyGroups(marker, paginationFetchLimit(maxItems)),
+                    maxItems, KeyGroup::getId);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("KeyGroupList", NS)
-                    .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", groups.size())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (KeyGroup g : groups) {
+            for (KeyGroup g : page.items()) {
                 xml.start("KeyGroupSummary").raw(xmlKeyGroupResponse(g)).end("KeyGroupSummary");
             }
             xml.end("Items").end("KeyGroupList");
@@ -1482,19 +1516,22 @@ public class CloudFrontController {
     public Response listRealtimeLogConfigs(@QueryParam("Marker") String marker,
                                            @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<RealtimeLogConfig> configs = service.listRealtimeLogConfigs(marker, maxItems);
-            boolean truncated = configs.size() == maxItems;
+            Page<RealtimeLogConfig> page = page(
+                    service.listRealtimeLogConfigs(marker, paginationFetchLimit(maxItems)),
+                    maxItems, RealtimeLogConfig::getName);
 
             XmlBuilder xml = new XmlBuilder()
                     .start("RealtimeLogConfigs", NS)
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", configs.size())
                     .start("Items");
-            for (RealtimeLogConfig c : configs) {
+            for (RealtimeLogConfig c : page.items()) {
                 xml.raw(xmlRealtimeLogConfigBody(c));
             }
-            xml.end("Items").end("RealtimeLogConfigs");
+            xml.end("Items")
+                    .elem("IsTruncated", page.truncated())
+                    .elem("Marker", marker != null ? marker : "")
+                    .elem("NextMarker", page.nextMarker())
+                    .end("RealtimeLogConfigs");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1650,22 +1687,21 @@ public class CloudFrontController {
     public Response listFieldLevelEncryptionConfigs(@QueryParam("Marker") String marker,
                                                      @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<FieldLevelEncryptionConfig> configs =
-                    service.listFieldLevelEncryptionConfigs(marker, maxItems);
-            boolean truncated = configs.size() == maxItems;
+            Page<FieldLevelEncryptionConfig> page = page(
+                    service.listFieldLevelEncryptionConfigs(
+                            marker, paginationFetchLimit(maxItems)),
+                    maxItems, FieldLevelEncryptionConfig::getId);
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListFieldLevelEncryptionConfigsResult", NS)
-                    .start("FieldLevelEncryptionList")
-                    .elem("Marker", marker != null ? marker : "")
+                    .start("FieldLevelEncryptionList", NS)
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", configs.size())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (FieldLevelEncryptionConfig c : configs) {
+            for (FieldLevelEncryptionConfig c : page.items()) {
                 xml.raw(xmlFieldLevelEncryptionConfigResponse(c));
             }
-            xml.end("Items").end("FieldLevelEncryptionList").end("ListFieldLevelEncryptionConfigsResult");
+            xml.end("Items").end("FieldLevelEncryptionList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1744,23 +1780,21 @@ public class CloudFrontController {
     public Response listFieldLevelEncryptionProfiles(@QueryParam("Marker") String marker,
                                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
         try {
-            List<FieldLevelEncryptionProfile> profiles =
-                    service.listFieldLevelEncryptionProfiles(marker, maxItems);
-            boolean truncated = profiles.size() == maxItems;
+            Page<FieldLevelEncryptionProfile> page = page(
+                    service.listFieldLevelEncryptionProfiles(
+                            marker, paginationFetchLimit(maxItems)),
+                    maxItems, FieldLevelEncryptionProfile::getId);
 
             XmlBuilder xml = new XmlBuilder()
-                    .start("ListFieldLevelEncryptionProfilesResult", NS)
-                    .start("FieldLevelEncryptionProfileList")
-                    .elem("Marker", marker != null ? marker : "")
+                    .start("FieldLevelEncryptionProfileList", NS)
+                    .elem("NextMarker", page.nextMarker())
                     .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", profiles.size())
+                    .elem("Quantity", page.items().size())
                     .start("Items");
-            for (FieldLevelEncryptionProfile p : profiles) {
+            for (FieldLevelEncryptionProfile p : page.items()) {
                 xml.raw(xmlFieldLevelEncryptionProfileResponse(p));
             }
-            xml.end("Items").end("FieldLevelEncryptionProfileList")
-                    .end("ListFieldLevelEncryptionProfilesResult");
+            xml.end("Items").end("FieldLevelEncryptionProfileList");
             return Response.ok(xml.build(), XML).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
@@ -1992,6 +2026,11 @@ public class CloudFrontController {
                 .elem("DomainName", dist.getDomainName())
                 .elem("LastModifiedTime",
                         dist.getLastModifiedTime() != null ? dist.getLastModifiedTime().toString() : "")
+                .raw(xmlActiveTrustedKeyGroups(dist.getConfig()))
+                .start("ActiveTrustedSigners")
+                .elem("Enabled", false)
+                .elem("Quantity", 0)
+                .end("ActiveTrustedSigners")
                 .start("DistributionConfig")
                 .raw(xmlDistributionConfigBody(dist.getConfig()))
                 .end("DistributionConfig")
@@ -2016,6 +2055,7 @@ public class CloudFrontController {
         List<Origin> origins = cfg.getOrigins();
         xml.raw(xmlQuantityItems("Origins", "Origin", origins != null ? origins.size() : 0,
                 origins != null ? origins.stream().map(this::xmlOrigin).toList() : List.of()));
+        xml.raw(xmlEmptyOriginGroups());
 
         if (cfg.getDefaultCacheBehavior() != null) {
             xml.raw(xmlDefaultCacheBehavior(cfg.getDefaultCacheBehavior()));
@@ -2034,27 +2074,29 @@ public class CloudFrontController {
         xml.end("CacheBehaviors");
 
         List<Map<String, Object>> customErrors = cfg.getCustomErrorResponses();
-        int ceCount = customErrors != null ? customErrors.size() : 0;
-        xml.start("CustomErrorResponses").elem("Quantity", ceCount);
-        if (ceCount > 0) {
+        int cerCount = customErrors != null ? customErrors.size() : 0;
+        xml.start("CustomErrorResponses").elem("Quantity", cerCount);
+        if (cerCount > 0) {
             xml.start("Items");
-            for (Map<String, Object> ce : customErrors) {
-                xml.start("CustomErrorResponse")
-                        .elem("ErrorCode", ce.get("ErrorCode") != null
-                                ? String.valueOf(ce.get("ErrorCode")) : null)
-                        .elem("ResponsePagePath", ce.get("ResponsePagePath") != null
-                                ? String.valueOf(ce.get("ResponsePagePath")) : null)
-                        .elem("ResponseCode", ce.get("ResponseCode") != null
-                                ? String.valueOf(ce.get("ResponseCode")) : null)
-                        .elem("ErrorCachingMinTTL", ce.get("ErrorCachingMinTTL") != null
-                                ? String.valueOf(ce.get("ErrorCachingMinTTL")) : null)
+            for (Map<String, Object> cer : customErrors) {
+                xml.start("CustomErrorResponse").elem("ErrorCode", str(cer.get("ErrorCode")));
+                // ResponsePagePath and ResponseCode are optional; CloudFront omits them when unset
+                // rather than returning empty elements.
+                String pagePath = str(cer.get("ResponsePagePath"));
+                if (!pagePath.isEmpty()) {
+                    xml.elem("ResponsePagePath", pagePath);
+                }
+                String responseCode = str(cer.get("ResponseCode"));
+                if (!responseCode.isEmpty()) {
+                    xml.elem("ResponseCode", responseCode);
+                }
+                xml.elem("ErrorCachingMinTTL", cer.get("ErrorCachingMinTTL") != null
+                                ? str(cer.get("ErrorCachingMinTTL")) : "0")
                         .end("CustomErrorResponse");
             }
             xml.end("Items");
         }
         xml.end("CustomErrorResponses");
-
-        xml.raw(xmlRestrictions(cfg.getGeoRestriction()));
 
         List<String> aliases = cfg.getAliases();
         int aliasCount = aliases != null ? aliases.size() : 0;
@@ -2069,32 +2111,86 @@ public class CloudFrontController {
         xml.end("Aliases");
 
         xml.raw(xmlViewerCertificate(cfg.getViewerCertificate()));
+        xml.raw(xmlRestrictions(cfg.getGeoRestriction()));
+        xml.raw(xmlLogging(cfg.getLogging()));
 
         return xml.build();
     }
 
-    @SuppressWarnings("unchecked")
-    private String xmlRestrictions(Map<String, Object> geo) {
-        XmlBuilder xml = new XmlBuilder().start("Restrictions").start("GeoRestriction");
-        Object restrictionType = geo != null ? geo.get("RestrictionType") : null;
-        if (restrictionType != null && !"none".equals(restrictionType)) {
-            List<String> locations = geo.get("Items") instanceof List<?> items
-                    ? (List<String>) items
-                    : List.of();
-            xml.elem("RestrictionType", String.valueOf(restrictionType))
-                    .elem("Quantity", locations.size());
-            if (!locations.isEmpty()) {
-                xml.start("Items");
-                for (String location : locations) {
-                    xml.elem("Location", location);
-                }
-                xml.end("Items");
+    /**
+     * Logging is always present on a real DistributionConfig response, disabled by
+     * default. Callers read it unconditionally, so omitting it when the caller did not
+     * supply one leaves the member missing from every read.
+     */
+    private String xmlLogging(Map<String, Object> logging) {
+        return new XmlBuilder()
+                .start("Logging")
+                .elem("Enabled", logging != null
+                        && Boolean.parseBoolean(str(logging.get("Enabled"))))
+                .elem("IncludeCookies", logging != null
+                        && Boolean.parseBoolean(str(logging.get("IncludeCookies"))))
+                .elem("Bucket", logging != null ? str(logging.get("Bucket")) : "")
+                .elem("Prefix", logging != null ? str(logging.get("Prefix")) : "")
+                .end("Logging")
+                .build();
+    }
+
+    private String xmlEmptyOriginGroups() {
+        // Presence-only OriginGroups is intentional for Terraform compatibility; round-tripping groups is deferred.
+        return new XmlBuilder()
+                .start(ORIGIN_GROUPS)
+                .elem(QUANTITY, EMPTY_QUANTITY)
+                .end(ORIGIN_GROUPS)
+                .build();
+    }
+
+    private String xmlRestrictions(Map<String, Object> geoRestriction) {
+        String restrictionType = DEFAULT_GEO_RESTRICTION_TYPE;
+        int quantity = EMPTY_QUANTITY;
+        List<String> locations = List.of();
+        if (geoRestriction != null) {
+            restrictionType = String.valueOf(
+                    geoRestriction.getOrDefault(RESTRICTION_TYPE, DEFAULT_GEO_RESTRICTION_TYPE));
+            locations = stringList(geoRestriction.get(LOCATIONS));
+            quantity = parseInt(geoRestriction.get(QUANTITY), EMPTY_QUANTITY);
+            if (quantity == EMPTY_QUANTITY && !locations.isEmpty()) {
+                quantity = locations.size();
             }
-        } else {
-            xml.elem("RestrictionType", "none").elem("Quantity", 0);
         }
-        xml.end("GeoRestriction").end("Restrictions");
-        return xml.build();
+
+        XmlBuilder xml = new XmlBuilder()
+                .start(RESTRICTIONS)
+                .start(GEO_RESTRICTION)
+                .elem(RESTRICTION_TYPE, restrictionType)
+                .elem(QUANTITY, quantity);
+        if (!locations.isEmpty()) {
+            xml.start(ITEMS);
+            for (String location : locations) {
+                xml.elem(LOCATION, location);
+            }
+            xml.end(ITEMS);
+        }
+        return xml.end(GEO_RESTRICTION)
+                .end(RESTRICTIONS)
+                .build();
+    }
+
+    private List<String> stringList(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream().map(String::valueOf).toList();
+        }
+        return List.of();
+    }
+
+    private int parseInt(Object value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.toString());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     private String xmlOrigin(Origin o) {
@@ -2104,26 +2200,15 @@ public class CloudFrontController {
                 .elem("DomainName", o.getDomainName())
                 .elem("OriginPath", o.getOriginPath() != null ? o.getOriginPath() : "")
                 .elem("ConnectionAttempts", o.getConnectionAttempts())
-                .elem("ConnectionTimeout", o.getConnectionTimeout());
+                .elem("ConnectionTimeout", o.getConnectionTimeout())
+                .elem("ResponseCompletionTimeout",
+                        o.getResponseCompletionTimeout() != null
+                                ? o.getResponseCompletionTimeout()
+                                : DEFAULT_RESPONSE_COMPLETION_TIMEOUT_SECONDS);
 
         if (o.getOriginAccessControlId() != null && !o.getOriginAccessControlId().isEmpty()) {
             xml.elem("OriginAccessControlId", o.getOriginAccessControlId());
         }
-
-        List<Map<String, String>> customHeaders = o.getCustomHeaders();
-        int headerCount = customHeaders != null ? customHeaders.size() : 0;
-        xml.start("CustomHeaders").elem("Quantity", headerCount);
-        if (headerCount > 0) {
-            xml.start("Items");
-            for (Map<String, String> header : customHeaders) {
-                xml.start("OriginCustomHeader")
-                        .elem("HeaderName", header.get("HeaderName"))
-                        .elem("HeaderValue", header.get("HeaderValue"))
-                        .end("OriginCustomHeader");
-            }
-            xml.end("Items");
-        }
-        xml.end("CustomHeaders");
 
         Map<String, String> s3Config = o.getS3OriginConfig();
         if (s3Config != null) {
@@ -2141,6 +2226,12 @@ public class CloudFrontController {
                     .elem("HTTPSPort", coc.getOrDefault("HTTPSPort", "443").toString())
                     .elem("OriginProtocolPolicy",
                             coc.getOrDefault("OriginProtocolPolicy", "https-only").toString())
+                    .elem("OriginReadTimeout",
+                            coc.getOrDefault("OriginReadTimeout", DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS).toString())
+                    .elem("OriginKeepaliveTimeout",
+                            coc.getOrDefault("OriginKeepaliveTimeout", DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS)
+                                    .toString())
+                    .raw(xmlOriginSslProtocols(coc.get("OriginSslProtocols")))
                     .end("CustomOriginConfig");
         }
 
@@ -2156,6 +2247,21 @@ public class CloudFrontController {
             }
             xml.end("VpcOriginConfig");
         }
+        List<Map<String, String>> customHeaders = o.getCustomHeaders();
+        int customHeaderCount = customHeaders == null ? 0 : customHeaders.size();
+        xml.start("CustomHeaders")
+                .elem("Quantity", customHeaderCount);
+        if (customHeaderCount > 0) {
+            xml.start("Items");
+            for (Map<String, String> header : customHeaders) {
+                xml.start("OriginCustomHeader")
+                        .elem("HeaderName", header.getOrDefault("HeaderName", ""))
+                        .elem("HeaderValue", header.getOrDefault("HeaderValue", ""))
+                        .end("OriginCustomHeader");
+            }
+            xml.end("Items");
+        }
+        xml.end("CustomHeaders");
 
         xml.end("Origin");
         return xml.build();
@@ -2170,25 +2276,23 @@ public class CloudFrontController {
                 .elem("CachePolicyId", dcb.getCachePolicyId())
                 .elem("OriginRequestPolicyId", dcb.getOriginRequestPolicyId())
                 .elem("ResponseHeadersPolicyId", dcb.getResponseHeadersPolicyId())
-                .elem("Compress", dcb.isCompress());
+                .elem("FieldLevelEncryptionId",
+                        dcb.getFieldLevelEncryptionId() != null ? dcb.getFieldLevelEncryptionId() : "")
+                .elem("RealtimeLogConfigArn", dcb.getRealtimeLogConfigArn())
+                .elem("Compress", dcb.isCompress())
+                .elem("SmoothStreaming", dcb.isSmoothStreaming());
+
+        xml.raw(xmlCacheBehaviorTtls(dcb.getMinTTL(), dcb.getDefaultTTL(), dcb.getMaxTTL()));
+
+        xml.raw(xmlTrustedSigners());
+        xml.raw(xmlTrustedKeyGroups(
+                dcb.isTrustedKeyGroupsEnabled(), dcb.getTrustedKeyGroups()));
 
         xml.raw(xmlAllowedMethods(dcb.getAllowedMethods(), dcb.getCachedMethods()));
-
-        if (dcb.getForwardedValues() != null) {
-            xml.raw(xmlForwardedValues(dcb.getForwardedValues()));
-        }
-        if (dcb.getMinTTL() != null) {
-            xml.elem("MinTTL", dcb.getMinTTL().longValue());
-        }
-        if (dcb.getDefaultTTL() != null) {
-            xml.elem("DefaultTTL", dcb.getDefaultTTL().longValue());
-        }
-        if (dcb.getMaxTTL() != null) {
-            xml.elem("MaxTTL", dcb.getMaxTTL().longValue());
-        }
+        xml.raw(xmlCacheBehaviorForwardedValues(dcb.getCachePolicyId(), dcb.getForwardedValues()));
 
         xml.raw(xmlFunctionAssociations(dcb.getFunctionAssociations()));
-        xml.start("LambdaFunctionAssociations").elem("Quantity", 0).end("LambdaFunctionAssociations");
+        xml.raw(xmlLambdaFunctionAssociations(dcb.getLambdaFunctionAssociations()));
 
         xml.end("DefaultCacheBehavior");
         return xml.build();
@@ -2204,104 +2308,200 @@ public class CloudFrontController {
                 .elem("CachePolicyId", cb.getCachePolicyId())
                 .elem("OriginRequestPolicyId", cb.getOriginRequestPolicyId())
                 .elem("ResponseHeadersPolicyId", cb.getResponseHeadersPolicyId())
-                .elem("Compress", cb.isCompress());
+                .elem("FieldLevelEncryptionId",
+                        cb.getFieldLevelEncryptionId() != null ? cb.getFieldLevelEncryptionId() : "")
+                .elem("RealtimeLogConfigArn", cb.getRealtimeLogConfigArn())
+                .elem("Compress", cb.isCompress())
+                .elem("SmoothStreaming", cb.isSmoothStreaming());
+
+        xml.raw(xmlCacheBehaviorTtls(cb.getMinTTL(), cb.getDefaultTTL(), cb.getMaxTTL()));
+
+        xml.raw(xmlTrustedSigners());
+        xml.raw(xmlTrustedKeyGroups(
+                cb.isTrustedKeyGroupsEnabled(), cb.getTrustedKeyGroups()));
 
         xml.raw(xmlAllowedMethods(cb.getAllowedMethods(), cb.getCachedMethods()));
-
-        if (cb.getForwardedValues() != null) {
-            xml.raw(xmlForwardedValues(cb.getForwardedValues()));
-        }
-        if (cb.getMinTTL() != null) {
-            xml.elem("MinTTL", cb.getMinTTL().longValue());
-        }
-        if (cb.getDefaultTTL() != null) {
-            xml.elem("DefaultTTL", cb.getDefaultTTL().longValue());
-        }
-        if (cb.getMaxTTL() != null) {
-            xml.elem("MaxTTL", cb.getMaxTTL().longValue());
-        }
+        xml.raw(xmlCacheBehaviorForwardedValues(cb.getCachePolicyId(), cb.getForwardedValues()));
 
         xml.raw(xmlFunctionAssociations(cb.getFunctionAssociations()));
-        xml.start("LambdaFunctionAssociations").elem("Quantity", 0).end("LambdaFunctionAssociations");
+        xml.raw(xmlLambdaFunctionAssociations(cb.getLambdaFunctionAssociations()));
 
         xml.end("CacheBehavior");
         return xml.build();
     }
 
-    private String xmlAllowedMethods(List<String> allowed, List<String> cached) {
-        if (allowed == null || allowed.isEmpty()) {
-            allowed = List.of("GET", "HEAD");
+    private String xmlLambdaFunctionAssociations(List<Map<String, Object>> associations) {
+        List<Map<String, Object>> list = associations != null ? associations : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("LambdaFunctionAssociations")
+                .elem("Quantity", list.size());
+        if (!list.isEmpty()) {
+            xml.start("Items");
+            for (Map<String, Object> a : list) {
+                xml.start("LambdaFunctionAssociation")
+                        .elem("LambdaFunctionARN", str(a.get("LambdaFunctionARN")))
+                        .elem("EventType", str(a.get("EventType")))
+                        .elem("IncludeBody", Boolean.TRUE.equals(a.get("IncludeBody")))
+                        .end("LambdaFunctionAssociation");
+            }
+            xml.end("Items");
         }
-        if (cached == null || cached.isEmpty()) {
-            cached = List.of("GET", "HEAD");
+        return xml.end("LambdaFunctionAssociations").build();
+    }
+
+    private String xmlFunctionAssociations(List<Map<String, String>> associations) {
+        List<Map<String, String>> list = associations != null ? associations : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("FunctionAssociations")
+                .elem("Quantity", list.size());
+        if (!list.isEmpty()) {
+            xml.start("Items");
+            for (Map<String, String> a : list) {
+                xml.start("FunctionAssociation")
+                        .elem("FunctionARN", str(a.get("FunctionARN")))
+                        .elem("EventType", str(a.get("EventType")))
+                        .end("FunctionAssociation");
+            }
+            xml.end("Items");
+        }
+        return xml.end("FunctionAssociations").build();
+    }
+
+    private String xmlTrustedKeyGroups(
+            boolean enabled, List<String> trustedKeyGroups) {
+        List<String> keyGroups = trustedKeyGroups != null ? trustedKeyGroups : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("TrustedKeyGroups")
+                .elem("Enabled", enabled)
+                .elem("Quantity", keyGroups.size());
+        if (!keyGroups.isEmpty()) {
+            xml.start("Items");
+            for (String keyGroup : keyGroups) {
+                xml.elem("KeyGroup", keyGroup);
+            }
+            xml.end("Items");
+        }
+        return xml.end("TrustedKeyGroups").build();
+    }
+
+    // AWS always echoes a (usually empty) TrustedSigners object in every cache behavior. Floci models
+    // only the modern TrustedKeyGroups, but the Terraform AWS provider reads TrustedSigners.Items with
+    // no nil guard, so an omitted object segfaults it on read-back. Emit the disabled form AWS returns.
+    private String xmlTrustedSigners() {
+        return new XmlBuilder()
+                .start("TrustedSigners")
+                .elem("Enabled", false)
+                .elem("Quantity", 0)
+                .end("TrustedSigners")
+                .build();
+    }
+
+    // A custom origin must carry OriginSslProtocols. Floci did not echo it, and the Terraform AWS
+    // provider flattens CustomOriginConfig.OriginSslProtocols.Items with no nil guard, so an omitted
+    // element segfaults it on distribution read-back. Round-trip the submitted protocols, defaulting
+    // to the form AWS returns when the client sends none.
+    private String xmlOriginSslProtocols(Object protocols) {
+        List<String> list = stringList(protocols);
+        if (list.isEmpty()) {
+            list = List.of("TLSv1.2");
         }
         XmlBuilder xml = new XmlBuilder()
-                .start("AllowedMethods").elem("Quantity", allowed.size()).start("Items");
-        for (String method : allowed) {
-            xml.elem("Method", method);
+                .start("OriginSslProtocols")
+                .elem("Quantity", list.size())
+                .start("Items");
+        for (String protocol : list) {
+            xml.elem("SslProtocol", protocol);
         }
-        xml.end("Items");
-        xml.start("CachedMethods").elem("Quantity", cached.size()).start("Items");
-        for (String method : cached) {
-            xml.elem("Method", method);
+        return xml.end("Items").end("OriginSslProtocols").build();
+    }
+
+    // DefaultTTL and MaxTTL are optional, and 0 is a meaningful value (the usual "do not cache" with
+    // forwarded_values), so presence has to be tracked separately from the value. Treating 0 as unset
+    // drops an explicit default_ttl = 0 from the read-back and the provider then sees a permanent diff.
+    private String xmlCacheBehaviorTtls(Long minTtl, Long defaultTtl, Long maxTtl) {
+        XmlBuilder xml = new XmlBuilder().elem("MinTTL", minTtl != null ? minTtl : 0L);
+        if (defaultTtl != null) {
+            xml.elem("DefaultTTL", defaultTtl);
         }
-        xml.end("Items").end("CachedMethods");
-        xml.end("AllowedMethods");
+        if (maxTtl != null) {
+            xml.elem("MaxTTL", maxTtl);
+        }
         return xml.build();
     }
 
-    @SuppressWarnings("unchecked")
-    private String xmlForwardedValues(Map<String, Object> fv) {
+    // When a cache behavior uses the legacy (non-cache-policy) form, AWS echoes a full ForwardedValues
+    // object. Floci dropped it, so the provider's read either lost the config or, on newer provider
+    // versions, dereferenced the missing object. Emit the submitted values in the shape AWS returns.
+    private String xmlCacheBehaviorForwardedValues(String cachePolicyId, Map<String, Object> forwardedValues) {
+        if (cachePolicyId != null && !cachePolicyId.isEmpty()) {
+            return "";
+        }
+        boolean queryString = forwardedValues != null
+                && Boolean.TRUE.equals(forwardedValues.get("QueryString"));
+        Object forward = forwardedValues != null ? forwardedValues.get("CookiesForward") : null;
         XmlBuilder xml = new XmlBuilder()
                 .start("ForwardedValues")
-                .elem("QueryString", Boolean.TRUE.equals(fv.get("QueryString")));
-
-        Map<String, Object> cookies = fv.get("Cookies") instanceof Map<?, ?> map
-                ? (Map<String, Object>) map
-                : null;
-        xml.start("Cookies").elem("Forward",
-                cookies != null ? String.valueOf(cookies.getOrDefault("Forward", "none")) : "none");
-        List<String> whitelisted = cookies != null && cookies.get("WhitelistedNames") instanceof List<?> names
-                ? (List<String>) names
-                : null;
-        if (whitelisted != null && !whitelisted.isEmpty()) {
-            xml.start("WhitelistedNames").elem("Quantity", whitelisted.size()).start("Items");
-            for (String name : whitelisted) {
-                xml.elem("Name", name);
-            }
-            xml.end("Items").end("WhitelistedNames");
-        }
+                .elem("QueryString", queryString)
+                .start("Cookies")
+                .elem("Forward", forward != null ? forward.toString() : "none");
+        xml.raw(xmlForwardedNames("WhitelistedNames", "Name",
+                forwardedValuesList(forwardedValues, "CookieNames")));
         xml.end("Cookies");
+        xml.raw(xmlForwardedNames("Headers", "Name",
+                forwardedValuesList(forwardedValues, "Headers")));
+        xml.raw(xmlForwardedNames("QueryStringCacheKeys", "Name",
+                forwardedValuesList(forwardedValues, "QueryStringCacheKeys")));
+        return xml.end("ForwardedValues").build();
+    }
 
-        List<String> headers = fv.get("Headers") instanceof List<?> headerNames
-                ? (List<String>) headerNames
-                : null;
-        xml.start("Headers").elem("Quantity", headers != null ? headers.size() : 0);
-        if (headers != null && !headers.isEmpty()) {
+    @SuppressWarnings("unchecked")
+    private static List<String> forwardedValuesList(Map<String, Object> forwardedValues, String key) {
+        Object value = forwardedValues != null ? forwardedValues.get(key) : null;
+        return value instanceof List<?> list ? (List<String>) list : List.of();
+    }
+
+    // Whitelisted cookie names, forwarded headers and query-string cache keys are Quantity/Items pairs.
+    // Echoing a bare Quantity 0 loses whatever the client whitelisted, so the provider reads the lists
+    // back empty and diffs on every plan. AWS omits Items entirely when the quantity is zero.
+    private String xmlForwardedNames(String wrapper, String itemName, List<String> names) {
+        XmlBuilder xml = new XmlBuilder().start(wrapper).elem("Quantity", names.size());
+        if (!names.isEmpty()) {
             xml.start("Items");
-            for (String name : headers) {
-                xml.elem("Name", name);
+            for (String name : names) {
+                xml.elem(itemName, name);
             }
             xml.end("Items");
         }
-        xml.end("Headers");
+        return xml.end(wrapper).build();
+    }
 
-        List<String> queryStringCacheKeys = fv.get("QueryStringCacheKeys") instanceof List<?> keys
-                ? (List<String>) keys
-                : null;
-        xml.start("QueryStringCacheKeys")
-                .elem("Quantity", queryStringCacheKeys != null ? queryStringCacheKeys.size() : 0);
-        if (queryStringCacheKeys != null && !queryStringCacheKeys.isEmpty()) {
+    private String xmlActiveTrustedKeyGroups(DistributionConfig config) {
+        List<KeyGroup> groups = service.activeTrustedKeyGroups(config);
+        XmlBuilder xml = new XmlBuilder()
+                .start("ActiveTrustedKeyGroups")
+                .elem("Enabled", !groups.isEmpty())
+                .elem("Quantity", groups.size());
+        if (!groups.isEmpty()) {
             xml.start("Items");
-            for (String key : queryStringCacheKeys) {
-                xml.elem("Name", key);
+            for (KeyGroup group : groups) {
+                List<String> keyPairIds =
+                        group.getItems() != null ? group.getItems() : List.of();
+                xml.start("KeyGroup")
+                        .elem("KeyGroupId", group.getId())
+                        .start("KeyPairIds")
+                        .elem("Quantity", keyPairIds.size());
+                if (!keyPairIds.isEmpty()) {
+                    xml.start("Items");
+                    for (String keyPairId : keyPairIds) {
+                        xml.elem("KeyPairId", keyPairId);
+                    }
+                    xml.end("Items");
+                }
+                xml.end("KeyPairIds").end("KeyGroup");
             }
             xml.end("Items");
         }
-        xml.end("QueryStringCacheKeys");
-
-        xml.end("ForwardedValues");
-        return xml.build();
+        return xml.end("ActiveTrustedKeyGroups").build();
     }
 
     private String xmlViewerCertificate(Map<String, String> vc) {
@@ -2341,10 +2541,9 @@ public class CloudFrontController {
         List<Origin> origins = cfg != null ? cfg.getOrigins() : null;
         xml.raw(xmlQuantityItems("Origins", "Origin",
                 origins != null ? origins.size() : 0,
-                origins != null ? origins.stream().map(o ->
-                        "<Origin><Id>" + XmlBuilder.escape(o.getId()) + "</Id><DomainName>"
-                                + XmlBuilder.escape(o.getDomainName()) + "</DomainName></Origin>").toList()
+                origins != null ? origins.stream().map(this::xmlOrigin).toList()
                         : List.of()));
+        xml.raw(xmlEmptyOriginGroups());
 
         List<String> aliases = cfg != null ? cfg.getAliases() : null;
         int aliasCount = aliases != null ? aliases.size() : 0;
@@ -2359,6 +2558,7 @@ public class CloudFrontController {
         xml.end("Aliases");
 
         xml.raw(xmlViewerCertificate(cfg != null ? cfg.getViewerCertificate() : null));
+        xml.raw(xmlRestrictions(cfg != null ? cfg.getGeoRestriction() : null));
 
         xml.end("DistributionSummary");
         return xml.build();
@@ -2425,16 +2625,14 @@ public class CloudFrontController {
                 .start("ResponseHeadersPolicy")
                 .elem("Id", policy.getId())
                 .elem("LastModifiedTime",
-                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "");
-        if (policy.getConfigXml() != null && !policy.getConfigXml().isBlank()) {
-            xml.raw(policy.getConfigXml());
-        } else {
-            xml.start("ResponseHeadersPolicyConfig")
-                    .elem("Name", policy.getName())
-                    .elem("Comment", policy.getComment() != null ? policy.getComment() : "")
-                    .end("ResponseHeadersPolicyConfig");
-        }
-        return xml.end("ResponseHeadersPolicy").build();
+                        policy.getLastModifiedTime() != null ? policy.getLastModifiedTime().toString() : "")
+                .start("ResponseHeadersPolicyConfig")
+                .elem("Name", policy.getName())
+                .elem("Comment", policy.getComment() != null ? policy.getComment() : "");
+        ResponseHeadersPolicyConfigCodec.serialize(xml, policy.getConfig());
+        return xml.end("ResponseHeadersPolicyConfig")
+                .end("ResponseHeadersPolicy")
+                .build();
     }
 
     private String xmlOriginAccessControlResponse(OriginAccessControl oac) {
@@ -2500,25 +2698,6 @@ public class CloudFrontController {
                 .end("FunctionMetadata")
                 .end("FunctionSummary")
                 .build();
-    }
-
-    private String xmlFunctionAssociations(List<Map<String, String>> associations) {
-        List<Map<String, String>> items = associations != null ? associations : List.of();
-        XmlBuilder xml = new XmlBuilder()
-                .start("FunctionAssociations")
-                .elem("Quantity", items.size());
-        if (!items.isEmpty()) {
-            xml.start("Items");
-            for (Map<String, String> association : items) {
-                xml.start("FunctionAssociation")
-                        .elem("FunctionARN", association.get("FunctionARN"))
-                        .elem("EventType", association.get("EventType"))
-                        .end("FunctionAssociation");
-            }
-            xml.end("Items");
-        }
-        xml.end("FunctionAssociations");
-        return xml.build();
     }
 
     private String xmlKeyValueStoreAssociations(List<String> arns) {
@@ -2604,6 +2783,33 @@ public class CloudFrontController {
                 .build();
     }
 
+    /** Renders a possibly-null value as a string, using the empty string for {@code null}. */
+    private static String str(Object value) {
+        return value != null ? value.toString() : "";
+    }
+
+    // AllowedMethods.CachedMethods is a nested Quantity/Items pair, not a sibling of AllowedMethods
+    // itself. Terraform's aws_cloudfront_distribution requires both allowed_methods and
+    // cached_methods on every cache behavior, so omitting this sub-object is a permanent diff.
+    private String xmlAllowedMethods(List<String> allowedMethods, List<String> cachedMethods) {
+        List<String> allowed = allowedMethods == null || allowedMethods.isEmpty()
+                ? List.of("GET", "HEAD") : allowedMethods;
+        XmlBuilder xml = new XmlBuilder().start("AllowedMethods").elem("Quantity", allowed.size());
+        xml.start("Items");
+        for (String method : allowed) {
+            xml.elem("Method", method);
+        }
+        xml.end("Items");
+        if (cachedMethods != null && !cachedMethods.isEmpty()) {
+            xml.start("CachedMethods").elem("Quantity", cachedMethods.size()).start("Items");
+            for (String method : cachedMethods) {
+                xml.elem("Method", method);
+            }
+            xml.end("Items").end("CachedMethods");
+        }
+        return xml.end("AllowedMethods").build();
+    }
+
     private String xmlQuantityItems(String wrapper, String itemTag, int count, List<String> items) {
         XmlBuilder xml = new XmlBuilder().start(wrapper).elem("Quantity", count);
         if (count > 0 && items != null && !items.isEmpty()) {
@@ -2616,6 +2822,29 @@ public class CloudFrontController {
         xml.end(wrapper);
         return xml.build();
     }
+
+    private String xmlDirectItems(String wrapper, String itemTag, List<String> items) {
+        XmlBuilder xml = new XmlBuilder().start(wrapper);
+        for (String item : items) {
+            xml.elem(itemTag, item);
+        }
+        return xml.end(wrapper).build();
+    }
+
+    private static int paginationFetchLimit(int maxItems) {
+        return maxItems > 0 && maxItems < Integer.MAX_VALUE ? maxItems + 1 : maxItems;
+    }
+
+    private static <T> Page<T> page(List<T> candidates, int maxItems,
+                                    Function<T, String> markerFunction) {
+        boolean truncated = maxItems > 0 && candidates.size() > maxItems;
+        List<T> items = truncated ? candidates.subList(0, maxItems) : candidates;
+        String nextMarker = truncated && !items.isEmpty()
+                ? markerFunction.apply(items.get(items.size() - 1)) : null;
+        return new Page<>(items, truncated, nextMarker);
+    }
+
+    private record Page<T>(List<T> items, boolean truncated, String nextMarker) {}
 
     private Response xmlErrorResponse(AwsException e) {
         String xml = new XmlBuilder()
@@ -2634,109 +2863,137 @@ public class CloudFrontController {
     // ── Request parsers ───────────────────────────────────────────────────────
 
     private DistributionConfig parseDistributionConfig(String body) {
+        Map<String, String> values =
+                parseDistributionConfigTopLevelValues(body);
         DistributionConfig cfg = new DistributionConfig();
-        cfg.setCallerReference(XmlParser.extractFirst(body, "CallerReference", null));
-        cfg.setEnabled("true".equalsIgnoreCase(XmlParser.extractFirst(body, "Enabled", "true")));
-        cfg.setComment(XmlParser.extractFirst(body, "Comment", ""));
-        cfg.setDefaultRootObject(XmlParser.extractFirst(body, "DefaultRootObject", ""));
-        cfg.setHttpVersion(XmlParser.extractFirst(body, "HttpVersion", "http2"));
-        cfg.setPriceClass(XmlParser.extractFirst(body, "PriceClass", "PriceClass_All"));
-        cfg.setIPV6Enabled("true".equalsIgnoreCase(XmlParser.extractFirst(body, "IsIPV6Enabled", "true")));
-        cfg.setWebAclId(XmlParser.extractFirst(body, "WebAclId", null));
-        cfg.setContinuousDeploymentPolicyId(XmlParser.extractFirst(body, "ContinuousDeploymentPolicyId", null));
-        cfg.setStaging("true".equalsIgnoreCase(XmlParser.extractFirst(body, "Staging", "false")));
+        cfg.setCallerReference(values.get("CallerReference"));
+        cfg.setEnabled("true".equalsIgnoreCase(
+                values.getOrDefault("Enabled", "true")));
+        cfg.setComment(values.getOrDefault("Comment", ""));
+        cfg.setDefaultRootObject(
+                values.getOrDefault("DefaultRootObject", ""));
+        cfg.setHttpVersion(values.getOrDefault("HttpVersion", "http2"));
+        cfg.setPriceClass(
+                values.getOrDefault("PriceClass", "PriceClass_All"));
+        cfg.setIPV6Enabled("true".equalsIgnoreCase(
+                values.getOrDefault("IsIPV6Enabled", "true")));
+        cfg.setWebAclId(values.get("WebAclId"));
+        cfg.setContinuousDeploymentPolicyId(
+                values.get("ContinuousDeploymentPolicyId"));
+        cfg.setStaging("true".equalsIgnoreCase(
+                values.getOrDefault("Staging", "false")));
 
         cfg.setOrigins(parseOrigins(body));
         cfg.setDefaultCacheBehavior(parseDefaultCacheBehavior(body));
         cfg.setCacheBehaviors(parseCacheBehaviors(body));
         cfg.setAliases(parseAliases(body));
         cfg.setViewerCertificate(parseViewerCertificate(body));
-        cfg.setGeoRestriction(parseGeoRestriction(body));
         cfg.setCustomErrorResponses(parseCustomErrorResponses(body));
+        cfg.setGeoRestriction(parseGeoRestriction(body));
+        cfg.setLogging(parseLogging(body));
 
         return cfg;
     }
 
-    private Map<String, Object> parseGeoRestriction(String body) {
+    private Map<String, String> parseDistributionConfigTopLevelValues(
+            String body) {
+        Map<String, String> values = new LinkedHashMap<>();
         if (body == null || body.isEmpty()) {
-            return null;
+            return values;
         }
         try {
-            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
-            boolean inGeoRestriction = false;
-            String restrictionType = null;
-            List<String> locations = new ArrayList<>();
-
-            while (r.hasNext()) {
-                int event = r.next();
+            XMLStreamReader reader = XmlParser.newStreamReader(body);
+            boolean inDistributionConfig = false;
+            int nestedDepth = 0;
+            while (reader.hasNext()) {
+                int event = reader.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
-                    switch (r.getLocalName()) {
-                        case "GeoRestriction" -> inGeoRestriction = true;
-                        case "RestrictionType" -> {
-                            if (inGeoRestriction) restrictionType = r.getElementText();
-                        }
-                        case "Location" -> {
-                            if (inGeoRestriction) locations.add(r.getElementText());
-                        }
-                        default -> {
-                        }
+                    String local = reader.getLocalName();
+                    if (!inDistributionConfig
+                            && "DistributionConfig".equals(local)) {
+                        inDistributionConfig = true;
+                        continue;
+                    }
+                    if (!inDistributionConfig) {
+                        continue;
+                    }
+                    nestedDepth++;
+                    if (nestedDepth == 1
+                            && isDistributionConfigScalar(local)) {
+                        values.put(local, reader.getElementText());
+                        nestedDepth--;
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT
-                        && "GeoRestriction".equals(r.getLocalName())) {
-                    inGeoRestriction = false;
+                        && inDistributionConfig) {
+                    if (nestedDepth == 0
+                            && "DistributionConfig".equals(
+                                    reader.getLocalName())) {
+                        inDistributionConfig = false;
+                    } else {
+                        nestedDepth--;
+                    }
                 }
             }
-            r.close();
-            if (restrictionType != null) {
-                Map<String, Object> geo = new LinkedHashMap<>();
-                geo.put("RestrictionType", restrictionType);
-                geo.put("Items", locations);
-                return geo;
-            }
+            reader.close();
         } catch (Exception e) {
-            LOG.debugv("Failed to parse GeoRestriction: {0}", e.getMessage());
+            LOG.debugv(
+                    "Invalid DistributionConfig XML: {0}",
+                    e.getMessage());
+            throw new AwsException(
+                    "InvalidArgument",
+                    "The DistributionConfig XML is invalid.",
+                    400);
         }
-        return null;
+        return values;
     }
 
+    private static boolean isDistributionConfigScalar(String local) {
+        return switch (local) {
+            case "CallerReference",
+                    "Enabled",
+                    "Comment",
+                    "DefaultRootObject",
+                    "HttpVersion",
+                    "PriceClass",
+                    "IsIPV6Enabled",
+                    "WebAclId",
+                    "ContinuousDeploymentPolicyId",
+                    "Staging" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Parses the {@code CustomErrorResponses} block into a list of maps keyed by
+     * {@code ErrorCode}, {@code ResponsePagePath}, {@code ResponseCode} and {@code ErrorCachingMinTTL}
+     * (values kept as strings). CloudFront uses these to override an origin error with a custom
+     * page/status — most notably the SPA fallback that turns a 403/404 into 200 {@code /index.html}.
+     */
     private List<Map<String, Object>> parseCustomErrorResponses(String body) {
         List<Map<String, Object>> result = new ArrayList<>();
         if (body == null || body.isEmpty()) {
             return result;
         }
         try {
-            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
-            boolean inList = false;
+            XMLStreamReader r = XmlParser.newStreamReader(body);
+            boolean inBlock = false;
+            boolean inItem = false;
             Map<String, Object> current = null;
-
             while (r.hasNext()) {
                 int event = r.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
-                    switch (r.getLocalName()) {
-                        case "CustomErrorResponses" -> inList = true;
+                    String local = r.getLocalName();
+                    switch (local) {
+                        case "CustomErrorResponses" -> inBlock = true;
                         case "CustomErrorResponse" -> {
-                            if (inList) current = new LinkedHashMap<>();
-                        }
-                        case "ErrorCode" -> {
-                            if (current != null) {
-                                try {
-                                    current.put("ErrorCode", Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
+                            if (inBlock) {
+                                inItem = true;
+                                current = new LinkedHashMap<>();
                             }
                         }
-                        case "ResponsePagePath" -> {
-                            if (current != null) current.put("ResponsePagePath", r.getElementText());
-                        }
-                        case "ResponseCode" -> {
-                            if (current != null) current.put("ResponseCode", r.getElementText());
-                        }
-                        case "ErrorCachingMinTTL" -> {
-                            if (current != null) {
-                                try {
-                                    current.put("ErrorCachingMinTTL", Long.parseLong(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
+                        case "ErrorCode", "ResponsePagePath", "ResponseCode", "ErrorCachingMinTTL" -> {
+                            if (inItem && current != null) {
+                                current.put(local, r.getElementText());
                             }
                         }
                         default -> {
@@ -2745,12 +3002,13 @@ public class CloudFrontController {
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
                         case "CustomErrorResponse" -> {
-                            if (current != null) {
+                            if (inItem && current != null) {
                                 result.add(current);
-                                current = null;
                             }
+                            inItem = false;
+                            current = null;
                         }
-                        case "CustomErrorResponses" -> inList = false;
+                        case "CustomErrorResponses" -> inBlock = false;
                         default -> {
                         }
                     }
@@ -2758,9 +3016,38 @@ public class CloudFrontController {
             }
             r.close();
         } catch (Exception e) {
-            LOG.debugv("Failed to parse CustomErrorResponses: {0}", e.getMessage());
+            // A malformed CustomErrorResponses block yields the entries parsed so far rather than
+            // failing the whole distribution create/update; log it so the cause is diagnosable.
+            LOG.debugv("Ignoring malformed CustomErrorResponses during parse: {0}", e.getMessage());
         }
         return result;
+    }
+
+    /**
+     * Parses the optional {@code Logging} block into {@code Enabled}, {@code IncludeCookies},
+     * {@code Bucket} and {@code Prefix} (values kept as strings). A request that omits the block
+     * yields an empty map rather than {@code null}, which {@link #xmlLogging} renders as the
+     * disabled defaults CloudFront reports for a distribution that never asked for access logs.
+     */
+    private Map<String, Object> parseLogging(String body) {
+        List<Map<String, String>> groups = XmlParser.extractGroups(body, "Logging");
+        if (groups.isEmpty()) {
+            return Map.of();
+        }
+        return new LinkedHashMap<>(groups.getFirst());
+    }
+
+    private Map<String, Object> parseGeoRestriction(String body) {
+        List<Map<String, String>> groups = XmlParser.extractGroups(body, GEO_RESTRICTION);
+        if (groups.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> geoRestriction = new LinkedHashMap<>(groups.getFirst());
+        List<String> locations = XmlParser.extractAll(body, LOCATION);
+        if (!locations.isEmpty()) {
+            geoRestriction.put(LOCATIONS, locations);
+        }
+        return geoRestriction;
     }
 
     private List<Origin> parseOrigins(String body) {
@@ -2769,24 +3056,51 @@ public class CloudFrontController {
             return result;
         }
         try {
-            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
+            XMLStreamReader r = XmlParser.newStreamReader(body);
             boolean inOrigins = false;
             boolean inOrigin = false;
             boolean inS3OriginConfig = false;
             boolean inCustomOriginConfig = false;
             boolean inVpcOriginConfig = false;
-            boolean inCustomHeaders = false;
+            Map<String, String> vpcConfig = null;
+            boolean inOriginSslProtocols = false;
             Origin current = null;
             Map<String, String> s3Config = null;
             Map<String, Object> customConfig = null;
-            Map<String, String> vpcConfig = null;
-            List<Map<String, String>> customHeaders = new ArrayList<>();
+            List<String> sslProtocols = null;
+            Integer sslProtocolsQuantity = null;
+            Integer originReadTimeoutSeconds = null;
+            boolean inCustomHeaders = false;
+            boolean inCustomHeaderItems = false;
+            boolean customHeaderItemsSeen = false;
+            List<Map<String, String>> customHeaders = null;
             Map<String, String> currentHeader = null;
+            Integer customHeadersQuantity = null;
 
             while (r.hasNext()) {
                 int event = r.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     String local = r.getLocalName();
+                    if (inCustomHeaders) {
+                        boolean validElement = switch (local) {
+                            case "Quantity" -> !inCustomHeaderItems
+                                    && currentHeader == null
+                                    && customHeadersQuantity == null;
+                            case "Items" -> !inCustomHeaderItems
+                                    && currentHeader == null
+                                    && !customHeaderItemsSeen;
+                            case "OriginCustomHeader" ->
+                                    inCustomHeaderItems && currentHeader == null;
+                            case "HeaderName" -> currentHeader != null
+                                    && !currentHeader.containsKey("HeaderName");
+                            case "HeaderValue" -> currentHeader != null
+                                    && !currentHeader.containsKey("HeaderValue");
+                            default -> false;
+                        };
+                        if (!validElement) {
+                            throw invalidOriginCustomHeadersStructure();
+                        }
+                    }
                     switch (local) {
                         case "Origins" -> inOrigins = true;
                         case "Origin" -> {
@@ -2794,22 +3108,6 @@ public class CloudFrontController {
                                 inOrigin = true;
                                 current = new Origin();
                                 customHeaders = new ArrayList<>();
-                            }
-                        }
-                        case "CustomHeaders" -> {
-                            if (inOrigin) inCustomHeaders = true;
-                        }
-                        case "OriginCustomHeader" -> {
-                            if (inCustomHeaders) currentHeader = new LinkedHashMap<>();
-                        }
-                        case "HeaderName" -> {
-                            if (currentHeader != null) {
-                                currentHeader.put("HeaderName", r.getElementText());
-                            }
-                        }
-                        case "HeaderValue" -> {
-                            if (currentHeader != null) {
-                                currentHeader.put("HeaderValue", r.getElementText());
                             }
                         }
                         case "S3OriginConfig" -> {
@@ -2828,6 +3126,17 @@ public class CloudFrontController {
                             if (inOrigin) {
                                 inVpcOriginConfig = true;
                                 vpcConfig = new LinkedHashMap<>();
+                            }
+                        }
+                        case "OriginSslProtocols" -> {
+                            if (inCustomOriginConfig) {
+                                inOriginSslProtocols = true;
+                                sslProtocols = new ArrayList<>();
+                            }
+                        }
+                        case "SslProtocol" -> {
+                            if (inOriginSslProtocols && sslProtocols != null) {
+                                sslProtocols.add(r.getElementText());
                             }
                         }
                         case "Id" -> {
@@ -2859,7 +3168,8 @@ public class CloudFrontController {
                                     && !inVpcOriginConfig && current != null) {
                                 try {
                                     current.setConnectionAttempts(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
+                                } catch (NumberFormatException e) {
+                                    LOG.debugv("Ignoring malformed ConnectionAttempts during parse: {0}", e.getMessage());
                                 }
                             }
                         }
@@ -2868,13 +3178,20 @@ public class CloudFrontController {
                                     && !inVpcOriginConfig && current != null) {
                                 try {
                                     current.setConnectionTimeout(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
+                                } catch (NumberFormatException e) {
+                                    LOG.debugv("Ignoring malformed ConnectionTimeout during parse: {0}", e.getMessage());
                                 }
                             }
                         }
-                        case "VpcOriginId", "OriginReadTimeout", "OriginKeepaliveTimeout" -> {
+                        case "VpcOriginId" -> {
                             if (inVpcOriginConfig && vpcConfig != null) {
                                 vpcConfig.put(local, r.getElementText());
+                            }
+                        }
+                        case "ResponseCompletionTimeout" -> {
+                            if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig && current != null) {
+                                current.setResponseCompletionTimeout(
+                                        parseNonNegativeTimeout("ResponseCompletionTimeout", r.getElementText()));
                             }
                         }
                         case "OriginAccessIdentity" -> {
@@ -2897,24 +3214,98 @@ public class CloudFrontController {
                                 customConfig.put("OriginProtocolPolicy", r.getElementText());
                             }
                         }
+                        case "OriginKeepaliveTimeout" -> {
+                            if (inVpcOriginConfig && vpcConfig != null) {
+                                vpcConfig.put(local, r.getElementText());
+                                continue;
+                            }
+                            if (inCustomOriginConfig && customConfig != null) {
+                                customConfig.put("OriginKeepaliveTimeout", parseBoundedTimeout(
+                                        "InvalidOriginKeepaliveTimeout", "OriginKeepaliveTimeout",
+                                        r.getElementText(), MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS,
+                                        MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS));
+                            }
+                        }
+                        case "OriginReadTimeout" -> {
+                            if (inVpcOriginConfig && vpcConfig != null) {
+                                vpcConfig.put(local, r.getElementText());
+                                continue;
+                            }
+                            if (inCustomOriginConfig && customConfig != null) {
+                                originReadTimeoutSeconds = parseBoundedTimeout(
+                                        "InvalidOriginReadTimeout", "OriginReadTimeout",
+                                        r.getElementText(), MIN_ORIGIN_READ_TIMEOUT_SECONDS,
+                                        MAX_ORIGIN_READ_TIMEOUT_SECONDS);
+                                customConfig.put("OriginReadTimeout", originReadTimeoutSeconds);
+                            }
+                        }
+                        case "CustomHeaders" -> {
+                            if (inOrigin) {
+                                inCustomHeaders = true;
+                                inCustomHeaderItems = false;
+                                customHeaderItemsSeen = false;
+                                customHeaders = new ArrayList<>();
+                                customHeadersQuantity = null;
+                            }
+                        }
+                        case "Quantity" -> {
+                            if (inCustomHeaders && currentHeader == null) {
+                                try {
+                                    customHeadersQuantity = Integer.parseInt(r.getElementText());
+                                } catch (NumberFormatException e) {
+                                    throw inconsistentQuantities();
+                                }
+                            } else if (inOriginSslProtocols) {
+                                try {
+                                    sslProtocolsQuantity = Integer.parseInt(r.getElementText());
+                                } catch (NumberFormatException e) {
+                                    throw inconsistentQuantities();
+                                }
+                            }
+                        }
+                        case "Items" -> {
+                            if (inCustomHeaders) {
+                                inCustomHeaderItems = true;
+                                customHeaderItemsSeen = true;
+                            }
+                        }
+                        case "OriginCustomHeader" -> {
+                            if (inCustomHeaders) {
+                                currentHeader = new LinkedHashMap<>();
+                            }
+                        }
+                        case "HeaderName" -> {
+                            if (inCustomHeaders && currentHeader != null) {
+                                currentHeader.put("HeaderName", r.getElementText());
+                            }
+                        }
+                        case "HeaderValue" -> {
+                            if (inCustomHeaders && currentHeader != null) {
+                                currentHeader.put("HeaderValue", r.getElementText());
+                            }
+                        }
                         default -> {
                         }
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     switch (r.getLocalName()) {
-                        case "OriginCustomHeader" -> {
-                            if (currentHeader != null) {
-                                customHeaders.add(currentHeader);
-                                currentHeader = null;
-                            }
-                        }
-                        case "CustomHeaders" -> inCustomHeaders = false;
                         case "S3OriginConfig" -> {
                             if (inS3OriginConfig && current != null) {
                                 current.setS3OriginConfig(s3Config);
                             }
                             inS3OriginConfig = false;
                             s3Config = null;
+                        }
+                        case "OriginSslProtocols" -> {
+                            if (inCustomOriginConfig && customConfig != null && sslProtocols != null) {
+                                if (sslProtocolsQuantity == null || sslProtocolsQuantity != sslProtocols.size()) {
+                                    throw inconsistentQuantities();
+                                }
+                                customConfig.put("OriginSslProtocols", sslProtocols);
+                            }
+                            inOriginSslProtocols = false;
+                            sslProtocols = null;
+                            sslProtocolsQuantity = null;
                         }
                         case "CustomOriginConfig" -> {
                             if (inCustomOriginConfig && current != null) {
@@ -2930,15 +3321,56 @@ public class CloudFrontController {
                             inVpcOriginConfig = false;
                             vpcConfig = null;
                         }
+                        case "OriginCustomHeader" -> {
+                            if (inCustomHeaders && currentHeader != null && customHeaders != null) {
+                                customHeaders.add(currentHeader);
+                            }
+                            currentHeader = null;
+                        }
+                        case "Items" -> {
+                            if (inCustomHeaders) {
+                                if (currentHeader != null) {
+                                    throw invalidOriginCustomHeadersStructure();
+                                }
+                                inCustomHeaderItems = false;
+                            }
+                        }
+                        case "CustomHeaders" -> {
+                            if (inCustomHeaders && current != null) {
+                                int itemCount = customHeaders == null ? 0 : customHeaders.size();
+                                if (customHeadersQuantity == null || customHeadersQuantity != itemCount) {
+                                    throw inconsistentQuantities();
+                                }
+                                if (itemCount > 0 && !customHeaderItemsSeen) {
+                                    throw invalidOriginCustomHeadersStructure();
+                                }
+                                current.setCustomHeaders(customHeaders);
+                            }
+                            inCustomHeaders = false;
+                            inCustomHeaderItems = false;
+                            customHeaderItemsSeen = false;
+                            customHeaders = null;
+                            customHeadersQuantity = null;
+                        }
                         case "Origin" -> {
                             if (inOrigin && current != null) {
-                                if (!customHeaders.isEmpty()) {
-                                    current.setCustomHeaders(customHeaders);
+                                Integer completionTimeout = current.getResponseCompletionTimeout();
+                                int effectiveReadTimeout = originReadTimeoutSeconds != null
+                                        ? originReadTimeoutSeconds
+                                        : DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
+                                if (completionTimeout != null && completionTimeout > 0
+                                        && completionTimeout < effectiveReadTimeout) {
+                                    throw new AwsException(
+                                            "InvalidArgument",
+                                            "The parameter ResponseCompletionTimeout must be greater than or "
+                                                    + "equal to OriginReadTimeout.",
+                                            400);
                                 }
                                 result.add(current);
                             }
                             inOrigin = false;
                             current = null;
+                            originReadTimeoutSeconds = null;
                         }
                         case "Origins" -> inOrigins = false;
                         default -> {
@@ -2947,9 +3379,146 @@ public class CloudFrontController {
                 }
             }
             r.close();
-        } catch (Exception ignored) {
+            return result;
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.debugv("Rejecting malformed Origins during parse: {0}", e.getMessage());
+            throw new AwsException(
+                    "InvalidArgument",
+                    "The origin configuration is invalid.",
+                    400);
         }
-        return result;
+    }
+
+    private static AwsException inconsistentQuantities() {
+        return new AwsException(
+                "InconsistentQuantities",
+                "The value of Quantity and the size of Items do not match.",
+                400);
+    }
+
+    private static AwsException invalidOriginCustomHeadersStructure() {
+        return new AwsException(
+                "InvalidArgument",
+                "The origin custom headers structure is invalid.",
+                400);
+    }
+
+    private static int parseBoundedTimeout(String errorCode, String field, String rawValue, int min, int max) {
+        int value = parseNonNegativeTimeout(errorCode, field, rawValue);
+        if (value < min || value > max) {
+            throw new AwsException(
+                    errorCode,
+                    "The parameter " + field + " must be between " + min + " and " + max + " seconds.",
+                    400);
+        }
+        return value;
+    }
+
+    private static int parseNonNegativeTimeout(String field, String rawValue) {
+        return parseNonNegativeTimeout("InvalidArgument", field, rawValue);
+    }
+
+    private static int parseNonNegativeTimeout(String errorCode, String field, String rawValue) {
+        try {
+            int value = Integer.parseInt(rawValue);
+            if (value < 0) {
+                throw new NumberFormatException(rawValue);
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw new AwsException(
+                    errorCode,
+                    "The parameter " + field + " must be a non-negative integer.",
+                    400);
+        }
+    }
+
+    // Event types accepted by AWS for each association kind. Lambda@Edge runs at all
+    // four points; CloudFront Functions only at the viewer edge.
+    private static final Set<String> LAMBDA_EVENT_TYPES = Set.of(
+            "viewer-request", "viewer-response", "origin-request", "origin-response");
+    private static final Set<String> FUNCTION_EVENT_TYPES = Set.of(
+            "viewer-request", "viewer-response");
+
+    private void validateLambdaFunctionAssociations(List<Map<String, Object>> associations) {
+        for (Map<String, Object> a : associations) {
+            if (str(a.get("LambdaFunctionARN")).isEmpty()) {
+                throw new AwsException("InvalidArgument",
+                        "The Lambda function association must include a LambdaFunctionARN.", 400);
+            }
+            if (!LAMBDA_EVENT_TYPES.contains(str(a.get("EventType")))) {
+                throw new AwsException("InvalidArgument",
+                        "The event type for the Lambda function association is not valid.", 400);
+            }
+        }
+    }
+
+    private void validateFunctionAssociations(List<Map<String, String>> associations) {
+        for (Map<String, String> a : associations) {
+            if (str(a.get("FunctionARN")).isEmpty()) {
+                throw new AwsException("InvalidArgument",
+                        "The CloudFront function association must include a FunctionARN.", 400);
+            }
+            if (!FUNCTION_EVENT_TYPES.contains(str(a.get("EventType")))) {
+                throw new AwsException("InvalidArgument",
+                        "The event type for the CloudFront function association is not valid.", 400);
+            }
+        }
+    }
+
+    private static int parseAssociationsQuantity(String value) {
+        try {
+            int quantity = Integer.parseInt(value.trim());
+            if (quantity < 0) {
+                throw new NumberFormatException("negative quantity");
+            }
+            return quantity;
+        } catch (NumberFormatException e) {
+            throw new AwsException("InvalidArgument",
+                    "The association Quantity must be a non-negative integer.", 400);
+        }
+    }
+
+    private static void validateAssociationsQuantity(Integer declared, int itemCount) {
+        if (declared != null && declared != itemCount) {
+            throw inconsistentQuantities();
+        }
+    }
+
+    private static long parseLongOrZero(String value) {
+        if (value == null) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    private static Map<String, Object> forwardedValuesModel(
+            Boolean queryString,
+            String cookiesForward,
+            List<String> cookieNames,
+            List<String> headers,
+            List<String> queryStringCacheKeys) {
+        Map<String, Object> forwardedValues = new LinkedHashMap<>();
+        forwardedValues.put("QueryString", queryString != null && queryString);
+        if (cookiesForward != null) {
+            forwardedValues.put("CookiesForward", cookiesForward);
+        }
+        if (cookieNames != null && !cookieNames.isEmpty()) {
+            forwardedValues.put("CookieNames", List.copyOf(cookieNames));
+        }
+        if (headers != null && !headers.isEmpty()) {
+            forwardedValues.put("Headers", List.copyOf(headers));
+        }
+        if (queryStringCacheKeys != null && !queryStringCacheKeys.isEmpty()) {
+            forwardedValues.put("QueryStringCacheKeys", List.copyOf(queryStringCacheKeys));
+        }
+        return forwardedValues;
     }
 
     private DefaultCacheBehavior parseDefaultCacheBehavior(String body) {
@@ -2958,221 +3527,22 @@ public class CloudFrontController {
             return dcb;
         }
         try {
-            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
-            boolean inDcb = false;
-            boolean inAllowedMethods = false;
-            boolean inCachedMethods = false;
-            boolean inFunctionAssociations = false;
-            boolean inForwardedValues = false;
-            boolean inCookies = false;
-            boolean inWhitelistedNames = false;
-            boolean inFvHeaders = false;
-            boolean inQueryStringCacheKeys = false;
-            List<String> allowedMethods = new ArrayList<>();
-            List<String> cachedMethods = new ArrayList<>();
-            List<Map<String, String>> functionAssociations = new ArrayList<>();
-            Map<String, String> currentAssociation = null;
-            Map<String, Object> forwardedValues = null;
-            Map<String, Object> cookies = null;
-            List<String> whitelistedNames = new ArrayList<>();
-            List<String> fvHeaders = new ArrayList<>();
-            List<String> queryStringCacheKeys = new ArrayList<>();
-
+            XMLStreamReader r = XmlParser.newStreamReader(body);
             while (r.hasNext()) {
                 int event = r.next();
-                if (event == XMLStreamConstants.START_ELEMENT) {
-                    String local = r.getLocalName();
-                    switch (local) {
-                        case "DefaultCacheBehavior" -> inDcb = true;
-                        case "AllowedMethods" -> {
-                            if (inDcb) inAllowedMethods = true;
-                        }
-                        case "CachedMethods" -> {
-                            if (inAllowedMethods) inCachedMethods = true;
-                        }
-                        case "FunctionAssociations" -> {
-                            if (inDcb) inFunctionAssociations = true;
-                        }
-                        case "FunctionAssociation" -> {
-                            if (inFunctionAssociations) currentAssociation = new LinkedHashMap<>();
-                        }
-                        case "FunctionARN" -> {
-                            if (currentAssociation != null) {
-                                currentAssociation.put("FunctionARN", r.getElementText());
-                            }
-                        }
-                        case "EventType" -> {
-                            if (currentAssociation != null) {
-                                currentAssociation.put("EventType", r.getElementText());
-                            }
-                        }
-                        case "ForwardedValues" -> {
-                            if (inDcb) {
-                                inForwardedValues = true;
-                                forwardedValues = new LinkedHashMap<>();
-                            }
-                        }
-                        case "QueryString" -> {
-                            if (inForwardedValues && forwardedValues != null) {
-                                forwardedValues.put("QueryString",
-                                        "true".equalsIgnoreCase(r.getElementText()));
-                            }
-                        }
-                        case "Cookies" -> {
-                            if (inForwardedValues) {
-                                inCookies = true;
-                                cookies = new LinkedHashMap<>();
-                            }
-                        }
-                        case "Forward" -> {
-                            if (inCookies && cookies != null) {
-                                cookies.put("Forward", r.getElementText());
-                            }
-                        }
-                        case "WhitelistedNames" -> {
-                            if (inCookies) inWhitelistedNames = true;
-                        }
-                        case "Headers" -> {
-                            if (inForwardedValues && !inCookies) inFvHeaders = true;
-                        }
-                        case "QueryStringCacheKeys" -> {
-                            if (inForwardedValues) inQueryStringCacheKeys = true;
-                        }
-                        case "Name" -> {
-                            if (inWhitelistedNames) {
-                                whitelistedNames.add(r.getElementText());
-                            } else if (inFvHeaders) {
-                                fvHeaders.add(r.getElementText());
-                            } else if (inQueryStringCacheKeys) {
-                                queryStringCacheKeys.add(r.getElementText());
-                            }
-                        }
-                        case "MinTTL" -> {
-                            if (inDcb) {
-                                try {
-                                    dcb.setMinTTL(Long.parseLong(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
-                            }
-                        }
-                        case "DefaultTTL" -> {
-                            if (inDcb) {
-                                try {
-                                    dcb.setDefaultTTL(Long.parseLong(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
-                            }
-                        }
-                        case "MaxTTL" -> {
-                            if (inDcb) {
-                                try {
-                                    dcb.setMaxTTL(Long.parseLong(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
-                            }
-                        }
-                        case "TargetOriginId" -> {
-                            if (inDcb) dcb.setTargetOriginId(r.getElementText());
-                        }
-                        case "ViewerProtocolPolicy" -> {
-                            if (inDcb) dcb.setViewerProtocolPolicy(r.getElementText());
-                        }
-                        case "CachePolicyId" -> {
-                            if (inDcb) dcb.setCachePolicyId(r.getElementText());
-                        }
-                        case "OriginRequestPolicyId" -> {
-                            if (inDcb) dcb.setOriginRequestPolicyId(r.getElementText());
-                        }
-                        case "ResponseHeadersPolicyId" -> {
-                            if (inDcb) dcb.setResponseHeadersPolicyId(r.getElementText());
-                        }
-                        case "FieldLevelEncryptionId" -> {
-                            if (inDcb) dcb.setFieldLevelEncryptionId(r.getElementText());
-                        }
-                        case "RealtimeLogConfigArn" -> {
-                            if (inDcb) dcb.setRealtimeLogConfigArn(r.getElementText());
-                        }
-                        case "Compress" -> {
-                            if (inDcb) dcb.setCompress("true".equalsIgnoreCase(r.getElementText()));
-                        }
-                        case "Method" -> {
-                            if (inCachedMethods) {
-                                cachedMethods.add(r.getElementText());
-                            } else if (inAllowedMethods) {
-                                allowedMethods.add(r.getElementText());
-                            }
-                        }
-                        default -> {
-                        }
-                    }
-                } else if (event == XMLStreamConstants.END_ELEMENT) {
-                    switch (r.getLocalName()) {
-                        case "CachedMethods" -> inCachedMethods = false;
-                        case "AllowedMethods" -> inAllowedMethods = false;
-                        case "FunctionAssociation" -> {
-                            if (currentAssociation != null) {
-                                functionAssociations.add(currentAssociation);
-                                currentAssociation = null;
-                            }
-                        }
-                        case "FunctionAssociations" -> inFunctionAssociations = false;
-                        case "WhitelistedNames" -> {
-                            if (inWhitelistedNames && cookies != null && !whitelistedNames.isEmpty()) {
-                                cookies.put("WhitelistedNames", new ArrayList<>(whitelistedNames));
-                            }
-                            whitelistedNames.clear();
-                            inWhitelistedNames = false;
-                        }
-                        case "Headers" -> {
-                            if (inFvHeaders) {
-                                if (forwardedValues != null && !fvHeaders.isEmpty()) {
-                                    forwardedValues.put("Headers", new ArrayList<>(fvHeaders));
-                                }
-                                fvHeaders.clear();
-                                inFvHeaders = false;
-                            }
-                        }
-                        case "QueryStringCacheKeys" -> {
-                            if (inQueryStringCacheKeys) {
-                                if (forwardedValues != null && !queryStringCacheKeys.isEmpty()) {
-                                    forwardedValues.put("QueryStringCacheKeys",
-                                            new ArrayList<>(queryStringCacheKeys));
-                                }
-                                queryStringCacheKeys.clear();
-                                inQueryStringCacheKeys = false;
-                            }
-                        }
-                        case "Cookies" -> {
-                            if (inCookies && forwardedValues != null && cookies != null) {
-                                forwardedValues.put("Cookies", cookies);
-                            }
-                            cookies = null;
-                            inCookies = false;
-                        }
-                        case "ForwardedValues" -> {
-                            if (inForwardedValues && forwardedValues != null) {
-                                dcb.setForwardedValues(forwardedValues);
-                            }
-                            forwardedValues = null;
-                            inForwardedValues = false;
-                        }
-                        case "DefaultCacheBehavior" -> inDcb = false;
-                        default -> {
-                        }
-                    }
+                if (event == XMLStreamConstants.START_ELEMENT
+                        && "DefaultCacheBehavior".equals(r.getLocalName())) {
+                    parseCacheBehaviorScope(r, "DefaultCacheBehavior", dcb);
+                    break;
                 }
             }
             r.close();
-            if (!allowedMethods.isEmpty()) {
-                dcb.setAllowedMethods(allowedMethods);
-            }
-            if (!cachedMethods.isEmpty()) {
-                dcb.setCachedMethods(cachedMethods);
-            }
-            if (!functionAssociations.isEmpty()) {
-                dcb.setFunctionAssociations(functionAssociations);
-            }
-        } catch (Exception ignored) {
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.debugv("Invalid DefaultCacheBehavior XML: {0}", e.getMessage());
+            throw new AwsException(
+                    "InvalidArgument", "The DefaultCacheBehavior configuration is invalid.", 400);
         }
         return dcb;
     }
@@ -3183,242 +3553,320 @@ public class CloudFrontController {
             return result;
         }
         try {
-            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
+            XMLStreamReader r = XmlParser.newStreamReader(body);
             boolean inCacheBehaviors = false;
-            boolean inCacheBehavior = false;
-            boolean inAllowedMethods = false;
-            boolean inCachedMethods = false;
-            boolean inFunctionAssociations = false;
-            boolean inForwardedValues = false;
-            boolean inCookies = false;
-            boolean inWhitelistedNames = false;
-            boolean inFvHeaders = false;
-            boolean inQueryStringCacheKeys = false;
-            CacheBehavior current = null;
-            List<String> allowedMethods = new ArrayList<>();
-            List<String> cachedMethods = new ArrayList<>();
-            List<Map<String, String>> functionAssociations = new ArrayList<>();
-            Map<String, String> currentAssociation = null;
-            Map<String, Object> forwardedValues = null;
-            Map<String, Object> cookies = null;
-            List<String> whitelistedNames = new ArrayList<>();
-            List<String> fvHeaders = new ArrayList<>();
-            List<String> queryStringCacheKeys = new ArrayList<>();
 
             while (r.hasNext()) {
                 int event = r.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     String local = r.getLocalName();
-                    switch (local) {
-                        case "CacheBehaviors" -> inCacheBehaviors = true;
-                        case "CacheBehavior" -> {
-                            if (inCacheBehaviors) {
-                                inCacheBehavior = true;
-                                current = new CacheBehavior();
-                                allowedMethods = new ArrayList<>();
-                                cachedMethods = new ArrayList<>();
-                                functionAssociations = new ArrayList<>();
-                            }
-                        }
-                        case "AllowedMethods" -> {
-                            if (inCacheBehavior) inAllowedMethods = true;
-                        }
-                        case "CachedMethods" -> {
-                            if (inAllowedMethods) inCachedMethods = true;
-                        }
-                        case "FunctionAssociations" -> {
-                            if (inCacheBehavior) inFunctionAssociations = true;
-                        }
-                        case "FunctionAssociation" -> {
-                            if (inFunctionAssociations) currentAssociation = new LinkedHashMap<>();
-                        }
-                        case "FunctionARN" -> {
-                            if (currentAssociation != null) {
-                                currentAssociation.put("FunctionARN", r.getElementText());
-                            }
-                        }
-                        case "EventType" -> {
-                            if (currentAssociation != null) {
-                                currentAssociation.put("EventType", r.getElementText());
-                            }
-                        }
-                        case "ForwardedValues" -> {
-                            if (inCacheBehavior) {
-                                inForwardedValues = true;
-                                forwardedValues = new LinkedHashMap<>();
-                            }
-                        }
-                        case "QueryString" -> {
-                            if (inForwardedValues && forwardedValues != null) {
-                                forwardedValues.put("QueryString",
-                                        "true".equalsIgnoreCase(r.getElementText()));
-                            }
-                        }
-                        case "Cookies" -> {
-                            if (inForwardedValues) {
-                                inCookies = true;
-                                cookies = new LinkedHashMap<>();
-                            }
-                        }
-                        case "Forward" -> {
-                            if (inCookies && cookies != null) {
-                                cookies.put("Forward", r.getElementText());
-                            }
-                        }
-                        case "WhitelistedNames" -> {
-                            if (inCookies) inWhitelistedNames = true;
-                        }
-                        case "Headers" -> {
-                            if (inForwardedValues && !inCookies) inFvHeaders = true;
-                        }
-                        case "QueryStringCacheKeys" -> {
-                            if (inForwardedValues) inQueryStringCacheKeys = true;
-                        }
-                        case "Name" -> {
-                            if (inWhitelistedNames) {
-                                whitelistedNames.add(r.getElementText());
-                            } else if (inFvHeaders) {
-                                fvHeaders.add(r.getElementText());
-                            } else if (inQueryStringCacheKeys) {
-                                queryStringCacheKeys.add(r.getElementText());
-                            }
-                        }
-                        case "MinTTL" -> {
-                            if (inCacheBehavior && current != null) {
-                                try {
-                                    current.setMinTTL(Long.parseLong(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
-                            }
-                        }
-                        case "DefaultTTL" -> {
-                            if (inCacheBehavior && current != null) {
-                                try {
-                                    current.setDefaultTTL(Long.parseLong(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
-                            }
-                        }
-                        case "MaxTTL" -> {
-                            if (inCacheBehavior && current != null) {
-                                try {
-                                    current.setMaxTTL(Long.parseLong(r.getElementText()));
-                                } catch (NumberFormatException ignored) {
-                                }
-                            }
-                        }
-                        case "PathPattern" -> {
-                            if (inCacheBehavior && current != null) current.setPathPattern(r.getElementText());
-                        }
-                        case "TargetOriginId" -> {
-                            if (inCacheBehavior && current != null) current.setTargetOriginId(r.getElementText());
-                        }
-                        case "ViewerProtocolPolicy" -> {
-                            if (inCacheBehavior && current != null) current.setViewerProtocolPolicy(r.getElementText());
-                        }
-                        case "CachePolicyId" -> {
-                            if (inCacheBehavior && current != null) current.setCachePolicyId(r.getElementText());
-                        }
-                        case "OriginRequestPolicyId" -> {
-                            if (inCacheBehavior && current != null)
-                                current.setOriginRequestPolicyId(r.getElementText());
-                        }
-                        case "ResponseHeadersPolicyId" -> {
-                            if (inCacheBehavior && current != null)
-                                current.setResponseHeadersPolicyId(r.getElementText());
-                        }
-                        case "Compress" -> {
-                            if (inCacheBehavior && current != null) {
-                                current.setCompress("true".equalsIgnoreCase(r.getElementText()));
-                            }
-                        }
-                        case "Method" -> {
-                            if (inCachedMethods) {
-                                cachedMethods.add(r.getElementText());
-                            } else if (inAllowedMethods) {
-                                allowedMethods.add(r.getElementText());
-                            }
-                        }
-                        default -> {
-                        }
+                    if ("CacheBehaviors".equals(local)) {
+                        inCacheBehaviors = true;
+                    } else if ("CacheBehavior".equals(local) && inCacheBehaviors) {
+                        CacheBehavior current = new CacheBehavior();
+                        parseCacheBehaviorScope(r, "CacheBehavior", current);
+                        result.add(current);
                     }
-                } else if (event == XMLStreamConstants.END_ELEMENT) {
-                    switch (r.getLocalName()) {
-                        case "CachedMethods" -> inCachedMethods = false;
-                        case "AllowedMethods" -> inAllowedMethods = false;
-                        case "FunctionAssociation" -> {
-                            if (currentAssociation != null) {
-                                functionAssociations.add(currentAssociation);
-                                currentAssociation = null;
-                            }
-                        }
-                        case "FunctionAssociations" -> inFunctionAssociations = false;
-                        case "WhitelistedNames" -> {
-                            if (inWhitelistedNames && cookies != null && !whitelistedNames.isEmpty()) {
-                                cookies.put("WhitelistedNames", new ArrayList<>(whitelistedNames));
-                            }
-                            whitelistedNames.clear();
-                            inWhitelistedNames = false;
-                        }
-                        case "Headers" -> {
-                            if (inFvHeaders) {
-                                if (forwardedValues != null && !fvHeaders.isEmpty()) {
-                                    forwardedValues.put("Headers", new ArrayList<>(fvHeaders));
-                                }
-                                fvHeaders.clear();
-                                inFvHeaders = false;
-                            }
-                        }
-                        case "QueryStringCacheKeys" -> {
-                            if (inQueryStringCacheKeys) {
-                                if (forwardedValues != null && !queryStringCacheKeys.isEmpty()) {
-                                    forwardedValues.put("QueryStringCacheKeys",
-                                            new ArrayList<>(queryStringCacheKeys));
-                                }
-                                queryStringCacheKeys.clear();
-                                inQueryStringCacheKeys = false;
-                            }
-                        }
-                        case "Cookies" -> {
-                            if (inCookies && forwardedValues != null && cookies != null) {
-                                forwardedValues.put("Cookies", cookies);
-                            }
-                            cookies = null;
-                            inCookies = false;
-                        }
-                        case "ForwardedValues" -> {
-                            if (inForwardedValues && current != null && forwardedValues != null) {
-                                current.setForwardedValues(forwardedValues);
-                            }
-                            forwardedValues = null;
-                            inForwardedValues = false;
-                        }
-                        case "CacheBehavior" -> {
-                            if (inCacheBehavior && current != null) {
-                                if (!allowedMethods.isEmpty()) {
-                                    current.setAllowedMethods(allowedMethods);
-                                }
-                                if (!cachedMethods.isEmpty()) {
-                                    current.setCachedMethods(cachedMethods);
-                                }
-                                if (!functionAssociations.isEmpty()) {
-                                    current.setFunctionAssociations(functionAssociations);
-                                }
-                                result.add(current);
-                            }
-                            inCacheBehavior = false;
-                            current = null;
-                        }
-                        case "CacheBehaviors" -> inCacheBehaviors = false;
-                        default -> {
-                        }
-                    }
+                } else if (event == XMLStreamConstants.END_ELEMENT
+                        && "CacheBehaviors".equals(r.getLocalName())) {
+                    inCacheBehaviors = false;
                 }
             }
             r.close();
-        } catch (Exception ignored) {
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.debugv("Invalid CacheBehaviors XML: {0}", e.getMessage());
+            throw new AwsException(
+                    "InvalidArgument", "The CacheBehaviors configuration is invalid.", 400);
         }
         return result;
+    }
+
+    /**
+     * Parses one {@code DefaultCacheBehavior} or {@code CacheBehavior} element into
+     * {@code target}. The reader must have just produced the {@code START_ELEMENT} for
+     * {@code scopeElement}; this consumes everything up to and including its matching
+     * {@code END_ELEMENT}.
+     */
+    private void parseCacheBehaviorScope(
+            XMLStreamReader r, String scopeElement, CacheBehaviorSettings target)
+            throws XMLStreamException {
+        boolean inAllowedMethods = false;
+        boolean inCachedMethods = false;
+        boolean inTrustedKeyGroups = false;
+        boolean sawTrustedKeyGroups = false;
+        Boolean trustedKeyGroupsEnabled = null;
+        Integer trustedKeyGroupsQuantity = null;
+        List<String> allowedMethods = new ArrayList<>();
+        List<String> cachedMethods = new ArrayList<>();
+        List<String> trustedKeyGroups = new ArrayList<>();
+        boolean inForwardedValues = false;
+        boolean inForwardedCookies = false;
+        boolean inForwardedCookieNames = false;
+        boolean inForwardedHeaders = false;
+        boolean inForwardedQueryStringCacheKeys = false;
+        boolean sawForwardedValues = false;
+        Boolean forwardedQueryString = null;
+        String forwardedCookiesForward = null;
+        List<String> forwardedCookieNames = new ArrayList<>();
+        List<String> forwardedHeaders = new ArrayList<>();
+        List<String> forwardedQueryStringCacheKeys = new ArrayList<>();
+        boolean inLambdaAssociations = false;
+        boolean inFunctionAssociations = false;
+        Map<String, Object> currentLambdaAssociation = null;
+        Map<String, String> currentFunctionAssociation = null;
+        List<Map<String, Object>> lambdaAssociations = new ArrayList<>();
+        List<Map<String, String>> functionAssociations = new ArrayList<>();
+        Integer lambdaAssociationsQuantity = null;
+        Integer functionAssociationsQuantity = null;
+
+        while (r.hasNext()) {
+            int event = r.next();
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                String local = r.getLocalName();
+                switch (local) {
+                    case "LambdaFunctionAssociations" -> inLambdaAssociations = true;
+                    case "FunctionAssociations" -> inFunctionAssociations = true;
+                    case "LambdaFunctionAssociation" -> {
+                        if (inLambdaAssociations) {
+                            currentLambdaAssociation = new LinkedHashMap<>();
+                        }
+                    }
+                    case "FunctionAssociation" -> {
+                        if (inFunctionAssociations) {
+                            currentFunctionAssociation = new LinkedHashMap<>();
+                        }
+                    }
+                    case "LambdaFunctionARN" -> {
+                        if (currentLambdaAssociation != null) {
+                            currentLambdaAssociation.put("LambdaFunctionARN", r.getElementText());
+                        }
+                    }
+                    case "FunctionARN" -> {
+                        if (currentFunctionAssociation != null) {
+                            currentFunctionAssociation.put("FunctionARN", r.getElementText());
+                        }
+                    }
+                    case "IncludeBody" -> {
+                        if (currentLambdaAssociation != null) {
+                            currentLambdaAssociation.put(
+                                    "IncludeBody", "true".equalsIgnoreCase(r.getElementText()));
+                        }
+                    }
+                    case "EventType" -> {
+                        if (currentLambdaAssociation != null) {
+                            currentLambdaAssociation.put("EventType", r.getElementText());
+                        } else if (currentFunctionAssociation != null) {
+                            currentFunctionAssociation.put("EventType", r.getElementText());
+                        }
+                    }
+                    case "TrustedKeyGroups" -> {
+                        inTrustedKeyGroups = true;
+                        sawTrustedKeyGroups = true;
+                    }
+                    case "Enabled" -> {
+                        if (inTrustedKeyGroups) {
+                            trustedKeyGroupsEnabled = parseTrustedKeyGroupsEnabled(r.getElementText());
+                        }
+                    }
+                    case "Quantity" -> {
+                        if (inTrustedKeyGroups) {
+                            trustedKeyGroupsQuantity = parseTrustedKeyGroupsQuantity(r.getElementText());
+                        } else if (inLambdaAssociations && currentLambdaAssociation == null) {
+                            lambdaAssociationsQuantity = parseAssociationsQuantity(r.getElementText());
+                        } else if (inFunctionAssociations && currentFunctionAssociation == null) {
+                            functionAssociationsQuantity = parseAssociationsQuantity(r.getElementText());
+                        }
+                    }
+                    case "KeyGroup" -> {
+                        if (inTrustedKeyGroups) {
+                            trustedKeyGroups.add(r.getElementText());
+                        }
+                    }
+                    case "AllowedMethods" -> inAllowedMethods = true;
+                    case "CachedMethods" -> {
+                        if (inAllowedMethods) inCachedMethods = true;
+                    }
+                    case "ForwardedValues" -> {
+                        inForwardedValues = true;
+                        sawForwardedValues = true;
+                    }
+                    case "Cookies" -> {
+                        if (inForwardedValues) inForwardedCookies = true;
+                    }
+                    case "WhitelistedNames" -> {
+                        if (inForwardedCookies) inForwardedCookieNames = true;
+                    }
+                    case "Headers" -> {
+                        if (inForwardedValues) inForwardedHeaders = true;
+                    }
+                    case "QueryStringCacheKeys" -> {
+                        if (inForwardedValues) inForwardedQueryStringCacheKeys = true;
+                    }
+                    case "Name" -> {
+                        if (inForwardedCookieNames) {
+                            forwardedCookieNames.add(r.getElementText());
+                        } else if (inForwardedHeaders) {
+                            forwardedHeaders.add(r.getElementText());
+                        } else if (inForwardedQueryStringCacheKeys) {
+                            forwardedQueryStringCacheKeys.add(r.getElementText());
+                        }
+                    }
+                    case "QueryString" -> {
+                        if (inForwardedValues && !inForwardedCookies) {
+                            forwardedQueryString = "true".equalsIgnoreCase(r.getElementText());
+                        }
+                    }
+                    case "Forward" -> {
+                        if (inForwardedCookies) forwardedCookiesForward = r.getElementText();
+                    }
+                    case "PathPattern" -> target.setPathPattern(r.getElementText());
+                    case "TargetOriginId" -> target.setTargetOriginId(r.getElementText());
+                    case "ViewerProtocolPolicy" -> target.setViewerProtocolPolicy(r.getElementText());
+                    case "CachePolicyId" -> target.setCachePolicyId(r.getElementText());
+                    case "OriginRequestPolicyId" -> target.setOriginRequestPolicyId(r.getElementText());
+                    case "ResponseHeadersPolicyId" -> target.setResponseHeadersPolicyId(r.getElementText());
+                    case "FieldLevelEncryptionId" -> target.setFieldLevelEncryptionId(r.getElementText());
+                    case "RealtimeLogConfigArn" -> target.setRealtimeLogConfigArn(r.getElementText());
+                    case "Compress" -> target.setCompress("true".equalsIgnoreCase(r.getElementText()));
+                    case "SmoothStreaming" ->
+                            target.setSmoothStreaming("true".equalsIgnoreCase(r.getElementText()));
+                    case "MinTTL" -> target.setMinTTL(parseLongOrZero(r.getElementText()));
+                    case "DefaultTTL" -> target.setDefaultTTL(parseLongOrZero(r.getElementText()));
+                    case "MaxTTL" -> target.setMaxTTL(parseLongOrZero(r.getElementText()));
+                    case "Method" -> {
+                        if (inCachedMethods) {
+                            cachedMethods.add(r.getElementText());
+                        } else if (inAllowedMethods) {
+                            allowedMethods.add(r.getElementText());
+                        }
+                    }
+                    default -> {
+                    }
+                }
+            } else if (event == XMLStreamConstants.END_ELEMENT) {
+                String local = r.getLocalName();
+                if (scopeElement.equals(local)) {
+                    break;
+                }
+                switch (local) {
+                    case "CachedMethods" -> inCachedMethods = false;
+                    case "AllowedMethods" -> inAllowedMethods = false;
+                    case "WhitelistedNames" -> inForwardedCookieNames = false;
+                    case "Headers" -> inForwardedHeaders = false;
+                    case "QueryStringCacheKeys" -> inForwardedQueryStringCacheKeys = false;
+                    case "Cookies" -> inForwardedCookies = false;
+                    case "ForwardedValues" -> inForwardedValues = false;
+                    case "TrustedKeyGroups" -> inTrustedKeyGroups = false;
+                    case "LambdaFunctionAssociations" -> inLambdaAssociations = false;
+                    case "FunctionAssociations" -> inFunctionAssociations = false;
+                    case "LambdaFunctionAssociation" -> {
+                        if (currentLambdaAssociation != null) {
+                            lambdaAssociations.add(currentLambdaAssociation);
+                            currentLambdaAssociation = null;
+                        }
+                    }
+                    case "FunctionAssociation" -> {
+                        if (currentFunctionAssociation != null) {
+                            functionAssociations.add(currentFunctionAssociation);
+                            currentFunctionAssociation = null;
+                        }
+                    }
+                    default -> {
+                    }
+                }
+            }
+        }
+
+        if (!allowedMethods.isEmpty()) {
+            target.setAllowedMethods(allowedMethods);
+        }
+        if (!cachedMethods.isEmpty()) {
+            target.setCachedMethods(cachedMethods);
+        }
+        if (sawForwardedValues) {
+            target.setForwardedValues(forwardedValuesModel(
+                    forwardedQueryString,
+                    forwardedCookiesForward,
+                    forwardedCookieNames,
+                    forwardedHeaders,
+                    forwardedQueryStringCacheKeys));
+        }
+        if (!trustedKeyGroups.isEmpty()) {
+            target.setTrustedKeyGroups(trustedKeyGroups);
+        }
+        validateAssociationsQuantity(lambdaAssociationsQuantity, lambdaAssociations.size());
+        validateAssociationsQuantity(functionAssociationsQuantity, functionAssociations.size());
+        validateLambdaFunctionAssociations(lambdaAssociations);
+        validateFunctionAssociations(functionAssociations);
+        if (!lambdaAssociations.isEmpty()) {
+            target.setLambdaFunctionAssociations(lambdaAssociations);
+        }
+        if (!functionAssociations.isEmpty()) {
+            target.setFunctionAssociations(functionAssociations);
+        }
+        if (sawTrustedKeyGroups) {
+            if (trustedKeyGroupsEnabled == null) {
+                throw new AwsException(
+                        "InvalidArgument", "TrustedKeyGroups must include Enabled.", 400);
+            }
+            validateTrustedKeyGroupsQuantity(trustedKeyGroupsQuantity, trustedKeyGroups.size());
+            validateEnabledTrustedKeyGroups(trustedKeyGroupsEnabled, trustedKeyGroups.size());
+            target.setTrustedKeyGroupsEnabled(trustedKeyGroupsEnabled);
+        }
+    }
+
+    private static boolean parseTrustedKeyGroupsEnabled(String value) {
+        if (!"true".equalsIgnoreCase(value)
+                && !"false".equalsIgnoreCase(value)) {
+            throw new AwsException(
+                    "InvalidArgument",
+                    "TrustedKeyGroups Enabled must be true or false.",
+                    400);
+        }
+        return Boolean.parseBoolean(value);
+    }
+
+    private static int parseTrustedKeyGroupsQuantity(String value) {
+        try {
+            int quantity = Integer.parseInt(value);
+            if (quantity < 0) {
+                throw new NumberFormatException("negative quantity");
+            }
+            return quantity;
+        } catch (NumberFormatException e) {
+            throw new AwsException(
+                    "InvalidArgument",
+                    "TrustedKeyGroups Quantity must be a non-negative integer.",
+                    400);
+        }
+    }
+
+    private static void validateTrustedKeyGroupsQuantity(
+            Integer quantity, int itemCount) {
+        if (quantity == null) {
+            throw new AwsException(
+                    "InvalidArgument",
+                    "TrustedKeyGroups must include Quantity.",
+                    400);
+        }
+        if (quantity != itemCount) {
+            throw new AwsException(
+                    "InconsistentQuantities",
+                    "The value of Quantity does not match the number of items.",
+                    400);
+        }
+    }
+
+    private static void validateEnabledTrustedKeyGroups(
+            boolean enabled, int itemCount) {
+        if (enabled && itemCount == 0) {
+            throw new AwsException(
+                    "InvalidArgument",
+                    "TrustedKeyGroups cannot be enabled without a key group.",
+                    400);
+        }
     }
 
     private List<String> parseAliases(String body) {
@@ -3427,7 +3875,7 @@ public class CloudFrontController {
             return result;
         }
         try {
-            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
+            XMLStreamReader r = XmlParser.newStreamReader(body);
             boolean inAliases = false;
             while (r.hasNext()) {
                 int event = r.next();
@@ -3456,7 +3904,7 @@ public class CloudFrontController {
             return result;
         }
         try {
-            XMLStreamReader r = XML_FACTORY.createXMLStreamReader(new StringReader(body));
+            XMLStreamReader r = XmlParser.newStreamReader(body);
             boolean inVc = false;
             while (r.hasNext()) {
                 int event = r.next();
@@ -3508,6 +3956,7 @@ public class CloudFrontController {
         policy.setName(XmlParser.extractFirst(body, "Name", null));
         policy.setComment(XmlParser.extractFirst(body, "Comment", null));
         policy.setConfigXml(extractXmlElement(body, "ResponseHeadersPolicyConfig"));
+        policy.setConfig(ResponseHeadersPolicyConfigCodec.parse(body));
         return policy;
     }
 
@@ -3524,9 +3973,10 @@ public class CloudFrontController {
         OriginAccessControl oac = new OriginAccessControl();
         oac.setName(XmlParser.extractFirst(body, "Name", null));
         oac.setDescription(XmlParser.extractFirst(body, "Description", null));
-        oac.setSigningProtocol(XmlParser.extractFirst(body, "SigningProtocol", "sigv4"));
-        oac.setSigningBehavior(XmlParser.extractFirst(body, "SigningBehavior", "always"));
-        oac.setOriginAccessControlOriginType(XmlParser.extractFirst(body, "OriginAccessControlOriginType", "s3"));
+        oac.setSigningProtocol(XmlParser.extractFirst(body, "SigningProtocol", null));
+        oac.setSigningBehavior(XmlParser.extractFirst(body, "SigningBehavior", null));
+        oac.setOriginAccessControlOriginType(
+                XmlParser.extractFirst(body, "OriginAccessControlOriginType", null));
         return oac;
     }
 
@@ -3657,7 +4107,7 @@ public class CloudFrontController {
                 .start("KeyGroupConfig")
                 .elem("Name", group.getName() != null ? group.getName() : "")
                 .elem("Comment", group.getComment() != null ? group.getComment() : "")
-                .raw(xmlPublicKeyItems(items))
+                .raw(xmlDirectItems("Items", "PublicKey", items))
                 .end("KeyGroupConfig")
                 .end("KeyGroup");
         return xml.build();

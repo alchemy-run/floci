@@ -53,7 +53,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         assertTrue(Files.exists(metadataFile),
             "Metadata file should be created after certificate generation");
     }
@@ -67,7 +67,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         CertificateMetadata metadata = readMetadata(metadataFile);
 
         assertNotNull(metadata.getHostnames(), "Hostnames should not be null");
@@ -105,7 +105,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         CertificateMetadata metadata = readMetadata(metadataFile);
 
         assertTrue(metadata.getHostnames().contains("floci"),
@@ -124,7 +124,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         CertificateMetadata metadata = readMetadata(metadataFile);
 
         assertTrue(metadata.getHostnames().contains("myhost"),
@@ -144,7 +144,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         CertificateMetadata metadata = readMetadata(metadataFile);
 
         assertTrue(metadata.getHostnames().contains("newhost"),
@@ -162,7 +162,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         CertificateMetadata metadata = readMetadata(metadataFile);
 
         assertNotNull(metadata.getGeneratedAt(),
@@ -180,7 +180,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         CertificateMetadata metadata = readMetadata(metadataFile);
 
         assertNotNull(metadata.getFlociVersion(),
@@ -202,7 +202,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         CertificateMetadata metadata = readMetadata(metadataFile);
 
         assertNotNull(metadata.getFlociVersion(),
@@ -218,7 +218,7 @@ class TlsConfigSourceMetadataPersistenceTest {
         new TlsConfigSource();
 
         // Assert
-        Path metadataFile = tempDir.resolve("tls/floci-selfsigned.metadata.json");
+        Path metadataFile = tempDir.resolve("tls/floci-server.metadata.json");
         String json = Files.readString(metadataFile);
 
         assertFalse(json.isBlank(), "Metadata file should not be empty");

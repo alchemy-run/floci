@@ -8,7 +8,16 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.appconfig.model.*;
+import io.github.hectorvent.floci.services.appconfig.model.Application;
+import io.github.hectorvent.floci.services.appconfig.model.ConfigurationProfile;
+import io.github.hectorvent.floci.services.appconfig.model.Deployment;
+import io.github.hectorvent.floci.services.appconfig.model.DeploymentStrategy;
+import io.github.hectorvent.floci.services.appconfig.model.DeploymentSummary;
+import io.github.hectorvent.floci.services.appconfig.model.Environment;
+import io.github.hectorvent.floci.services.appconfig.model.Extension;
+import io.github.hectorvent.floci.services.appconfig.model.ExtensionAssociation;
+import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersion;
+import io.github.hectorvent.floci.services.appconfig.model.HostedConfigurationVersionSummary;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
@@ -20,7 +29,15 @@ import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -47,6 +64,8 @@ public class AppConfigService {
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService scheduler;
     private final ConcurrentHashMap<String, ScheduledFuture<?>> pendingCompletions = new ConcurrentHashMap<>();
+    private final Map<String, DeploymentPageToken> deploymentPageTokens = new ConcurrentHashMap<>();
+    private static final int MAX_DEPLOYMENT_PAGE_TOKENS = 1000;
 
     @Inject
     public AppConfigService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
@@ -208,15 +227,6 @@ public class AppConfigService {
         return profile;
     }
 
-    public void deleteConfigurationProfile(String appId, String profileId) {
-        getConfigurationProfile(appId, profileId);
-        String prefix = appId + "::" + profileId + "::";
-        if (!versionStore.scan(k -> k.startsWith(prefix)).isEmpty()) {
-            throw new AwsException("BadRequestException",
-                    "Cannot delete configuration profile " + profileId + " because hosted configuration versions still exist", 400);
-        }
-        profileStore.delete(profileId);
-    }
 
     public ConfigurationProfile getConfigurationProfile(String appId, String profileId) {
         ConfigurationProfile profile = profileStore.get(profileId).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Configuration profile not found", 404));
@@ -228,6 +238,25 @@ public class AppConfigService {
         return profileStore.scan(k -> true).stream()
                 .filter(p -> p.getApplicationId().equals(appId))
                 .toList();
+    }
+
+    public void deleteConfigurationProfile(String appId, String profileId) {
+        // Unlike deleteApplication (a single, unscoped ID), a profile is nested under an
+        // application - a mismatched appId must not be able to delete another application's
+        // profile just because its bare profileId is guessed/known. A profileId that doesn't
+        // exist at all is still an idempotent no-op, matching deleteApplication's convention;
+        // only an existing-but-wrongly-scoped one is rejected.
+        profileStore.get(profileId).ifPresent(profile -> {
+            if (!profile.getApplicationId().equals(appId)) {
+                throw new AwsException("ResourceNotFoundException", "Configuration profile not found in this application", 404);
+            }
+        });
+        String versionPrefix = appId + "::" + profileId + "::";
+        if (!versionStore.scan(key -> key.startsWith(versionPrefix)).isEmpty()) {
+            throw new AwsException("BadRequestException",
+                    "Cannot delete configuration profile " + profileId + " because hosted configuration versions still exist", 400);
+        }
+        profileStore.delete(profileId);
     }
 
     // ──────────────────────────── Hosted Configuration Version ────────────────────────────
@@ -251,10 +280,6 @@ public class AppConfigService {
         return version;
     }
 
-    public void deleteHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
-        getHostedConfigurationVersion(appId, profileId, versionNumber);
-        versionStore.delete(appId + "::" + profileId + "::" + versionNumber);
-    }
 
     public HostedConfigurationVersion getHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
         return versionStore.get(appId + "::" + profileId + "::" + versionNumber)
@@ -278,6 +303,10 @@ public class AppConfigService {
                 .toList();
     }
 
+    public void deleteHostedConfigurationVersion(String appId, String profileId, int versionNumber) {
+        versionStore.delete(appId + "::" + profileId + "::" + versionNumber);
+    }
+
     // ──────────────────────────── Deployment Strategy ────────────────────────────
 
     public DeploymentStrategy createDeploymentStrategy(Map<String, Object> request) {
@@ -295,15 +324,6 @@ public class AppConfigService {
         return strategy;
     }
 
-    public List<DeploymentStrategy> listDeploymentStrategies() {
-        List<DeploymentStrategy> strategies = new ArrayList<>(List.of(
-                builtinStrategy("AppConfig.AllAtOnce"),
-                builtinStrategy("AppConfig.Linear50PercentEvery30Seconds"),
-                builtinStrategy("AppConfig.Canary10Percent20Minutes")
-        ));
-        strategies.addAll(strategyStore.scan(k -> true));
-        return strategies;
-    }
 
     public DeploymentStrategy updateDeploymentStrategy(String id, Map<String, Object> request) {
         DeploymentStrategy strategy = getDeploymentStrategy(id);
@@ -329,19 +349,36 @@ public class AppConfigService {
         return strategy;
     }
 
-    public void deleteDeploymentStrategy(String id) {
-        if (id.startsWith("AppConfig.")) {
-            throw new AwsException("BadRequestException", "Cannot delete predefined Deployment Strategy", 400);
-        }
-        getDeploymentStrategy(id);
-        strategyStore.delete(id);
-    }
 
     public DeploymentStrategy getDeploymentStrategy(String id) {
         // AWS predefined built-in strategies
         DeploymentStrategy builtin = builtinStrategy(id);
         if (builtin != null) return builtin;
         return strategyStore.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException", "Deployment strategy not found", 404));
+    }
+
+    public List<DeploymentStrategy> listDeploymentStrategies() {
+        // Real AWS's ListDeploymentStrategies includes the predefined strategies alongside
+        // custom ones (confirmed via the API reference's own sample response) - the predefined
+        // ones aren't in strategyStore at all (see getDeploymentStrategy's builtinStrategy check
+        // above), so they need to be added explicitly here too.
+        List<DeploymentStrategy> result = new ArrayList<>(List.of(
+                builtinStrategy("AppConfig.AllAtOnce"),
+                builtinStrategy("AppConfig.Linear50PercentEvery30Seconds"),
+                builtinStrategy("AppConfig.Canary10Percent20Minutes")));
+        result.addAll(strategyStore.scan(k -> true));
+        return result;
+    }
+
+    public void deleteDeploymentStrategy(String id) {
+        // Predefined strategies aren't real stored resources (see builtinStrategy above) -
+        // silently no-op'ing here would report success for a delete that did nothing, and the
+        // "deleted" strategy would still show up in every subsequent Get/List call.
+        if (builtinStrategy(id) != null) {
+            throw new AwsException("BadRequestException",
+                    "Predefined deployment strategy " + id + " cannot be deleted.", 400);
+        }
+        strategyStore.delete(id);
     }
 
     private static DeploymentStrategy builtinStrategy(String id) {
@@ -460,6 +497,98 @@ public class AppConfigService {
     public Deployment getDeployment(String appId, String envId, int deploymentNumber) {
         return deploymentStore.get(appId + "::" + envId + "::" + deploymentNumber)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Deployment not found", 404));
+    }
+
+    public DeploymentPage listDeployments(String appId, String envId, Integer maxResults, String nextToken) {
+        getEnvironment(appId, envId);
+        int pageSize = maxResults == null ? 50 : maxResults;
+        if (pageSize < 1 || pageSize > 50) {
+            throw new AwsException("BadRequestException", "max_results must be between 1 and 50", 400);
+        }
+
+        String scope = appId + "::" + envId;
+        Integer afterDeploymentNumber = null;
+        if (nextToken != null) {
+            DeploymentPageToken token = deploymentPageTokens.get(nextToken);
+            if (token == null || !token.scope().equals(scope)) {
+                throw new AwsException("BadRequestException", "Invalid next_token", 400);
+            }
+            afterDeploymentNumber = token.lastDeploymentNumber();
+        }
+
+        List<Deployment> deployments = deploymentStore.scan(k -> true).stream()
+                .filter(deployment -> appId.equals(deployment.getApplicationId()))
+                .filter(deployment -> envId.equals(deployment.getEnvironmentId()))
+                .sorted(Comparator.comparingInt(Deployment::getDeploymentNumber).reversed())
+                .toList();
+
+        int start = 0;
+        if (afterDeploymentNumber != null) {
+            while (start < deployments.size()
+                    && deployments.get(start).getDeploymentNumber() >= afterDeploymentNumber) {
+                start++;
+            }
+        }
+
+        int end = Math.min(start + pageSize, deployments.size());
+        List<DeploymentSummary> items = deployments.subList(start, end).stream()
+                .map(this::toDeploymentSummary)
+                .toList();
+        String resultToken = null;
+        if (end < deployments.size()) {
+            resultToken = createDeploymentPageToken(scope,
+                    items.get(items.size() - 1).getDeploymentNumber());
+        } else if (nextToken != null) {
+            deploymentPageTokens.remove(nextToken);
+        }
+        return new DeploymentPage(items, resultToken);
+    }
+
+    private DeploymentSummary toDeploymentSummary(Deployment deployment) {
+        DeploymentSummary summary = new DeploymentSummary();
+        summary.setConfigurationProfileId(deployment.getConfigurationProfileId());
+        summary.setConfigurationVersion(deployment.getConfigurationVersion());
+        summary.setDeploymentNumber(deployment.getDeploymentNumber());
+        summary.setState(deployment.getState());
+        summary.setConfigurationName(deployment.getConfigurationName());
+        ConfigurationProfile profile = profileStore.get(deployment.getConfigurationProfileId()).orElse(null);
+        if (profile != null) {
+            summary.setConfigurationName(profile.getName());
+            summary.setType(profile.getType());
+        }
+        summary.setStartedAt(deployment.getStartedAt());
+        summary.setCompletedAt(deployment.getCompletedAt());
+        summary.setDeploymentDurationInMinutes(deployment.getDeploymentDurationInMinutes());
+        summary.setFinalBakeTimeInMinutes(deployment.getFinalBakeTimeInMinutes());
+        summary.setGrowthFactor(deployment.getGrowthFactor());
+        summary.setGrowthType(deployment.getGrowthType());
+        summary.setPercentageComplete(deployment.getPercentageComplete());
+        if (summary.getDeploymentDurationInMinutes() == null) {
+            DeploymentStrategy strategy = getDeploymentStrategy(deployment.getDeploymentStrategyId());
+            summary.setDeploymentDurationInMinutes(strategy.getDeploymentDurationInMinutes());
+            summary.setFinalBakeTimeInMinutes(strategy.getFinalBakeTimeInMinutes());
+            summary.setGrowthFactor(strategy.getGrowthFactor());
+            summary.setGrowthType(strategy.getGrowthType());
+        }
+        if (summary.getPercentageComplete() == null) {
+            summary.setPercentageComplete("COMPLETE".equals(deployment.getState()) ? 100.0f : 0.0f);
+        }
+        return summary;
+    }
+
+    private String createDeploymentPageToken(String scope, int lastDeploymentNumber) {
+        while (deploymentPageTokens.size() >= MAX_DEPLOYMENT_PAGE_TOKENS) {
+            deploymentPageTokens.keySet().stream().findFirst().ifPresent(deploymentPageTokens::remove);
+        }
+        String token = UUID.randomUUID().toString().replace("-", "");
+        deploymentPageTokens.put(token, new DeploymentPageToken(scope, lastDeploymentNumber));
+        return token;
+    }
+
+    private record DeploymentPageToken(String scope, int lastDeploymentNumber) {
+    }
+
+    public record DeploymentPage(List<DeploymentSummary> items, String nextToken) {
     }
 
     public String getActiveVersion(String envId, String profileId) {

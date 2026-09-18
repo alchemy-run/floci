@@ -1,22 +1,11 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.route53.Route53Service;
 import io.github.hectorvent.floci.services.route53.model.HostedZone;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
 import io.github.hectorvent.floci.services.route53.model.ResourceRecordSet;
-import io.github.hectorvent.floci.services.ses.model.AccountSuppressionAttributes;
-import io.github.hectorvent.floci.services.ses.model.ConfigurationSet;
-import io.github.hectorvent.floci.services.ses.model.ContactList;
-import io.github.hectorvent.floci.services.ses.model.Contact;
-import io.github.hectorvent.floci.services.ses.model.ReceiptRuleSet;
-import io.github.hectorvent.floci.services.ses.model.CustomVerificationEmailTemplate;
-import io.github.hectorvent.floci.services.ses.model.DedicatedIpPool;
-import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
 import io.github.hectorvent.floci.services.ses.model.Identity;
-import io.github.hectorvent.floci.services.ses.model.SentEmail;
-import io.github.hectorvent.floci.services.ses.model.SuppressedDestination;
 import io.github.hectorvent.floci.testing.MutableClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,35 +26,22 @@ class SesServiceDkimLookupCacheTest {
     private static final String REGION = "us-east-1";
     private static final String DOMAIN = "example.com";
 
-    private SesService service;
+    private SesIdentityService identities;
     private InMemoryStorage<String, Identity> identityStore;
     private Route53Service route53Service;
     private MutableClock clock;
 
     @BeforeEach
     void setUp() {
-        identityStore = new InMemoryStorage<>();
         route53Service = mock(Route53Service.class);
         clock = new MutableClock();
         clock.reset();
-        service = new SesService(
-                identityStore,
-                new InMemoryStorage<String, SentEmail>(),
-                new InMemoryStorage<String, Boolean>(),
-                new InMemoryStorage<String, EmailTemplate>(),
-                new InMemoryStorage<String, ConfigurationSet>(),
-                new InMemoryStorage<String, SuppressedDestination>(),
-                new InMemoryStorage<String, AccountSuppressionAttributes>(),
-                new InMemoryStorage<String, DedicatedIpPool>(),
-                new InMemoryStorage<String, ContactList>(),
-                new InMemoryStorage<String, Contact>(),
-                new InMemoryStorage<String, String>(),
-                new InMemoryStorage<String, ReceiptRuleSet>(),
-                new InMemoryStorage<String, CustomVerificationEmailTemplate>(),
-                mock(SmtpRelay.class),
-                new ObjectMapper(),
-                route53Service,
-                clock);
+        SesServiceTestBuilder builder = SesServiceTestBuilder.create()
+                .route53Service(route53Service)
+                .clock(clock);
+        identityStore = builder.identityStore();
+        builder.build();
+        identities = builder.identityService();
     }
 
     @Test
@@ -73,8 +49,12 @@ class SesServiceDkimLookupCacheTest {
         Identity identity = storePendingDomainIdentity();
         stubRoute53(identity, List.of());
 
-        assertEquals("Pending", service.getIdentityVerificationAttributes(DOMAIN, REGION).getVerificationStatus());
-        assertEquals("Pending", service.getIdentityVerificationAttributes(DOMAIN, REGION).getVerificationStatus());
+        assertEquals("Pending",
+                identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                        .getVerificationStatus());
+        assertEquals("Pending",
+                identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                        .getVerificationStatus());
 
         verify(route53Service, times(1)).listHostedZones(null, Integer.MAX_VALUE);
         verify(route53Service, times(1)).listResourceRecordSets(eq("zone-1"), eq(null), eq(null), eq(Integer.MAX_VALUE));
@@ -85,9 +65,13 @@ class SesServiceDkimLookupCacheTest {
         Identity identity = storePendingDomainIdentity();
         stubRoute53(identity, List.of());
 
-        assertEquals("Pending", service.getIdentityVerificationAttributes(DOMAIN, REGION).getVerificationStatus());
+        assertEquals("Pending",
+                identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                        .getVerificationStatus());
         clock.advance(Duration.ofSeconds(5));
-        assertEquals("Pending", service.getIdentityVerificationAttributes(DOMAIN, REGION).getVerificationStatus());
+        assertEquals("Pending",
+                identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                        .getVerificationStatus());
 
         verify(route53Service, times(2)).listHostedZones(null, Integer.MAX_VALUE);
         verify(route53Service, times(2)).listResourceRecordSets(eq("zone-1"), eq(null), eq(null), eq(Integer.MAX_VALUE));
@@ -99,14 +83,20 @@ class SesServiceDkimLookupCacheTest {
         List<ResourceRecordSet> matchingRecords = buildMatchingRecords(identity);
         stubRoute53(identity, List.of());
 
-        assertEquals("Pending", service.getIdentityVerificationAttributes(DOMAIN, REGION).getVerificationStatus());
+        assertEquals("Pending",
+                identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                        .getVerificationStatus());
 
         when(route53Service.listResourceRecordSets("zone-1", null, null, Integer.MAX_VALUE))
                 .thenReturn(matchingRecords);
 
         clock.advance(Duration.ofSeconds(5));
-        assertEquals("Success", service.getIdentityVerificationAttributes(DOMAIN, REGION).getVerificationStatus());
-        assertEquals("Success", service.getIdentityVerificationAttributes(DOMAIN, REGION).getVerificationStatus());
+        assertEquals("Success",
+                identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                        .getVerificationStatus());
+        assertEquals("Success",
+                identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                        .getVerificationStatus());
 
         verify(route53Service, times(4)).listHostedZones(null, Integer.MAX_VALUE);
         verify(route53Service, times(4)).listResourceRecordSets(eq("zone-1"), eq(null), eq(null), eq(Integer.MAX_VALUE));

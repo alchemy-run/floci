@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.core.common.docker;
 
 import com.github.dockerjava.api.model.Bind;
+import com.github.dockerjava.api.model.DeviceRequest;
 import com.github.dockerjava.api.model.LogConfig;
 import com.github.dockerjava.api.model.Mount;
 
@@ -18,11 +19,13 @@ import java.util.Map;
  * @param entrypoint Entrypoint to use (overrides image ENTRYPOINT)
  * @param memoryBytes Memory limit in bytes (null = no limit)
  * @param portBindings Map of container port to host port (0 = dynamic allocation)
+ * @param loopbackPortBindings Container ports whose host bindings accept loopback traffic only
  * @param exposedPorts Ports to expose (required for port bindings)
  * @param networkMode Docker network name or mode (null = default bridge)
  * @param mounts Volume mounts (named volumes, bind mounts, tmpfs)
  * @param binds Legacy bind mounts (prefer mounts for new code)
  * @param extraHosts Extra /etc/hosts entries as "hostname:ip" strings
+ * @param labels Container labels merged over the default floci-aws labels
  * @param logConfig Docker log driver configuration (null = daemon default)
  * @param privileged Whether to run the container in privileged mode (required for k3s)
  * @param cgroupnsMode Docker cgroup namespace mode (for example, "host")
@@ -30,6 +33,7 @@ import java.util.Map;
  * @param workingDir Working directory inside the container (overrides image WORKDIR)
  * @param user User the container process runs as, formatted "uid[:gid]" (null = image USER)
  * @param groupAdd Supplementary group IDs added to the container process
+ * @param deviceRequests Device requests for accelerators such as GPUs (empty = none)
  */
 public record ContainerSpec(
         String image,
@@ -39,25 +43,86 @@ public record ContainerSpec(
         List<String> entrypoint,
         Long memoryBytes,
         Map<Integer, Integer> portBindings,
+        List<Integer> loopbackPortBindings,
         List<Integer> exposedPorts,
         String networkMode,
         List<Mount> mounts,
         List<Bind> binds,
         List<String> extraHosts,
+        Map<String, String> labels,
         LogConfig logConfig,
         boolean privileged,
         String cgroupnsMode,
         List<String> dnsServers,
         String workingDir,
         String user,
-        List<String> groupAdd
+        List<String> groupAdd,
+        List<DeviceRequest> deviceRequests
 ) {
     /**
      * Creates a minimal spec with just the image name.
      * All other fields will be null or empty lists.
      */
     public ContainerSpec(String image) {
-        this(image, null, List.of(), null, null, null, Map.of(), List.of(), null, List.of(), List.of(), List.of(), null, false, null, List.of(), null, null, List.of());
+        this(image, null, List.of(), null, null, null, Map.of(), List.of(), List.of(), null, List.of(), List.of(), List.of(), Map.of(), null, false, null, List.of(), null, null, List.of(), List.of());
+    }
+
+    /**
+     * Backward-compatible constructor that defaults {@code loopbackPortBindings} to empty.
+     */
+    public ContainerSpec(
+            String image,
+            String name,
+            List<String> env,
+            List<String> cmd,
+            List<String> entrypoint,
+            Long memoryBytes,
+            Map<Integer, Integer> portBindings,
+            List<Integer> exposedPorts,
+            String networkMode,
+            List<Mount> mounts,
+            List<Bind> binds,
+            List<String> extraHosts,
+            Map<String, String> labels,
+            LogConfig logConfig,
+            boolean privileged,
+            String cgroupnsMode,
+            List<String> dnsServers,
+            String workingDir,
+            String user,
+            List<String> groupAdd
+    ) {
+        this(image, name, env, cmd, entrypoint, memoryBytes, portBindings, List.of(), exposedPorts, networkMode, mounts, binds, extraHosts, labels, logConfig, privileged, cgroupnsMode, dnsServers, workingDir, user, groupAdd, List.of());
+    }
+
+    /**
+     * Backward-compatible constructor that defaults {@code deviceRequests} to empty, so a
+     * caller that predates accelerator support keeps building CPU-only containers.
+     */
+    public ContainerSpec(
+            String image,
+            String name,
+            List<String> env,
+            List<String> cmd,
+            List<String> entrypoint,
+            Long memoryBytes,
+            Map<Integer, Integer> portBindings,
+            List<Integer> loopbackPortBindings,
+            List<Integer> exposedPorts,
+            String networkMode,
+            List<Mount> mounts,
+            List<Bind> binds,
+            List<String> extraHosts,
+            Map<String, String> labels,
+            LogConfig logConfig,
+            boolean privileged,
+            String cgroupnsMode,
+            List<String> dnsServers,
+            String workingDir,
+            String user,
+            List<String> groupAdd
+    ) {
+        this(image, name, env, cmd, entrypoint, memoryBytes, portBindings, loopbackPortBindings, exposedPorts, networkMode, mounts, binds, extraHosts, labels, logConfig, privileged, cgroupnsMode, dnsServers, workingDir, user, groupAdd, List.of());
     }
 
     /**
@@ -79,5 +144,12 @@ public record ContainerSpec(
      */
     public boolean hasLogConfig() {
         return logConfig != null;
+    }
+
+    /**
+     * Returns true if this spec asks the daemon for any device, such as a GPU.
+     */
+    public boolean hasDeviceRequests() {
+        return deviceRequests != null && !deviceRequests.isEmpty();
     }
 }

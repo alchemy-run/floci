@@ -1,10 +1,9 @@
 package io.github.hectorvent.floci.services.eventbridge;
 
 import com.cronutils.model.Cron;
-import com.cronutils.model.definition.CronDefinition;
-import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.model.time.ExecutionTime;
 import com.cronutils.parser.CronParser;
+import io.github.hectorvent.floci.core.common.AwsCronDefinitions;
 
 import java.time.ZonedDateTime;
 import java.util.regex.Matcher;
@@ -20,20 +19,7 @@ public final class ScheduleExpressionParser {
             "^cron\\((.+)\\)$",
             Pattern.CASE_INSENSITIVE);
 
-    private static final CronParser CRON_PARSER;
-
-    static {
-        CronDefinition definition = CronDefinitionBuilder.defineCron()
-                .withSeconds().and()
-                .withMinutes().and()
-                .withHours().and()
-                .withDayOfMonth().supportsHash().supportsL().supportsW().supportsQuestionMark().and()
-                .withMonth().and()
-                .withDayOfWeek().supportsHash().supportsL().supportsW().supportsQuestionMark().and()
-                .withYear().optional().and()
-                .instance();
-        CRON_PARSER = new CronParser(definition);
-    }
+    private static final CronParser CRON_PARSER = AwsCronDefinitions.newParser();
 
     private ScheduleExpressionParser() {}
 

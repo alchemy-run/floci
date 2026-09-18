@@ -77,17 +77,21 @@ public class ElastiCacheMemcachedService {
         int proxyPort = elasticacheService.allocateProxyPort();
         ElastiCacheContainerHandle handle = null;
         try {
-            handle = containerManager.start(clusterId, image);
-            proxyManager.startProxy(clusterId, proxyPort, handle.getHost(), handle.getPort());
+            handle = containerManager.tryStart(clusterId, image);
+            if (handle != null) {
+                proxyManager.startProxy(clusterId, proxyPort, handle.getHost(), handle.getPort());
+            }
 
             Endpoint endpoint = endpointFor(handle, proxyPort);
             CacheCluster cluster = new CacheCluster(
                     clusterId, CacheClusterStatus.AVAILABLE, ENGINE, ENGINE_VERSION,
                     endpoint, Instant.now());
             cluster.setProxyPort(proxyPort);
-            cluster.setContainerId(handle.getContainerId());
-            cluster.setContainerHost(handle.getHost());
-            cluster.setContainerPort(handle.getPort());
+            if (handle != null) {
+                cluster.setContainerId(handle.getContainerId());
+                cluster.setContainerHost(handle.getHost());
+                cluster.setContainerPort(handle.getPort());
+            }
 
             clusters.put(clusterId, cluster);
             LOG.infov("Memcached cluster {0} created, endpoint={1}:{2}",
@@ -143,7 +147,7 @@ public class ElastiCacheMemcachedService {
     }
 
     private Endpoint endpointFor(ElastiCacheContainerHandle handle, int proxyPort) {
-        if (containerDetector.isRunningInContainer()) {
+        if (handle != null && containerDetector.isRunningInContainer()) {
             return new Endpoint(handle.getHost(), handle.getPort());
         }
         return new Endpoint(resolveEndpointHost(), proxyPort);

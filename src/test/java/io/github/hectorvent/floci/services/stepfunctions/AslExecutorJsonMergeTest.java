@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.ecs.EcsService;
 import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
 import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
 import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,16 +43,20 @@ class AslExecutorJsonMergeTest {
                 mock(LambdaFunctionStore.class),
                 mock(DynamoDbService.class),
                 mock(DynamoDbJsonHandler.class),
-                mock(SqsJsonHandler.class),
+                mock(SqsJsonHandler.class), mock(SnsJsonHandler.class),
                 mock(CloudFormationQueryHandler.class),
                 mock(Ec2Service.class),
                 mock(S3Service.class),
                 mock(EcsService.class),
                 mock(EcsJsonHandler.class),
+                mock(io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler.class),
+                mock(io.github.hectorvent.floci.services.scheduler.SchedulerService.class),
+                mock(io.github.hectorvent.floci.services.scheduler.SchedulerController.class),
                 mapper,
                 new JsonataEvaluator(mapper),
                 mock(Instance.class),
                 mock(EmulatorConfig.class),
+                null,
                 null);
     }
 

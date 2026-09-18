@@ -130,8 +130,7 @@ public class MicrovmEndpointProxyController {
         // the idle policy opted in — mirror it so suspension is transparent.
         if ("SUSPENDED".equals(vm.getState()) && autoResumeEnabled(vm)) {
             LOG.infov("Auto-resuming suspended MicroVM {0} on request", microvmId);
-            runtimeService.resumeMicrovm(vm.getRegion(), microvmId);
-            vm = runtimeService.requireMicrovm(vm.getRegion(), microvmId);
+            runtimeService.resumeMicrovm(vm);
         }
 
         if (!"RUNNING".equals(vm.getState())) {

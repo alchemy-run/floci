@@ -1,28 +1,16 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ses.model.AccountSuppressionAttributes;
-import io.github.hectorvent.floci.services.ses.model.ConfigurationSet;
-import io.github.hectorvent.floci.services.ses.model.ContactList;
-import io.github.hectorvent.floci.services.ses.model.Contact;
-import io.github.hectorvent.floci.services.ses.model.ReceiptRuleSet;
-import io.github.hectorvent.floci.services.ses.model.CustomVerificationEmailTemplate;
-import io.github.hectorvent.floci.services.ses.model.DedicatedIpPool;
-import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
-import io.github.hectorvent.floci.services.ses.model.Identity;
-import io.github.hectorvent.floci.services.ses.model.SentEmail;
 import io.github.hectorvent.floci.services.ses.model.SuppressedDestination;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.mockito.Mockito.mock;
 
 /**
  * Covers {@link SesService#resolveSuppressionReason(String, String)} — the per-recipient
@@ -37,30 +25,17 @@ class SesServiceSuppressionReasonTest {
     private static final String REGION = "us-east-1";
 
     private SesService service;
+    private SesSuppressionService suppression;
     private InMemoryStorage<String, SuppressedDestination> suppressionStore;
     private InMemoryStorage<String, AccountSuppressionAttributes> accountSuppressionStore;
 
     @BeforeEach
     void setUp() {
-        suppressionStore = new InMemoryStorage<>();
-        accountSuppressionStore = new InMemoryStorage<>();
-        service = new SesService(
-                new InMemoryStorage<String, Identity>(),
-                new InMemoryStorage<String, SentEmail>(),
-                new InMemoryStorage<String, Boolean>(),
-                new InMemoryStorage<String, EmailTemplate>(),
-                new InMemoryStorage<String, ConfigurationSet>(),
-                suppressionStore,
-                accountSuppressionStore,
-                new InMemoryStorage<String, DedicatedIpPool>(),
-                new InMemoryStorage<String, ContactList>(),
-                new InMemoryStorage<String, Contact>(),
-                new InMemoryStorage<String, String>(),
-                new InMemoryStorage<String, ReceiptRuleSet>(),
-                new InMemoryStorage<String, CustomVerificationEmailTemplate>(),
-                mock(SmtpRelay.class),
-                new ObjectMapper(),
-                Clock.systemUTC());
+        SesServiceTestBuilder builder = SesServiceTestBuilder.create();
+        suppressionStore = builder.suppressionStore();
+        accountSuppressionStore = builder.accountSuppressionStore();
+        service = builder.build();
+        suppression = builder.suppressionService();
     }
 
     @Test
@@ -81,7 +56,7 @@ class SesServiceSuppressionReasonTest {
     void onListButReasonNotInAccountSettings_returnsNull() {
         service.putSuppressedDestination(REGION, "complainer@example.com", "COMPLAINT");
         // Narrow the account settings to BOUNCE only.
-        service.putAccountSuppressionAttributes(REGION, List.of("BOUNCE"));
+        suppression.putAccountSuppressionAttributes(REGION, List.of("BOUNCE"));
         assertNull(service.resolveSuppressionReason("complainer@example.com", null, REGION));
     }
 
@@ -89,7 +64,7 @@ class SesServiceSuppressionReasonTest {
     void accountSettingsEmpty_returnsNull() {
         service.putSuppressedDestination(REGION, "bouncer@example.com", "BOUNCE");
         // Disable account-level suppression by passing an empty list.
-        service.putAccountSuppressionAttributes(REGION, new ArrayList<>());
+        suppression.putAccountSuppressionAttributes(REGION, new ArrayList<>());
         assertNull(service.resolveSuppressionReason("bouncer@example.com", null, REGION));
     }
 

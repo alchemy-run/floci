@@ -7,6 +7,8 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontService;
+import io.github.hectorvent.floci.services.cloudfront.CloudFrontRequestRouter;
+import io.github.hectorvent.floci.services.cloudfront.CloudFrontServingController;
 import io.github.hectorvent.floci.services.cloudfront.model.CacheBehavior;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontFunction;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
@@ -39,6 +41,7 @@ import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.net.InetAddress;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -86,6 +89,7 @@ public class CloudFrontEdgeController {
             "te", "trailer", "transfer-encoding", "upgrade", "content-length", "host");
 
     private final CloudFrontService service;
+    private final CloudFrontServingController servingController;
     private final CloudFrontFunctionRuntime runtime;
     private final ObjectMapper mapper;
     private final EmulatorConfig config;
@@ -109,8 +113,10 @@ public class CloudFrontEdgeController {
                                     EmulatorConfig config,
                                     ContainerDetector containerDetector,
                                     Vertx vertx,
-                                    HttpServer gateway) {
+                                    HttpServer gateway,
+                                    CloudFrontServingController servingController) {
         this.service = service;
+        this.servingController = servingController;
         this.runtime = runtime;
         this.mapper = mapper;
         this.config = config;
@@ -196,8 +202,13 @@ public class CloudFrontEdgeController {
         // matching normalizes both away.
         String uri = rawEdgePath(uriInfo, distributionId, rawPath);
         String query = uriInfo.getRequestUri().getRawQuery();
+        Response rejected = servingController.validateEdgeViewerRequest(distribution, uri, method);
+        if (rejected != null) {
+            return rejected;
+        }
 
-        CacheBehaviorView behavior = matchBehavior(distribution, uri);
+        String normalizedPath = CloudFrontRequestRouter.normalizePath(URI.create("http://viewer.invalid" + uri).getPath());
+        CacheBehaviorView behavior = matchBehavior(distribution, normalizedPath);
         ObjectNode event = buildEvent(distribution, method, uri, query, headers);
 
         CloudFrontFunction viewerRequest = resolveFunction(behavior.functionArn("viewer-request"));
@@ -210,7 +221,9 @@ public class CloudFrontEdgeController {
             }
             execution.logs().forEach(log -> LOG.debugv("cloudfront-function: {0}", log));
             if (execution.isResponse()) {
-                return viewerResponse(distribution, behavior, fromFunctionResponse(execution.output()), event);
+                Response response = servingController.applyEdgeResponse(distribution, uri, method, headers,
+                        uriInfo.getRequestUri().getScheme(), fromFunctionResponse(execution.output()), false);
+                return viewerResponse(distribution, behavior, response, event);
             }
             event.set("request", execution.output());
         }
@@ -224,7 +237,11 @@ public class CloudFrontEdgeController {
         }
 
         try {
-            return viewerResponse(distribution, behavior, forward(method, request, origin, body), event);
+            Response response = forward(distribution, method, request, origin, body,
+                    uriInfo.getRequestUri().getScheme());
+            response = servingController.applyEdgeResponse(distribution, uri, method, headers,
+                    uriInfo.getRequestUri().getScheme(), response, true);
+            return viewerResponse(distribution, behavior, response, event);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return edgeError(502, "Interrupted while forwarding to " + origin.getDomainName() + ".");
@@ -391,15 +408,7 @@ public class CloudFrontEdgeController {
         if (pattern == null || pattern.isBlank()) {
             return false;
         }
-        StringBuilder regex = new StringBuilder();
-        for (char c : pattern.toCharArray()) {
-            switch (c) {
-                case '*' -> regex.append(".*");
-                case '?' -> regex.append('.');
-                default -> regex.append(java.util.regex.Pattern.quote(String.valueOf(c)));
-            }
-        }
-        return uri.matches(regex.toString());
+        return CloudFrontRequestRouter.pathPatternMatches(pattern, uri);
     }
 
     private CloudFrontFunction resolveFunction(String functionArn) {
@@ -450,8 +459,8 @@ public class CloudFrontEdgeController {
 
     // ── Origin forwarding ─────────────────────────────────────────────────────
 
-    private Response forward(String method, JsonNode request, Origin origin, byte[] body)
-            throws Exception {
+    private Response forward(Distribution distribution, String method, JsonNode request, Origin origin, byte[] body,
+                             String viewerScheme) throws Exception {
         String domain = origin.getDomainName();
         String host = domain;
         int embeddedPort = -1;
@@ -461,12 +470,32 @@ public class CloudFrontEdgeController {
             embeddedPort = Integer.parseInt(domain.substring(colon + 1));
         }
 
-        String scheme = originScheme(origin, embeddedPort);
+        String scheme = originScheme(origin, embeddedPort, viewerScheme);
         int port = embeddedPort > 0 ? embeddedPort : originPort(origin, scheme);
 
         String uri = request.path("uri").asText("/");
-        String originPath = origin.getOriginPath() == null ? "" : origin.getOriginPath();
+        String forwardUri = CloudFrontRequestRouter.resolveForwardUri(origin.getOriginPath(), uri,
+                distribution.getConfig().getDefaultRootObject());
         String query = serializeQuerystring(request.path("querystring"));
+        Map<String, String> outboundHeaders = new LinkedHashMap<>();
+        request.path("headers").fields().forEachRemaining(entry -> {
+            String name = entry.getKey().toLowerCase(Locale.ROOT);
+            if (!HOP_BY_HOP.contains(name)) {
+                outboundHeaders.put(name, entry.getValue().path("value").asText(""));
+            }
+        });
+        String cookie = serializeCookies(request.path("cookies"));
+        if (!cookie.isEmpty()) {
+            outboundHeaders.put("cookie", cookie);
+        }
+        if (CloudFrontRequestRouter.isS3Origin(origin) && List.of("GET", "HEAD", "OPTIONS").contains(method)) {
+            return servingController.serveEdgeS3Origin(distribution, origin, uri, method, outboundHeaders);
+        }
+        if (origin.getCustomHeaders() != null) {
+            for (Map<String, String> header : origin.getCustomHeaders()) {
+                outboundHeaders.put(header.get("HeaderName").toLowerCase(Locale.ROOT), header.get("HeaderValue"));
+            }
+        }
 
         // An origin that is itself an emulated AWS endpoint (an S3 bucket, a
         // Lambda function URL) is served by this same process: connect back to
@@ -483,6 +512,10 @@ public class CloudFrontEdgeController {
         } else {
             targetHost = reachableHost(host);
             targetPort = port;
+            URI target = CloudFrontServingController.buildCustomOriginUri(
+                    scheme, targetHost, targetPort, forwardUri, query.isEmpty() ? null : query.substring(1));
+            outboundHeaders.put("host", domain);
+            return servingController.forwardEdgeCustomOrigin(target, method, outboundHeaders, body);
         }
 
         RequestOptions options = new RequestOptions()
@@ -492,23 +525,14 @@ public class CloudFrontEdgeController {
                 // ...but address the origin's own authority.
                 .setHost(host)
                 .setPort(port)
-                .setURI(originPath + uri + query)
+                .setURI(forwardUri + query)
                 .setSsl("https".equals(scheme))
                 .setTimeout(30_000);
 
-        String cookie = serializeCookies(request.path("cookies"));
         return proxyClient.request(options)
                 .compose(originRequest -> {
-                    request.path("headers").fields().forEachRemaining(entry -> {
-                        String name = entry.getKey().toLowerCase(Locale.ROOT);
-                        if (!HOP_BY_HOP.contains(name)) {
-                            originRequest.putHeader(name, entry.getValue().path("value").asText(""));
-                        }
-                    });
+                    outboundHeaders.forEach(originRequest::putHeader);
                     originRequest.putHeader("Host", domain);
-                    if (!cookie.isEmpty()) {
-                        originRequest.putHeader("cookie", cookie);
-                    }
                     return body != null && body.length > 0
                             ? originRequest.send(Buffer.buffer(body))
                             : originRequest.send();
@@ -538,10 +562,14 @@ public class CloudFrontEdgeController {
      * the emulator (CloudFront rejects ports in {@code DomainName}), and always
      * means a local dev server, so it defaults to plain HTTP.
      */
-    private String originScheme(Origin origin, int embeddedPort) {
+    private String originScheme(Origin origin, int embeddedPort, String viewerScheme) {
         Map<String, Object> custom = origin.getCustomOriginConfig();
         if (custom != null && custom.get("OriginProtocolPolicy") != null) {
-            return String.valueOf(custom.get("OriginProtocolPolicy")).startsWith("http-only") ? "http" : "https";
+            String policy = String.valueOf(custom.get("OriginProtocolPolicy"));
+            if ("match-viewer".equals(policy)) {
+                return "https".equalsIgnoreCase(viewerScheme) ? "https" : "http";
+            }
+            return "http-only".equals(policy) ? "http" : "https";
         }
         return embeddedPort > 0 ? "http" : "https";
     }

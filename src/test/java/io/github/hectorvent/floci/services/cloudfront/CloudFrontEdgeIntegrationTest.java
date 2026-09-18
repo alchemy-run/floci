@@ -331,6 +331,55 @@ class CloudFrontEdgeIntegrationTest {
                 .body(containsString("InvalidIfMatchVersion"));
     }
 
+    @Test
+    void responseHeadersPolicyAppliesToFunctionResponses() {
+        String kvsArn = createKeyValueStore("edge-policy-kvs", "greeting", "policy");
+        Function function = createFunction("edge-policy-fn", """
+                async function handler(event) {
+                  return { statusCode: 200, body: { encoding: "text", data: "function response" } };
+                }
+                """, kvsArn);
+        String id = createDistribution("edge-policy", function.arn());
+        String policyXml = given().contentType("application/xml").body("""
+                <ResponseHeadersPolicyConfig xmlns="%s">
+                  <Name>edge-policy-headers</Name>
+                  <CustomHeadersConfig><Quantity>1</Quantity><Items><ResponseHeadersPolicyCustomHeader>
+                    <Header>X-Combined-Policy</Header><Value>applied</Value><Override>true</Override>
+                  </ResponseHeadersPolicyCustomHeader></Items></CustomHeadersConfig>
+                </ResponseHeadersPolicyConfig>
+                """.formatted(NS)).post("/2020-05-31/response-headers-policy")
+                .then().statusCode(201).extract().body().asString();
+        String policyId = firstElement(policyXml, "Id");
+        ExtractableResponse<Response> config = given().get("/2020-05-31/distribution/" + id + "/config")
+                .then().statusCode(200).extract();
+        given().contentType("application/xml").header("If-Match", config.header("ETag"))
+                .body(config.body().asString().replace("</DefaultCacheBehavior>",
+                        "<ResponseHeadersPolicyId>" + policyId + "</ResponseHeadersPolicyId></DefaultCacheBehavior>"))
+                .put("/2020-05-31/distribution/" + id + "/config").then().statusCode(200);
+        given().header("Host", id + ".cloudfront.net").get("/policy").then().statusCode(200)
+                .header("X-Combined-Policy", equalTo("applied"))
+                .body(equalTo("function response"));
+    }
+
+    @Test
+    void disabledDistributionRejectsFunctionExecutionOnBothRoutes() {
+        String kvsArn = createKeyValueStore("edge-disabled-kvs", "greeting", "disabled");
+        Function function = createFunction("edge-disabled-fn", """
+                async function handler(event) {
+                  return { statusCode: 200, body: { encoding: "text", data: "must not run" } };
+                }
+                """, kvsArn);
+        String id = createDistribution("edge-disabled", function.arn());
+        ExtractableResponse<Response> config = given().get("/2020-05-31/distribution/" + id + "/config")
+                .then().statusCode(200).extract();
+        given().contentType("application/xml").header("If-Match", config.header("ETag"))
+                .body(config.body().asString().replace("<Enabled>true</Enabled>", "<Enabled>false</Enabled>"))
+                .put("/2020-05-31/distribution/" + id + "/config").then().statusCode(200);
+
+        given().get("/_floci/cloudfront/" + id + "/blocked").then().statusCode(404);
+        given().header("Host", id + ".cloudfront.net").get("/blocked").then().statusCode(404);
+    }
+
     /**
      * Every distribution also gets a plain-HTTP port of its own. That port is
      * the only address of the emulated edge that actually works on a developer

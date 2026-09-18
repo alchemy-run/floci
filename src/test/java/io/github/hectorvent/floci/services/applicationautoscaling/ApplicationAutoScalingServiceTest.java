@@ -58,7 +58,8 @@ class ApplicationAutoScalingServiceTest {
         }).when(cloudWatch).deleteAlarms(any(), anyString());
 
         service = new ApplicationAutoScalingService(
-                new InMemoryStorage<>(), new InMemoryStorage<>(), regionResolver, cloudWatch);
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                regionResolver, cloudWatch);
     }
 
     private ScalableTarget register() {

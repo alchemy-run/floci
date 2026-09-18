@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.batch.model.BatchComputeEnvironment;
 import io.github.hectorvent.floci.services.batch.model.BatchJob;
 import io.github.hectorvent.floci.services.batch.model.BatchJobDefinition;
 import io.github.hectorvent.floci.services.batch.model.BatchJobQueue;
+import io.github.hectorvent.floci.services.batch.model.BatchNodeExecution;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -211,109 +213,585 @@ class BatchServiceTest {
     }
 
     @Test
-    void queuedSubmitLeavesJobRunnableSoCancelAndTerminateCanFailIt() throws Exception {
-        BatchService service = queuedService();
-        String queueArn = createQueue(service, "queued-ce", "queued-queue");
-        String definitionArn = registerDefinition(service, "queued-job");
+    void updateJobQueueChangesPriorityStateAndComputeEnvironmentOrder() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
 
-        String cancelId = service.submitJob(json("""
-                {"jobName":"queued-cancel","jobQueue":"%s","jobDefinition":"%s"}
-                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
-        JsonNode submitted = service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(cancelId)))
-                .path("jobs").get(0);
-        assertEquals("RUNNABLE", submitted.path("status").asText());
-        assertTrue(submitted.path("jobQueue").asText().contains("job-queue/"));
-
-        JsonNode listed = service.listJobs(json("""
-                {"jobQueue":"%s","jobStatus":"RUNNABLE"}
-                """.formatted(queueArn)));
-        assertEquals(cancelId, listed.path("jobSummaryList").get(0).path("jobId").asText());
-
-        JsonNode snapshotJob = service.getJobQueueSnapshot(json("{\"jobQueue\":\"%s\"}".formatted(queueArn)))
-                .path("frontOfQueue").path("jobs").get(0);
-        assertTrue(snapshotJob.path("jobArn").asText().endsWith("/" + cancelId));
-        assertTrue(snapshotJob.has("earliestTimeAtPosition"));
-
-        service.cancelJob(json("""
-                {"jobId":"%s","reason":"alchemy e2e cancel test"}
-                """.formatted(cancelId)));
-        assertEquals("FAILED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(cancelId)))
-                .path("jobs").get(0).path("status").asText());
-
-        String terminateId = service.submitJob(json("""
-                {"jobName":"queued-terminate","jobQueue":"%s","jobDefinition":"%s"}
-                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
-        service.terminateJob(json("""
-                {"jobId":"%s","reason":"alchemy e2e terminate test"}
-                """.formatted(terminateId)));
-        assertEquals("FAILED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(terminateId)))
-                .path("jobs").get(0).path("status").asText());
-    }
-
-    @Test
-    void cancelAndTerminateAreNoOpsOnSucceededJobs() throws Exception {
-        BatchService service = immediateService(new InMemoryStorage<>());
-        String queueArn = createQueue(service, "terminal-ce", "terminal-queue");
-        String definitionArn = registerDefinition(service, "terminal-job");
-        String jobId = service.submitJob(json("""
-                {"jobName":"already-done","jobQueue":"%s","jobDefinition":"%s"}
-                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
-        assertEquals("SUCCEEDED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
-                .path("jobs").get(0).path("status").asText());
-
-        service.cancelJob(json("{\"jobId\":\"%s\",\"reason\":\"late cancel\"}".formatted(jobId)));
-        service.terminateJob(json("{\"jobId\":\"%s\",\"reason\":\"late terminate\"}".formatted(jobId)));
-        assertEquals("SUCCEEDED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
-                .path("jobs").get(0).path("status").asText());
-    }
-
-    @Test
-    void deleteComputeEnvironmentRejectsAttachedQueueWithInUseMessage() throws Exception {
-        BatchService service = immediateService(new InMemoryStorage<>());
-        String envArn = service.createComputeEnvironment(json("""
-                {"computeEnvironmentName":"inuse-ce","type":"UNMANAGED","unmanagedvCpus":4}
+        String firstComputeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"update-ce-1","type":"MANAGED"}
                 """), REGION).path("computeEnvironmentArn").asText();
-        service.createJobQueue(json("""
+        String secondComputeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"update-ce-2","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        String queueArn = service.createJobQueue(json("""
                 {
-                  "jobQueueName":"inuse-queue",
+                  "jobQueueName":"update-queue",
                   "priority":1,
                   "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
                 }
-                """.formatted(envArn)), REGION);
+                """.formatted(firstComputeArn)), REGION).path("jobQueueArn").asText();
+
+        JsonNode updated = service.updateJobQueue(json("""
+                {
+                  "jobQueue":"update-queue",
+                  "state":"DISABLED",
+                  "priority":5,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(secondComputeArn)));
+        assertEquals("update-queue", updated.path("jobQueueName").asText());
+        assertEquals(queueArn, updated.path("jobQueueArn").asText());
+
+        JsonNode detail = service.describeJobQueues(json("""
+                {"jobQueues":["%s"]}
+                """.formatted(queueArn))).path("jobQueues").get(0);
+        assertEquals("DISABLED", detail.path("state").asText());
+        assertEquals(5, detail.path("priority").asInt());
+        assertEquals(secondComputeArn,
+                detail.path("computeEnvironmentOrder").get(0).path("computeEnvironment").asText());
+    }
+
+    @Test
+    void updateJobQueueRejectsUnknownQueue() {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        AwsException e = assertThrows(AwsException.class, () -> service.updateJobQueue(json("""
+                {"jobQueue":"missing-queue","priority":2}
+                """)));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void deleteJobQueueRejectsEnabledQueue() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"delete-enabled-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        service.createJobQueue(json("""
+                {
+                  "jobQueueName":"delete-enabled-queue",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(computeArn)), REGION);
+
+        AwsException e = assertThrows(AwsException.class, () -> service.deleteJobQueue(json("""
+                {"jobQueue":"delete-enabled-queue"}
+                """)));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void deleteJobQueueRemovesDisabledQueueAndToleratesRepeatDeletes() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"delete-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        String queueArn = service.createJobQueue(json("""
+                {
+                  "jobQueueName":"delete-queue",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(computeArn)), REGION).path("jobQueueArn").asText();
+
+        service.updateJobQueue(json("""
+                {"jobQueue":"delete-queue","state":"DISABLED"}
+                """));
+        JsonNode deleted = service.deleteJobQueue(json("""
+                {"jobQueue":"delete-queue"}
+                """));
+        assertEquals(0, deleted.size());
+
+        JsonNode queues = service.describeJobQueues(json("""
+                {"jobQueues":["%s"]}
+                """.formatted(queueArn))).path("jobQueues");
+        assertEquals(0, queues.size());
+
+        JsonNode repeated = service.deleteJobQueue(json("""
+                {"jobQueue":"delete-queue"}
+                """));
+        assertEquals(0, repeated.size());
+    }
+
+    @Test
+    void updateComputeEnvironmentChangesStateServiceRoleAndComputeResources() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+
+        String computeArn = service.createComputeEnvironment(json("""
+                {
+                  "computeEnvironmentName":"update-ce",
+                  "type":"MANAGED",
+                  "computeResources":{"type":"EC2","minvCpus":0,"maxvCpus":4,"instanceTypes":["optimal"]}
+                }
+                """), REGION).path("computeEnvironmentArn").asText();
+
+        JsonNode updated = service.updateComputeEnvironment(json("""
+                {
+                  "computeEnvironment":"update-ce",
+                  "state":"DISABLED",
+                  "serviceRole":"arn:aws:iam::000000000000:role/BatchServiceRole",
+                  "computeResources":{"maxvCpus":8,"desiredvCpus":2}
+                }
+                """));
+        assertEquals("update-ce", updated.path("computeEnvironmentName").asText());
+        assertEquals(computeArn, updated.path("computeEnvironmentArn").asText());
+
+        JsonNode detail = service.describeComputeEnvironments(json("""
+                {"computeEnvironments":["%s"]}
+                """.formatted(computeArn))).path("computeEnvironments").get(0);
+        assertEquals("DISABLED", detail.path("state").asText());
+        assertEquals("arn:aws:iam::000000000000:role/BatchServiceRole", detail.path("serviceRole").asText());
+        // Partial update: only the sent fields change, minvCpus/instanceTypes survive untouched.
+        assertEquals(0, detail.path("computeResources").path("minvCpus").asInt());
+        assertEquals(8, detail.path("computeResources").path("maxvCpus").asInt());
+        assertEquals(2, detail.path("computeResources").path("desiredvCpus").asInt());
+        assertEquals("optimal", detail.path("computeResources").path("instanceTypes").get(0).asText());
+    }
+
+    @Test
+    void updateComputeEnvironmentRejectsUnknownEnvironment() {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        AwsException e = assertThrows(AwsException.class, () -> service.updateComputeEnvironment(json("""
+                {"computeEnvironment":"missing-ce","state":"DISABLED"}
+                """)));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void updateComputeEnvironmentRejectsInvalidState() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"invalid-state-ce","type":"MANAGED"}
+                """), REGION);
+
+        AwsException e = assertThrows(AwsException.class, () -> service.updateComputeEnvironment(json("""
+                {"computeEnvironment":"invalid-state-ce","state":"SUSPENDED"}
+                """)));
+        assertEquals("ClientException", e.getErrorCode());
+
+        // Rejected before being written: the environment is still ENABLED, not stuck holding
+        // an invalid value DeleteComputeEnvironment could never match against.
+        JsonNode detail = service.describeComputeEnvironments(json("""
+                {"computeEnvironments":["invalid-state-ce"]}
+                """)).path("computeEnvironments").get(0);
+        assertEquals("ENABLED", detail.path("state").asText());
+    }
+
+    @Test
+    void createComputeEnvironmentRejectsInvalidState() {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        AwsException e = assertThrows(AwsException.class, () -> service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"bad-create-ce","type":"MANAGED","state":"SUSPENDED"}
+                """), REGION));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void deleteComputeEnvironmentRejectsEnabledEnvironment() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"delete-enabled-ce","type":"MANAGED"}
+                """), REGION);
+
+        AwsException e = assertThrows(AwsException.class, () -> service.deleteComputeEnvironment(json("""
+                {"computeEnvironment":"delete-enabled-ce"}
+                """)));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void deleteComputeEnvironmentRejectsEnvironmentStillAttachedToJobQueue() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"attached-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        service.createJobQueue(json("""
+                {
+                  "jobQueueName":"attached-queue",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(computeArn)), REGION);
         service.updateComputeEnvironment(json("""
-                {"computeEnvironment":"inuse-ce","state":"DISABLED"}
+                {"computeEnvironment":"attached-ce","state":"DISABLED"}
                 """));
 
-        AwsException error = assertThrows(AwsException.class, () ->
-                service.deleteComputeEnvironment(json("{\"computeEnvironment\":\"inuse-ce\"}")));
-        assertEquals("ClientException", error.getErrorCode());
-        assertTrue(error.getMessage().contains("found existing JobQueue relationship"));
+        AwsException e = assertThrows(AwsException.class, () -> service.deleteComputeEnvironment(json("""
+                {"computeEnvironment":"attached-ce"}
+                """)));
+        assertEquals("ClientException", e.getErrorCode());
     }
 
     @Test
-    void missingQueueAndComputeEnvironmentMessagesMatchDistilled() throws Exception {
-        BatchService service = immediateService(new InMemoryStorage<>());
-        AwsException queue = assertThrows(AwsException.class, () ->
-                service.updateJobQueue(json("{\"jobQueue\":\"missing-queue\"}")));
-        assertTrue(queue.getMessage().matches("job-queue/.* does not exist"));
+    void deleteComputeEnvironmentRemovesDisabledEnvironmentAndToleratesRepeatDeletes() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
 
-        AwsException env = assertThrows(AwsException.class, () ->
-                service.updateComputeEnvironment(json("{\"computeEnvironment\":\"missing-ce\"}")));
-        assertTrue(env.getMessage().matches("compute-environment/.* does not exist"));
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"delete-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+
+        service.updateComputeEnvironment(json("""
+                {"computeEnvironment":"delete-ce","state":"DISABLED"}
+                """));
+        JsonNode deleted = service.deleteComputeEnvironment(json("""
+                {"computeEnvironment":"delete-ce"}
+                """));
+        assertEquals(0, deleted.size());
+
+        JsonNode envs = service.describeComputeEnvironments(json("""
+                {"computeEnvironments":["%s"]}
+                """.formatted(computeArn))).path("computeEnvironments");
+        assertEquals(0, envs.size());
+
+        JsonNode repeated = service.deleteComputeEnvironment(json("""
+                {"computeEnvironment":"delete-ce"}
+                """));
+        assertEquals(0, repeated.size());
     }
 
     @Test
-    void unmanagedComputeEnvironmentRoundTripsUnmanagedvCpus() throws Exception {
-        BatchService service = immediateService(new InMemoryStorage<>());
-        service.createComputeEnvironment(json("""
-                {"computeEnvironmentName":"unmanaged-ce","type":"UNMANAGED","unmanagedvCpus":4}
-                """), REGION);
-        JsonNode described = service.describeComputeEnvironments(json("""
-                {"computeEnvironments":["unmanaged-ce"]}
-                """)).path("computeEnvironments").get(0);
-        assertEquals("UNMANAGED", described.path("type").asText());
-        assertEquals(4, described.path("unmanagedvCpus").asInt());
-        assertTrue(described.path("ecsClusterArn").isMissingNode());
+    void submitArrayJobFansOutChildrenAndAggregatesStatus() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"array-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        String queueArn = service.createJobQueue(json("""
+                {
+                  "jobQueueName":"array-queue",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(computeArn)), REGION).path("jobQueueArn").asText();
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"array-job",
+                  "type":"container",
+                  "containerProperties":{"image":"public.ecr.aws/example/job:latest"}
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        JsonNode submitted = service.submitJob(json("""
+                {
+                  "jobName":"array-submit",
+                  "jobQueue":"%s",
+                  "jobDefinition":"%s",
+                  "arrayProperties":{"size":3}
+                }
+                """.formatted(queueArn, definitionArn)), REGION);
+        String parentId = submitted.path("jobId").asText();
+
+        JsonNode parent = service.describeJobs(json("""
+                {"jobs":["%s"]}
+                """.formatted(parentId))).path("jobs").get(0);
+        assertEquals("SUCCEEDED", parent.path("status").asText());
+        assertEquals(3, parent.path("arrayProperties").path("size").asInt());
+        assertEquals(3, parent.path("arrayProperties").path("statusSummary").path("SUCCEEDED").asInt());
+        assertEquals(0, parent.path("container").size());
+
+        JsonNode child = service.describeJobs(json("""
+                {"jobs":["%s:1"]}
+                """.formatted(parentId))).path("jobs").get(0);
+        assertEquals("SUCCEEDED", child.path("status").asText());
+        assertEquals(1, child.path("arrayProperties").path("index").asInt());
+        assertEquals("array-submit", child.path("jobName").asText());
+
+        JsonNode childList = service.listJobs(json("""
+                {"arrayJobId":"%s"}
+                """.formatted(parentId))).path("jobSummaryList");
+        assertEquals(3, childList.size());
+        for (int i = 0; i < 3; i++) {
+            assertEquals(i, childList.get(i).path("arrayProperties").path("index").asInt());
+        }
+
+        JsonNode queueList = service.listJobs(json("""
+                {"jobQueue":"%s","jobStatus":"SUCCEEDED"}
+                """.formatted(queueArn))).path("jobSummaryList");
+        long matchingParents = 0;
+        for (JsonNode summary : queueList) {
+            if (parentId.equals(summary.path("jobId").asText())) {
+                matchingParents++;
+            }
+            assertEquals(false, summary.path("jobId").asText().contains(":"));
+        }
+        assertEquals(1, matchingParents);
+    }
+
+    @Test
+    void submitArrayJobRejectsSizeOutOfBounds() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String queueArn = arrayReadyQueue(service);
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"array-bounds-job",
+                  "type":"container",
+                  "containerProperties":{"image":"public.ecr.aws/example/job:latest"}
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        AwsException tooSmall = assertThrows(AwsException.class, () -> service.submitJob(json("""
+                {"jobName":"too-small","jobQueue":"%s","jobDefinition":"%s","arrayProperties":{"size":1}}
+                """.formatted(queueArn, definitionArn)), REGION));
+        assertEquals("ClientException", tooSmall.getErrorCode());
+
+        AwsException tooBig = assertThrows(AwsException.class, () -> service.submitJob(json("""
+                {"jobName":"too-big","jobQueue":"%s","jobDefinition":"%s","arrayProperties":{"size":10001}}
+                """.formatted(queueArn, definitionArn)), REGION));
+        assertEquals("ClientException", tooBig.getErrorCode());
+    }
+
+    @Test
+    void listJobsRequiresExactlyOneSelector() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String queueArn = arrayReadyQueue(service);
+
+        AwsException none = assertThrows(AwsException.class, () -> service.listJobs(json("{}")));
+        assertEquals("ClientException", none.getErrorCode());
+
+        AwsException both = assertThrows(AwsException.class, () -> service.listJobs(json("""
+                {"jobQueue":"%s","arrayJobId":"some-id"}
+                """.formatted(queueArn))));
+        assertEquals("ClientException", both.getErrorCode());
+    }
+
+    @Test
+    void registerMultiNodeJobDefinitionValidatesRangeCoverage() {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+
+        AwsException e = assertThrows(AwsException.class, () -> service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"gap-def",
+                  "type":"multinode",
+                  "nodeProperties":{
+                    "numNodes":3,
+                    "mainNode":0,
+                    "nodeRangeProperties":[
+                      {"targetNodes":"0:0","container":{"image":"main:latest"}}
+                    ]
+                  }
+                }
+                """), REGION));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void registerMultiNodeJobDefinitionRejectsContainerProperties() {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+
+        AwsException e = assertThrows(AwsException.class, () -> service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"mixed-def",
+                  "type":"multinode",
+                  "containerProperties":{"image":"solo:latest"},
+                  "nodeProperties":{
+                    "numNodes":2,
+                    "mainNode":0,
+                    "nodeRangeProperties":[{"targetNodes":"0:1","container":{"image":"worker:latest"}}]
+                  }
+                }
+                """), REGION));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void submitMultiNodeJobRunsAllNodesAndSucceeds() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String queueArn = arrayReadyQueue(service);
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"mnp-job",
+                  "type":"multinode",
+                  "nodeProperties":{
+                    "numNodes":2,
+                    "mainNode":0,
+                    "nodeRangeProperties":[
+                      {"targetNodes":"0:0","container":{"image":"main:latest"}},
+                      {"targetNodes":"1:1","container":{"image":"worker:latest"}}
+                    ]
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        String jobId = service.submitJob(json("""
+                {"jobName":"mnp-submit","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+
+        JsonNode job = waitForJobStatus(service, jobId, "SUCCEEDED");
+        assertNotNull(job);
+        assertEquals(2, job.path("nodeProperties").path("numNodes").asInt());
+        assertEquals(0, job.path("nodeProperties").path("mainNode").asInt());
+        assertEquals(1, job.path("attempts").size());
+        assertEquals(0, job.path("container").size());
+
+        JsonNode nodes = service.listJobs(json("""
+                {"multiNodeJobId":"%s"}
+                """.formatted(jobId))).path("jobSummaryList");
+        assertEquals(2, nodes.size());
+        assertEquals(0, nodes.get(0).path("nodeProperties").path("nodeIndex").asInt());
+        assertEquals(true, nodes.get(0).path("nodeProperties").path("isMainNode").asBoolean());
+        assertEquals(1, nodes.get(1).path("nodeProperties").path("nodeIndex").asInt());
+        assertEquals(false, nodes.get(1).path("nodeProperties").path("isMainNode").asBoolean());
+    }
+
+    @Test
+    void submitMultiNodeJobSucceedsWhenOnlyAChildNodeFails() throws Exception {
+        // AWS determines the job's outcome solely from the main node, per the MNP user guide.
+        BatchDockerRunner runner = mock(BatchDockerRunner.class);
+        when(runner.run(any(BatchJob.class), anyInt(), any(BatchNodeExecution.class)))
+                .thenAnswer(invocation -> {
+                    BatchNodeExecution node = invocation.getArgument(2);
+                    return node.getNodeIndex() == 1
+                            ? new BatchRunResult(3, "worker crashed", "log-1", 1L, 2L, false)
+                            : new BatchRunResult(0, null, "log-0", 1L, 2L, false);
+                });
+        BatchService service = dockerService(runner);
+        String queueArn = arrayReadyQueue(service);
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"mnp-child-fail-job",
+                  "type":"multinode",
+                  "nodeProperties":{
+                    "numNodes":2,
+                    "mainNode":0,
+                    "nodeRangeProperties":[{"targetNodes":"0:1","container":{"image":"worker:latest"}}]
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        String jobId = service.submitJob(json("""
+                {"jobName":"mnp-child-fail-submit","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+
+        JsonNode job = waitForJobStatus(service, jobId, "SUCCEEDED");
+        assertNotNull(job);
+        verify(runner, times(2)).run(any(BatchJob.class), anyInt(), any(BatchNodeExecution.class));
+
+        JsonNode nodes = service.listJobs(json("""
+                {"multiNodeJobId":"%s"}
+                """.formatted(jobId))).path("jobSummaryList");
+        assertEquals(3, nodes.get(1).path("container").path("exitCode").asInt());
+    }
+
+    @Test
+    void submitMultiNodeJobFailsWhenTheMainNodeFails() throws Exception {
+        BatchDockerRunner runner = mock(BatchDockerRunner.class);
+        when(runner.run(any(BatchJob.class), anyInt(), any(BatchNodeExecution.class)))
+                .thenAnswer(invocation -> {
+                    BatchNodeExecution node = invocation.getArgument(2);
+                    return node.isMainNode()
+                            ? new BatchRunResult(3, "main crashed", "log-0", 1L, 2L, false)
+                            : new BatchRunResult(0, null, "log-1", 1L, 2L, false);
+                });
+        BatchService service = dockerService(runner);
+        String queueArn = arrayReadyQueue(service);
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"mnp-main-fail-job",
+                  "type":"multinode",
+                  "nodeProperties":{
+                    "numNodes":2,
+                    "mainNode":0,
+                    "nodeRangeProperties":[{"targetNodes":"0:1","container":{"image":"worker:latest"}}]
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        String jobId = service.submitJob(json("""
+                {"jobName":"mnp-main-fail-submit","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+
+        JsonNode job = waitForJobStatus(service, jobId, "FAILED");
+        assertNotNull(job);
+        assertEquals("main crashed", job.path("statusReason").asText());
+        verify(runner, times(2)).run(any(BatchJob.class), anyInt(), any(BatchNodeExecution.class));
+    }
+
+    @Test
+    void submitMultiNodeJobRejectsContainerOverrides() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String queueArn = arrayReadyQueue(service);
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"mnp-overrides-job",
+                  "type":"multinode",
+                  "nodeProperties":{
+                    "numNodes":1,
+                    "mainNode":0,
+                    "nodeRangeProperties":[{"targetNodes":"0:0","container":{"image":"main:latest"}}]
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        AwsException e = assertThrows(AwsException.class, () -> service.submitJob(json("""
+                {
+                  "jobName":"mnp-overrides-submit","jobQueue":"%s","jobDefinition":"%s",
+                  "containerOverrides":{"command":["nope"]}
+                }
+                """.formatted(queueArn, definitionArn)), REGION));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void submitJobRejectsArrayPropertiesForMultiNodeJobDefinition() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String queueArn = arrayReadyQueue(service);
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"mnp-array-job",
+                  "type":"multinode",
+                  "nodeProperties":{
+                    "numNodes":1,
+                    "mainNode":0,
+                    "nodeRangeProperties":[{"targetNodes":"0:0","container":{"image":"main:latest"}}]
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        AwsException e = assertThrows(AwsException.class, () -> service.submitJob(json("""
+                {"jobName":"mnp-array-submit","jobQueue":"%s","jobDefinition":"%s","arrayProperties":{"size":2}}
+                """.formatted(queueArn, definitionArn)), REGION));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    @Test
+    void nodeOverridesNumNodesRequiresAnOpenEndedRange() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<String, BatchJob>());
+        String queueArn = arrayReadyQueue(service);
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"mnp-closed-range-job",
+                  "type":"multinode",
+                  "nodeProperties":{
+                    "numNodes":2,
+                    "mainNode":0,
+                    "nodeRangeProperties":[{"targetNodes":"0:1","container":{"image":"worker:latest"}}]
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        AwsException e = assertThrows(AwsException.class, () -> service.submitJob(json("""
+                {
+                  "jobName":"mnp-closed-range-submit","jobQueue":"%s","jobDefinition":"%s",
+                  "nodeOverrides":{"numNodes":4}
+                }
+                """.formatted(queueArn, definitionArn)), REGION));
+        assertEquals("ClientException", e.getErrorCode());
+    }
+
+    private String arrayReadyQueue(BatchService service) throws Exception {
+        String suffix = UUID.randomUUID().toString();
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"ce-%s","type":"MANAGED"}
+                """.formatted(suffix)), REGION).path("computeEnvironmentArn").asText();
+        return service.createJobQueue(json("""
+                {
+                  "jobQueueName":"queue-%s",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(suffix, computeArn)), REGION).path("jobQueueArn").asText();
     }
 
     private BatchService dockerService(BatchDockerRunner runner) {
@@ -462,5 +940,158 @@ class BatchServiceTest {
         public void clear() {
             store.clear();
         }
+    }
+
+    @Test
+    void queuedArrayCancellationFailsChildrenAndParent() throws Exception {
+        BatchService service = queuedService();
+        String queueArn = createQueue(service, "queued-array-ce", "queued-array-queue");
+        String definitionArn = registerDefinition(service, "queued-array-job");
+        String jobId = service.submitJob(json("""
+                {"jobName":"queued-array","jobQueue":"%s","jobDefinition":"%s","arrayProperties":{"size":2}}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+
+        service.cancelJob(json("{\"jobId\":\"%s\",\"reason\":\"cancel array\"}".formatted(jobId)));
+
+        assertEquals("FAILED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
+                .path("jobs").get(0).path("status").asText());
+        JsonNode children = service.listJobs(json("{\"arrayJobId\":\"%s\"}".formatted(jobId)))
+                .path("jobSummaryList");
+        assertEquals(2, children.size());
+        for (JsonNode child : children) {
+            assertEquals("FAILED", child.path("status").asText());
+        }
+    }
+
+    @Test
+    void queuedMultiNodeJobCanBeTerminatedBeforeExecution() throws Exception {
+        BatchService service = queuedService();
+        String queueArn = createQueue(service, "queued-node-ce", "queued-node-queue");
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"queued-nodes", "type":"multinode",
+                  "nodeProperties":{"numNodes":2,"mainNode":0,"nodeRangeProperties":[
+                    {"targetNodes":"0:1","container":{"image":"worker:latest"}}
+                  ]}
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+        String jobId = service.submitJob(json("""
+                {"jobName":"queued-nodes","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+        assertEquals("RUNNABLE", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
+                .path("jobs").get(0).path("status").asText());
+
+        service.terminateJob(json("{\"jobId\":\"%s\",\"reason\":\"terminate nodes\"}".formatted(jobId)));
+
+        JsonNode job = service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
+                .path("jobs").get(0);
+        assertEquals("FAILED", job.path("status").asText());
+        assertEquals(0, job.path("attempts").size());
+    }
+
+    @Test
+    void queuedSubmitLeavesJobRunnableSoCancelAndTerminateCanFailIt() throws Exception {
+        BatchService service = queuedService();
+        String queueArn = createQueue(service, "queued-ce", "queued-queue");
+        String definitionArn = registerDefinition(service, "queued-job");
+
+        String cancelId = service.submitJob(json("""
+                {"jobName":"queued-cancel","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+        JsonNode submitted = service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(cancelId)))
+                .path("jobs").get(0);
+        assertEquals("RUNNABLE", submitted.path("status").asText());
+        assertTrue(submitted.path("jobQueue").asText().contains("job-queue/"));
+
+        JsonNode listed = service.listJobs(json("""
+                {"jobQueue":"%s","jobStatus":"RUNNABLE"}
+                """.formatted(queueArn)));
+        assertEquals(cancelId, listed.path("jobSummaryList").get(0).path("jobId").asText());
+
+        JsonNode snapshotJob = service.getJobQueueSnapshot(json("{\"jobQueue\":\"%s\"}".formatted(queueArn)))
+                .path("frontOfQueue").path("jobs").get(0);
+        assertTrue(snapshotJob.path("jobArn").asText().endsWith("/" + cancelId));
+        assertTrue(snapshotJob.has("earliestTimeAtPosition"));
+
+        service.cancelJob(json("""
+                {"jobId":"%s","reason":"alchemy e2e cancel test"}
+                """.formatted(cancelId)));
+        assertEquals("FAILED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(cancelId)))
+                .path("jobs").get(0).path("status").asText());
+
+        String terminateId = service.submitJob(json("""
+                {"jobName":"queued-terminate","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+        service.terminateJob(json("""
+                {"jobId":"%s","reason":"alchemy e2e terminate test"}
+                """.formatted(terminateId)));
+        assertEquals("FAILED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(terminateId)))
+                .path("jobs").get(0).path("status").asText());
+    }
+
+    @Test
+    void cancelAndTerminateAreNoOpsOnSucceededJobs() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<>());
+        String queueArn = createQueue(service, "terminal-ce", "terminal-queue");
+        String definitionArn = registerDefinition(service, "terminal-job");
+        String jobId = service.submitJob(json("""
+                {"jobName":"already-done","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+        assertEquals("SUCCEEDED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
+                .path("jobs").get(0).path("status").asText());
+
+        service.cancelJob(json("{\"jobId\":\"%s\",\"reason\":\"late cancel\"}".formatted(jobId)));
+        service.terminateJob(json("{\"jobId\":\"%s\",\"reason\":\"late terminate\"}".formatted(jobId)));
+        assertEquals("SUCCEEDED", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
+                .path("jobs").get(0).path("status").asText());
+    }
+
+    @Test
+    void deleteComputeEnvironmentRejectsAttachedQueueWithInUseMessage() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<>());
+        String envArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"inuse-ce","type":"UNMANAGED","unmanagedvCpus":4}
+                """), REGION).path("computeEnvironmentArn").asText();
+        service.createJobQueue(json("""
+                {
+                  "jobQueueName":"inuse-queue",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(envArn)), REGION);
+        service.updateComputeEnvironment(json("""
+                {"computeEnvironment":"inuse-ce","state":"DISABLED"}
+                """));
+
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.deleteComputeEnvironment(json("{\"computeEnvironment\":\"inuse-ce\"}")));
+        assertEquals("ClientException", error.getErrorCode());
+        assertTrue(error.getMessage().contains("found existing JobQueue relationship"));
+    }
+
+    @Test
+    void missingQueueAndComputeEnvironmentMessagesMatchDistilled() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<>());
+        AwsException queue = assertThrows(AwsException.class, () ->
+                service.updateJobQueue(json("{\"jobQueue\":\"missing-queue\"}")));
+        assertTrue(queue.getMessage().matches("job-queue/.* does not exist"));
+
+        AwsException env = assertThrows(AwsException.class, () ->
+                service.updateComputeEnvironment(json("{\"computeEnvironment\":\"missing-ce\"}")));
+        assertTrue(env.getMessage().matches("compute-environment/.* does not exist"));
+    }
+
+    @Test
+    void unmanagedComputeEnvironmentRoundTripsUnmanagedvCpus() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<>());
+        service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"unmanaged-ce","type":"UNMANAGED","unmanagedvCpus":4}
+                """), REGION);
+        JsonNode described = service.describeComputeEnvironments(json("""
+                {"computeEnvironments":["unmanaged-ce"]}
+                """)).path("computeEnvironments").get(0);
+        assertEquals("UNMANAGED", described.path("type").asText());
+        assertEquals(4, described.path("unmanagedvCpus").asInt());
+        assertTrue(described.path("ecsClusterArn").isMissingNode());
     }
 }

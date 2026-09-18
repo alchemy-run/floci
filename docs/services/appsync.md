@@ -5,6 +5,14 @@
 
 Floci implements the AWS AppSync Management API, providing local emulation of GraphQL API configuration, schema management, data source binding, resolver mapping, API key provisioning, custom domains, and channel namespaces.
 
+## OIDC issuer network policy
+
+AppSync OIDC authentication uses the shared JWT issuer policy. By default, issuer discovery and
+JWKS requests require HTTPS and reject local, private, link-local, and other non-public addresses.
+For an isolated development environment, set `FLOCI_SECURITY_ALLOW_PRIVATE_JWT_TARGETS=true`.
+This also applies to API Gateway HTTP API JWT authorizers. The option permits private HTTPS
+targets and HTTP URLs that use a literal private or loopback address.
+
 ## Supported Operations
 
 ### GraphQL API
@@ -21,7 +29,7 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 
 | Operation | Description |
 |---|---|
-| `StartSchemaCreation` | Start schema creation — validates and parses SDL using graphql-java (invalid SDL returns 400) |
+| `StartSchemaCreation` | Start schema creation : validates and parses SDL using graphql-java (invalid SDL returns 400) |
 | `GetSchemaCreationStatus` | Get schema creation status |
 | `GetIntrospectionSchema` | Get the introspection schema (HTTP payload is the raw SDL/JSON blob) |
 
@@ -77,6 +85,8 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 | `DeleteApiKey` | Delete an API key |
 | `ListApiKeys` | List all API keys for an API |
 
+As on AWS, `ApiKey.id` is the key value itself (`da2-` followed by 26 lowercase alphanumerics) and is what clients send in the `x-api-key` header. There is no separate secret field.
+
 ### Tags
 
 | Operation | Description |
@@ -123,7 +133,6 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 | `CreateApiAssociation` | Associate a source API with a merged API |
 | `GetApiAssociation` | Get a merged API association |
 | `DeleteApiAssociation` | Delete a merged API association |
-| `ListApiAssociations` | List all merged API associations |
 
 ### API Cache
 
@@ -156,7 +165,9 @@ Floci implements the AWS AppSync Management API, providing local emulation of Gr
 
 ## Schema Registry
 
-`StartSchemaCreation` validates the provided GraphQL SDL using [graphql-java](https://github.com/graphql-java/graphql-java). Invalid schemas are rejected with a `BadRequestException` (400) at registration time, preventing them from being caught later during query execution.
+`StartSchemaCreation` validates the provided GraphQL SDL using [graphql-java](https://github.com/graphql-java/graphql-java). Invalid schemas are rejected asynchronously (status `FAILED` with details after `PROCESSING`). Valid schemas are registered in an in-memory `SchemaRegistry` and persisted to the schema store.
+
+On emulator startup, after storage load and orphan recovery, Floci **rehydrates** SUCCESS SDLs from the schema store into `SchemaRegistry` so `POST /v1/apis/{apiId}/graphql` works across restarts (memory/persistent/hybrid/wal).
 
 The following **AWS scalar types** are pre-registered and available in any schema without requiring explicit `scalar` declarations:
 
@@ -190,12 +201,64 @@ The following **AppSync directives** are pre-defined and recognized in schemas:
 | `@aws_oidc` | OBJECT, FIELD_DEFINITION | Require OIDC auth |
 | `@aws_lambda` | OBJECT, FIELD_DEFINITION | Require Lambda auth |
 | `@aws_subscribe(mutations: [String!]!)` | FIELD_DEFINITION | Link subscription to mutation |
-| `@aws_auth(cognito_groups: [String!]!)` | OBJECT | Require Cognito groups |
+| `@aws_auth(cognito_groups: [String!]!)` | OBJECT, FIELD_DEFINITION | Require Cognito groups (ignored when additional auth modes exist) |
 | `@aws_delta_sync` | OBJECT | Delta sync configuration |
 
 Unknown directives are rejected during schema registration.
 
 Schema extensions (`extend type Query { ... }`) are supported natively through graphql-java.
+
+## GraphQL execute (data-plane)
+
+| Surface | Path | Content-Types |
+|---|---|---|
+| HTTP GraphQL | `POST /v1/apis/{apiId}/graphql` | `application/json`, `application/graphql` (+ charset) |
+
+Execute is a **separate** data-plane endpoint from the management API. Request body is GraphQL-over-HTTP JSON: `{ "query", "variables?", "operationName?" }`.
+
+Responses are `application/json` with AWS AppSync wire shapes (`data` / `errors[]` with top-level `errorType` / `errorInfo`). Most GraphQL syntax and validation errors return **HTTP 200** with `errors[]`.
+
+| Case | HTTP | Notes |
+|---|---|---|
+| Query / introspection / validation / syntax (incl. blank `query`) | 200 | NONE and Lambda data sources support JS/VTL resolver dispatch; unsupported adapters do not fetch data |
+| HTTP subscription operation | 200 | `OperationNotSupported` (realtime WebSocket is a later phase) |
+| Empty body / `{}` / `[]` / unparseable JSON / bad Content-Type | 400 | `MalformedHttpRequestException` |
+| Missing `operationName` with multiple operations | 400 | `BadRequestException` : `Missing operation name.` |
+| Unknown `apiId` | 404 | `NotFoundException` |
+| API exists but no executable schema (incl. PROCESSING) | **502** | `GraphQLSchemaException` : `No schema definition exists.` + `x-amzn-errortype` |
+| Unexpected failure | 500 | `InternalFailure` |
+| Missing/invalid/expired credentials, unconfigured mode, Lambda deny | **401** | `UnauthorizedException` : GraphQL does not run; `x-amzn-errortype` is set. Missing headers use message `Missing authorization header`. |
+| Field directive mismatch, Cognito group miss, Lambda `deniedFields`, IAM field DENY | **200** | Field is `null` and `errors[]` contains `Unauthorized` : `Not Authorized to access {field} on type {type}` (no `x-amzn-errortype`) |
+
+**Evidence for data-plane statuses** (empty/`[]`/`{}` → 400; missing schema → 502): AppSync team sample in [graphql/graphql-over-http#81](https://github.com/graphql/graphql-over-http/issues/81) (@robzhu). The management API Reference lists `GraphQLSchemaException` as HTTP 400 for “schema not valid” on management operations : a different surface than the GraphQL execute data plane.
+
+### Execute authentication
+
+Request auth runs after Content-Type and body parse and after API lookup (unknown `apiId` is still 404). It runs before schema lookup, so a missing schema with no credentials is 401, not 502.
+
+Headers are classified by **shape** (not primary-then-fallback). If both `x-api-key` and SigV4 `Authorization` are present, **SigV4 wins**. AppSync does not fall back to the API key when IAM validation fails.
+
+Missing required auth headers return HTTP **401** `UnauthorizedException` with message `Missing authorization header`. Invalid or expired credentials that are present still return 401 with `You are not authorized to make this call.`
+
+| Header shape | Mode |
+|---|---|
+| `Authorization` starts with `AWS4-HMAC-SHA256` | `AWS_IAM` (wins over `x-api-key` if both are present) |
+| `x-api-key` present | `API_KEY` |
+| `Authorization: Bearer <jwt>` | Cognito and/or OIDC (matched by `iss` / `aud` or `azp`) |
+| Other `Authorization` | `AWS_LAMBDA` |
+
+Configured modes are the API default `authenticationType` plus `additionalAuthenticationProviders`. A classified mode that is not configured returns 401.
+
+| Mode | Emulator notes |
+|---|---|
+| API_KEY | Lookup by `ApiKey.id`, which is the key value (`da2-…`). Identity is absent (not `{}`). Default key expiry is 7 days when `expires` is omitted; stored `expires` is rounded down to the nearest hour. Create/UpdateApiKey require `expires` between 1 and 365 days from now (`ApiKeyValidityOutOfBoundsException`, 400). `deletes` is `expires` plus 60 days. |
+| AWS_IAM | Verifies a real header-signed SigV4 request (`appsync` service, fixed `/v1/apis/{apiId}/graphql` canonical path, 5-minute clock skew): the `Credential=` access key must resolve to a secret via `IamService`, and the signature must match. The legacy `test`/`test` pair is still emulator ALLOW, but it must be signed with secret `test` like any other key, and it is not a bypass. A temporary (`ASIA...`) credential must also present the `X-Amz-Security-Token` header matching the one issued for it. An unknown or unsigned key is always 401 and never becomes the account-root identity. Known keys additionally evaluate `appsync:GraphQL`. |
+| Cognito / OIDC | JWT signature is verified, not just decoded. Cognito checks the token against the issuing user pool's own RS256 signing key (`alg`, `kid`, issuer, audience/`clientId`, expiry); OIDC checks it against the configured issuer's published JWKS (via OIDC discovery), the same way the HTTP API JWT authorizer does. Both fail closed: an unreachable issuer, unsupported algorithm (including `none`), unmatched `kid`, or bad signature is 401. OIDC as the sole mode still skips the token's own `iss` claim check, but the signature is always verified against the configured issuer's keys. OIDC identity is `{sub, issuer, claims}` (no `sourceIp`). |
+| Lambda | AppSync `isAuthorized` contract via `LambdaService.invoke` (not an API Gateway policy document). |
+
+SDL field auth: unmarked fields require the API **default** mode. Additional modes unlock fields tagged `@aws_api_key` / `@aws_iam` / `@aws_oidc` / `@aws_cognito_user_pools` / `@aws_lambda`. Multiple directives on a field are OR. Field-level directives override type-level. `@aws_auth` is allowed on `OBJECT \| FIELD_DEFINITION` and is ignored when additional modes exist.
+
+Duplicate `API_KEY` / `AWS_IAM` / `AWS_LAMBDA` (and the same Cognito pool or OIDC issuer) between default and additional providers is rejected on create/update with management 400 `BadRequestException`: `Authentication type {TYPE} for additional authentication provider {N} already specified on the API. It can only be specified once.` (`N` is 1-based in `additionalAuthenticationProviders`).
 
 ## Pagination
 
@@ -244,17 +307,18 @@ https://{apiId}.appsync-api.{region}.amazonaws.com/graphql
 
 The gateway also accepts the path-style data-plane URL `POST /v1/apis/{apiId}/graphql`. Host headers matching `{apiId}.appsync-api.{region}.*` are rewritten onto that path. API_KEY APIs require `x-api-key`; AWS_IAM APIs accept a SigV4 `Authorization` header (and an additional API_KEY provider if configured).
 
-Lambda containers resolve `{apiId}.appsync-api.{region}.amazonaws.com` and `appsync.{region}.amazonaws.com` through Floci's embedded DNS (same pattern as `sync-states`). TLS SAN `*.appsync-api.us-east-1.amazonaws.com` covers in-Lambda `https://` GraphQL `fetch()` — a single-label `*.us-east-1.amazonaws.com` wildcard does not match that hostname. `EvaluateCode` / `EvaluateMappingTemplate` return `outErrors` as a JSON string (`"[]"`), matching the AWS wire shape.
+Lambda containers resolve `{apiId}.appsync-api.{region}.amazonaws.com` and `appsync.{region}.amazonaws.com` through Floci's embedded DNS (same pattern as `sync-states`). TLS SAN `*.appsync-api.us-east-1.amazonaws.com` covers in-Lambda `https://` GraphQL `fetch()` : a single-label `*.us-east-1.amazonaws.com` wildcard does not match that hostname. `EvaluateCode` / `EvaluateMappingTemplate` return `outErrors` as a JSON string (`"[]"`), matching the AWS wire shape.
 
 Resolvers run `APPSYNC_JS` (`request`/`response`) or VTL templates. `NONE` data sources use the request `payload` as `ctx.result`. `AWS_LAMBDA` data sources invoke the configured function with that payload. Pipeline resolvers chain AppSync Functions and expose `ctx.prev.result`.
 
 ## Not Implemented
 
-These AWS AppSync operations are not yet implemented and are tracked in future phases:
+These AWS AppSync capabilities are not yet implemented and are tracked in future phases:
 
 - **Data source adapters** (beyond NONE + Lambda): DynamoDB, HTTP, EventBridge, OpenSearch, RDS connectors
 - **Subscriptions**: WebSocket real-time subscriptions
-- **Lambda authorizer data-plane**: AWS_LAMBDA primary auth is stored but not invoked on GraphQL requests
+- **Guardrails**: query depth / complexity limits and related errors
+- **Caching execution**: API cache configuration round-trips, but API-level and per-resolver response caching is not implemented
 - **Merged API source management**: `StartSchemaMerge`, `ListTypesByAssociation`
 - **Data source introspection**: `StartDataSourceIntrospection`, `GetDataSourceIntrospection`
 
@@ -263,6 +327,18 @@ These AWS AppSync operations are not yet implemented and are tracked in future p
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_APPSYNC_ENABLED` | `true` | Enable or disable the service |
+| `FLOCI_SERVICES_APPSYNC_VTL_MAX_LOOPS` | `10000` | Maximum `#foreach` iterations a VTL resolver template may execute |
+| `FLOCI_SERVICES_APPSYNC_VTL_MAX_OUTPUT_CHARS` | `1048576` | Maximum characters a VTL resolver template may render |
+| `FLOCI_SERVICES_APPSYNC_VTL_TIMEOUT_MILLIS` | `5000` | Maximum wall-clock time a VTL resolver template may spend evaluating |
+
+Request/response mapping templates render inside the same VTL reflection sandbox described for
+API Gateway in [api-gateway.md](api-gateway.md#configuration) (`SecureUberspector`, with `Class`,
+`ClassLoader`, `Runtime`, `ProcessBuilder`, `System`, `Thread`, `java.io.File` and related
+classes/packages blocked), and are subject to the same three limits above. The loop cap truncates
+a `#foreach` at the configured iteration count and lets the template finish rendering with
+whatever output it produced up to that point; it does not fail the resolver. Exceeding the
+output-size or execution-time limit does fail the resolver, the same way any other VTL evaluation
+error does.
 
 ## Examples
 
@@ -317,6 +393,12 @@ aws appsync associate-api \
   --domain-name api.example.com \
   --api-id API_ID \
   --endpoint-url $AWS_ENDPOINT_URL
+
+# Execute a GraphQL query (data-plane; send credentials for the API auth mode)
+curl -s -X POST "$AWS_ENDPOINT_URL/v1/apis/API_ID/graphql" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: da2-YOUR_API_KEY" \
+  -d '{"query":"{ hello }"}'
 
 # Create a channel namespace
 aws appsync create-channel-namespace \

@@ -65,7 +65,14 @@ Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and G
 | CreateTable | Creates a table definition in the local Glue Data Catalog. |
 | GetTable | Returns a stored table definition and resolves schema references when possible. |
 | GetTables | Lists table definitions for a database. |
+| UpdateTable | Replaces a table definition; the previous version is archived unless `SkipArchive` is set. |
 | DeleteTable | Deletes a table definition from a database. |
+| BatchDeleteTable | Deletes several tables of a database, reporting the missing ones in `Errors`. |
+| GetTableVersions | Lists the current and archived versions of a table, newest first. |
+| GetTableVersion | Returns one version by `VersionId`, or the current version when none is given. |
+| DeleteTableVersion | Deletes an archived version; the current version cannot be deleted, as on AWS. |
+| BatchDeleteTableVersion | Deletes several archived versions, reporting the ones not deleted in `Errors`. |
+| SearchTables | Searches every table of the catalog by `SearchText` (substring, or exact when quoted), property `Filters` (string keys use the tokenised match of the API reference, time keys honour `Comparator`, other keys read table parameters) and `SortCriteria`, paged by `MaxResults` and `NextToken`. |
 
 #### Partitions
 
@@ -79,7 +86,19 @@ Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and G
 | BatchCreatePartition | Creates partitions and reports per-item `AlreadyExistsException` errors. |
 | BatchGetPartition | Returns the partitions that exist (missing keys are omitted). |
 | BatchUpdatePartition | Updates partitions and reports per-item `EntityNotFoundException` errors. |
-| BatchDeletePartition | Deletes partitions and reports per-item `EntityNotFoundException` errors. |
+| BatchDeletePartition | Deletes up to 25 partitions, reporting the ones not found in `Errors`. |
+| CreatePartitionIndex | Registers a partition index on a table. Keys must name partition columns, and a table holds at most 3 indexes. The index reports `CREATING` before `ACTIVE`. |
+| GetPartitionIndexes | Lists a table's partition indexes, each with its keys resolved to name and type. |
+| DeletePartitionIndex | Removes a partition index from a table. The index reports `DELETING` before it disappears. |
+
+Partition indexes carry the AWS lifecycle. A new index reports `CREATING` and then `ACTIVE`; a
+deleted one reports `DELETING` and then disappears. As on AWS, only one index per table may be
+created or deleted at a time, and an index that is still `CREATING` cannot be deleted yet.
+
+The transitions are driven by reads rather than by a timer, so they are deterministic: each
+`GetPartitionIndexes` reports the current state and settles it, and a client that polls (as the
+Terraform provider does) converges on its next call. The `FAILED` state is not emulated, since it
+only arises from a backfill failure.
 
 #### User-defined Functions
 
@@ -150,7 +169,9 @@ The Glue Data Catalog is automatically used by **Athena** to resolve table names
 
 Tables can reference a Schema Registry schema version through `StorageDescriptor.SchemaReference`. On `GetTable` and `GetTables`, Floci resolves the schema definition into Glue columns when possible.
 
-The DuckDB read function is selected based on the table's `StorageDescriptor.InputFormat` and `StorageDescriptor.SerdeInfo.SerializationLibrary`:
+A table whose `Parameters.table_type` is `ICEBERG` (case-insensitive), as set by `pyiceberg`'s `GlueCatalog` and AWS's own Glue-Iceberg integration, is read via `iceberg_scan` against `Parameters.metadata_location` instead, following the table's real manifest list rather than its `StorageDescriptor`. See [Athena's format inference](athena.md#format-inference) for the full explanation.
+
+For every other table, the DuckDB read function is selected based on the table's `StorageDescriptor.InputFormat` and `StorageDescriptor.SerdeInfo.SerializationLibrary`:
 
 | Condition | DuckDB function |
 |---|---|

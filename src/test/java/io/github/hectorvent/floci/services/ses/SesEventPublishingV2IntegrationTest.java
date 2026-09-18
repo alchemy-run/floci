@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService.MetricIdentity;
+import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
@@ -82,6 +83,9 @@ class SesEventPublishingV2IntegrationTest {
 
     @Inject
     CloudWatchMetricsService metricsService;
+
+    @Inject
+    FirehoseService firehoseService;
 
     @BeforeAll
     static void configureRestAssured() {
@@ -191,6 +195,11 @@ class SesEventPublishingV2IntegrationTest {
                 .filter(e -> "Delivery".equals(e.path("eventType").asText()))
                 .findFirst().orElseThrow();
         assertEquals(SENDER, delivery.path("mail").path("source").asText());
+        // The event reports the sending account (resolved per request; the default account here) in
+        // both sendingAccountId and the source ARN.
+        assertEquals("000000000000", delivery.path("mail").path("sendingAccountId").asText());
+        assertEquals("arn:aws:ses:us-east-1:000000000000:identity/" + SENDER,
+                delivery.path("mail").path("sourceArn").asText());
         assertEquals("success@simulator.amazonses.com",
                 delivery.path("delivery").path("recipients").get(0).asText());
         assertEquals(CS, delivery.path("mail").path("tags").path("ses:configuration-set").get(0).asText());
@@ -546,8 +555,8 @@ class SesEventPublishingV2IntegrationTest {
                 .header("X-Amz-Target", "Firehose_20150804.CreateDeliveryStream")
                 .body("""
                     {"DeliveryStreamName": "%s",
-                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s"}}
-                    """.formatted(FIREHOSE_STREAM, FIREHOSE_BUCKET))
+                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s", "Prefix": "%s/"}}
+                    """.formatted(FIREHOSE_STREAM, FIREHOSE_BUCKET, FIREHOSE_STREAM))
         .when()
                 .post("/")
         .then()
@@ -639,22 +648,26 @@ class SesEventPublishingV2IntegrationTest {
 
     @Test
     @Order(15)
-    void firehose_fiveSends_triggerAutoFlushAndWriteNdjsonToS3() throws Exception {
-        for (int i = 0; i < 5; i++) {
-            sendEmailToConfigSet(CS_FIREHOSE, "recipient" + i + "@example.com", "fh-evt-" + i);
-        }
+    void firehose_sendEventsAreDeliveredAsNdjsonToS3() throws Exception {
+        sendEmailToConfigSet(CS_FIREHOSE, "recipient0@example.com", "fh-evt-0");
+        sendEmailToConfigSet(CS_FIREHOSE, "recipient1@example.com", "fh-evt-1");
+
+        // Small events stay buffered until the stream's size (SizeInMBs) or
+        // interval (IntervalInSeconds) trigger fires; force the flush so the
+        // assertion is deterministic (same mechanism the scheduled flusher uses).
+        firehoseService.flush(FIREHOSE_STREAM);
 
         List<S3Object> objects = s3Service.listObjects(FIREHOSE_BUCKET, FIREHOSE_STREAM + "/", null, 100);
         assertEquals(1, objects.size(),
-                "expected exactly one flushed S3 object after 5 putRecord calls (DEFAULT_FLUSH_COUNT)");
+                "expected exactly one flushed S3 object containing the buffered events");
 
         S3Object obj = s3Service.getObject(FIREHOSE_BUCKET, objects.get(0).getKey());
         String body = new String(obj.getData(), StandardCharsets.UTF_8);
         String[] lines = body.split("\\R");
-        assertEquals(5, lines.length, "flushed object should contain 5 NDJSON records");
+        assertEquals(2, lines.length, "flushed object should contain one NDJSON record per send");
 
-        for (int i = 0; i < 5; i++) {
-            JsonNode event = MAPPER.readTree(lines[i]);
+        for (String line : lines) {
+            JsonNode event = MAPPER.readTree(line);
             assertEquals("Send", event.path("eventType").asText());
             assertEquals(SENDER, event.path("mail").path("source").asText());
             assertEquals(CS_FIREHOSE,
@@ -676,8 +689,8 @@ class SesEventPublishingV2IntegrationTest {
                 .header("X-Amz-Target", "Firehose_20150804.CreateDeliveryStream")
                 .body("""
                     {"DeliveryStreamName": "%s",
-                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s"}}
-                    """.formatted(streamDisabled, FIREHOSE_BUCKET))
+                     "S3DestinationConfiguration": {"BucketARN": "arn:aws:s3:::%s", "Prefix": "%s/"}}
+                    """.formatted(streamDisabled, FIREHOSE_BUCKET, streamDisabled))
         .when()
                 .post("/")
         .then()
@@ -1672,5 +1685,78 @@ class SesEventPublishingV2IntegrationTest {
                 .post("/")
         .then()
                 .statusCode(200);
+    }
+
+    @Test
+    @Order(30)
+    void v1SendRawEmail_xSesControlHeaders_selectConfigurationSetAndSupplyTags() throws Exception {
+        drainQueue();
+        // Neither ConfigurationSetName nor Tags is sent as a request field: AWS reads both from the
+        // message itself on a raw send, so the events only reach the topic if the headers are honoured.
+        String raw = "From: " + SENDER + "\r\n"
+                + "To: success@simulator.amazonses.com\r\n"
+                + "Subject: header-driven\r\n"
+                + "X-SES-CONFIGURATION-SET: " + CS + "\r\n"
+                + "X-SES-MESSAGE-TAGS: campaign=headercampaign, env=headerenv\r\n"
+                + "\r\nbody";
+        String rawB64 = java.util.Base64.getEncoder().encodeToString(
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", SES_AUTH)
+                .body("Action=SendRawEmail"
+                        + "&Source=" + java.net.URLEncoder.encode(SENDER, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&RawMessage.Data=" + java.net.URLEncoder.encode(rawB64, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&Version=2010-12-01")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+
+        List<JsonNode> events = receiveSesEvents(2);
+        JsonNode send = events.stream()
+                .filter(e -> "Send".equals(e.path("eventType").asText()))
+                .findFirst().orElseThrow();
+        JsonNode tags = send.path("mail").path("tags");
+        assertEquals(CS, tags.path("ses:configuration-set").get(0).asText());
+        assertEquals("headercampaign", tags.path("campaign").get(0).asText());
+        assertEquals("headerenv", tags.path("env").get(0).asText());
+    }
+
+    @Test
+    @Order(31)
+    void v1SendRawEmail_requestTagsReplaceTheHeaderTagsEntirely() throws Exception {
+        drainQueue();
+        String raw = "From: " + SENDER + "\r\n"
+                + "To: success@simulator.amazonses.com\r\n"
+                + "Subject: header-vs-request\r\n"
+                + "X-SES-MESSAGE-TAGS: campaign=fromheader, only=inheader\r\n"
+                + "\r\nbody";
+        String rawB64 = java.util.Base64.getEncoder().encodeToString(
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", SES_AUTH)
+                .body("Action=SendRawEmail"
+                        + "&Source=" + java.net.URLEncoder.encode(SENDER, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&RawMessage.Data=" + java.net.URLEncoder.encode(rawB64, java.nio.charset.StandardCharsets.UTF_8)
+                        + "&Tags.member.1.Name=campaign&Tags.member.1.Value=fromrequest"
+                        + "&ConfigurationSetName=" + CS
+                        + "&Version=2010-12-01")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+
+        List<JsonNode> events = receiveSesEvents(2);
+        JsonNode send = events.stream()
+                .filter(e -> "Send".equals(e.path("eventType").asText()))
+                .findFirst().orElseThrow();
+        JsonNode tags = send.path("mail").path("tags");
+        assertEquals("fromrequest", tags.path("campaign").get(0).asText());
+        // AWS uses only the API parameter's tags when both are given and does not join the two
+        // sets, so a header-only tag is dropped rather than merged in.
+        assertTrue(tags.path("only").isMissingNode() || tags.path("only").isEmpty(),
+                "header tags must be discarded entirely when the request supplies tags: " + tags);
     }
 }

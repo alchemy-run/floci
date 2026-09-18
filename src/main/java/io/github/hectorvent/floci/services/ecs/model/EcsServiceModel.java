@@ -23,8 +23,14 @@ public class EcsServiceModel {
     private Instant createdAt;
     /** When the current deployment began: service creation, or the last task-definition change. */
     private Instant lastDeploymentAt;
+    /** Current deployment identifier ("ecs-svc/<hex>"). Rolls on a task-definition change or forceNewDeployment. */
+    private String deploymentId;
+    /** The deploymentId last observed to reach steady state; guards against re-emitting COMPLETED. */
+    private String lastCompletedDeploymentId;
     private String namespace;
     private String deploymentController;
+    private String schedulingStrategy;
+    private String availabilityZoneRebalancing;
     private Map<String, String> tags = new HashMap<>();
     private List<EcsLoadBalancer> loadBalancers = new ArrayList<>();
     private NetworkConfiguration networkConfiguration;
@@ -32,6 +38,12 @@ public class EcsServiceModel {
     private Integer healthCheckGracePeriodSeconds;
     private List<CapacityProviderStrategyItem> capacityProviderStrategy;
     private List<ServiceRegistry> serviceRegistries;
+    /**
+     * The Service Connect configuration given on CreateService or UpdateService, kept raw.
+     * DescribeServices reports it on each deployments[] entry, which is where AWS's model puts
+     * it; the Service shape itself has no member for it.
+     */
+    private Map<String, Object> serviceConnectConfiguration;
 
     public String getServiceArn() { return serviceArn; }
     public void setServiceArn(String serviceArn) { this.serviceArn = serviceArn; }
@@ -65,11 +77,27 @@ public class EcsServiceModel {
     public Instant getLastDeploymentAt() { return lastDeploymentAt; }
     public void setLastDeploymentAt(Instant lastDeploymentAt) { this.lastDeploymentAt = lastDeploymentAt; }
 
+    public String getDeploymentId() { return deploymentId; }
+    public void setDeploymentId(String deploymentId) { this.deploymentId = deploymentId; }
+
+    public String getLastCompletedDeploymentId() { return lastCompletedDeploymentId; }
+    public void setLastCompletedDeploymentId(String lastCompletedDeploymentId) {
+        this.lastCompletedDeploymentId = lastCompletedDeploymentId;
+    }
+
     public String getNamespace() { return namespace; }
     public void setNamespace(String namespace) { this.namespace = namespace; }
 
     public String getDeploymentController() { return deploymentController; }
     public void setDeploymentController(String deploymentController) { this.deploymentController = deploymentController; }
+
+    public String getSchedulingStrategy() { return schedulingStrategy; }
+    public void setSchedulingStrategy(String schedulingStrategy) { this.schedulingStrategy = schedulingStrategy; }
+
+    public String getAvailabilityZoneRebalancing() { return availabilityZoneRebalancing; }
+    public void setAvailabilityZoneRebalancing(String availabilityZoneRebalancing) {
+        this.availabilityZoneRebalancing = availabilityZoneRebalancing;
+    }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
@@ -102,5 +130,10 @@ public class EcsServiceModel {
     public List<ServiceRegistry> getServiceRegistries() { return serviceRegistries; }
     public void setServiceRegistries(List<ServiceRegistry> serviceRegistries) {
         this.serviceRegistries = serviceRegistries;
+    }
+
+    public Map<String, Object> getServiceConnectConfiguration() { return serviceConnectConfiguration; }
+    public void setServiceConnectConfiguration(Map<String, Object> serviceConnectConfiguration) {
+        this.serviceConnectConfiguration = serviceConnectConfiguration;
     }
 }

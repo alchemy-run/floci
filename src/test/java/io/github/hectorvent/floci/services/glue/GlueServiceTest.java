@@ -3,14 +3,21 @@ package io.github.hectorvent.floci.services.glue;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.glue.model.Column;
 import io.github.hectorvent.floci.services.glue.model.Crawler;
+import io.github.hectorvent.floci.services.glue.model.CrawlerTargets;
 import io.github.hectorvent.floci.services.glue.model.Database;
 import io.github.hectorvent.floci.services.glue.model.Job;
+import io.github.hectorvent.floci.services.glue.model.JobCommand;
+import io.github.hectorvent.floci.services.glue.model.JobUpdate;
 import io.github.hectorvent.floci.services.glue.model.Partition;
+import io.github.hectorvent.floci.services.glue.model.PartitionIndex;
+import io.github.hectorvent.floci.services.glue.model.PartitionIndexDescriptor;
+import io.github.hectorvent.floci.services.glue.model.S3Target;
 import io.github.hectorvent.floci.services.glue.model.SchemaReference;
 import io.github.hectorvent.floci.services.glue.model.StorageDescriptor;
 import io.github.hectorvent.floci.services.glue.model.Table;
@@ -26,8 +33,11 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -49,6 +59,7 @@ class GlueServiceTest {
 
     private GlueService glueService;
     private GlueSchemaRegistryService schemaRegistryService;
+    private StorageBackend<String, Database> databaseStore;
     private StorageBackend<String, Table> tableStore;
     private StorageBackend<String, Table> tableVersionStore;
     private StorageBackend<String, Map<String, Object>> columnStatisticsStore;
@@ -59,20 +70,42 @@ class GlueServiceTest {
         RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT_ID);
         StorageFactory storageFactory = new InMemoryStorageFactory();
         schemaRegistryService = new GlueSchemaRegistryService(storageFactory, regionResolver);
+        databaseStore = new InMemoryStorage<>();
         tableStore = new InMemoryStorage<>();
         tableVersionStore = new InMemoryStorage<>();
         columnStatisticsStore = new InMemoryStorage<>();
         partitionStore = new InMemoryStorage<>();
         glueService = new GlueService(
-                new InMemoryStorage<String, Database>(),
+                databaseStore,
                 tableStore,
                 tableVersionStore,
                 columnStatisticsStore,
                 partitionStore,
+                new InMemoryStorage<String, PartitionIndexDescriptor>(),
                 new InMemoryStorage<String, Map<String, Object>>(),
                 new InMemoryStorage<String, UserDefinedFunction>(),
+                new InMemoryStorage<String, Job>(),
+                new InMemoryStorage<String, Crawler>(),
                 schemaRegistryService, regionResolver, new ResourceGroupsTaggingService(null));
         glueService.createDatabase(new Database("db1"));
+    }
+
+    @Test
+    void createDatabasePersistsCatalogIdSoReadsDoNotWriteIt() {
+        assertEquals(ACCOUNT_ID, databaseStore.get("db1").orElseThrow().getCatalogId());
+        assertEquals(ACCOUNT_ID, glueService.getDatabase("db1").getCatalogId());
+    }
+
+    @Test
+    void databasePersistedBeforeCatalogIdWasModelledIsBackfilledOnRead() {
+        Database legacy = new Database("legacy-db");
+        legacy.setCatalogId(null);
+        databaseStore.put("legacy-db", legacy);
+
+        assertEquals(ACCOUNT_ID, glueService.getDatabase("legacy-db").getCatalogId());
+        assertEquals(ACCOUNT_ID, glueService.getDatabases().stream()
+                .filter(database -> "legacy-db".equals(database.getName()))
+                .findFirst().orElseThrow().getCatalogId());
     }
 
     @Test
@@ -1029,8 +1062,7 @@ class GlueServiceTest {
 
     @Test
     void jobBookmarkIsMissingUntilARunAndJobRunIdsUseAwsPrefix() {
-        Job job = new Job();
-        job.setName("etl");
+        Job job = createValidJob("etl");
         job.setRole("arn:aws:iam::000000000000:role/GlueJob");
         glueService.createJob(job, Map.of(), REGION);
 
@@ -1047,8 +1079,7 @@ class GlueServiceTest {
 
     @Test
     void stopIdleCrawlerIsNotRunning() {
-        Crawler crawler = new Crawler();
-        crawler.setName("events");
+        Crawler crawler = createValidCrawler("events");
         crawler.setRole("arn:aws:iam::000000000000:role/GlueCrawler");
         crawler.setDatabaseName("db1");
         glueService.createCrawler(crawler, Map.of(), REGION);
@@ -1105,10 +1136,418 @@ class GlueServiceTest {
         }
 
         @Override
-        public <V> StorageBackend<String, V> create(String serviceName,
+        public <V> AccountAwareStorageBackend<V> create(String serviceName,
                                                      String fileName,
                                                      TypeReference<Map<String, V>> typeReference) {
-            return new InMemoryStorage<>();
+            return AccountAwareStorageBackend.inMemory("000000000000");
         }
+    }
+
+    private Job createValidJob(String name) {
+        Job job = new Job();
+        job.setName(name);
+        job.setRole("arn:aws:iam::000000000000:role/my-role");
+        job.setCommand(new JobCommand());
+        return job;
+    }
+
+    private Crawler createValidCrawler(String name) {
+        Crawler crawler = new Crawler();
+        crawler.setName(name);
+        crawler.setRole("arn:aws:iam::000000000000:role/my-role");
+        CrawlerTargets targets = new CrawlerTargets();
+        targets.setS3Targets(java.util.List.of(new S3Target()));
+        crawler.setTargets(targets);
+        return crawler;
+    }
+
+    @Test
+    void jobCanBeCreatedFetchedUpdatedAndDeleted() {
+        Job job = createValidJob("my-job");
+        job.setDescription("Original description");
+
+        glueService.createJob(job);
+
+        Job fetched = glueService.getJob("my-job");
+        assertEquals("my-job", fetched.getName());
+        assertEquals("Original description", fetched.getDescription());
+        assertNotNull(fetched.getCreatedOn());
+        assertEquals(fetched.getCreatedOn(), fetched.getLastModifiedOn());
+
+        assertEquals(1, glueService.getJobs().size());
+        assertEquals(1, glueService.getJobs(10, null).items().size());
+
+        JobUpdate update = new JobUpdate();
+        update.setDescription("Updated description");
+        update.setRole("arn:aws:iam::000000000000:role/new-role");
+
+        glueService.updateJob("my-job", update);
+
+        Job updated = glueService.getJob("my-job");
+        assertEquals("Updated description", updated.getDescription());
+        assertEquals("arn:aws:iam::000000000000:role/new-role", updated.getRole());
+        assertTrue(updated.getLastModifiedOn().isAfter(fetched.getCreatedOn()) || updated.getLastModifiedOn().equals(fetched.getCreatedOn()));
+
+        glueService.deleteJob("my-job", REGION);
+
+        AwsException ex = assertThrows(AwsException.class, () -> glueService.getJob("my-job"));
+        assertEquals("EntityNotFoundException", ex.getErrorCode());
+        assertTrue(glueService.getJobs().isEmpty());
+    }
+
+    @Test
+    void crawlerCanBeCreatedFetchedUpdatedAndDeleted() {
+        Crawler crawler = createValidCrawler("my-crawler");
+        crawler.setDescription("Original crawler");
+        crawler.setDatabaseName("db1");
+
+        glueService.createCrawler(crawler);
+
+        Crawler fetched = glueService.getCrawler("my-crawler");
+        assertEquals("my-crawler", fetched.getName());
+        assertEquals("Original crawler", fetched.getDescription());
+        assertEquals("db1", fetched.getDatabaseName());
+        assertNotNull(fetched.getCreationTime());
+        assertEquals(fetched.getCreationTime(), fetched.getLastUpdated());
+
+        assertEquals(1, glueService.getCrawlers().size());
+        assertEquals(1, glueService.getCrawlers(10, null).items().size());
+
+        Crawler update = new Crawler();
+        update.setName("my-crawler");
+        update.setDescription("Updated crawler");
+        update.setDatabaseName("db2");
+
+        glueService.updateCrawler(update);
+
+        Crawler updated = glueService.getCrawler("my-crawler");
+        assertEquals("Updated crawler", updated.getDescription());
+        assertEquals("db2", updated.getDatabaseName());
+        assertTrue(updated.getLastUpdated().isAfter(fetched.getCreationTime()) || updated.getLastUpdated().equals(fetched.getCreationTime()));
+
+        glueService.deleteCrawler("my-crawler", REGION);
+
+        AwsException ex = assertThrows(AwsException.class, () -> glueService.getCrawler("my-crawler"));
+        assertEquals("EntityNotFoundException", ex.getErrorCode());
+        assertTrue(glueService.getCrawlers().isEmpty());
+    }
+
+    @Test
+    void resourceTaggingWorksForJobsAndCrawlers() {
+        Job job = createValidJob("tagged-job");
+        glueService.createJob(job, Map.of("key1", "value1"), REGION);
+
+        String jobArn = "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":job/tagged-job";
+        Map<String, String> tags = glueService.getTags(jobArn, REGION);
+        assertEquals("value1", tags.get("key1"));
+
+        glueService.tagResource(jobArn, Map.of("key2", "value2"), REGION);
+        Map<String, String> updatedTags = glueService.getTags(jobArn, REGION);
+        assertEquals("value1", updatedTags.get("key1"));
+        assertEquals("value2", updatedTags.get("key2"));
+
+        glueService.untagResource(jobArn, List.of("key1"), REGION);
+        Map<String, String> finalTags = glueService.getTags(jobArn, REGION);
+        assertNull(finalTags.get("key1"));
+        assertEquals("value2", finalTags.get("key2"));
+
+        Crawler crawler = createValidCrawler("tagged-crawler");
+        glueService.createCrawler(crawler, Map.of("env", "prod"), REGION);
+
+        String crawlerArn = "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":crawler/tagged-crawler";
+        Map<String, String> crawlerTags = glueService.getTags(crawlerArn, REGION);
+        assertEquals("prod", crawlerTags.get("env"));
+    }
+
+    @Test
+    void jobAndCrawlerRejectsDuplicateCreation() {
+        Job job = createValidJob("dup-job");
+        glueService.createJob(job);
+
+        AwsException jobEx = assertThrows(AwsException.class, () -> glueService.createJob(job));
+        assertEquals("AlreadyExistsException", jobEx.getErrorCode());
+
+        Crawler crawler = createValidCrawler("dup-crawler");
+        glueService.createCrawler(crawler);
+
+        AwsException crawlerEx = assertThrows(AwsException.class, () -> glueService.createCrawler(crawler));
+        assertEquals("AlreadyExistsException", crawlerEx.getErrorCode());
+    }
+
+    @Test
+    void getJobsAndCrawlersPagination() {
+        for (int i = 0; i < 5; i++) {
+            Job job = createValidJob("job-" + i);
+            glueService.createJob(job);
+
+            Crawler crawler = createValidCrawler("crawler-" + i);
+            glueService.createCrawler(crawler);
+        }
+
+        GlueService.Page<Job> jobsPage = glueService.getJobs(2, null);
+        assertEquals(2, jobsPage.items().size());
+        assertNotNull(jobsPage.nextToken());
+
+        GlueService.Page<Job> jobsNextPage = glueService.getJobs(10, jobsPage.nextToken());
+        assertEquals(3, jobsNextPage.items().size());
+        assertNull(jobsNextPage.nextToken());
+
+        GlueService.Page<Crawler> crawlersPage = glueService.getCrawlers(3, null);
+        assertEquals(3, crawlersPage.items().size());
+        assertNotNull(crawlersPage.nextToken());
+
+        GlueService.Page<Crawler> crawlersNextPage = glueService.getCrawlers(10, crawlersPage.nextToken());
+        assertEquals(2, crawlersNextPage.items().size());
+        assertNull(crawlersNextPage.nextToken());
+
+        AwsException negativeMaxResultsJobs = assertThrows(AwsException.class, () -> glueService.getJobs(-1, null));
+        assertEquals("InvalidInputException", negativeMaxResultsJobs.getErrorCode());
+
+        AwsException zeroMaxResultsCrawlers = assertThrows(AwsException.class, () -> glueService.getCrawlers(0, null));
+        assertEquals("InvalidInputException", zeroMaxResultsCrawlers.getErrorCode());
+
+        AwsException hugeMaxResultsJobs = assertThrows(AwsException.class, () -> glueService.getJobs(1001, null));
+        assertEquals("InvalidInputException", hugeMaxResultsJobs.getErrorCode());
+    }
+
+    @Test
+    void taggingNonExistentResourceThrows() {
+        String fakeJobArn = "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":job/fake-job";
+        String fakeCrawlerArn = "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":crawler/fake-crawler";
+        String fakeDbArn = "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":database/fake-db";
+        String fakeTableArn = "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":table/fake-db/fake-table";
+        String fakeUdfArn = "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":userDefinedFunction/fake-db/fake-udf";
+
+        AwsException jobTagEx = assertThrows(AwsException.class, () -> glueService.tagResource(fakeJobArn, Map.of("k", "v"), REGION));
+        assertEquals("EntityNotFoundException", jobTagEx.getErrorCode());
+
+        AwsException crawlerGetTagsEx = assertThrows(AwsException.class, () -> glueService.getTags(fakeCrawlerArn, REGION));
+        assertEquals("EntityNotFoundException", crawlerGetTagsEx.getErrorCode());
+
+        AwsException dbTagEx = assertThrows(AwsException.class, () -> glueService.tagResource(fakeDbArn, Map.of("k", "v"), REGION));
+        assertEquals("EntityNotFoundException", dbTagEx.getErrorCode());
+
+        AwsException tableTagEx = assertThrows(AwsException.class, () -> glueService.tagResource(fakeTableArn, Map.of("k", "v"), REGION));
+        assertEquals("EntityNotFoundException", tableTagEx.getErrorCode());
+
+        AwsException udfTagEx = assertThrows(AwsException.class, () -> glueService.tagResource(fakeUdfArn, Map.of("k", "v"), REGION));
+        assertEquals("EntityNotFoundException", udfTagEx.getErrorCode());
+    }
+
+    @Test
+    void concurrentPartitionIndexCreatesStopAtTheCap() throws Exception {
+        Table table = new Table();
+        table.setName("indexed");
+        StorageDescriptor sd = new StorageDescriptor();
+        sd.setColumns(java.util.List.of(new Column("a", "string")));
+        table.setStorageDescriptor(sd);
+        table.setPartitionKeys(java.util.List.of(new Column("a", "string"), new Column("b", "string")));
+        glueService.createTable("db1", table);
+
+        // Two settled indexes leave exactly one slot under the cap of three.
+        createSettledIndex("idx0", "a");
+        createSettledIndex("idx1", "b");
+
+        int attempts = 4;
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(attempts);
+        for (int i = 0; i < attempts; i++) {
+            String indexName = "race" + i;
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    PartitionIndex index = new PartitionIndex();
+                    index.setIndexName(indexName);
+                    index.setKeys(java.util.List.of("a", "b"));
+                    glueService.createPartitionIndex("db1", "indexed", index);
+                } catch (AwsException | InterruptedException expected) {
+                    // Only the create that takes the last slot succeeds; the rest are rejected.
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        start.countDown();
+        assertTrue(done.await(10, TimeUnit.SECONDS), "partition index creates did not finish");
+
+        assertEquals(3, glueService.getPartitionIndexes("db1", "indexed").size());
+    }
+
+    private void createSettledIndex(String indexName, String key) {
+        PartitionIndex index = new PartitionIndex();
+        index.setIndexName(indexName);
+        index.setKeys(java.util.List.of(key));
+        glueService.createPartitionIndex("db1", "indexed", index);
+        glueService.getPartitionIndexes("db1", "indexed");
+    }
+
+    // ── Table versions, batch partition delete and SearchTables ──────────────
+
+    private Table namedTable(String name) {
+        Table table = new Table();
+        table.setName(name);
+        return table;
+    }
+
+    private void createVersions(String name, int updates) {
+        Table table = namedTable(name);
+        table.setDescription("v0");
+        glueService.createTable("db1", table);
+        for (int i = 1; i <= updates; i++) {
+            Table replacement = namedTable(name);
+            replacement.setDescription("v" + i);
+            glueService.updateTable("db1", replacement, String.valueOf(i - 1), false);
+        }
+    }
+
+    @Test
+    void getTableVersionReturnsTheRequestedOrTheCurrentVersion() {
+        createVersions("plain", 2);
+
+        Map<String, Object> archived = glueService.getTableVersion("db1", "plain", "0");
+        assertEquals("0", archived.get("VersionId"));
+        assertEquals("v0", ((Table) archived.get("Table")).getDescription());
+
+        Map<String, Object> current = glueService.getTableVersion("db1", "plain", null);
+        assertEquals("2", current.get("VersionId"));
+        assertEquals("v2", ((Table) current.get("Table")).getDescription());
+        assertEquals("2", glueService.getTableVersion("db1", "plain", "2").get("VersionId"));
+
+        AwsException missing = assertThrows(AwsException.class,
+                () -> glueService.getTableVersion("db1", "plain", "7"));
+        assertEquals("EntityNotFoundException", missing.getErrorCode());
+        assertEquals("Version not found.", missing.getMessage());
+        AwsException notAnInteger = assertThrows(AwsException.class,
+                () -> glueService.getTableVersion("db1", "plain", "latest"));
+        assertEquals("InvalidInputException", notAnInteger.getErrorCode());
+        AwsException noTable = assertThrows(AwsException.class,
+                () -> glueService.getTableVersion("db1", "nope", "0"));
+        assertEquals("EntityNotFoundException", noTable.getErrorCode());
+    }
+
+    @Test
+    void deleteTableVersionDropsArchivedVersionsButNeverTheCurrentOne() {
+        createVersions("plain", 3);
+
+        glueService.deleteTableVersion("db1", "plain", "1");
+        List<String> remaining = glueService.getTableVersions("db1", "plain").stream()
+                .map(version -> (String) version.get("VersionId")).toList();
+        assertEquals(List.of("3", "2", "0"), remaining);
+
+        AwsException current = assertThrows(AwsException.class,
+                () -> glueService.deleteTableVersion("db1", "plain", "3"));
+        assertEquals("InvalidInputException", current.getErrorCode());
+        AwsException gone = assertThrows(AwsException.class,
+                () -> glueService.deleteTableVersion("db1", "plain", "1"));
+        assertEquals("EntityNotFoundException", gone.getErrorCode());
+        AwsException blank = assertThrows(AwsException.class,
+                () -> glueService.deleteTableVersion("db1", "plain", null));
+        assertEquals("InvalidInputException", blank.getErrorCode());
+
+        List<GlueService.TableVersionError> errors =
+                glueService.batchDeleteTableVersions("db1", "plain", List.of("0", "9", "3", "2"));
+        assertEquals(List.of("9", "3"), errors.stream().map(GlueService.TableVersionError::versionId).toList());
+        assertEquals("EntityNotFoundException", errors.get(0).errorDetail().errorCode());
+        assertEquals("InvalidInputException", errors.get(1).errorDetail().errorCode());
+        assertEquals("plain", errors.get(0).tableName());
+        assertEquals(1, glueService.getTableVersions("db1", "plain").size(), "only the current version is left");
+
+        List<String> tooMany = java.util.stream.IntStream.rangeClosed(1, 101)
+                .mapToObj(String::valueOf).toList();
+        AwsException overCap = assertThrows(AwsException.class,
+                () -> glueService.batchDeleteTableVersions("db1", "plain", tooMany));
+        assertEquals("InvalidInputException", overCap.getErrorCode());
+    }
+
+    @Test
+    void batchDeletePartitionDeletesWhatExistsAndReportsTheRest() {
+        Table table = namedTable("events");
+        table.setPartitionKeys(List.of(new Column("dt", "string")));
+        glueService.createTable("db1", table);
+        for (String dt : List.of("2026-01-01", "2026-01-02", "2026-01-03")) {
+            Partition partition = new Partition();
+            partition.setValues(List.of(dt));
+            glueService.createPartition("db1", "events", partition);
+        }
+
+        List<GlueService.BatchCreatePartitionError> errors = glueService.batchDeletePartitions(
+                "db1", "events", List.of(List.of("2026-01-01"), List.of("2026-01-09"), List.of("2026-01-03")));
+
+        assertEquals(1, errors.size());
+        assertEquals(List.of("2026-01-09"), errors.get(0).partitionValues());
+        assertEquals("EntityNotFoundException", errors.get(0).errorDetail().errorCode());
+        assertEquals(List.of(List.of("2026-01-02")),
+                glueService.getPartitions("db1", "events").stream().map(Partition::getValues).toList());
+        AwsException noTable = assertThrows(AwsException.class,
+                () -> glueService.batchDeletePartitions("db1", "nope", List.of(List.of("x"))));
+        assertEquals("EntityNotFoundException", noTable.getErrorCode());
+    }
+
+    @Test
+    void searchTablesMatchesTextTokensAndTimesAcrossDatabases() {
+        glueService.createDatabase(new Database("db2"));
+        Table orders = namedTable("customer-orders");
+        orders.setDescription("Orders placed by customers");
+        orders.setOwner("sales");
+        orders.setTableType("EXTERNAL_TABLE");
+        StorageDescriptor sd = new StorageDescriptor();
+        sd.setColumns(List.of(new Column("order_id", "string"), new Column("total", "double")));
+        orders.setStorageDescriptor(sd);
+        orders.setParameters(Map.of("classification", "parquet"));
+        glueService.createTable("db1", orders);
+        Table link = namedTable("xx-link-yy");
+        link.setOwner("data");
+        glueService.createTable("db2", link);
+        Table nolink = namedTable("xxlinkyy");
+        nolink.setOwner("data");
+        glueService.createTable("db2", nolink);
+
+        List<String> all = names(glueService.searchTables(null, null, null, null, null));
+        assertEquals(List.of("customer-orders", "xx-link-yy", "xxlinkyy"), all, "database then name");
+
+        assertEquals(List.of("customer-orders"), names(glueService.searchTables("ORDER_ID", null, null, null, null)),
+                "column names take part in the text search");
+        assertEquals(List.of("xx-link-yy", "xxlinkyy"), names(glueService.searchTables("link", null, null, null, null)));
+        assertEquals(List.of("xx-link-yy"),
+                names(glueService.searchTables("\"xx-link-yy\"", null, null, null, null)), "quotes mean exact");
+        assertEquals(List.of(), names(glueService.searchTables("\"link\"", null, null, null, null)));
+
+        // The reference's example: Key=Name, Value=link finds xx-link-yy but not xxlinkyy.
+        assertEquals(List.of("xx-link-yy"), names(glueService.searchTables(null,
+                List.of(new GlueService.SearchFilter("Name", "link", null)), null, null, null)));
+        assertEquals(List.of("customer-orders"), names(glueService.searchTables(null,
+                List.of(new GlueService.SearchFilter("DatabaseName", "db1", null),
+                        new GlueService.SearchFilter("classification", "parquet", null)), null, null, null)));
+        assertEquals(List.of(), names(glueService.searchTables(null,
+                List.of(new GlueService.SearchFilter("Owner", "sales", null),
+                        new GlueService.SearchFilter("TableType", "VIRTUAL_VIEW", null)), null, null, null)));
+
+        long future = Instant.now().getEpochSecond() + 3600;
+        assertEquals(3, glueService.searchTables(null,
+                List.of(new GlueService.SearchFilter("CreateTime", String.valueOf(future), "LESS_THAN")),
+                null, null, null).items().size());
+        assertEquals(List.of(), names(glueService.searchTables(null,
+                List.of(new GlueService.SearchFilter("CreateTime", String.valueOf(future), "GREATER_THAN")),
+                null, null, null)));
+        AwsException badComparator = assertThrows(AwsException.class, () -> glueService.searchTables(null,
+                List.of(new GlueService.SearchFilter("CreateTime", "0", "BETWEEN")), null, null, null));
+        assertEquals("InvalidInputException", badComparator.getErrorCode());
+
+        assertEquals(List.of("xxlinkyy", "xx-link-yy", "customer-orders"), names(glueService.searchTables(null, null,
+                List.of(new GlueService.SearchSort("Name", "DESC")), null, null)));
+        AwsException badField = assertThrows(AwsException.class, () -> glueService.searchTables(null, null,
+                List.of(new GlueService.SearchSort("Columns", "ASC")), null, null));
+        assertEquals("InvalidInputException", badField.getErrorCode());
+
+        GlueService.Page<Table> first = glueService.searchTables(null, null, null, 2, null);
+        assertEquals(2, first.items().size());
+        assertNotNull(first.nextToken());
+        GlueService.Page<Table> second = glueService.searchTables(null, null, null, 2, first.nextToken());
+        assertEquals(List.of("xxlinkyy"), names(second));
+        assertNull(second.nextToken());
+    }
+
+    private static List<String> names(GlueService.Page<Table> page) {
+        return page.items().stream().map(Table::getName).toList();
     }
 }

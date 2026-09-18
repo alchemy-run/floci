@@ -1,31 +1,45 @@
 package io.github.hectorvent.floci.services.textract;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AiMockConfigLoader;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsGeometry;
 import io.github.hectorvent.floci.core.common.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 /**
  * Dummy response builder for Amazon Textract. Stateless for sync operations.
  * Async operations (Start* and Get*) use an in-memory job store.
  * No real OCR or document analysis is performed: every call returns a fixed
- * stub Block list matching the AWS Textract wire format.
+ * stub Block list matching the AWS Textract wire format by default.
+ * <p>
+ * Callers can override the sync-action default per exact "Bucket/Name" S3Object
+ * key via {@link AiMockConfigLoader} — see {@code docs/services/textract.md}
+ * "Mock Responses". A Bytes-backed Document has no such key, so mock lookup is
+ * simply skipped for it. The async Start and Get action pairs do not support
+ * mocking (the mock key would need to be persisted alongside the job id) — out
+ * of scope.
  *
  * @see <a href="https://docs.aws.amazon.com/textract/latest/dg/API_Operations.html">Textract API Reference</a>
  */
 @ApplicationScoped
 public class TextractService implements Resettable {
     static final String MODEL_VERSION = "1.0";
+    private static final String SERVICE_KEY = "textract";
     private final ObjectMapper objectMapper;
+    private final AiMockConfigLoader mockConfigLoader;
     /** In-memory async job store: jobId to jobType ("TEXT_DETECTION" or "DOCUMENT_ANALYSIS"). */
     private final ConcurrentHashMap<String, String> asyncJobs = new ConcurrentHashMap<>();
     @Inject
-    public TextractService(ObjectMapper objectMapper) {
+    public TextractService(ObjectMapper objectMapper, AiMockConfigLoader mockConfigLoader) {
         this.objectMapper = objectMapper;
+        this.mockConfigLoader = mockConfigLoader;
     }
     public void clear() {
         asyncJobs.clear();
@@ -34,7 +48,11 @@ public class TextractService implements Resettable {
      * DetectDocumentText — returns a stub PAGE + LINE + WORD block hierarchy.
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_DetectDocumentText.html
      */
-    public Response detectDocumentText() {
+    public Response detectDocumentText(String mockKey) {
+        Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, mockKey, "DetectDocumentText");
+        if (mock.isPresent()) {
+            return Response.ok(mock.get()).build();
+        }
         ObjectNode root = objectMapper.createObjectNode();
         root.set("DocumentMetadata", buildDocumentMetadata(1));
         root.set("Blocks", buildStubBlocks());
@@ -45,7 +63,11 @@ public class TextractService implements Resettable {
      * AnalyzeDocument — returns the same stub blocks; FeatureTypes are accepted but ignored.
      * Response shape: https://docs.aws.amazon.com/textract/latest/dg/API_AnalyzeDocument.html
      */
-    public Response analyzeDocument() {
+    public Response analyzeDocument(String mockKey) {
+        Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, mockKey, "AnalyzeDocument");
+        if (mock.isPresent()) {
+            return Response.ok(mock.get()).build();
+        }
         ObjectNode root = objectMapper.createObjectNode();
         root.set("DocumentMetadata", buildDocumentMetadata(1));
         root.set("Blocks", buildStubBlocks());
@@ -141,7 +163,7 @@ public class TextractService implements Resettable {
         word.put("Id", wordId);
         word.put("Confidence", 99.9);
         word.put("Text", "Floci");
-        word.set("Geometry", buildGeometry(0.1, 0.1, 0.15, 0.05));
+        word.set("Geometry", AwsGeometry.buildGeometry(0.1, 0.1, 0.15, 0.05));
         word.put("Page", 1);
         blocks.add(word);
         // LINE block (child: WORD)
@@ -150,7 +172,7 @@ public class TextractService implements Resettable {
         line.put("Id", lineId);
         line.put("Confidence", 99.9);
         line.put("Text", "Floci");
-        line.set("Geometry", buildGeometry(0.1, 0.1, 0.15, 0.05));
+        line.set("Geometry", AwsGeometry.buildGeometry(0.1, 0.1, 0.15, 0.05));
         line.set("Relationships", buildRelationships("CHILD", wordId));
         line.put("Page", 1);
         blocks.add(line);
@@ -159,34 +181,11 @@ public class TextractService implements Resettable {
         page.put("BlockType", "PAGE");
         page.put("Id", pageId);
         page.put("Confidence", 99.9);
-        page.set("Geometry", buildGeometry(0.0, 0.0, 1.0, 1.0));
+        page.set("Geometry", AwsGeometry.buildGeometry(0.0, 0.0, 1.0, 1.0));
         page.set("Relationships", buildRelationships("CHILD", lineId));
         page.put("Page", 1);
         blocks.add(page);
         return blocks;
-    }
-    /**
-     * Builds a Geometry object with BoundingBox and a 4-point Polygon.
-     * @see <a href="https://docs.aws.amazon.com/textract/latest/dg/API_Geometry.html">Geometry</a>
-     */
-    private ObjectNode buildGeometry(double left, double top, double width, double height) {
-        ObjectNode geometry = objectMapper.createObjectNode();
-        ObjectNode bbox = geometry.putObject("BoundingBox");
-        bbox.put("Width", width);
-        bbox.put("Height", height);
-        bbox.put("Left", left);
-        bbox.put("Top", top);
-        ArrayNode polygon = geometry.putArray("Polygon");
-        addPoint(polygon, left, top);
-        addPoint(polygon, left + width, top);
-        addPoint(polygon, left + width, top + height);
-        addPoint(polygon, left, top + height);
-        return geometry;
-    }
-    private void addPoint(ArrayNode polygon, double x, double y) {
-        ObjectNode point = polygon.addObject();
-        point.put("X", x);
-        point.put("Y", y);
     }
     /**
      * Builds a single Relationship entry.

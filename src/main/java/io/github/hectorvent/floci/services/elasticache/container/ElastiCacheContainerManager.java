@@ -16,7 +16,6 @@ import org.jboss.logging.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -53,6 +52,7 @@ public class ElastiCacheContainerManager {
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final Map<String, ElastiCacheContainerHandle> activeContainers = new ConcurrentHashMap<>();
+    private volatile boolean dockerUnavailableLogged;
 
     @Inject
     public ElastiCacheContainerManager(ContainerBuilder containerBuilder,
@@ -69,7 +69,65 @@ public class ElastiCacheContainerManager {
         this.regionResolver = regionResolver;
     }
 
+    /**
+     * Attempts {@link #start} and reports the backend as unavailable instead of propagating the
+     * failure, when the cause is that no Docker daemon is reachable from Floci: Floci running
+     * inside Docker without a mounted socket, or a stopped daemon on the host. A failure raised
+     * while the daemon <em>is</em> reachable is a genuine container problem and still propagates,
+     * so nothing changes for a Floci that can start Valkey containers.
+     *
+     * @return the container handle, or {@code null} when no Docker daemon is reachable and no
+     *         container was created
+     */
+    public ElastiCacheContainerHandle tryStart(String groupId, String image) {
+        try {
+            ElastiCacheContainerHandle handle = start(groupId, image);
+            dockerUnavailableLogged = false;
+            return handle;
+        } catch (RuntimeException e) {
+            if (isDockerReachable()) {
+                throw e;
+            }
+            boolean partial = activeContainers.containsKey(groupId);
+            stopByGroupId(groupId);
+            if (partial) {
+                throw e;
+            }
+            if (!dockerUnavailableLogged) {
+                dockerUnavailableLogged = true;
+                LOG.warnv("No Docker daemon is reachable from Floci ({0}). ElastiCache metadata "
+                        + "operations keep working and replication groups still reach 'available', "
+                        + "but they have no backing Valkey container until a daemon becomes "
+                        + "reachable.", e.getMessage());
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Probes the configured Docker endpoint, which is how a missing daemon is told apart from a
+     * container that failed for its own reasons.
+     */
+    public boolean isDockerReachable() {
+        try {
+            lifecycleManager.getDockerClient().pingCmd().exec();
+            return true;
+        } catch (Exception e) {
+            LOG.debugv("Docker daemon is not reachable: {0}", e.getMessage());
+            return false;
+        }
+    }
+
     public ElastiCacheContainerHandle start(String groupId, String image) {
+        return start(groupId, image, List.of());
+    }
+
+    /**
+     * Starts a backend container for the given resource id, appending {@code extraServerFlags}
+     * to the Valkey server command line (via the image's {@code VALKEY_EXTRA_FLAGS} hook).
+     * Cluster-mode nodes use this to pass {@code --cluster-enabled} and announce settings.
+     */
+    public ElastiCacheContainerHandle start(String groupId, String image, List<String> extraServerFlags) {
         LOG.infov("Starting ElastiCache backend container for group: {0}", groupId);
 
         String containerName = containerName(groupId);
@@ -77,14 +135,21 @@ public class ElastiCacheContainerManager {
         // Remove any stale container with the same name
         lifecycleManager.removeIfExists(containerName);
 
+        StringBuilder serverFlags = new StringBuilder("--loglevel verbose");
+        for (String flag : extraServerFlags) {
+            serverFlags.append(' ').append(flag);
+        }
+
         // Build container spec. Only publish the backend port to the host in
         // native mode — in Docker mode the JVM reaches the container via its
         // network IP, no host binding needed.
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
-                .withEnv("VALKEY_EXTRA_FLAGS", "--loglevel verbose")
+                .withEnv("VALKEY_EXTRA_FLAGS", serverFlags.toString())
                 .withDockerNetwork(config.services().elasticache().dockerNetwork())
-                .withLogRotation();
+                .withLogRotation()
+                .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                        "elasticache", groupId, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
 
         if (!containerDetector.isRunningInContainer()) {
             specBuilder.withDynamicPort(BACKEND_PORT);
@@ -102,6 +167,13 @@ public class ElastiCacheContainerManager {
 
         ElastiCacheContainerHandle handle = new ElastiCacheContainerHandle(
                 info.containerId(), groupId, endpoint.host(), endpoint.port());
+        try {
+            handle.setNetworkIp(lifecycleManager.resolveContainerNetworkIp(
+                    info.containerId(), config.services().elasticache().dockerNetwork().orElse(null)));
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not resolve network IP for ElastiCache container {0}: {1}",
+                    info.containerId(), e.getMessage());
+        }
         activeContainers.put(groupId, handle);
 
         // Attach log streaming
@@ -133,7 +205,7 @@ public class ElastiCacheContainerManager {
                 OutputStream out = s.getOutputStream();
                 out.write(RESP_PING);
                 out.flush();
-                String line = readAsciiLineCrLf(s.getInputStream());
+                String line = RespLineReader.readAsciiLineCrLf(s.getInputStream());
                 if (line.startsWith("+PONG")) {
                     if (attempt > 1) {
                         LOG.infov("ElastiCache backend ready for group {0} after {1} probe attempt(s)", groupId, attempt);
@@ -158,22 +230,6 @@ public class ElastiCacheContainerManager {
         throw new RuntimeException(
                 "ElastiCache backend for group " + groupId + " did not become ready on " + host + ":" + port
                         + " within " + BACKEND_READY_DEADLINE_MS + "ms");
-    }
-
-    private static String readAsciiLineCrLf(InputStream in) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        int b;
-        while ((b = in.read()) != -1) {
-            if (b == '\r') {
-                int next = in.read();
-                if (next != '\n') {
-                    throw new IOException("Expected \\n after \\r in RESP line");
-                }
-                break;
-            }
-            sb.append((char) b);
-        }
-        return sb.toString();
     }
 
     public void stop(ElastiCacheContainerHandle handle) {
