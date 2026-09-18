@@ -155,7 +155,7 @@ public class CloudWatchMetricsQueryHandler {
             xml.elem("Unit", dp.unit()).end("member");
         }
         xml.end("Datapoints");
-        return Response.ok(AwsQueryResponse.envelope("GetMetricStatistics", null, xml.build())).build();
+        return Response.ok(AwsQueryResponse.envelope("GetMetricStatistics", AwsNamespaces.CW, xml.build())).build();
     }
 
     private Response handleGetMetricData(MultivaluedMap<String, String> params, String region) {
@@ -190,7 +190,7 @@ public class CloudWatchMetricsQueryHandler {
             xml.end("member");
         }
         xml.end("MetricDataResults");
-        return Response.ok(AwsQueryResponse.envelope("GetMetricData", null, xml.build())).build();
+        return Response.ok(AwsQueryResponse.envelope("GetMetricData", AwsNamespaces.CW, xml.build())).build();
     }
 
     private List<CloudWatchMetricsService.MetricDataQuery> parseMetricDataQueries(

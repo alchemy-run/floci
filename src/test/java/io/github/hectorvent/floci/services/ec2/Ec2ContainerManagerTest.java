@@ -437,7 +437,7 @@ class Ec2ContainerManagerTest {
 
     @Test
     void userDataExecutionCommandRunsScriptDirectlySoShebangIsHonored() {
-        assertArrayEquals(new String[]{"/tmp/user-data.sh"}, Ec2ContainerManager.userDataExecutionCommand());
+        assertArrayEquals(new String[]{"/var/lib/user-data.sh"}, Ec2ContainerManager.userDataExecutionCommand());
     }
 
     @Test
@@ -909,6 +909,16 @@ class Ec2ContainerManagerTest {
     }
 
     @Test
+    void instanceProfileEnvironmentLetsTheSdkUseImds() {
+        List<String> environment = Ec2ContainerManager.localAwsEnvironment(
+                "us-west-2", "http://floci:4566", "http://floci:9169", true);
+        assertTrue(environment.contains("AWS_EC2_METADATA_SERVICE_ENDPOINT=http://floci:9169"));
+        assertTrue(environment.contains("AWS_ENDPOINT_URL=http://floci:4566"));
+        assertFalse(environment.stream().anyMatch(value -> value.startsWith("AWS_ACCESS_KEY_ID=")
+                || value.startsWith("AWS_SECRET_ACCESS_KEY=") || value.startsWith("AWS_SESSION_TOKEN=")));
+    }
+
+    @Test
     void localAwsEnvironmentProvidesCliCredentialsAndFlociEndpoint() {
         assertEquals(
                 java.util.List.of(
@@ -1257,6 +1267,28 @@ class Ec2ContainerManagerTest {
         assertFalse(finishUserData.await(10, TimeUnit.MILLISECONDS), "user data should still be blocked");
         finishUserData.countDown();
         awaitUntil(() -> "running".equals(instance.getState().getName()), Duration.ofSeconds(2));
+    }
+
+    @Test
+    void userDataIsCopiedAndExecutedOutsideGuestTemporaryMounts() throws Exception {
+        LaunchHarness harness = launchHarness();
+        InspectContainerCmd inspect = mock(InspectContainerCmd.class);
+        when(harness.dockerClient.inspectContainerCmd(TEST_CONTAINER_ID)).thenReturn(inspect);
+        InspectContainerResponse withIp = inspectResponse("172.18.0.10");
+        when(inspect.exec()).thenReturn(withIp);
+        CountDownLatch userDataStarted = new CountDownLatch(1);
+        harness.stubSuccessfulExecs(userDataStarted, new CountDownLatch(0));
+        CopyArchiveToContainerCmd copy = harness.dockerClient.copyArchiveToContainerCmd(TEST_CONTAINER_ID);
+        Instance instance = instance("i-userdata-persistent-path");
+        instance.setUserData("#!/bin/sh\necho ready\n");
+
+        harness.manager.launch(instance, "amazonlinux:2023", null, "us-west-2");
+
+        assertTrue(userDataStarted.await(2, TimeUnit.SECONDS), "user data should start");
+        verify(copy).withRemotePath("/var/lib");
+        verify(copy, never()).withRemotePath("/tmp");
+        assertTrue(harness.executedCommands.stream()
+                .anyMatch(command -> Arrays.equals(command, new String[]{"/var/lib/user-data.sh"})));
     }
 
     @Test
@@ -1714,7 +1746,7 @@ class Ec2ContainerManagerTest {
         });
         when(execCreate.exec()).thenAnswer(invocation -> {
             String[] command = currentCommand.get();
-            return command != null && command.length == 1 && "/tmp/user-data.sh".equals(command[0])
+            return command != null && command.length == 1 && "/var/lib/user-data.sh".equals(command[0])
                     ? userDataExec : metadataExec;
         });
 
@@ -1877,7 +1909,7 @@ class Ec2ContainerManagerTest {
             });
             when(execCreate.exec()).thenAnswer(invocation -> {
                 String[] command = currentCommand.get();
-                if (command != null && command.length == 1 && "/tmp/user-data.sh".equals(command[0])) {
+                if (command != null && command.length == 1 && "/var/lib/user-data.sh".equals(command[0])) {
                     return userDataExec;
                 }
                 return metadataExec;

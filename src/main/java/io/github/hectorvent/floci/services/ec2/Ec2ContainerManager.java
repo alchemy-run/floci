@@ -77,7 +77,8 @@ import java.util.zip.GZIPInputStream;
 public class Ec2ContainerManager {
 
     private static final Logger LOG = Logger.getLogger(Ec2ContainerManager.class);
-    private static final String USER_DATA_SCRIPT_PATH = "/tmp/user-data.sh";
+    // Guest-created /tmp mounts hide files copied through Docker's archive API.
+    private static final String USER_DATA_SCRIPT_PATH = "/var/lib/user-data.sh";
     private static final Pattern MIME_BOUNDARY = Pattern.compile("(?im)^content-type:\\s*multipart/[^;]+;\\s*boundary=\"?([^\";\\n\\r]+)\"?.*$");
     private static final List<String> ALLOWED_SSHD_PATHS = List.of("/usr/sbin/sshd", "/usr/local/sbin/sshd", "/sbin/sshd");
     /** Exit code the sshd install probe uses for "sshd is present but scp is not". See startSshd. */
@@ -586,7 +587,7 @@ public class Ec2ContainerManager {
                             namespace.helperId(), prefixLists);
                 }
                 ContainerSpec spec = buildContainerSpec(containerName, image, region, serviceEndpoint, imdsEndpoint,
-                        instanceId, sshHostPort, namespace);
+                        instanceId, sshHostPort, namespace, instance.getIamInstanceProfileArn() != null);
                 containerId = image.dockerPlatform() == null
                         ? lifecycleManager.create(spec)
                         : lifecycleManager.create(spec, image.dockerPlatform());
@@ -640,13 +641,15 @@ public class Ec2ContainerManager {
 
     private ContainerSpec buildContainerSpec(String containerName, ResolvedAmiImage image, String region,
                                              String serviceEndpoint, String imdsEndpoint, String instanceId,
-                                             int sshHostPort, SecurityGroupFirewallManager.Namespace namespace) {
+                                             int sshHostPort, SecurityGroupFirewallManager.Namespace namespace,
+                                             boolean hasInstanceProfile) {
         // Minimal images keep the historic tail command, while cloud-image AMI guests can boot their init.
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image.dockerImage())
                 .withName(containerName)
                 .withEmbeddedDns()
                 .withDockerNetwork(Optional.empty())
-                .withEnv(localAwsEnvironment(region, serviceEndpoint, imdsEndpoint))
+                .withEnv(localAwsEnvironment(region, serviceEndpoint, imdsEndpoint,
+                        hasInstanceProfile))
                 .withEnv("AWS_EC2_INSTANCE_ID", instanceId)
                 .withHostDockerInternalOnLinux()
                 .withLogRotation()
@@ -1521,7 +1524,7 @@ public class Ec2ContainerManager {
         byte[] script = scriptContent.getBytes(StandardCharsets.UTF_8);
         byte[] tar = buildSingleFileTar("user-data.sh", script, 0755);
         dockerClient.copyArchiveToContainerCmd(containerId)
-                .withRemotePath("/tmp")
+                .withRemotePath("/var/lib")
                 .withTarInputStream(new ByteArrayInputStream(tar))
                 .exec();
 
@@ -1949,14 +1952,21 @@ public class Ec2ContainerManager {
 
 
     static List<String> localAwsEnvironment(String region, String serviceEndpoint, String imdsEndpoint) {
-        return List.of(
+        return localAwsEnvironment(region, serviceEndpoint, imdsEndpoint, false);
+    }
+
+    static List<String> localAwsEnvironment(String region, String serviceEndpoint, String imdsEndpoint,
+                                            boolean hasInstanceProfile) {
+        List<String> environment = new ArrayList<>(List.of(
                 "AWS_EC2_METADATA_SERVICE_ENDPOINT=" + imdsEndpoint,
                 "AWS_ENDPOINT_URL=" + serviceEndpoint,
                 "AWS_DEFAULT_REGION=" + region,
-                "AWS_REGION=" + region,
-                "AWS_ACCESS_KEY_ID=test",
-                "AWS_SECRET_ACCESS_KEY=test",
-                "AWS_SESSION_TOKEN=test-session-token");
+                "AWS_REGION=" + region));
+        if (!hasInstanceProfile) {
+            environment.addAll(List.of("AWS_ACCESS_KEY_ID=test", "AWS_SECRET_ACCESS_KEY=test",
+                    "AWS_SESSION_TOKEN=test-session-token"));
+        }
+        return environment;
     }
 
     static String summarizeUserDataOutput(BoundedOutput output) {

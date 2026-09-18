@@ -102,6 +102,7 @@ floci:
     # The test listener binds all interfaces so Quarkus keeps localhost as its test authority.
     # This is test-only; production keeps the loopback default.
     allow-unsafe-network-exposure: true
+    allow-private-jwt-targets: true
 
   init-hooks:
     shell-executable: /bin/sh
@@ -140,6 +141,7 @@ floci:
       enabled: true
     lambda:
       enabled: true
+      docker-flags: ""
       honour-architectures: false
       zip-max-entries: 100000
       # aws-config-path:
@@ -197,6 +199,7 @@ floci:
       mock: false
       proxy-base-port: 7001
       proxy-max-port: 7099
+      default-sql-server-image: "mcr.microsoft.com/mssql/server:2022-latest"
       proxy-handshake-timeout-millis: 10000
       proxy-backend-connect-timeout-millis: 5000
       proxy-max-connections: 100
@@ -484,10 +487,11 @@ floci:
       enabled: true
     verifiedpermissions:
       enabled: true
-      cedar-url: http://127.0.0.1:18180
     ram:
       enabled: true
     codegurureviewer:
+      enabled: true
+    codeartifact:
       enabled: true
     marketplace:
       enabled: true

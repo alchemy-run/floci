@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.appconfig.model.Application;
 import io.github.hectorvent.floci.services.appconfig.model.ConfigurationProfile;
 import io.github.hectorvent.floci.services.appconfig.model.Deployment;
 import io.github.hectorvent.floci.services.appconfig.model.DeploymentStrategy;
+import io.github.hectorvent.floci.services.appconfig.model.DeploymentSummary;
 import io.github.hectorvent.floci.services.appconfig.model.Environment;
 import io.github.hectorvent.floci.services.appconfig.model.Extension;
 import io.github.hectorvent.floci.services.appconfig.model.ExtensionAssociation;
@@ -63,6 +64,8 @@ public class AppConfigService {
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService scheduler;
     private final ConcurrentHashMap<String, ScheduledFuture<?>> pendingCompletions = new ConcurrentHashMap<>();
+    private final Map<String, DeploymentPageToken> deploymentPageTokens = new ConcurrentHashMap<>();
+    private static final int MAX_DEPLOYMENT_PAGE_TOKENS = 1000;
 
     @Inject
     public AppConfigService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
@@ -494,6 +497,98 @@ public class AppConfigService {
     public Deployment getDeployment(String appId, String envId, int deploymentNumber) {
         return deploymentStore.get(appId + "::" + envId + "::" + deploymentNumber)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Deployment not found", 404));
+    }
+
+    public DeploymentPage listDeployments(String appId, String envId, Integer maxResults, String nextToken) {
+        getEnvironment(appId, envId);
+        int pageSize = maxResults == null ? 50 : maxResults;
+        if (pageSize < 1 || pageSize > 50) {
+            throw new AwsException("BadRequestException", "max_results must be between 1 and 50", 400);
+        }
+
+        String scope = appId + "::" + envId;
+        Integer afterDeploymentNumber = null;
+        if (nextToken != null) {
+            DeploymentPageToken token = deploymentPageTokens.get(nextToken);
+            if (token == null || !token.scope().equals(scope)) {
+                throw new AwsException("BadRequestException", "Invalid next_token", 400);
+            }
+            afterDeploymentNumber = token.lastDeploymentNumber();
+        }
+
+        List<Deployment> deployments = deploymentStore.scan(k -> true).stream()
+                .filter(deployment -> appId.equals(deployment.getApplicationId()))
+                .filter(deployment -> envId.equals(deployment.getEnvironmentId()))
+                .sorted(Comparator.comparingInt(Deployment::getDeploymentNumber).reversed())
+                .toList();
+
+        int start = 0;
+        if (afterDeploymentNumber != null) {
+            while (start < deployments.size()
+                    && deployments.get(start).getDeploymentNumber() >= afterDeploymentNumber) {
+                start++;
+            }
+        }
+
+        int end = Math.min(start + pageSize, deployments.size());
+        List<DeploymentSummary> items = deployments.subList(start, end).stream()
+                .map(this::toDeploymentSummary)
+                .toList();
+        String resultToken = null;
+        if (end < deployments.size()) {
+            resultToken = createDeploymentPageToken(scope,
+                    items.get(items.size() - 1).getDeploymentNumber());
+        } else if (nextToken != null) {
+            deploymentPageTokens.remove(nextToken);
+        }
+        return new DeploymentPage(items, resultToken);
+    }
+
+    private DeploymentSummary toDeploymentSummary(Deployment deployment) {
+        DeploymentSummary summary = new DeploymentSummary();
+        summary.setConfigurationProfileId(deployment.getConfigurationProfileId());
+        summary.setConfigurationVersion(deployment.getConfigurationVersion());
+        summary.setDeploymentNumber(deployment.getDeploymentNumber());
+        summary.setState(deployment.getState());
+        summary.setConfigurationName(deployment.getConfigurationName());
+        ConfigurationProfile profile = profileStore.get(deployment.getConfigurationProfileId()).orElse(null);
+        if (profile != null) {
+            summary.setConfigurationName(profile.getName());
+            summary.setType(profile.getType());
+        }
+        summary.setStartedAt(deployment.getStartedAt());
+        summary.setCompletedAt(deployment.getCompletedAt());
+        summary.setDeploymentDurationInMinutes(deployment.getDeploymentDurationInMinutes());
+        summary.setFinalBakeTimeInMinutes(deployment.getFinalBakeTimeInMinutes());
+        summary.setGrowthFactor(deployment.getGrowthFactor());
+        summary.setGrowthType(deployment.getGrowthType());
+        summary.setPercentageComplete(deployment.getPercentageComplete());
+        if (summary.getDeploymentDurationInMinutes() == null) {
+            DeploymentStrategy strategy = getDeploymentStrategy(deployment.getDeploymentStrategyId());
+            summary.setDeploymentDurationInMinutes(strategy.getDeploymentDurationInMinutes());
+            summary.setFinalBakeTimeInMinutes(strategy.getFinalBakeTimeInMinutes());
+            summary.setGrowthFactor(strategy.getGrowthFactor());
+            summary.setGrowthType(strategy.getGrowthType());
+        }
+        if (summary.getPercentageComplete() == null) {
+            summary.setPercentageComplete("COMPLETE".equals(deployment.getState()) ? 100.0f : 0.0f);
+        }
+        return summary;
+    }
+
+    private String createDeploymentPageToken(String scope, int lastDeploymentNumber) {
+        while (deploymentPageTokens.size() >= MAX_DEPLOYMENT_PAGE_TOKENS) {
+            deploymentPageTokens.keySet().stream().findFirst().ifPresent(deploymentPageTokens::remove);
+        }
+        String token = UUID.randomUUID().toString().replace("-", "");
+        deploymentPageTokens.put(token, new DeploymentPageToken(scope, lastDeploymentNumber));
+        return token;
+    }
+
+    private record DeploymentPageToken(String scope, int lastDeploymentNumber) {
+    }
+
+    public record DeploymentPage(List<DeploymentSummary> items, String nextToken) {
     }
 
     public String getActiveVersion(String envId, String profileId) {

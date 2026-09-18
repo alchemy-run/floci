@@ -35,6 +35,7 @@ The management plane allows you to create and manage applications, environments,
 - `DeleteDeploymentStrategy`
 - `StartDeployment` : honors `DeploymentDurationInMinutes`. A strategy with duration `0` completes immediately (`COMPLETE`); a positive duration stays `DEPLOYING` until the duration elapses or `StopDeployment` rolls it back. Instant completions still fire `ON_DEPLOYMENT_START` then `ON_DEPLOYMENT_COMPLETE`.
 - `GetDeployment`
+- `ListDeployments` (`GET /applications/{ApplicationId}/environments/{EnvironmentId}/deployments`)
 - `StopDeployment` : in-flight (`DEPLOYING` / `BAKING` / `VALIDATING`) deployments transition to `ROLLED_BACK` and fire `ON_DEPLOYMENT_ROLLED_BACK`. Terminal states return `BadRequestException`.
 - `CreateExtension`
 - `GetExtension`

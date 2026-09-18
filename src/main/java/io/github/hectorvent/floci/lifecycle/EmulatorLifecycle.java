@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.lifecycle;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
+import io.github.hectorvent.floci.core.common.ContainerTeardowns;
 import io.github.hectorvent.floci.core.common.ServiceRegistry;
 import io.github.hectorvent.floci.core.storage.PersistentPathValidator;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -193,6 +194,10 @@ public class EmulatorLifecycle {
         if (sweptSessions > 0) {
             LOG.infov("Removed {0} orphaned Lambda execution-role session(s)", sweptSessions);
         }
+        int sweptEc2Sessions = iamService.sweepOrphanedEc2InstanceSessions();
+        if (sweptEc2Sessions > 0) {
+            LOG.infov("Removed {0} orphaned EC2 instance session(s)", sweptEc2Sessions);
+        }
         schemaCreationWorker.recoverOrphans();
         schemaCreationWorker.rehydrateSchemas();
         stepFunctionsService.abortAbandonedExecutions();
@@ -325,14 +330,7 @@ public class EmulatorLifecycle {
         // Centralized teardown for process-bound containers (Lambda warm pool, ECS tasks,
         // EC2 instances, in-flight build/job containers). Runs before shutdownAll() so any
         // state written while stopping is captured by the final flush.
-        for (ContainerTeardown teardown : containerTeardowns) {
-            try {
-                teardown.stopManagedContainers();
-            } catch (Exception e) {
-                LOG.warnv("Container teardown failed for {0}: {1}",
-                        teardown.getClass().getSimpleName(), e.getMessage());
-            }
-        }
+        ContainerTeardowns.stopAll(containerTeardowns, LOG);
         runCleanup("storage shutdown", storageFactory::shutdownAll);
 
         LOG.info("=== AWS Local Emulator Stopped ===");

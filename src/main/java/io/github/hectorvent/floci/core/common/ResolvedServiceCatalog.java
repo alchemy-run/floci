@@ -38,11 +38,17 @@ import io.github.hectorvent.floci.services.cloudfront.CloudFrontKvsDataPlaneCont
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontServingController;
 import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontEdgeController;
 import io.github.hectorvent.floci.services.route53.Route53Controller;
+import io.github.hectorvent.floci.services.ses.SesAccountController;
+import io.github.hectorvent.floci.services.ses.SesConfigurationSetController;
 import io.github.hectorvent.floci.services.ses.SesContactController;
-import io.github.hectorvent.floci.services.ses.SesController;
 import io.github.hectorvent.floci.services.ses.SesCvetController;
 import io.github.hectorvent.floci.services.ses.SesDedicatedIpController;
+import io.github.hectorvent.floci.services.ses.SesIdentityController;
+import io.github.hectorvent.floci.services.ses.SesSendController;
+import io.github.hectorvent.floci.services.ses.SesSuppressionController;
+import io.github.hectorvent.floci.services.ses.SesTagController;
 import io.github.hectorvent.floci.services.ses.SesTemplateController;
+import io.github.hectorvent.floci.services.ses.SesTenantController;
 import io.github.hectorvent.floci.services.appsync.AppSyncController;
 import io.github.hectorvent.floci.services.rdsdata.RdsDataController;
 import io.github.hectorvent.floci.services.guardduty.GuardDutyController;
@@ -298,9 +304,12 @@ public class ResolvedServiceCatalog {
                         "ses", config.storage().mode(), 5000L, AwsNamespaces.SES, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON, ServiceProtocol.QUERY),
                         Set.of(), Set.of("email", "ses", "sesv2"), Set.of(),
-                        Set.of(SesController.class, SesContactController.class,
-                                SesCvetController.class, SesDedicatedIpController.class,
-                                SesTemplateController.class)),
+                        Set.of(SesAccountController.class, SesConfigurationSetController.class,
+                                SesContactController.class, SesCvetController.class,
+                                SesDedicatedIpController.class, SesIdentityController.class,
+                                SesSendController.class, SesSuppressionController.class,
+                                SesTagController.class, SesTemplateController.class,
+                                SesTenantController.class)),
                 descriptor("es", "opensearch", config.services().opensearch().enabled(), true,
                         "opensearch", storageMode(config.storage().services().opensearch().mode(), config.storage().mode()),
                         config.storage().services().opensearch().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -714,6 +723,11 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("codeguru-reviewer"), Set.of(),
                         Set.of(io.github.hectorvent.floci.services.codegurureviewer.CodeGuruReviewerController.class)),
+                descriptor("codeartifact", "codeartifact", config.services().codeartifact().enabled(), true,
+                        "codeartifact", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("codeartifact"), Set.of(),
+                        Set.of(io.github.hectorvent.floci.services.codeartifact.CodeArtifactController.class)),
                 descriptor("verifiedpermissions", "verifiedpermissions", config.services().verifiedpermissions().enabled(), true,
                         "verifiedpermissions", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

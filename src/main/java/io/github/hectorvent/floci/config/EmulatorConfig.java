@@ -198,6 +198,9 @@ public interface EmulatorConfig {
         @WithDefault("false")
         boolean disableCorsHeaders();
 
+        @WithDefault("false")
+        boolean allowPrivateJwtTargets();
+
         /**
          * Whether to grant Private Network Access preflights (respond with
          * {@code Access-Control-Allow-Private-Network: true}) when the browser asks.
@@ -786,7 +789,13 @@ public interface EmulatorConfig {
         LakeFormationServiceConfig lakeformation();
         EfsServiceConfig efs();
         CodeGuruReviewerServiceConfig codegurureviewer();
+        CodeArtifactServiceConfig codeartifact();
         MarketplaceServiceConfig marketplace();
+    }
+
+    interface CodeArtifactServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface ConnectServiceConfig {
@@ -989,7 +998,7 @@ public interface EmulatorConfig {
         /** When set, Floci uses this URL and skips Cedar sidecar container management. */
         Optional<String> cedarUrl();
 
-        @WithDefault("floci/floci:latest-cedar")
+        @WithDefault("floci/floci-sidecar-cedar:1.1.0")
         String cedarImage();
     }
 
@@ -1443,6 +1452,10 @@ public interface EmulatorConfig {
 
         /** Empty when Floci should adapt its built-in image to the requested engine version. */
         Optional<String> defaultMariadbImage();
+
+        /** Docker image used for SQL Server instances when no override is configured. */
+        @WithDefault("mcr.microsoft.com/mssql/server:2022-latest")
+        String defaultSqlServerImage();
 
         /** Hostname advertised for RDS endpoints. Uses published Docker ports when configured. */
         Optional<String> endpointHost();
@@ -2359,6 +2372,9 @@ public interface EmulatorConfig {
 
         /** Docker network to attach Lambda containers to. Empty = default bridge. */
         Optional<String> dockerNetwork();
+
+        /** Additional Docker create flags applied to every Lambda execution container. */
+        Optional<String> dockerFlags();
 
         /**
          * Base name prefix for the containers and code volumes Lambda spawns, replacing the

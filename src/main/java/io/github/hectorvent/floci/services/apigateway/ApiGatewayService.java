@@ -1,27 +1,6 @@
 package io.github.hectorvent.floci.services.apigateway;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
-import java.util.regex.Pattern;
-
-import io.github.hectorvent.floci.services.apigateway.model.EndpointConfiguration;
-import io.github.hectorvent.floci.services.apigateway.model.EndpointType;
-import org.jboss.logging.Logger;
-
 import com.fasterxml.jackson.core.type.TypeReference;
-
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.TlsCertificateManager;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -33,15 +12,17 @@ import io.github.hectorvent.floci.services.apigateway.model.ApiGatewayResource;
 import io.github.hectorvent.floci.services.apigateway.model.ApiKey;
 import io.github.hectorvent.floci.services.apigateway.model.Authorizer;
 import io.github.hectorvent.floci.services.apigateway.model.BasePathMapping;
-import io.github.hectorvent.floci.services.apigateway.model.MethodSetting;
 import io.github.hectorvent.floci.services.apigateway.model.CustomDomain;
 import io.github.hectorvent.floci.services.apigateway.model.Deployment;
+import io.github.hectorvent.floci.services.apigateway.model.EndpointConfiguration;
+import io.github.hectorvent.floci.services.apigateway.model.EndpointType;
 import io.github.hectorvent.floci.services.apigateway.model.GatewayResponse;
 import io.github.hectorvent.floci.services.apigateway.model.GatewayResponseType;
 import io.github.hectorvent.floci.services.apigateway.model.Integration;
 import io.github.hectorvent.floci.services.apigateway.model.IntegrationResponse;
 import io.github.hectorvent.floci.services.apigateway.model.MethodConfig;
 import io.github.hectorvent.floci.services.apigateway.model.MethodResponse;
+import io.github.hectorvent.floci.services.apigateway.model.MethodSetting;
 import io.github.hectorvent.floci.services.apigateway.model.Model;
 import io.github.hectorvent.floci.services.apigateway.model.QuotaSettings;
 import io.github.hectorvent.floci.services.apigateway.model.RequestValidator;
@@ -60,6 +41,23 @@ import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class ApiGatewayService {
@@ -186,22 +184,19 @@ public class ApiGatewayService {
                             "Unsupported patch operation: " + opType, 400);
                 }
 
-                switch (path) {
-                    case "/cloudwatchRoleArn" -> {
-                        if ("remove".equals(opType)) {
-                            copy.setCloudwatchRoleArn(null);
-                        } else {
-                            copy.setCloudwatchRoleArn(value);
-                        }
+                if (path.equals("/cloudwatchRoleArn")) {
+                    if ("remove".equals(opType)) {
+                        copy.setCloudwatchRoleArn(null);
+                    } else {
+                        copy.setCloudwatchRoleArn(value);
                     }
-                    default -> {
-                        if (path.startsWith("/throttleSettings")) {
-                            throw new AwsException("BadRequestException",
-                                    "/throttleSettings value cannot be changed this way", 400);
-                        }
+                } else {
+                    if (path.startsWith("/throttleSettings")) {
                         throw new AwsException("BadRequestException",
-                                "Unsupported patch path: " + path, 400);
+                                "/throttleSettings value cannot be changed this way", 400);
                     }
+                    throw new AwsException("BadRequestException",
+                            "Unsupported patch path: " + path, 400);
                 }
             }
         }
@@ -538,6 +533,34 @@ public class ApiGatewayService {
             integration.setPassthroughBehavior((String) request.get("passthroughBehavior"));
         }
 
+        integration.setContentHandling((String) request.get("contentHandling"));
+        integration.setCredentials((String) request.get("credentials"));
+        integration.setCacheNamespace((String) request.get("cacheNamespace"));
+        if (request.get("connectionType") != null) {
+            integration.setConnectionType((String) request.get("connectionType"));
+        }
+        integration.setConnectionId((String) request.get("connectionId"));
+
+        if (request.get("timeoutInMillis") instanceof Number timeout) {
+            // AWS accepts 50ms upward; the 29s ceiling applies only to edge-optimized APIs, and
+            // Regional/private APIs (Floci's default) may exceed it, so only the floor is enforced.
+            if (timeout.intValue() < 50) {
+                throw new AwsException("BadRequestException",
+                        "Invalid timeout value: " + timeout.intValue(), 400);
+            }
+            integration.setTimeoutInMillis(timeout.intValue());
+        }
+
+        if (request.get("cacheKeyParameters") instanceof List<?> cacheKeys) {
+            integration.setCacheKeyParameters(cacheKeys.stream()
+                    .filter(String.class::isInstance).map(String.class::cast).toList());
+        }
+
+        if (request.get("tlsConfig") instanceof Map<?, ?> tls) {
+            integration.setTlsConfig(new Integration.TlsConfig(
+                    Boolean.TRUE.equals(tls.get("insecureSkipVerification"))));
+        }
+
         @SuppressWarnings("unchecked")
         Map<String, String> reqParams = (Map<String, String>) request.get("requestParameters");
         if (reqParams != null) integration.setRequestParameters(reqParams);
@@ -583,7 +606,8 @@ public class ApiGatewayService {
 
         IntegrationResponse ir = new IntegrationResponse(statusCode, selectionPattern,
                 respParams != null ? respParams : new HashMap<>(),
-                respTemplates != null ? respTemplates : new HashMap<>());
+                respTemplates != null ? respTemplates : new HashMap<>(),
+                (String) request.get("contentHandling"));
 
         integration.getIntegrationResponses().put(statusCode, ir);
         resourceStore.put(resourceKey(region, apiId, resourceId),
@@ -742,6 +766,11 @@ public class ApiGatewayService {
         @SuppressWarnings("unchecked")
         Map<String, String> variables = (Map<String, String>) request.get("variables");
         if (variables != null) stage.setVariables(variables);
+
+        if (Boolean.TRUE.equals(request.get("cacheClusterEnabled"))) {
+            stage.setCacheClusterEnabled(true);
+            stage.setCacheClusterSize((String) request.getOrDefault("cacheClusterSize", "0.5"));
+        }
 
         stageStore.put(stageKey(region, apiId, stageName), stage);
         LOG.infov("Created stage {0} for API {1}", stageName, apiId);
@@ -975,22 +1004,29 @@ public class ApiGatewayService {
         apiKey.setCreatedDate(System.currentTimeMillis() / 1000L);
         apiKey.setLastUpdatedDate(apiKey.getCreatedDate());
         apiKey.setDescription((String) request.get("description"));
+        apiKey.setCustomerId((String) request.get("customerId"));
 
-        boolean generateDistinctId = Boolean.TRUE.equals(request.get("generateDistinctId"));
         String suppliedValue = (String) request.get("value");
+        String keyValue = (suppliedValue != null && !suppliedValue.isBlank())
+                ? suppliedValue
+                : UUID.randomUUID().toString().replace("-", "");
+        boolean generateDistinctId = !Boolean.FALSE.equals(request.get("generateDistinctId"));
+        apiKey.setId(generateDistinctId ? shortId(10) : keyValue);
+        apiKey.setValue(keyValue);
 
-        if (!generateDistinctId) {
-            String sharedValue = (suppliedValue != null && !suppliedValue.isBlank())
-                    ? suppliedValue
-                    : UUID.randomUUID().toString().replace("-", "");
-            apiKey.setId(sharedValue);
-            apiKey.setValue(sharedValue);
-        } else {
-            apiKey.setId(shortId(10));
-            apiKey.setValue((suppliedValue != null && !suppliedValue.isBlank())
-                    ? suppliedValue
-                    : UUID.randomUUID().toString().replace("-", ""));
+        List<String> stageKeys = new ArrayList<>();
+        if (request.get("stageKeys") instanceof List<?> rawStageKeys) {
+            for (Object rawStageKey : rawStageKeys) {
+                if (rawStageKey instanceof Map<?, ?> stageKey) {
+                    Object restApiId = stageKey.get("restApiId");
+                    Object stageName = stageKey.get("stageName");
+                    if (restApiId != null && stageName != null) {
+                        stageKeys.add(restApiId + "/" + stageName);
+                    }
+                }
+            }
         }
+        apiKey.setStageKeys(stageKeys);
 
         Map<String, String> tags = new HashMap<>();
         if (request.get("tags") instanceof Map<?, ?> rawTags) {
@@ -1118,6 +1154,7 @@ public class ApiGatewayService {
                     case "/name"        -> key.setName(op.get("value"));
                     case "/description" -> key.setDescription(op.get("value"));
                     case "/enabled"     -> key.setEnabled(Boolean.parseBoolean(op.get("value")));
+                    case "/customerId"  -> key.setCustomerId(op.get("value"));
                 }
             }
         }
@@ -3161,6 +3198,12 @@ public class ApiGatewayService {
         integrationRequest.put("httpMethod", integrationExt.get("httpMethod"));
         integrationRequest.put("uri", integrationExt.get("uri"));
         integrationRequest.put("passthroughBehavior", integrationExt.get("passthroughBehavior"));
+        for (String field : List.of("contentHandling", "timeoutInMillis", "connectionType",
+                "connectionId", "credentials", "cacheNamespace", "cacheKeyParameters", "tlsConfig")) {
+            if (integrationExt.get(field) != null) {
+                integrationRequest.put(field, integrationExt.get(field));
+            }
+        }
 
         Map<String, String> reqParams = (Map<String, String>) integrationExt.get("requestParameters");
         if (reqParams != null) integrationRequest.put("requestParameters", reqParams);
@@ -3197,56 +3240,6 @@ public class ApiGatewayService {
 
 
     // ──────────────────────────── VPC Links (v1) ────────────────────────────
-
-    public VpcLink createVpcLink(String region, Map<String, Object> request) {
-        VpcLink link = new VpcLink();
-        link.setId(shortId(10));
-        link.setName((String) request.get("name"));
-        link.setDescription((String) request.get("description"));
-        link.setTargetArns(readStringList(request.get("targetArns")));
-        link.setStatus("AVAILABLE");
-        if (request.get("tags") instanceof Map<?, ?> rawTags) {
-            Map<String, String> tags = new HashMap<>();
-            rawTags.forEach((key, value) -> tags.put(String.valueOf(key), String.valueOf(value)));
-            link.setTags(tags);
-        }
-        vpcLinkStore.put(vpcLinkKey(region, link.getId()), link);
-        LOG.infov("Created VPC link {0}", link.getId());
-        return link;
-    }
-
-    public VpcLink getVpcLink(String region, String vpcLinkId) {
-        return vpcLinkStore.get(vpcLinkKey(region, vpcLinkId))
-                .orElseThrow(() -> new AwsException("NotFoundException", "Invalid VPC Link identifier specified", 404));
-    }
-
-    public List<VpcLink> getVpcLinks(String region) {
-        String prefix = region + "::";
-        return vpcLinkStore.scan(k -> k.startsWith(prefix));
-    }
-
-    public VpcLink updateVpcLink(String region, String vpcLinkId, List<Map<String, String>> patchOperations) {
-        VpcLink link = getVpcLink(region, vpcLinkId);
-        if (patchOperations != null) {
-            for (Map<String, String> op : patchOperations) {
-                if (!"replace".equals(op.get("op")) && !"add".equals(op.get("op"))) continue;
-                String path = op.getOrDefault("path", "");
-                String value = op.get("value");
-                if ("/name".equals(path)) {
-                    link.setName(value);
-                } else if ("/description".equals(path)) {
-                    link.setDescription(value);
-                }
-            }
-        }
-        vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
-        return link;
-    }
-
-    public void deleteVpcLink(String region, String vpcLinkId) {
-        getVpcLink(region, vpcLinkId);
-        vpcLinkStore.delete(vpcLinkKey(region, vpcLinkId));
-    }
 
     // ──────────────────────────── v2 Domain Names ────────────────────────────
 
@@ -3509,6 +3502,91 @@ public class ApiGatewayService {
 
     private String gatewayResponseKey(String region, String apiId, String responseType) {
         return region + "::" + apiId + "::" + responseType;
+    }
+
+    // ──────────────────────────── VPC Links (v1) ────────────────────────────
+
+    public VpcLink createVpcLink(String region, Map<String, Object> request) {
+        String name = (String) request.get("name");
+        if (name == null || name.isBlank()) {
+            throw new AwsException("BadRequestException", "Vpc link name must be specified", 400);
+        }
+
+        @SuppressWarnings("unchecked")
+        List<String> targetArns = request.get("targetArns") instanceof List<?> arns
+                ? (List<String>) arns : List.of();
+        if (targetArns.isEmpty()) {
+            throw new AwsException("BadRequestException",
+                    "At least one target ARN must be specified", 400);
+        }
+
+        VpcLink link = new VpcLink();
+        link.setId(shortId(10));
+        link.setName(name);
+        link.setDescription((String) request.get("description"));
+        link.setTargetArns(targetArns);
+        // Floci has no real VPC to provision against, so the link is immediately usable rather
+        // than transitioning PENDING → AVAILABLE as it does in AWS.
+        link.setStatus("AVAILABLE");
+
+        if (request.get("tags") instanceof Map<?, ?> tags) {
+            Map<String, String> stringTags = new HashMap<>();
+            tags.forEach((k, v) -> {
+                if (k != null && v != null) stringTags.put(k.toString(), v.toString());
+            });
+            link.setTags(stringTags);
+        }
+
+        vpcLinkStore.put(vpcLinkKey(region, link.getId()), link);
+        LOG.infov("Created VPC Link: {0} ({1}) in {2}", link.getName(), link.getId(), region);
+        return link;
+    }
+
+    public VpcLink getVpcLink(String region, String vpcLinkId) {
+        return vpcLinkStore.get(vpcLinkKey(region, vpcLinkId))
+                .orElseThrow(() -> new AwsException("NotFoundException", "Invalid VPC link identifier specified", 404));
+    }
+
+    public List<VpcLink> getVpcLinks(String region) {
+        return vpcLinkStore.scan(k -> k.startsWith(region + "::"));
+    }
+
+    /**
+     * AWS's patch-operation table for a VPC link supports only {@code replace}, and only on
+     * {@code /name} and {@code /description}. Applying anything else is an error rather than a
+     * no-op: silently accepting {@code op=remove,path=/name} would have set the name to the
+     * supplied value, and silently ignoring an unknown path would report success for a change that
+     * never happened.
+     */
+    public VpcLink updateVpcLink(String region, String vpcLinkId, List<Map<String, String>> patchOperations) {
+        VpcLink link = getVpcLink(region, vpcLinkId);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                String operation = op.get("op");
+                String path = op.get("path");
+                String value = op.get("value");
+                if (!"replace".equals(operation)) {
+                    throw new AwsException("BadRequestException", "Unsupported operation", 400);
+                }
+                if (path == null) {
+                    throw new AwsException("BadRequestException", "Missing path", 400);
+                }
+                switch (path) {
+                    case "/name" -> link.setName(value);
+                    case "/description" -> link.setDescription(value);
+                    default -> throw new AwsException("BadRequestException",
+                            "Invalid patch path  '" + path + "' specified for op 'replace'. "
+                                    + "Must be one of: [/name, /description]", 400);
+                }
+            }
+        }
+        vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
+        return link;
+    }
+
+    public void deleteVpcLink(String region, String vpcLinkId) {
+        getVpcLink(region, vpcLinkId);
+        vpcLinkStore.delete(vpcLinkKey(region, vpcLinkId));
     }
 
     private String vpcLinkKey(String region, String vpcLinkId) {

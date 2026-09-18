@@ -1,10 +1,10 @@
 package io.github.hectorvent.floci.services.ec2;
 
+import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
-import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.ec2.model.*;
 import io.github.hectorvent.floci.services.kms.KmsService;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -3251,8 +3251,18 @@ public class Ec2QueryHandler {
 
     // ─── Key Pair handlers ────────────────────────────────────────────────────
 
-    private Response handleCreateKeyPair(MultivaluedMap<String, String> p, String region) {
+    // KeyName is required on CreateKeyPair and ImportKeyPair. Accepting its absence used to store
+    // a nameless key pair, and the first nameless record broke every later CreateKeyPair (#3356).
+    private static String requireKeyName(MultivaluedMap<String, String> p) {
         String keyName = p.getFirst("KeyName");
+        if (keyName == null || keyName.isBlank()) {
+            throw new AwsException("MissingParameter", "The request must contain the parameter KeyName", 400);
+        }
+        return keyName;
+    }
+
+    private Response handleCreateKeyPair(MultivaluedMap<String, String> p, String region) {
+        String keyName = requireKeyName(p);
         String keyType = p.getFirst("KeyType");
         KeyPair kp = service.createKeyPair(region, keyName, keyType);
         applyResourceTags(p, region, "key-pair", kp.getKeyPairId());
@@ -3292,14 +3302,36 @@ public class Ec2QueryHandler {
     private Response handleDeleteKeyPair(MultivaluedMap<String, String> p, String region) {
         String keyName = p.getFirst("KeyName");
         String keyPairId = p.getFirst("KeyPairId");
-        service.deleteKeyPair(region, keyName, keyPairId);
-        return booleanResponse("DeleteKeyPair");
+        boolean noName = keyName == null || keyName.isBlank();
+        boolean noId = keyPairId == null || keyPairId.isBlank();
+        if (noName && noId) {
+            throw new AwsException("MissingParameter", "The request must contain the parameter KeyName", 400);
+        }
+        KeyPair deleted = service.deleteKeyPair(region, keyName, keyPairId);
+        XmlBuilder xml = new XmlBuilder()
+                .start("DeleteKeyPairResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .elem("return", "true");
+        if (deleted != null) {
+            xml.elem("keyPairId", deleted.getKeyPairId());
+        }
+        xml.end("DeleteKeyPairResponse");
+        return xmlResponse(xml.build());
     }
 
     private Response handleImportKeyPair(MultivaluedMap<String, String> p, String region) {
-        String keyName = p.getFirst("KeyName");
+        String keyName = requireKeyName(p);
         String encoded = p.getFirst("PublicKeyMaterial");
-        String publicKeyMaterial = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
+        if (encoded == null || encoded.isBlank()) {
+            throw new AwsException("MissingParameter",
+                    "The request must contain the parameter PublicKeyMaterial", 400);
+        }
+        String publicKeyMaterial;
+        try {
+            publicKeyMaterial = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidKey.Format", "Key is not in valid OpenSSH public key format", 400);
+        }
         KeyPair kp = service.importKeyPair(region, keyName, publicKeyMaterial);
         applyResourceTags(p, region, "key-pair", kp.getKeyPairId());
         XmlBuilder xml = new XmlBuilder()
@@ -3365,6 +3397,7 @@ public class Ec2QueryHandler {
                     .elem("imageOwnerAlias", img.getImageOwnerAlias())
                     .elem("creationDate", img.getCreationDate())
                     .raw(blockDeviceMappingXml(img.getBlockDeviceMappings()))
+                    .raw(tagSetXml(img.getTags()))
                     .end("item");
         }
         xml.end("imagesSet").end("DescribeImagesResponse");
@@ -3398,7 +3431,7 @@ public class Ec2QueryHandler {
                 .stream().findFirst()
                 .orElseGet(() -> firstFilterValue(filters, "owner-alias", AMAZON_OWNER_ID));
         return switch (requested) {
-            case "self" -> config.defaultAccountId();
+            case "self" -> service.callerAccountId();
             case "amazon" -> AMAZON_OWNER_ID;
             case "aws-marketplace" -> AWS_MARKETPLACE_OWNER_ID;
             default -> requested;
@@ -4700,7 +4733,7 @@ public class Ec2QueryHandler {
         if (name == null || name.isBlank()) {
             return null;
         }
-        return AwsArnUtils.Arn.of("iam", "", config.defaultAccountId(), "instance-profile/" + name).toString();
+        return AwsArnUtils.Arn.of("iam", "", service.callerAccountId(), "instance-profile/" + name).toString();
     }
 
     private String vpcXml(Vpc vpc) {

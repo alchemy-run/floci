@@ -60,6 +60,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -736,6 +737,40 @@ class Ec2ServiceTest {
     }
 
     @Test
+    void describeImagesWritesRefreshedTagsBackWhenStorageReturnsDetachedImages() {
+        DetachedImageStorage imageStorage = new DetachedImageStorage();
+        Ec2ImageCatalog imageCatalog = new Ec2ImageCatalog();
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class), new AmiImageResolver(imageCatalog), imageCatalog,
+                new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory(Map.of("ec2-registered-images.json", imageStorage)));
+
+        Image stored = new Image();
+        stored.setImageId("ami-detached-tags");
+        stored.setName("detached-tags");
+        stored.setOwnerId("000000000000");
+        stored.setPublic(false);
+        stored.setImageOwnerAlias(null);
+        stored.setRegion("us-east-1");
+        imageStorage.put("us-east-1::ami-detached-tags", stored);
+        int putsBeforeDescribe = imageStorage.putCount();
+
+        Tag tag = new Tag();
+        tag.setKey("ManagedBy");
+        tag.setValue("test");
+        service.createTags("us-east-1", List.of(stored.getImageId()), List.of(tag));
+
+        List<Image> described = service.describeImages(
+                "us-east-1", List.of(stored.getImageId()), List.of(), Map.of());
+
+        assertEquals(1, described.size());
+        assertEquals("test", described.getFirst().getTags().getFirst().getValue());
+        assertTrue(imageStorage.putCount() > putsBeforeDescribe,
+                "DescribeImages must persist refreshed tags even when scan() returns detached values");
+        assertEquals("test", imageStorage.storedImage().getTags().getFirst().getValue());
+    }
+
+    @Test
     void describeInstanceTypesUsesExactCatalogMatches() {
         Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
                 mock(Ec2PortForwardManager.class),
@@ -1161,6 +1196,75 @@ class Ec2ServiceTest {
                 service.importKeyPair("us-east-1", "pinned-rsa", rsaKey).getKeyFingerprint());
         assertEquals("UOyzahv0Ty520U89wfCvKdTlp2TbtpmnlpJHPW3MbMk=",
                 service.importKeyPair("us-east-1", "pinned-ed25519", ed25519Key).getKeyFingerprint());
+    }
+
+    @Test
+    void createKeyPairRejectsMissingKeyName() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+
+        for (String missing : new String[] {null, "", "   "}) {
+            AwsException error = assertThrows(AwsException.class,
+                    () -> service.createKeyPair("us-east-1", missing));
+            assertEquals("MissingParameter", error.getErrorCode());
+            assertEquals(400, error.getHttpStatus());
+        }
+        assertTrue(service.describeKeyPairs("us-east-1", List.of(), List.of()).isEmpty());
+    }
+
+    @Test
+    void importKeyPairRejectsMissingKeyName() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.importKeyPair("us-east-1", null, "c3NoLXJzYSBBQUFB"));
+        assertEquals("MissingParameter", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void createKeyPairSurvivesANamelessRecordInTheStore() {
+        // Regression for #3356: a key pair stored without a name (accepted before KeyName was
+        // validated) made the duplicate check throw on every later CreateKeyPair.
+        AccountAwareStorageBackend<KeyPair> keyPairStore = AccountAwareStorageBackend.inMemory("000000000000");
+        KeyPair nameless = new KeyPair();
+        nameless.setKeyPairId("key-nameless");
+        nameless.setRegion("us-east-1");
+        keyPairStore.put("us-east-1:key-nameless", nameless);
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory(Map.of("ec2-key-pairs.json", keyPairStore)));
+
+        KeyPair created = service.createKeyPair("us-east-1", "fresh");
+        KeyPair imported = service.importKeyPair("us-east-1", "fresh-imported",
+                Ec2KeyMaterial.generateRsa().openSshPublicKey());
+
+        assertEquals("fresh", created.getKeyName());
+        assertEquals("fresh-imported", imported.getKeyName());
+        assertNull(service.deleteKeyPair("us-east-1", "no-such-name", null));
+        assertEquals(3, service.describeKeyPairs("us-east-1", List.of(), List.of()).size());
+    }
+
+    @Test
+    void deleteKeyPairReturnsTheDeletedRecordOrNull() {
+        Ec2Service service = new Ec2Service(mockConfig(true), mock(Ec2ContainerManager.class),
+                mock(Ec2PortForwardManager.class),
+                mock(AmiImageResolver.class), mock(Ec2ImageCatalog.class), new Ec2InstanceTypeCatalog(),
+                new InMemoryStorageFactory());
+        KeyPair byName = service.createKeyPair("us-east-1", "delete-by-name");
+        KeyPair byId = service.createKeyPair("us-east-1", "delete-by-id");
+
+        assertEquals(byName.getKeyPairId(), service.deleteKeyPair("us-east-1", "delete-by-name", null).getKeyPairId());
+        assertEquals(byId.getKeyPairId(), service.deleteKeyPair("us-east-1", null, byId.getKeyPairId()).getKeyPairId());
+        assertNull(service.deleteKeyPair("us-east-1", "delete-by-name", null));
+        assertNull(service.deleteKeyPair("us-east-1", null, byId.getKeyPairId()));
+        assertTrue(service.describeKeyPairs("us-east-1", List.of(), List.of()).isEmpty());
     }
 
     @Test
@@ -4151,6 +4255,68 @@ class Ec2ServiceTest {
                 return (AccountAwareStorageBackend<V>) override;
             }
             return AccountAwareStorageBackend.inMemory("000000000000");
+        }
+    }
+
+    private static final class DetachedImageStorage extends AccountAwareStorageBackend<Image> {
+        private final Map<String, Image> values = new HashMap<>();
+        private int putCount;
+
+        private DetachedImageStorage() {
+            super(new io.github.hectorvent.floci.core.storage.InMemoryStorage<>(), null, "000000000000");
+        }
+
+        @Override
+        public void put(String key, Image value) {
+            putCount++;
+            values.put(key, copy(value));
+        }
+
+        @Override
+        public Optional<Image> get(String key) {
+            Image value = values.get(key);
+            return value == null ? Optional.empty() : Optional.of(copy(value));
+        }
+
+        @Override
+        public List<Image> scan(Predicate<String> keyFilter) {
+            return values.entrySet().stream()
+                    .filter(entry -> keyFilter.test(entry.getKey()))
+                    .map(entry -> copy(entry.getValue()))
+                    .toList();
+        }
+
+        private int putCount() {
+            return putCount;
+        }
+
+        private Image storedImage() {
+            return copy(values.get("us-east-1::ami-detached-tags"));
+        }
+
+        private static Image copy(Image source) {
+            Image copy = new Image();
+            copy.setImageId(source.getImageId());
+            copy.setName(source.getName());
+            copy.setDescription(source.getDescription());
+            copy.setState(source.getState());
+            copy.setOwnerId(source.getOwnerId());
+            copy.setPublic(source.isPublic());
+            copy.setArchitecture(source.getArchitecture());
+            copy.setRootDeviceType(source.getRootDeviceType());
+            copy.setRootDeviceName(source.getRootDeviceName());
+            copy.setVirtualizationType(source.getVirtualizationType());
+            copy.setHypervisor(source.getHypervisor());
+            copy.setPlatform(source.getPlatform());
+            copy.setImageOwnerAlias(source.getImageOwnerAlias());
+            copy.setCreationDate(source.getCreationDate());
+            copy.setRegion(source.getRegion());
+            copy.setSourceImageId(source.getSourceImageId());
+            copy.setDockerImage(source.getDockerImage());
+            copy.setBlockDeviceMappings(source.getBlockDeviceMappings() == null
+                    ? List.of() : new java.util.ArrayList<>(source.getBlockDeviceMappings()));
+            copy.setTags(source.getTags() == null ? List.of() : new java.util.ArrayList<>(source.getTags()));
+            return copy;
         }
     }
 }

@@ -306,11 +306,27 @@ def test_deferral_beyond_the_warning_window_is_not_flagged():
     assert r["docs"]["deferred_expiring"] == []
 
 
+def test_row_exempt_facet_pages_are_counted_without_requiring_a_matrix_row():
+    r = si.reconcile(_data(doc_pages=["iam", "s3", "iam-verification"],
+                           facet_pages=["iam-verification"]))
+    assert r["counts"]["matrix_pages"] == 2
+    assert r["counts"]["doc_pages"] == 3
+    assert r["docs"]["pages_without_row"] == []
+    assert r["docs"]["rows_without_page"] == []
+
+
+def test_facet_exemption_does_not_hide_an_unregistered_page():
+    r = si.reconcile(_data(doc_pages=["iam", "s3", "iam-verification", "unregistered"],
+                           facet_pages=["iam-verification"]))
+    assert r["docs"]["pages_without_row"] == ["unregistered"]
+
+
 # --------------------------------------------------------------------------- #
 # End to end, against the real repo
 # --------------------------------------------------------------------------- #
 def test_real_sources_parse_and_render():
-    result = si.reconcile(si.collect(si._repo_root()))
+    data = si.collect(si._repo_root())
+    result = si.reconcile(data)
     counts = result["counts"]
     # Not pinned to exact values: they move every time a service lands. What must hold
     # is that every source parsed to something plausible and the two gated equalities
@@ -320,9 +336,10 @@ def test_real_sources_parse_and_render():
             assert count == 0
         else:
             assert count > 50
-    assert counts["matrix_pages"] == counts["doc_pages"]
+    assert counts["matrix_pages"] == len(set(data["doc_pages"]) - set(data["facet_pages"]))
     assert counts["config_accessors"] == counts["yaml_keys"]
     assert result["docs"]["pages_without_row"] == []
+    assert result["docs"]["rows_without_page"] == []
     assert result["packages"]["unregistered"] == []
     assert "THE ANSWER" in si.render(result)
 

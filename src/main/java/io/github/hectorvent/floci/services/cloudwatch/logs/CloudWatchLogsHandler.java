@@ -11,7 +11,6 @@ import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogDestination;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogEvent;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogGroup;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogStream;
-import io.github.hectorvent.floci.services.cloudwatch.logs.model.MetricFilter;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.ResourcePolicy;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.SubscriptionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,14 +28,17 @@ public class CloudWatchLogsHandler {
 
     private final CloudWatchLogsService logsService;
     private final CloudWatchLogsCrossAccountService crossAccountService;
+    private final CloudWatchLogsMetricFilterHandler metricFilterHandler;
     private final ObjectMapper objectMapper;
 
     @Inject
     public CloudWatchLogsHandler(CloudWatchLogsService logsService,
                                  CloudWatchLogsCrossAccountService crossAccountService,
+                                 CloudWatchLogsMetricFilterService metricFilterService,
                                  ObjectMapper objectMapper) {
         this.logsService = logsService;
         this.crossAccountService = crossAccountService;
+        this.metricFilterHandler = new CloudWatchLogsMetricFilterHandler(metricFilterService, objectMapper);
         this.objectMapper = objectMapper;
     }
 
@@ -63,6 +65,8 @@ public class CloudWatchLogsHandler {
             case "PutSubscriptionFilter" -> handlePutSubscriptionFilter(request, region);
             case "DescribeSubscriptionFilters" -> handleDescribeSubscriptionFilters(request, region);
             case "DeleteSubscriptionFilter" -> handleDeleteSubscriptionFilter(request, region);
+            case "PutMetricFilter", "DescribeMetricFilters", "DeleteMetricFilter", "TestMetricFilter" ->
+                    metricFilterHandler.handle(action, request, region);
             case "AssociateKmsKey" -> handleAssociateKmsKey(request, region);
             case "DisassociateKmsKey" -> handleDisassociateKmsKey(request, region);
             case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
@@ -80,9 +84,6 @@ public class CloudWatchLogsHandler {
             case "GetLogRecord" -> handleGetLogRecord(request, region);
             case "DescribeDestinations" -> handleDescribeDestinations(request, region);
             case "DeleteDestination" -> handleDeleteDestination(request, region);
-            case "PutMetricFilter" -> handlePutMetricFilter(request, region);
-            case "DescribeMetricFilters" -> handleDescribeMetricFilters(request, region);
-            case "DeleteMetricFilter" -> handleDeleteMetricFilter(request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                     .build();
@@ -151,7 +152,7 @@ public class CloudWatchLogsHandler {
                 node.put("kmsKeyId", g.getKmsKeyId());
             }
             node.put("storedBytes", 0);
-            node.put("metricFilterCount", 0);
+            node.put("metricFilterCount", metricFilterHandler.metricFilterCount(g.getLogGroupName(), region));
             groupsArray.add(node);
         }
         response.set("logGroups", groupsArray);
@@ -680,70 +681,6 @@ public class CloudWatchLogsHandler {
     }
 
 
-    private Response handlePutMetricFilter(JsonNode request, String region) {
-        String logGroupName = resolveLogGroupName(request);
-        String filterName = request.path("filterName").asText();
-        String filterPattern = request.path("filterPattern").asText("");
-        List<Map<String, Object>> transformations = new ArrayList<>();
-        request.path("metricTransformations").forEach(node -> {
-            Map<String, Object> t = new HashMap<>();
-            t.put("metricName", node.path("metricName").asText());
-            t.put("metricNamespace", node.path("metricNamespace").asText());
-            t.put("metricValue", node.path("metricValue").asText());
-            if (node.has("defaultValue")) {
-                t.put("defaultValue", node.path("defaultValue").asDouble());
-            }
-            transformations.add(t);
-        });
-        logsService.putMetricFilter(logGroupName, filterName, filterPattern, transformations, region);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleDescribeMetricFilters(JsonNode request, String region) {
-        String logGroupName = request.has("logGroupName") || request.has("logGroupIdentifier")
-                ? resolveLogGroupName(request) : null;
-        String filterNamePrefix = textOrNull(request, "filterNamePrefix");
-        String nextToken = textOrNull(request, "nextToken");
-        int limit = request.path("limit").asInt(0);
-        CloudWatchLogsService.DescribeMetricFiltersResult result =
-                logsService.describeMetricFilters(logGroupName, filterNamePrefix, nextToken, limit, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode filters = response.putArray("metricFilters");
-        for (MetricFilter f : result.metricFilters()) {
-            ObjectNode node = objectMapper.createObjectNode();
-            node.put("filterName", f.getFilterName());
-            node.put("logGroupName", f.getLogGroupName());
-            node.put("filterPattern", f.getFilterPattern());
-            node.put("creationTime", f.getCreationTime());
-            ArrayNode transforms = node.putArray("metricTransformations");
-            for (Map<String, Object> t : f.getMetricTransformations()) {
-                ObjectNode tn = objectMapper.createObjectNode();
-                if (t.get("metricName") != null) {
-                    tn.put("metricName", String.valueOf(t.get("metricName")));
-                }
-                if (t.get("metricNamespace") != null) {
-                    tn.put("metricNamespace", String.valueOf(t.get("metricNamespace")));
-                }
-                if (t.get("metricValue") != null) {
-                    tn.put("metricValue", String.valueOf(t.get("metricValue")));
-                }
-                if (t.get("defaultValue") instanceof Number n) {
-                    tn.put("defaultValue", n.doubleValue());
-                }
-                transforms.add(tn);
-            }
-            filters.add(node);
-        }
-        if (result.nextToken() != null) {
-            response.put("nextToken", result.nextToken());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleDeleteMetricFilter(JsonNode request, String region) {
-        logsService.deleteMetricFilter(resolveLogGroupName(request), request.path("filterName").asText(), region);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
 
     private Response handleGetDataProtectionPolicy(JsonNode request, String region) {
         // Data-protection policies are not modeled. Return HTTP 200 with the resolved

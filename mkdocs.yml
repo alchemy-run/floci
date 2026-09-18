@@ -154,6 +154,7 @@ nav:
     - EventBridge Pipes: services/pipes.md
     - EventBridge Scheduler: services/scheduler.md
     - CloudWatch: services/cloudwatch.md
+    - CloudWatch Metric Filter Verification: services/cloudwatch-metric-filters-verification.md
     - CloudWatch OAM: services/oam.md
     - CloudWatch RUM: services/rum.md
     - Managed Prometheus (AMP): services/managed-prometheus.md
@@ -184,6 +185,7 @@ nav:
     - SageMaker: services/sagemaker.md
     - CodeDeploy: services/codedeploy.md
     - CodeGuru Reviewer: services/codegurureviewer.md
+    - CodeArtifact: services/codeartifact.md
     - CodePipeline: services/codepipeline.md
     - Service Quotas: services/servicequotas.md
     - AWS RAM: services/ram.md

@@ -7,6 +7,8 @@ import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogEvent;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogGroup;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.LogStream;
+import io.github.hectorvent.floci.services.cloudwatch.logs.model.MetricFilter;
+import io.github.hectorvent.floci.services.cloudwatch.logs.model.MetricTransformation;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.SubscriptionFilter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ class CloudWatchLogsServiceTest {
     @BeforeEach
     void setUp() {
         service = new CloudWatchLogsService(
+                new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -80,6 +83,7 @@ class CloudWatchLogsServiceTest {
                 new AccountAwareStorageBackend<>(rawStreams, null, "000000000000"),
                 new AccountAwareStorageBackend<>(rawEvents, null, "000000000000"),
                 new AccountAwareStorageBackend<>(new InMemoryStorage<>(), null, "000000000000"),
+                new AccountAwareStorageBackend<>(new InMemoryStorage<>(), null, "000000000000"),
                 10_000, new RegionResolver(REGION, "000000000000"));
         String accountA = "111111111111";
         String accountB = "222222222222";
@@ -120,6 +124,7 @@ class CloudWatchLogsServiceTest {
                 new AccountAwareStorageBackend<>(rawStreams, null, accountB),
                 new AccountAwareStorageBackend<>(rawEvents, null, accountB),
                 new AccountAwareStorageBackend<>(new InMemoryStorage<>(), null, accountB),
+                new AccountAwareStorageBackend<>(new InMemoryStorage<>(), null, accountB),
                 10_000, new RegionResolver(REGION, accountB));
         long now = System.currentTimeMillis();
         long twoDaysAgo = now - 2 * 86_400_000L;
@@ -153,6 +158,7 @@ class CloudWatchLogsServiceTest {
                 new AccountAwareStorageBackend<>(rawGroups, null, accountB),
                 new AccountAwareStorageBackend<>(rawStreams, null, accountB),
                 new AccountAwareStorageBackend<>(rawEvents, null, accountB),
+                new AccountAwareStorageBackend<>(new InMemoryStorage<>(), null, accountB),
                 new AccountAwareStorageBackend<>(new InMemoryStorage<>(), null, accountB),
                 10_000, 2, new RegionResolver(REGION, accountB));
 
@@ -240,6 +246,7 @@ class CloudWatchLogsServiceTest {
 
     private static CloudWatchLogsService serviceWithStoredEventCeiling(int maxStoredEvents) {
         return new CloudWatchLogsService(
+                new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -820,6 +827,7 @@ class CloudWatchLogsServiceTest {
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
                 2,
                 new RegionResolver("us-east-1", "000000000000")
         );
@@ -900,6 +908,7 @@ class CloudWatchLogsServiceTest {
     @Test
     void getLogEventsPagesForwardWithAnUnboundedMaxEventsPerQuery() {
         CloudWatchLogsService unboundedService = new CloudWatchLogsService(
+                new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -1199,6 +1208,7 @@ class CloudWatchLogsServiceTest {
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
                 0,
                 new RegionResolver("us-east-1", "000000000000")
         );
@@ -1459,14 +1469,27 @@ class CloudWatchLogsServiceTest {
     @Test
     void metricFilterRoundTrip() {
         service.createLogGroup("/app/logs", null, null, REGION);
-        service.putMetricFilter("/app/logs", "errors", "?ERROR",
-                List.of(Map.of("metricName", "Errors", "metricNamespace", "Test", "metricValue", "1", "defaultValue", 0)),
-                REGION);
-        var described = service.describeMetricFilters("/app/logs", "errors", null, 10, REGION);
+        CloudWatchLogsMetricFilterService filters = new CloudWatchLogsMetricFilterService(service,
+                null, new RegionResolver(REGION, "000000000000"));
+        MetricTransformation transformation = new MetricTransformation();
+        transformation.setMetricName("Errors");
+        transformation.setMetricNamespace("Test");
+        transformation.setMetricValue("1");
+        transformation.setDefaultValue(0.0);
+        MetricFilter definition = new MetricFilter();
+        definition.setLogGroupName("/app/logs");
+        definition.setFilterName("errors");
+        definition.setFilterPattern("?ERROR");
+        definition.setMetricTransformations(List.of(transformation));
+        filters.putMetricFilter(definition, REGION);
+        CloudWatchLogsMetricFilterService.DescribeMetricFiltersResult described =
+                filters.describeMetricFilters("/app/logs", "errors", null, null, null, 10, REGION);
         assertEquals(1, described.metricFilters().size());
         assertEquals("?ERROR", described.metricFilters().getFirst().getFilterPattern());
-        service.deleteMetricFilter("/app/logs", "errors", REGION);
-        assertTrue(service.describeMetricFilters("/app/logs", "errors", null, 10, REGION).metricFilters().isEmpty());
+        assertEquals(0.0, described.metricFilters().getFirst().getMetricTransformations().getFirst().getDefaultValue());
+        filters.deleteMetricFilter("/app/logs", "errors", REGION);
+        assertTrue(filters.describeMetricFilters("/app/logs", "errors", null, null, null, 10, REGION)
+                .metricFilters().isEmpty());
     }
 
     @Test

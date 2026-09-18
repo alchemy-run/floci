@@ -278,10 +278,12 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
                     : ResourceAccountRelationship.CROSS_ACCOUNT;
 
             for (Map<String, List<String>> targetContext : targetContexts) {
+                Map<String, List<String>> effectiveContext = IamConditionContextResolver.withGlobalContext(
+                        targetContext, resource, region, accountId, resourceOwnerAccountId);
                 ResourcePolicyDecision resourcePolicyDecision = evaluator.evaluateResourcePolicy(
-                        effectiveResourcePolicies, caller.principalArn(), action, resource, targetContext);
+                        effectiveResourcePolicies, caller.principalArn(), action, resource, effectiveContext);
                 Decision decision = evaluator.evaluateResolvedResourcePolicy(
-                        caller, resourcePolicyDecision, accountRelationship, action, resource, targetContext);
+                        caller, resourcePolicyDecision, accountRelationship, action, resource, effectiveContext);
                 if (decision != Decision.DENY) {
                     continue;
                 }
@@ -396,6 +398,9 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
                     || accountId.equals(resourceOwnerAccountId)
                     ? ResourceAccountRelationship.SAME_ACCOUNT
                     : ResourceAccountRelationship.CROSS_ACCOUNT;
+            String region = requestContext.getRegion() == null ? config.defaultRegion() : requestContext.getRegion();
+            conditionContext = IamConditionContextResolver.withGlobalContext(
+                    conditionContext, resource, region, accountId, resourceOwnerAccountId);
             Decision decision = evaluator.evaluateResolvedResourcePolicy(
                     caller, resourcePolicyDecision, accountRelationship,
                     action, resource, conditionContext);

@@ -7,7 +7,7 @@ import java.util.Locale;
 
 @RegisterForReflection
 public enum DatabaseEngine {
-    POSTGRES, MYSQL, MARIADB;
+    POSTGRES, MYSQL, MARIADB, SQLSERVER;
 
     @JsonCreator
     public static DatabaseEngine fromJson(String value) {
@@ -18,6 +18,7 @@ public enum DatabaseEngine {
         return switch (this) {
             case POSTGRES -> 5432;
             case MYSQL, MARIADB -> 3306;
+            case SQLSERVER -> 1433;
         };
     }
 
@@ -27,7 +28,7 @@ public enum DatabaseEngine {
         return switch (this) {
             case POSTGRES -> 63;
             case MYSQL -> 32;
-            case MARIADB -> 16;
+            case MARIADB, SQLSERVER -> 16;
         };
     }
 }
