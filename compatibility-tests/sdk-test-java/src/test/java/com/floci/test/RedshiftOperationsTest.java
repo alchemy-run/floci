@@ -45,6 +45,7 @@ import software.amazon.awssdk.services.redshift.model.DescribeOrderableClusterOp
 import software.amazon.awssdk.services.redshift.model.DescribeSnapshotCopyGrantsRequest;
 import software.amazon.awssdk.services.redshift.model.DescribeSnapshotCopyGrantsResponse;
 import software.amazon.awssdk.services.redshift.model.DescribeTagsRequest;
+import software.amazon.awssdk.services.redshift.model.Event;
 import software.amazon.awssdk.services.redshift.model.EventSubscription;
 import software.amazon.awssdk.services.redshift.model.ModifyClusterIamRolesRequest;
 import software.amazon.awssdk.services.redshift.model.ModifyClusterIamRolesResponse;
@@ -218,8 +219,9 @@ class RedshiftOperationsTest {
                 List<Message> messages = sqs.receiveMessage(r -> r.queueUrl(queueUrl).waitTimeSeconds(2)).messages();
                 assertThat(messages).singleElement().satisfies(message -> {
                     assertThat(message.body()).contains(source, "Cluster parameter group modified.");
-                    String observedMessage = client.describeEvents(r -> r.sourceType("cluster-parameter-group")
-                            .sourceIdentifier(source)).events().getLast().message();
+                    List<Event> events = client.describeEvents(r -> r.sourceType("cluster-parameter-group")
+                            .sourceIdentifier(source)).events();
+                    String observedMessage = events.get(events.size() - 1).message();
                     assertThat(message.body()).contains(observedMessage);
                     sqs.deleteMessage(r -> r.queueUrl(queueUrl).receiptHandle(message.receiptHandle()));
                 });

@@ -41,7 +41,7 @@ class KinesisAnalyticsV2MetadataTest {
                                         .propertyGroupId("app").propertyMap(Map.of("mode", "production")))))).applicationDetail();
                 assertThat(updated.applicationVersionId()).isEqualTo(2L);
                 assertThat(updated.applicationConfigurationDescription().environmentPropertyDescriptions()
-                        .propertyGroupDescriptions().getFirst().propertyMap()).containsEntry("mode", "production");
+                        .propertyGroupDescriptions().get(0).propertyMap()).containsEntry("mode", "production");
                 client.updateApplicationMaintenanceConfiguration(request -> request.applicationName(name)
                         .applicationMaintenanceConfigurationUpdate(configuration -> configuration
                                 .applicationMaintenanceWindowStartTimeUpdate("22:30")));
@@ -58,10 +58,10 @@ class KinesisAnalyticsV2MetadataTest {
                         .cloudWatchLoggingOption(option -> option.logStreamARN(stream)));
                 assertThat(added.applicationVersionId()).isEqualTo(3L);
                 assertThat(added.cloudWatchLoggingOptionDescriptions()).hasSize(1);
-                String id = added.cloudWatchLoggingOptionDescriptions().getFirst().cloudWatchLoggingOptionId();
+                String id = added.cloudWatchLoggingOptionDescriptions().get(0).cloudWatchLoggingOptionId();
                 assertThat(id).isNotBlank();
                 assertThat(client.describeApplication(request -> request.applicationName(name)).applicationDetail()
-                        .cloudWatchLoggingOptionDescriptions().getFirst().logStreamARN()).isEqualTo(stream);
+                        .cloudWatchLoggingOptionDescriptions().get(0).logStreamARN()).isEqualTo(stream);
                 assertThatThrownBy(() -> client.deleteApplicationCloudWatchLoggingOption(request -> request
                         .applicationName(name).currentApplicationVersionId(2L).cloudWatchLoggingOptionId(id)))
                         .isInstanceOf(ConcurrentModificationException.class);
@@ -70,20 +70,20 @@ class KinesisAnalyticsV2MetadataTest {
                 assertThat(client.describeApplication(request -> request.applicationName(name)).applicationDetail()
                         .cloudWatchLoggingOptionDescriptions()).isEmpty();
                 assertThat(client.describeApplicationVersion(request -> request.applicationName(name).applicationVersionId(3L))
-                        .applicationVersionDetail().cloudWatchLoggingOptionDescriptions().getFirst().cloudWatchLoggingOptionId())
+                        .applicationVersionDetail().cloudWatchLoggingOptionDescriptions().get(0).cloudWatchLoggingOptionId())
                         .isEqualTo(id);
                 assertThat(client.describeApplicationVersion(request -> request.applicationName(name).applicationVersionId(1L))
                         .applicationVersionDetail().applicationConfigurationDescription().environmentPropertyDescriptions()
-                        .propertyGroupDescriptions().getFirst().propertyMap()).containsEntry("mode", "test");
+                        .propertyGroupDescriptions().get(0).propertyMap()).containsEntry("mode", "test");
                 ListApplicationVersionsResponse versions = client.listApplicationVersions(request -> request.applicationName(name).limit(1));
                 assertThat(versions.applicationVersionSummaries()).hasSize(1);
-                assertThat(versions.applicationVersionSummaries().getFirst().applicationVersionId()).isEqualTo(4L);
+                assertThat(versions.applicationVersionSummaries().get(0).applicationVersionId()).isEqualTo(4L);
                 assertThat(versions.nextToken()).isNotBlank();
                 assertThat(client.listApplicationVersions(request -> request.applicationName(name).limit(1).nextToken(versions.nextToken()))
-                        .applicationVersionSummaries().getFirst().applicationVersionId()).isEqualTo(3L);
+                        .applicationVersionSummaries().get(0).applicationVersionId()).isEqualTo(3L);
                 ApplicationOperationInfo operation = client.listApplicationOperations(request -> request.applicationName(name)
                         .operation("AddApplicationCloudWatchLoggingOption").operationStatus("SUCCESSFUL"))
-                        .applicationOperationInfoList().getFirst();
+                        .applicationOperationInfoList().get(0);
                 assertThat(operation.operationId()).isEqualTo(added.operationId());
                 assertThat(operation.startTime()).isNotNull();
                 assertThat(operation.endTime()).isNotNull();

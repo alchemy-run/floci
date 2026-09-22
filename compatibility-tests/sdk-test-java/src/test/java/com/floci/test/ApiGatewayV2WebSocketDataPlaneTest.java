@@ -230,16 +230,22 @@ class ApiGatewayV2WebSocketDataPlaneTest {
         URI endpoint = TestFixtures.endpoint();
         URI socketUri = new URI("wss", null, endpoint.getHost(), endpoint.getPort(),
                 advertised.getPath(), advertised.getQuery(), null);
-        try (HttpClient tlsClient = gatewayTlsClient()) {
-            for (String message : List.of("hello-websocket", "again")) {
-                MultiMessageCapture capture = new MultiMessageCapture();
-                WebSocket socket = tlsClient.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10))
-                        .buildAsync(socketUri, capture).get(15, TimeUnit.SECONDS);
+        HttpClient tlsClient = gatewayTlsClient();
+        for (String message : List.of("hello-websocket", "again")) {
+            MultiMessageCapture capture = new MultiMessageCapture();
+            CompletableFuture<Integer> closeFuture = new CompletableFuture<>();
+            capture.setCloseFuture(closeFuture);
+            WebSocket socket = tlsClient.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10))
+                    .buildAsync(socketUri, capture).get(15, TimeUnit.SECONDS);
+            try {
+                socket.sendText(message, true).get(10, TimeUnit.SECONDS);
+                assertThat(capture.getNextMessage(15, TimeUnit.SECONDS)).isEqualTo("echo:" + message);
+            } finally {
                 try {
-                    socket.sendText(message, true).get(10, TimeUnit.SECONDS);
-                    assertThat(capture.getNextMessage(15, TimeUnit.SECONDS)).isEqualTo("echo:" + message);
-                } finally {
                     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
+                    closeFuture.get(10, TimeUnit.SECONDS);
+                } finally {
+                    socket.abort();
                 }
             }
         }

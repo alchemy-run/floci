@@ -778,16 +778,16 @@ class Ec2Tests {
             } else {
                 launch.subnetId(subnetId).securityGroupIds(sgId).privateIpAddress(requested);
             }
-            Instance created = ec2.runInstances(launch.build()).instances().getFirst();
+            Instance created = ec2.runInstances(launch.build()).instances().get(0);
             String id = created.instanceId();
             try {
                 assertThat(created.privateIpAddress()).isEqualTo(requested);
                 Instance running = waitForState(id, InstanceStateName.RUNNING);
                 assertThat(running.privateIpAddress()).isEqualTo(requested);
-                assertThat(running.networkInterfaces().getFirst().privateIpAddress()).isEqualTo(requested);
+                assertThat(running.networkInterfaces().get(0).privateIpAddress()).isEqualTo(requested);
                 assertThat(ec2.describeNetworkInterfaces(r -> r.networkInterfaceIds(
-                        running.networkInterfaces().getFirst().networkInterfaceId()))
-                        .networkInterfaces().getFirst().privateIpAddress()).isEqualTo(requested);
+                        running.networkInterfaces().get(0).networkInterfaceId()))
+                        .networkInterfaces().get(0).privateIpAddress()).isEqualTo(requested);
                 assertThatThrownBy(() -> ec2.runInstances(launch.build())).isInstanceOfSatisfying(Ec2Exception.class,
                         error -> assertThat(error.awsErrorDetails().errorCode()).isEqualTo("InvalidIPAddress.InUse"));
                 ec2.stopInstances(r -> r.instanceIds(id));

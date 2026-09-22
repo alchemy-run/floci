@@ -40,7 +40,7 @@ class DetectiveGraphLifecycleTest {
             try {
                 assertThat(arn).startsWith("arn:aws:detective:us-east-1:" + ACCOUNT + ":graph:");
                 assertThat(owner.listGraphs(request -> request.maxResults(1)).graphList()).hasSize(1);
-                Graph graph = owner.listGraphs(request -> {}).graphList().getFirst();
+                Graph graph = owner.listGraphs(request -> {}).graphList().get(0);
                 assertThat(graph.arn()).isEqualTo(arn);
                 assertThat(graph.createdTime()).isNotNull();
                 assertThat(owner.listTagsForResource(request -> request.resourceArn(arn)).tags())
@@ -56,7 +56,7 @@ class DetectiveGraphLifecycleTest {
                 owner.untagResource(request -> request.resourceArn(arn).tagKeys("obsolete", "absent"));
                 assertThat(owner.listTagsForResource(request -> request.resourceArn(arn)).tags())
                         .containsExactlyInAnyOrderEntriesOf(Map.of("env", "prod", "team", "security"));
-                Graph updated = owner.listGraphs(request -> {}).graphList().getFirst();
+                Graph updated = owner.listGraphs(request -> {}).graphList().get(0);
                 assertThat(updated.arn()).isEqualTo(arn);
                 assertThat(updated.createdTime()).isEqualTo(graph.createdTime());
                 assertThatThrownBy(() -> owner.tagResource(request -> request.resourceArn(arn)
