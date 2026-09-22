@@ -15,17 +15,25 @@ import io.github.hectorvent.floci.services.guardduty.model.MemberAccount;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationAdditionalConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationFeature;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.Bucket;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class GuardDutyServiceTest {
 
@@ -390,6 +398,10 @@ class GuardDutyServiceTest {
                 """));
         firstService.updateOrganizationConfiguration(REGION, created.getId(), request(
                 "{\"autoEnableOrganizationMembers\":\"ALL\"}"));
+        firstService.createSampleFindings(REGION, created.getId(), sampleRequest());
+        firstService.createResource(REGION, created.getId(), "filter", request("""
+                {"name":"persisted-filter","action":"ARCHIVE","findingCriteria":{"criterion":{"severity":{"gte":7}}}}
+                """));
 
         GuardDutyService reloadedService = new GuardDutyService(
                 loadedStore(detectorFile, new TypeReference<Map<String, Detector>>() {
@@ -401,6 +413,9 @@ class GuardDutyServiceTest {
         Detector reloaded = reloadedService.getDetector(REGION, created.getId());
 
         assertEquals(created.getId(), reloaded.getId());
+        assertEquals(1, reloadedService.listFindings(REGION, created.getId(), request("{}")).path("findingIds").size());
+        assertEquals("ARCHIVE", reloadedService.getResource(REGION, created.getId(), "filter", "persisted-filter")
+                .path("action").asText());
         assertEquals(created.getCreatedAt(), reloaded.getCreatedAt());
         assertEquals("test", reloaded.getTags().get("env"));
         assertEquals(
@@ -411,6 +426,209 @@ class GuardDutyServiceTest {
         assertEquals("ALL",
                 reloadedService.describeOrganizationConfiguration(REGION, created.getId())
                         .getAutoEnableOrganizationMembers());
+    }
+
+    @Test
+    void samplesAreExplicitStatefulFindingsWithTriageAndStatistics() {
+        Detector detector = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}"));
+        String id = detector.getId();
+        assertEquals(0, service.listFindings(REGION, id, request("{}")).path("findingIds").size());
+        service.createSampleFindings(REGION, id, sampleRequest());
+        String findingId = service.listFindings(REGION, id, request("{}")).path("findingIds").get(0).asText();
+        JsonNode ids = request("{\"findingIds\":[\"" + findingId + "\"]}");
+        JsonNode finding = service.getFindings(REGION, id, ids).path("findings").get(0);
+        assertEquals("Recon:EC2/PortProbeUnprotectedPort", finding.path("type").asText());
+        assertEquals(ACCOUNT, finding.path("accountId").asText());
+        assertEquals(REGION, finding.path("region").asText());
+        assertEquals("arn:aws:guardduty:" + REGION + ":" + ACCOUNT + ":detector/" + id + "/finding/" + findingId,
+                finding.path("arn").asText());
+        assertEquals("2.0", finding.path("schemaVersion").asText());
+        assertEquals("Instance", finding.path("resource").path("resourceType").asText());
+        assertEquals("{\"sample\":true}", finding.path("service").path("additionalInfo").path("value").asText());
+        assertEquals(id, finding.path("service").path("detectorId").asText());
+        assertFalse(finding.path("service").path("archived").asBoolean());
+        assertEquals(1, service.getFindingsStatistics(REGION, id,
+                request("{\"findingStatisticTypes\":[\"COUNT_BY_SEVERITY\"]}"))
+                .path("findingStatistics").path("countBySeverity").path("2.0").asInt());
+
+        service.updateFindings(REGION, id, ids, true);
+        JsonNode archived = request("{\"findingCriteria\":{\"criterion\":{\"service.archived\":{\"eq\":[\"true\"]}}}}");
+        assertEquals(1, service.listFindings(REGION, id, archived).path("findingIds").size());
+        service.updateFindings(REGION, id, ids, false);
+        assertEquals(0, service.listFindings(REGION, id, archived).path("findingIds").size());
+        service.updateFindings(REGION, id,
+                request("{\"findingIds\":[\"" + findingId + "\"],\"feedback\":\"USEFUL\"}"), null);
+        assertEquals("USEFUL", service.getFindings(REGION, id, ids).path("findings").get(0)
+                .path("service").path("userFeedback").asText());
+    }
+
+    @Test
+    void findingsValidateBeforeMutationAndAreDetectorScoped() {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        assertThrows(AwsException.class, () -> service.createSampleFindings(REGION, detectorId,
+                request("{\"findingTypes\":[\"Recon:EC2/PortProbeUnprotectedPort\",\"not-a-finding\"]}")));
+        assertEquals(0, service.listFindings(REGION, detectorId, request("{}")).path("findingIds").size());
+        service.createSampleFindings(REGION, detectorId, sampleRequest());
+        String findingId = service.listFindings(REGION, detectorId, request("{}")).path("findingIds").get(0).asText();
+        assertThrows(AwsException.class, () -> service.updateFindings(REGION, detectorId,
+                request("{\"findingIds\":[\"" + findingId + "\",\"missing\"]}"), true));
+        assertFalse(service.getFindings(REGION, detectorId, request("{\"findingIds\":[\"" + findingId + "\"]}"))
+                .path("findings").get(0).path("service").path("archived").asBoolean());
+        assertThrows(AwsException.class, () -> service.listFindings("us-west-2", detectorId, request("{}")));
+        String other = service.createDetector(REGION, "111111111111", request("{\"enable\":true}")).getId();
+        assertEquals(0, service.getFindings(REGION, other, request("{\"findingIds\":[\"" + findingId + "\"]}"))
+                .path("findings").size());
+        assertThrows(AwsException.class, () -> service.updateFindings(REGION, other,
+                request("{\"findingIds\":[\"" + findingId + "\"]}"), true));
+        service.updateDetector(REGION, detectorId, request("{\"enable\":false}"));
+        assertThrows(AwsException.class, () -> service.createSampleFindings(REGION, detectorId, sampleRequest()));
+    }
+
+    @Test
+    void findingsPaginateAndRejectUnsupportedCriteria() {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        service.createSampleFindings(REGION, detectorId, sampleRequest());
+        service.createSampleFindings(REGION, detectorId, sampleRequest());
+        JsonNode first = service.listFindings(REGION, detectorId, request("{\"maxResults\":1}"));
+        JsonNode second = service.listFindings(REGION, detectorId,
+                request("{\"maxResults\":1,\"nextToken\":\"" + first.path("nextToken").asText() + "\"}"));
+        assertEquals(1, first.path("findingIds").size());
+        assertEquals(1, second.path("findingIds").size());
+        assertFalse(first.path("findingIds").get(0).equals(second.path("findingIds").get(0)));
+        assertFalse(second.has("nextToken"));
+        assertEquals(0, service.listFindings(REGION, detectorId,
+                request("{\"findingCriteria\":{\"criterion\":{\"severity\":{\"gte\":7}}}}"))
+                .path("findingIds").size());
+        assertThrows(AwsException.class, () -> service.listFindings(REGION, detectorId,
+                request("{\"findingCriteria\":{\"criterion\":{\"unknown\":{\"eq\":[\"x\"]}}}}")));
+        assertThrows(AwsException.class, () -> service.listFindings(REGION, detectorId, request("{\"maxResults\":0}")));
+        assertThrows(AwsException.class, () -> service.listFindings(REGION, detectorId, request("{\"nextToken\":\"invalid\"}")));
+    }
+
+    @Test
+    void readsDoNotInventTelemetryCoverageOrFreeTrialEntitlements() {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        service.createSampleFindings(REGION, detectorId, sampleRequest());
+        JsonNode usage = service.getUsageStatistics(REGION, detectorId, request("""
+                {"usageStatisticsType":"SUM_BY_DATA_SOURCE","usageCriteria":{"dataSources":["FLOW_LOGS"]}}
+                """));
+        assertEquals(0, usage.path("usageStatistics").path("sumByDataSource").size());
+        assertEquals(0, service.listCoverage(REGION, detectorId, request("{}")).path("resources").size());
+        JsonNode trial = service.getRemainingFreeTrialDays(REGION, detectorId,
+                request("{\"accountIds\":[\"" + ACCOUNT + "\",\"111111111111\"]}"));
+        assertEquals(0, trial.path("accounts").size());
+        assertEquals(2, trial.path("unprocessedAccounts").size());
+        assertTrue(trial.path("unprocessedAccounts").get(0).path("result").asText().contains("no AWS billing enrollment"));
+        assertTrue(trial.path("unprocessedAccounts").get(1).path("result").asText().contains("not associated"));
+        assertThrows(AwsException.class, () -> service.getUsageStatistics(REGION, detectorId,
+                request("{\"usageStatisticsType\":\"invalid\",\"usageCriteria\":{}}")));
+        assertThrows(AwsException.class, () -> service.getUsageStatistics(REGION, "missing", request("{}")));
+        assertThrows(AwsException.class, () -> service.getRemainingFreeTrialDays(REGION, "missing", request("{}")));
+        service.updateDetector(REGION, detectorId,
+                request("{\"features\":[{\"name\":\"RUNTIME_MONITORING\",\"status\":\"ENABLED\"}]}"));
+        assertThrows(AwsException.class, () -> service.listCoverage(REGION, detectorId, request("{}")));
+    }
+
+    @Test
+    void invitationReadsRequireAnActualInvitationAndRespectRecipientAndRegion() {
+        String recipient = "111111111111";
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        service.createMembers(REGION, detectorId,
+                request("{\"accountDetails\":[{\"accountId\":\"" + recipient + "\",\"email\":\"member@example.com\"}]}"));
+        assertEquals(0, service.getInvitationsCount(REGION, recipient));
+        assertThrows(AwsException.class, () -> service.inviteMembers(REGION, detectorId,
+                request("{\"accountIds\":[\"" + recipient + "\"]}")));
+        JsonNode result = service.inviteMembers(REGION, detectorId,
+                request("{\"accountIds\":[\"" + recipient + "\",\"222222222222\"],\"disableEmailNotification\":true}"));
+        assertEquals(1, result.path("unprocessedAccounts").size());
+        assertEquals(1, service.getInvitationsCount(REGION, recipient));
+        assertEquals(0, service.getInvitationsCount(REGION, ACCOUNT));
+        assertEquals(0, service.getInvitationsCount("us-west-2", recipient));
+        MemberAccount invitation = service.listInvitations(REGION, recipient, null, null).items().get(0);
+        assertEquals(ACCOUNT, invitation.administratorId());
+        assertEquals(32, invitation.invitationId().length());
+        assertTrue(invitation.invitedAt().endsWith("Z"));
+        service.deleteDetector(REGION, detectorId);
+        assertEquals(0, service.getInvitationsCount(REGION, recipient));
+    }
+
+    @Test
+    void filtersPersistCriteriaTagsAndApplyArchiveOnlyToMatchingNewFindings() {
+        String detectorId = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        JsonNode create = request("""
+                {"name":"sample-filter","action":"ARCHIVE","rank":1,"tags":{"env":"test"},
+                 "findingCriteria":{"criterion":{"severity":{"gte":7}}},"clientToken":"filter-token"}
+                """);
+        String name = service.createResource(REGION, detectorId, "filter", create);
+        assertEquals(name, service.createResource(REGION, detectorId, "filter", create));
+        assertEquals(List.of(name), service.listResources(REGION, detectorId, "filter", null, null).items());
+        service.createSampleFindings(REGION, detectorId, sampleRequest());
+        assertFalse(service.getDetector(REGION, detectorId).getFindings().values().iterator().next()
+                .path("service").path("archived").asBoolean());
+        service.updateResource(REGION, detectorId, "filter", name,
+                request("{\"findingCriteria\":{\"criterion\":{\"severity\":{\"gte\":1}}},\"description\":\"archive samples\"}"));
+        service.createSampleFindings(REGION, detectorId, sampleRequest());
+        assertEquals(1, service.listFindings(REGION, detectorId,
+                request("{\"findingCriteria\":{\"criterion\":{\"service.archived\":{\"eq\":[\"true\"]}}}}"))
+                .path("findingIds").size());
+        String arn = "arn:aws:guardduty:" + REGION + ":" + ACCOUNT + ":detector/" + detectorId + "/filter/" + name;
+        service.tagResource(arn, Map.of("team", "security"));
+        service.untagResource(arn, List.of("env"));
+        assertEquals(Map.of("team", "security"), service.listTags(arn));
+        assertEquals("security", service.getResource(REGION, detectorId, "filter", name).path("tags").path("team").asText());
+        assertThrows(AwsException.class, () -> service.listTags(arn.replace(ACCOUNT, "999999999999")));
+        GuardDutyTagHandler tags = new GuardDutyTagHandler(service);
+        assertThrows(AwsException.class, () -> tags.listTags("us-west-2", arn));
+        assertThrows(AwsException.class, () -> tags.tagResource("us-west-2", arn, Map.of("foreign", "tag")));
+        assertEquals(Map.of("team", "security"), service.listTags(arn));
+        assertThrows(AwsException.class, () -> service.updateResource(REGION, detectorId, "filter", name,
+                request("{\"action\":\"NOOP\",\"rank\":2}")));
+        assertEquals("ARCHIVE", service.getResource(REGION, detectorId, "filter", name).path("action").asText());
+        service.deleteResource(REGION, detectorId, "filter", name);
+        assertThrows(AwsException.class, () -> service.getResource(REGION, detectorId, "filter", name));
+    }
+
+    @Test
+    void ipSetsLoadRealObjectsAndRejectMissingForeignOrMalformedSources() {
+        S3Service s3 = mock(S3Service.class);
+        when(s3.listBuckets()).thenReturn(List.of(new Bucket("lists-bucket")));
+        when(s3.getBucketRegion("lists-bucket")).thenReturn(REGION);
+        when(s3.getObject("lists-bucket", "ips.txt")).thenReturn(new S3Object("lists-bucket", "ips.txt",
+                "203.0.113.10\n203.0.113.0/24\n".getBytes(StandardCharsets.UTF_8), "text/plain"));
+        GuardDutyService withS3 = new GuardDutyService(new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(), s3);
+        String detectorId = withS3.createDetector(REGION, ACCOUNT, request("{\"enable\":true}")).getId();
+        JsonNode create = request("""
+                {"name":"trusted-ips","format":"TXT","location":"https://s3.amazonaws.com/lists-bucket/ips.txt",
+                 "activate":true,"clientToken":"ip-token"}
+                """);
+        String setId = withS3.createResource(REGION, detectorId, "ipset", create);
+        assertEquals(setId, withS3.createResource(REGION, detectorId, "ipset", create));
+        assertEquals("ACTIVE", withS3.getResource(REGION, detectorId, "ipset", setId).path("status").asText());
+        assertFalse(withS3.getResource(REGION, detectorId, "ipset", setId).has("_addresses"));
+        assertEquals(2, withS3.getDetector(REGION, detectorId).getResources().get("ipset/" + setId).path("_addresses").size());
+        assertThrows(AwsException.class, () -> withS3.updateResource(REGION, detectorId, "ipset", setId,
+                request("{\"expectedBucketOwner\":\"111111111111\",\"activate\":true}")));
+        assertThrows(AwsException.class, () -> withS3.updateResource(REGION, detectorId, "ipset", setId,
+                request("{\"location\":\"https://example.com/ips.txt\"}")));
+        when(s3.getObject("lists-bucket", "ips.txt")).thenThrow(new AwsException("NoSuchKey", "missing", 404));
+        assertThrows(AwsException.class, () -> withS3.updateResource(REGION, detectorId, "ipset", setId,
+                request("{\"activate\":true}")));
+        doReturn(new S3Object("lists-bucket", "ips.txt", "not-an-ip\n".getBytes(StandardCharsets.UTF_8), "text/plain"))
+                .when(s3).getObject("lists-bucket", "ips.txt");
+        assertThrows(AwsException.class, () -> withS3.updateResource(REGION, detectorId, "ipset", setId,
+                request("{\"activate\":true}")));
+        assertEquals(2, withS3.getDetector(REGION, detectorId).getResources().get("ipset/" + setId).path("_addresses").size());
+        when(s3.listBuckets()).thenReturn(List.of());
+        assertThrows(AwsException.class, () -> withS3.updateResource(REGION, detectorId, "ipset", setId,
+                request("{\"activate\":true}")));
+        withS3.updateResource(REGION, detectorId, "ipset", setId, request("{\"activate\":false}"));
+        assertEquals("INACTIVE", withS3.getResource(REGION, detectorId, "ipset", setId).path("status").asText());
+        withS3.deleteResource(REGION, detectorId, "ipset", setId);
+        assertTrue(withS3.listResources(REGION, detectorId, "ipset", null, null).items().isEmpty());
+    }
+
+    private JsonNode sampleRequest() {
+        return request("{\"findingTypes\":[\"Recon:EC2/PortProbeUnprotectedPort\"]}");
     }
 
     private static <V> PersistentStorage<String, V> loadedStore(

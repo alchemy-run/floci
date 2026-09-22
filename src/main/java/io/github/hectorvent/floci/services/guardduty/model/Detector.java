@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.guardduty.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
@@ -19,6 +20,8 @@ public class Detector {
     private Map<String, String> tags;
     private List<DetectorFeature> features;
     private OrganizationConfiguration organizationConfiguration;
+    private Map<String, JsonNode> findings = Map.of();
+    private Map<String, JsonNode> resources = Map.of();
 
     public Detector() {
     }
@@ -106,6 +109,22 @@ public class Detector {
 
     public void setFeatures(List<DetectorFeature> features) {
         this.features = features == null ? null : List.copyOf(features);
+    }
+
+    public Map<String, JsonNode> getFindings() {
+        return findings;
+    }
+
+    public void setFindings(Map<String, JsonNode> findings) {
+        this.findings = findings == null ? Map.of() : Map.copyOf(findings);
+    }
+
+    public Map<String, JsonNode> getResources() {
+        return resources;
+    }
+
+    public void setResources(Map<String, JsonNode> resources) {
+        this.resources = resources == null ? Map.of() : Map.copyOf(resources);
     }
 
     public OrganizationConfiguration getOrganizationConfiguration() {
