@@ -5,9 +5,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 /**
  * A parsed {@code ListTasks} request.
  *
- * <p>Every member narrows the listing. {@code startedBy} is the exception: ECS requires it to be
- * used on its own, which {@link #hasOtherFilters()} is there to check. {@code cluster} is not a
- * filter for that rule, it is the scope the listing runs in, so it pairs with {@code startedBy}.
+ * <p>The cluster and desired status select the task population. {@code startedBy} may narrow
+ * that population, but cannot be combined with another task-attribute filter.
  */
 @RegisterForReflection
 public class ListTasksRequest {
@@ -50,12 +49,11 @@ public class ListTasksRequest {
     public void setNextToken(String nextToken) { this.nextToken = nextToken; }
 
     /**
-     * Whether any filter other than {@code startedBy} is set. The cluster and the pagination
-     * members do not count: the cluster scopes the listing rather than narrowing it, and AWS
-     * accepts {@code list-tasks --cluster X --started-by Y}.
+     * Whether a task-attribute filter conflicts with {@code startedBy}.
+     * Cluster, desired status, and pagination may be specified independently.
      */
     public boolean hasOtherFilters() {
-        return containerInstance != null || desiredStatus != null
-                || family != null || launchType != null || serviceName != null;
+        return containerInstance != null || family != null
+                || launchType != null || serviceName != null;
     }
 }

@@ -499,7 +499,7 @@ class EcsFargateEdgeCaseIntegrationTest {
         // The cluster scopes the listing rather than filtering it, so it pairs with startedBy.
         assertTrue(call("ListTasks", "{\"cluster\":\"" + CLUSTER + "\",\"startedBy\":\"edge-batch-7\"}", 200)
                 .jsonPath().getList("taskArns").contains(tagged));
-        // Any other filter alongside startedBy is still refused.
+        // A family filter cannot be combined with startedBy.
         call("ListTasks", "{\"cluster\":\"" + CLUSTER + "\",\"family\":\"" + family
                 + "\",\"startedBy\":\"edge-batch-7\"}", 400)
                 .then().body("message", containsString("only filter"));
