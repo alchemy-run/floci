@@ -14,7 +14,15 @@ import software.amazon.awssdk.services.rds.model.ConnectionPoolConfigurationInfo
 import software.amazon.awssdk.services.rds.model.CreateDbProxyResponse;
 import software.amazon.awssdk.services.rds.model.CreateDbSubnetGroupResponse;
 import software.amazon.awssdk.services.rds.model.CreateOptionGroupResponse;
+import software.amazon.awssdk.services.rds.model.DBEngineVersion;
+import software.amazon.awssdk.services.rds.model.DBProxyEndpoint;
 import software.amazon.awssdk.services.rds.model.DBProxyTarget;
+import software.amazon.awssdk.services.rds.model.DbProxyEndpointAlreadyExistsException;
+import software.amazon.awssdk.services.rds.model.DbProxyEndpointNotFoundException;
+import software.amazon.awssdk.services.rds.model.DbProxyNotFoundException;
+import software.amazon.awssdk.services.rds.model.InvalidDbProxyEndpointStateException;
+import software.amazon.awssdk.services.rds.model.DbParameterGroupNotFoundException;
+import software.amazon.awssdk.services.rds.model.DescribeDbEngineVersionsResponse;
 import software.amazon.awssdk.services.rds.model.DescribeDbSubnetGroupsResponse;
 import software.amazon.awssdk.services.rds.model.DescribeOptionGroupsResponse;
 import software.amazon.awssdk.services.rds.model.DescribeOrderableDbInstanceOptionsResponse;
@@ -23,6 +31,8 @@ import software.amazon.awssdk.services.rds.model.ModifyOptionGroupResponse;
 import software.amazon.awssdk.services.rds.model.OptionConfiguration;
 import software.amazon.awssdk.services.rds.model.OptionGroupNotFoundException;
 import software.amazon.awssdk.services.rds.model.OptionSetting;
+import software.amazon.awssdk.services.rds.model.Parameter;
+import software.amazon.awssdk.services.rds.model.RdsException;
 
 import java.util.List;
 import java.util.logging.Level;
@@ -82,6 +92,54 @@ class RdsControlPlaneTest {
             }
             rds.close();
         }
+    }
+
+    @Test
+    void sdkDecodesEngineCatalogAndParameterDefaultsAfterReset() {
+        DescribeDbEngineVersionsResponse versions = rds.describeDBEngineVersions(b -> b
+                .engine("postgres").engineVersion("16.3"));
+        assertThat(versions.dbEngineVersions()).singleElement().satisfies(version -> {
+            assertThat(version.engine()).isEqualTo("postgres");
+            assertThat(version.dbParameterGroupFamily()).isEqualTo("postgres16");
+            assertThat(version.status()).isEqualTo("available");
+        });
+        List<DBEngineVersion> all = rds.describeDBEngineVersionsPaginator(b -> b.maxRecords(20))
+                .dbEngineVersions().stream().toList();
+        assertThat(all).hasSizeGreaterThan(20);
+        assertThat(all.stream().map(version -> version.engine() + ":" + version.engineVersion()).toList())
+                .doesNotHaveDuplicates();
+        assertThatThrownBy(() -> rds.describeDBEngineVersions(b -> b
+                .engine("postgres").defaultOnly(true).includeAll(true)))
+                .isInstanceOfSatisfying(RdsException.class,
+                        error -> assertThat(error.awsErrorDetails().errorCode()).isEqualTo("InvalidParameterCombination"));
+
+        String group = TestFixtures.uniqueName("rds-parameter-defaults");
+        rds.createDBParameterGroup(b -> b.dbParameterGroupName(group)
+                .dbParameterGroupFamily("postgres16").description("SDK defaults and reset"));
+        try {
+            List<Parameter> defaults = rds.describeDBParameters(b -> b.dbParameterGroupName(group)).parameters();
+            assertThat(defaults).anySatisfy(parameter -> {
+                assertThat(parameter.parameterName()).isEqualTo("max_connections");
+                assertThat(parameter.parameterValue()).isEqualTo("LEAST({DBInstanceClassMemory/9531392},5000)");
+                assertThat(parameter.applyType()).isEqualTo("static");
+                assertThat(parameter.applyMethodAsString()).isEqualTo("pending-reboot");
+            });
+            rds.modifyDBParameterGroup(b -> b.dbParameterGroupName(group).parameters(
+                    Parameter.builder().parameterName("work_mem").parameterValue("8192")
+                            .applyMethod("pending-reboot").build(),
+                    Parameter.builder().parameterName("max_connections").parameterValue("200")
+                            .applyMethod("pending-reboot").build()));
+            assertThat(rds.describeDBParameters(b -> b.dbParameterGroupName(group).source("user")).parameters())
+                    .hasSize(2).allSatisfy(parameter -> assertThat(parameter.applyMethodAsString()).isEqualTo("pending-reboot"));
+            rds.resetDBParameterGroup(b -> b.dbParameterGroupName(group).resetAllParameters(true));
+            assertThat(rds.describeDBParameters(b -> b.dbParameterGroupName(group)).parameters())
+                    .containsExactlyElementsOf(defaults);
+            assertThat(rds.describeDBParameters(b -> b.dbParameterGroupName(group).source("user")).parameters()).isEmpty();
+        } finally {
+            rds.deleteDBParameterGroup(b -> b.dbParameterGroupName(group));
+        }
+        assertThatThrownBy(() -> rds.describeDBParameterGroups(b -> b.dbParameterGroupName(group)))
+                .isInstanceOf(DbParameterGroupNotFoundException.class);
     }
 
     @Test
@@ -204,6 +262,83 @@ class RdsControlPlaneTest {
     }
 
     @Test
+    @DisplayName("Proxy endpoints round-trip through the AWS Query SDK with stable identity and tags")
+    void sdkRoundTripsDbProxyEndpoints() {
+        String parent = TestFixtures.uniqueName("rds-endpoint-parent");
+        String name = TestFixtures.uniqueName("rds-reader");
+        String renamed = name + "-renamed";
+        createIamProxy(rds, parent, subnetIds);
+        try {
+            DBProxyEndpoint defaultEndpoint = rds.describeDBProxyEndpoints(b -> b.dbProxyName(parent))
+                    .dbProxyEndpoints().get(0);
+            assertThat(defaultEndpoint.isDefault()).isTrue();
+            assertThat(defaultEndpoint.dbProxyEndpointName()).isEqualTo(parent);
+            assertThat(defaultEndpoint.targetRoleAsString()).isEqualTo("READ_WRITE");
+            assertThat(defaultEndpoint.dbProxyEndpointArn()).contains(":db-proxy-endpoint:prx-endpoint-");
+            assertThatThrownBy(() -> rds.deleteDBProxyEndpoint(b -> b.dbProxyEndpointName(parent)))
+                    .isInstanceOf(InvalidDbProxyEndpointStateException.class);
+
+            DBProxyEndpoint endpoint = rds.createDBProxyEndpoint(b -> b.dbProxyName(parent)
+                    .dbProxyEndpointName(name).vpcSubnetIds(subnetIds)
+                    .targetRole("READ_ONLY").endpointNetworkType("IPV4")
+                    .tags(t -> t.key("owner").value("endpoint<&"))).dbProxyEndpoint();
+            assertThat(endpoint.dbProxyName()).isEqualTo(parent);
+            assertThat(endpoint.dbProxyEndpointName()).isEqualTo(name);
+            assertThat(endpoint.dbProxyEndpointArn()).contains(":db-proxy-endpoint:prx-endpoint-");
+            assertThat(endpoint.targetRoleAsString()).isEqualTo("READ_ONLY");
+            assertThat(endpoint.endpointNetworkTypeAsString()).isEqualTo("IPV4");
+            assertThat(endpoint.isDefault()).isFalse();
+            assertThat(endpoint.createdDate()).isNotNull();
+            assertThat(endpoint.statusAsString()).isEqualTo("available");
+            assertThat(endpoint.vpcId()).isNotBlank();
+            assertThat(endpoint.vpcSubnetIds()).containsExactlyElementsOf(subnetIds);
+            assertThat(endpoint.endpoint()).isNotBlank().isNotEqualTo(defaultEndpoint.endpoint());
+            assertThatThrownBy(() -> rds.createDBProxyEndpoint(b -> b.dbProxyName(parent)
+                    .dbProxyEndpointName(name).vpcSubnetIds(subnetIds)))
+                    .isInstanceOf(DbProxyEndpointAlreadyExistsException.class);
+
+            rds.addTagsToResource(b -> b.resourceName(endpoint.dbProxyEndpointArn())
+                    .tags(t -> t.key("phase").value("updated")));
+            assertThat(rds.listTagsForResource(b -> b.resourceName(endpoint.dbProxyEndpointArn())).tagList())
+                    .extracting("key", "value")
+                    .contains(tuple("owner", "endpoint<&"), tuple("phase", "updated"));
+            rds.removeTagsFromResource(b -> b.resourceName(endpoint.dbProxyEndpointArn()).tagKeys("owner"));
+            DBProxyEndpoint modified = rds.modifyDBProxyEndpoint(b -> b.dbProxyEndpointName(name)
+                    .newDBProxyEndpointName(renamed)).dbProxyEndpoint();
+            assertThat(modified.dbProxyEndpointName()).isEqualTo(renamed);
+            assertThat(modified.dbProxyEndpointArn()).isEqualTo(endpoint.dbProxyEndpointArn());
+            assertThat(modified.endpoint()).isEqualTo(endpoint.endpoint());
+            assertThat(modified.createdDate()).isEqualTo(endpoint.createdDate());
+            assertThat(rds.listTagsForResource(b -> b.resourceName(endpoint.dbProxyEndpointArn())).tagList())
+                    .extracting("key", "value").containsExactly(tuple("phase", "updated"));
+            assertThatThrownBy(() -> rds.describeDBProxyEndpoints(b -> b.dbProxyEndpointName(name)))
+                    .isInstanceOf(DbProxyEndpointNotFoundException.class);
+            assertThat(rds.describeDBProxyEndpointsPaginator(b -> b.dbProxyName(parent).maxRecords(20))
+                    .dbProxyEndpoints().stream().map(DBProxyEndpoint::dbProxyEndpointName).toList())
+                    .containsExactlyInAnyOrder(parent, renamed);
+            assertThat(rds.deleteDBProxyEndpoint(b -> b.dbProxyEndpointName(renamed))
+                    .dbProxyEndpoint().statusAsString()).isEqualTo("deleting");
+            assertThatThrownBy(() -> rds.deleteDBProxyEndpoint(b -> b.dbProxyEndpointName(renamed)))
+                    .isInstanceOf(DbProxyEndpointNotFoundException.class);
+            assertThatThrownBy(() -> rds.listTagsForResource(b -> b.resourceName(endpoint.dbProxyEndpointArn())))
+                    .isInstanceOf(DbProxyEndpointNotFoundException.class);
+
+            rds.createDBProxyEndpoint(b -> b.dbProxyName(parent).dbProxyEndpointName(name)
+                    .vpcSubnetIds(subnetIds));
+            rds.deleteDBProxy(b -> b.dbProxyName(parent));
+            assertThatThrownBy(() -> rds.describeDBProxyEndpoints(b -> b.dbProxyEndpointName(name)))
+                    .isInstanceOf(DbProxyEndpointNotFoundException.class);
+            assertThatThrownBy(() -> rds.describeDBProxyEndpoints(b -> b.dbProxyName(parent)))
+                    .isInstanceOf(DbProxyNotFoundException.class);
+            assertThatThrownBy(() -> rds.createDBProxyEndpoint(b -> b.dbProxyName(parent)
+                    .dbProxyEndpointName(name).vpcSubnetIds(subnetIds)))
+                    .isInstanceOf(DbProxyNotFoundException.class);
+        } finally {
+            deleteProxy(rds, parent);
+        }
+    }
+
+    @Test
     void sdkRoundTripsIamDefaultAuthAndProxyUpdates() {
         String mutableProxyName = TestFixtures.uniqueName("rds-proxy-mutable");
         try {
@@ -295,6 +430,20 @@ class RdsControlPlaneTest {
             assertThat(west.describeDBProxies(b -> b.dbProxyName(regionalProxyName)).dbProxies())
                     .singleElement()
                     .satisfies(proxy -> assertThat(proxy.dbProxyArn()).contains(":rds:us-west-2:"));
+
+            String endpointName = regionalProxyName + "-reader";
+            DBProxyEndpoint eastEndpoint = east.createDBProxyEndpoint(b -> b.dbProxyName(regionalProxyName)
+                    .dbProxyEndpointName(endpointName).vpcSubnetIds(subnetIdsFor(Region.US_EAST_1))).dbProxyEndpoint();
+            DBProxyEndpoint westEndpoint = west.createDBProxyEndpoint(b -> b.dbProxyName(regionalProxyName)
+                    .dbProxyEndpointName(endpointName).vpcSubnetIds(subnetIdsFor(Region.US_WEST_2))).dbProxyEndpoint();
+            assertThat(eastEndpoint.dbProxyEndpointArn()).contains(":rds:us-east-1:");
+            assertThat(westEndpoint.dbProxyEndpointArn()).contains(":rds:us-west-2:");
+            east.deleteDBProxyEndpoint(b -> b.dbProxyEndpointName(endpointName));
+            assertThatThrownBy(() -> east.describeDBProxyEndpoints(b -> b.dbProxyEndpointName(endpointName)))
+                    .isInstanceOf(DbProxyEndpointNotFoundException.class);
+            assertThat(west.describeDBProxyEndpoints(b -> b.dbProxyEndpointName(endpointName)).dbProxyEndpoints())
+                    .singleElement().satisfies(endpoint ->
+                            assertThat(endpoint.dbProxyEndpointArn()).isEqualTo(westEndpoint.dbProxyEndpointArn()));
         } finally {
             try (RdsClient east = rdsClient(Region.US_EAST_1);
                  RdsClient west = rdsClient(Region.US_WEST_2)) {

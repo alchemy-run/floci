@@ -78,6 +78,13 @@ public class ControlTowerController {
     }
 
     @POST
+    @Path("/get-baseline")
+    public Response getBaseline(@Context HttpHeaders headers, String body) {
+        String identifier = requireText(parse(body), "baselineIdentifier");
+        return Response.ok(service.getBaseline(regionResolver.resolveRegion(headers), identifier)).build();
+    }
+
+    @POST
     @Path("/list-landingzones")
     @Consumes(MediaType.WILDCARD)
     public Response listLandingZones(@Context HttpHeaders headers) {

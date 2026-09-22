@@ -20,6 +20,111 @@ import static org.hamcrest.Matchers.notNullValue;
 @QuarkusTest
 class MskControllerIntegrationTest {
 
+    private static final String MISSING_CLUSTER_ARN =
+            "arn:aws:kafka:us-east-1:000000000000:cluster/missing-topic-cluster/00000000-0000-0000-0000-000000000000-1";
+
+    @Test
+    void topicReadsOnMissingClusterReturnNotFoundJson() {
+        given()
+        .when()
+            .get("/v1/clusters/{clusterArn}/topics", MISSING_CLUSTER_ARN)
+        .then()
+            .statusCode(404)
+            .contentType("application/json")
+            .body("__type", equalTo("NotFoundException"));
+
+        given()
+        .when()
+            .get("/v1/clusters/{clusterArn}/topics/{topicName}", MISSING_CLUSTER_ARN, "probe")
+        .then()
+            .statusCode(404)
+            .contentType("application/json")
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    void createTopicValidatesTheBodyBeforeLookingUpTheCluster() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {"topicName":"probe","partitionCount":1}
+                """)
+        .when()
+            .post("/v1/clusters/{clusterArn}/topics", MISSING_CLUSTER_ARN)
+        .then()
+            .statusCode(400)
+            .contentType("application/json")
+            .body("__type", equalTo("BadRequestException"))
+            .body("invalidParameter", equalTo("replicationFactor"));
+
+        given()
+            .contentType("application/json")
+            .body("""
+                {"topicName":"probe","partitionCount":1,"replicationFactor":1}
+                """)
+        .when()
+            .post("/v1/clusters/{clusterArn}/topics", MISSING_CLUSTER_ARN)
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    void createTopicMalformedBodiesReturnAwsJsonErrors() {
+        for (String body : new String[]{"{", "[]", "null", "", "{}",
+                "{\"topicName\":\"probe\",\"partitionCount\":1.5,\"replicationFactor\":1}",
+                "{\"topicName\":\"probe\",\"partitionCount\":1,\"replicationFactor\":0}",
+                "{\"topicName\":\"probe\",\"partitionCount\":1,\"replicationFactor\":\"1\"}"}) {
+            given()
+                .contentType("application/json")
+                .body(body)
+            .when()
+                .post("/v1/clusters/{clusterArn}/topics", MISSING_CLUSTER_ARN)
+            .then()
+                .statusCode(400)
+                .contentType("application/json")
+                .body("__type", equalTo("BadRequestException"));
+        }
+    }
+
+    @Test
+    void existingClusterDoesNotFabricateTopicControlPlaneSuccess() {
+        String clusterArn = given()
+            .contentType("application/json")
+            .body("{\"clusterName\":\"topic-control-plane-unavailable\"}")
+        .when()
+            .post("/v1/clusters")
+        .then()
+            .statusCode(200)
+            .extract().path("clusterArn");
+        try {
+            given()
+            .when()
+                .get("/v1/clusters/{clusterArn}/topics", clusterArn)
+            .then()
+                .statusCode(501)
+                .body("__type", equalTo("UnsupportedOperationException"));
+
+            given()
+            .when()
+                .get("/v1/clusters/{clusterArn}/topics/{topicName}", clusterArn, "probe")
+            .then()
+                .statusCode(501)
+                .body("__type", equalTo("UnsupportedOperationException"));
+
+            given()
+                .contentType("application/json")
+                .body("{\"topicName\":\"probe\",\"partitionCount\":1,\"replicationFactor\":1}")
+            .when()
+                .post("/v1/clusters/{clusterArn}/topics", clusterArn)
+            .then()
+                .statusCode(501)
+                .body("__type", equalTo("UnsupportedOperationException"));
+        } finally {
+            given().delete("/v1/clusters/{clusterArn}", clusterArn).then().statusCode(200);
+        }
+    }
+
     @Test
     void createClusterV1EchoesRequestedKafkaVersion() {
         String clusterArn = given()

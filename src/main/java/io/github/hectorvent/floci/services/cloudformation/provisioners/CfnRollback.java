@@ -89,6 +89,9 @@ public final class CfnRollback {
      */
     public static final String METRIC_FILTER_UPDATE_SNAPSHOT_ATTR = "__FlociMetricFilterUpdateSnapshot";
 
+    /** Keeps the prior domain and replacement identity until a delete-first rename commits or rolls back. */
+    public static final String COGNITO_DOMAIN_UPDATE_SNAPSHOT_ATTR = "__FlociCognitoDomainUpdateSnapshot";
+
     /**
      * Holds the pipe a rename displaced: the name it still lives under, the region that addresses
      * it, how many times deleting it has been attempted, and when the replacement was created.

@@ -162,7 +162,7 @@ public class IotDataController {
         response.put("topic", retained.getTopic());
         response.put("payload", retained.getPayload());
         response.put("qos", retained.getQos());
-        putEpoch(response, "lastModifiedTime", retained.getLastModifiedTime());
+        putEpochMillis(response, "lastModifiedTime", retained.getLastModifiedTime());
         return Response.ok(response).build();
     }
 
@@ -178,7 +178,7 @@ public class IotDataController {
             item.put("topic", retained.getTopic());
             item.put("payloadSize", Base64.getDecoder().decode(retained.getPayload()).length);
             item.put("qos", retained.getQos());
-            putEpoch(item, "lastModifiedTime", retained.getLastModifiedTime());
+            putEpochMillis(item, "lastModifiedTime", retained.getLastModifiedTime());
         }
         if (page.nextToken() != null) {
             response.put("nextToken", page.nextToken());
@@ -186,9 +186,9 @@ public class IotDataController {
         return Response.ok(response).build();
     }
 
-    private void putEpoch(ObjectNode node, String field, java.time.Instant instant) {
+    private void putEpochMillis(ObjectNode node, String field, java.time.Instant instant) {
         if (instant != null) {
-            node.put(field, instant.toEpochMilli() / 1000.0);
+            node.put(field, instant.toEpochMilli());
         }
     }
 }

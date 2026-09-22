@@ -76,6 +76,31 @@ public class EmrServerlessIntegrationTest {
     }
 
     @Test
+    void applicationTypesUseAwsResponseCasing() {
+        for (String type : new String[] {"SPARK", "HIVE"}) {
+            String expected = type.equals("SPARK") ? "Spark" : "Hive";
+            String id = givenReq().body("""
+                    {"name":"type-contract-%s","releaseLabel":"emr-7.5.0",
+                     "type":"%s","clientToken":"type-contract-%s"}
+                    """.formatted(type, type, type))
+                    .post("/applications").then().statusCode(200).extract().path("applicationId");
+            try {
+                givenReq().get("/applications/" + id).then().statusCode(200)
+                        .body("application.type", equalTo(expected));
+                givenReq().get("/applications").then().statusCode(200)
+                        .body("applications.find { it.id == '" + id + "' }.type", equalTo(expected));
+            } finally {
+                givenReq().delete("/applications/" + id).then().statusCode(200);
+            }
+        }
+        givenReq().body("""
+                {"name":"invalid-type","releaseLabel":"emr-7.5.0",
+                 "type":"INVALID","clientToken":"invalid-type-contract"}
+                """)
+                .post("/applications").then().statusCode(400);
+    }
+
+    @Test
     @Order(2)
     void createApplication() {
         applicationId = givenReq()

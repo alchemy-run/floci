@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.codedeploy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.codedeploy.model.Deployment;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -205,7 +207,7 @@ class CodeDeployServiceTest {
         when(lambdaService.invoke(eq(REGION), eq("beforeHook"), any(byte[].class), eq(InvocationType.RequestResponse)))
                 .thenAnswer(invocation -> {
                     byte[] payload = invocation.getArgument(2);
-                    service.putLifecycleEventHookExecutionStatus("ignored", executionIdFrom(payload), "Succeeded");
+                    service.putLifecycleEventHookExecutionStatus(REGION, deploymentIdFrom(payload), executionIdFrom(payload), "Succeeded");
                     return cleanInvoke;
                 });
 
@@ -270,7 +272,7 @@ class CodeDeployServiceTest {
         when(lambdaService.invoke(eq(REGION), eq("beforeHook"), any(byte[].class), eq(InvocationType.RequestResponse)))
                 .thenAnswer(invocation -> {
                     byte[] payload = invocation.getArgument(2);
-                    service.putLifecycleEventHookExecutionStatus("ignored", executionIdFrom(payload), "Failed");
+                    service.putLifecycleEventHookExecutionStatus(REGION, deploymentIdFrom(payload), executionIdFrom(payload), "Failed");
                     return cleanInvoke;
                 });
 
@@ -295,7 +297,7 @@ class CodeDeployServiceTest {
     }
 
     @Test
-    void lateLifecycleCallbackAfterDeploymentTerminalIsNoOp() {
+    void lateLifecycleCallbackAfterDeploymentTerminalFailsWithoutChangingStatus() {
         createLambdaAppAndGroup("app-late-callback", "group-late-callback");
         InvokeResult cleanInvoke = new InvokeResult(200, null, new byte[0], null, "req-5");
         AtomicReference<String> capturedExecutionId = new AtomicReference<>();
@@ -304,7 +306,7 @@ class CodeDeployServiceTest {
                     byte[] payload = invocation.getArgument(2);
                     String executionId = executionIdFrom(payload);
                     capturedExecutionId.set(executionId);
-                    service.putLifecycleEventHookExecutionStatus("ignored", executionId, "Succeeded");
+                    service.putLifecycleEventHookExecutionStatus(REGION, deploymentIdFrom(payload), executionId, "Succeeded");
                     return cleanInvoke;
                 });
 
@@ -312,9 +314,78 @@ class CodeDeployServiceTest {
         Deployment deployment = awaitTerminal(deploymentId, Duration.ofSeconds(5));
         assertEquals("Succeeded", deployment.getStatus());
 
-        service.putLifecycleEventHookExecutionStatus("ignored", capturedExecutionId.get(), "Failed");
+        AwsException error = assertThrows(AwsException.class, () -> service.putLifecycleEventHookExecutionStatus(
+                REGION, deploymentId, capturedExecutionId.get(), "Failed"));
+        assertEquals("LifecycleEventAlreadyCompletedException", error.getErrorCode());
 
         assertEquals("Succeeded", service.getDeployment(REGION, deploymentId).getStatus());
+    }
+
+    @Test
+    void deploymentsRegisterRevisionUsageAndGroupReferencesFollowLifecycle() {
+        createLambdaAppAndGroup("app-revision-use", "group-revision-use");
+        Map<String, Object> revision = lambdaRevision(null, null);
+        String deploymentId = service.createDeployment(REGION, "app-revision-use", "group-revision-use",
+                null, revision, null);
+        assertEquals("Succeeded", awaitTerminal(deploymentId, Duration.ofSeconds(5)).getStatus());
+        Map<?, ?> info = (Map<?, ?>) service.getApplicationRevision(REGION, "app-revision-use", revision).get("revisionInfo");
+        assertEquals(List.of("group-revision-use"), info.get("deploymentGroups"));
+        assertTrue(info.get("firstUsedTime") instanceof Double);
+        assertEquals(info.get("firstUsedTime"), info.get("lastUsedTime"));
+        assertEquals(List.of(revision), service.listApplicationRevisions(REGION, "app-revision-use",
+                null, null, null, null, "include", null).get("revisions"));
+        service.updateDeploymentGroup(REGION, "app-revision-use", "group-revision-use", "renamed-group", null, null, null);
+        assertEquals(List.of("renamed-group"), ((Map<?, ?>) service.getApplicationRevision(REGION, "app-revision-use", revision)
+                .get("revisionInfo")).get("deploymentGroups"));
+        service.deleteDeploymentGroup(REGION, "app-revision-use", "renamed-group");
+        assertEquals(List.of(), service.listApplicationRevisions(REGION, "app-revision-use",
+                null, null, null, null, "include", null).get("revisions"));
+        assertEquals(List.of(revision), service.listApplicationRevisions(REGION, "app-revision-use",
+                null, null, null, null, "exclude", null).get("revisions"));
+    }
+
+    @Test
+    void hookCallbacksValidateDeploymentOwnershipRegionAndStatusBeforeCompleting() {
+        createLambdaAppAndGroup("app-hook-owner", "group-hook-owner");
+        AtomicReference<String> executionId = new AtomicReference<>();
+        when(lambdaService.invoke(eq(REGION), eq("beforeHook"), any(byte[].class), eq(InvocationType.RequestResponse)))
+                .thenAnswer(invocation -> {
+                    executionId.set(executionIdFrom(invocation.getArgument(2)));
+                    return new InvokeResult(200, null, new byte[0], null, "hook-owner");
+                });
+        String owner = createLambdaDeployment("app-hook-owner", "group-hook-owner", "beforeHook", null);
+        String other = createLambdaDeployment("app-hook-owner", "group-hook-owner", null, null);
+        try {
+            await().atMost(Duration.ofSeconds(2)).until(() -> executionId.get() != null);
+            assertEquals("InvalidLifecycleEventHookExecutionIdException", assertThrows(AwsException.class,
+                    () -> service.putLifecycleEventHookExecutionStatus(REGION, other, executionId.get(), "Failed"))
+                    .getErrorCode());
+            assertEquals("DeploymentDoesNotExistException", assertThrows(AwsException.class,
+                    () -> service.putLifecycleEventHookExecutionStatus("us-west-2", owner, executionId.get(), "Failed"))
+                    .getErrorCode());
+            assertEquals("InvalidLifecycleEventHookExecutionStatusException", assertThrows(AwsException.class,
+                    () -> service.putLifecycleEventHookExecutionStatus(REGION, owner, executionId.get(), "InProgress"))
+                    .getErrorCode());
+            assertEquals("InvalidLifecycleEventHookExecutionIdException", assertThrows(AwsException.class,
+                    () -> service.putLifecycleEventHookExecutionStatus(REGION, owner, "unknown", "Succeeded"))
+                    .getErrorCode());
+            assertEquals("DeploymentIsNotInReadyStateException", assertThrows(AwsException.class,
+                    () -> service.continueDeployment(REGION, owner, "READY_WAIT")).getErrorCode());
+            assertEquals("InProgress", service.getDeployment(REGION, owner).getStatus());
+            assertEquals(executionId.get(), service.putLifecycleEventHookExecutionStatus(
+                    REGION, owner, executionId.get(), "Succeeded"));
+            assertEquals("Succeeded", awaitTerminal(owner, Duration.ofSeconds(5)).getStatus());
+            assertEquals("Succeeded", awaitTerminal(other, Duration.ofSeconds(5)).getStatus());
+            assertEquals("DeploymentAlreadyCompletedException", assertThrows(AwsException.class,
+                    () -> service.continueDeployment(REGION, owner, null)).getErrorCode());
+            assertEquals("DeploymentAlreadyCompletedException", assertThrows(AwsException.class,
+                    () -> service.stopDeployment(REGION, owner)).getErrorCode());
+        } finally {
+            if (!isTerminal(service.getDeployment(REGION, owner).getStatus())) {
+                service.stopDeployment(REGION, owner);
+                awaitTerminal(owner, Duration.ofSeconds(5));
+            }
+        }
     }
 
     // ---- Helpers --------------------------------------------------------------------------
@@ -374,6 +445,14 @@ class CodeDeployServiceTest {
                 }
                 """.formatted(hooks);
         return Map.of("revisionType", "AppSpecContent", "appSpecContent", Map.of("content", content));
+    }
+
+    private static String deploymentIdFrom(byte[] payload) {
+        try {
+            return JSON.readTree(payload).get("DeploymentId").asText();
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not parse hook payload", error);
+        }
     }
 
     private static String executionIdFrom(byte[] payload) {

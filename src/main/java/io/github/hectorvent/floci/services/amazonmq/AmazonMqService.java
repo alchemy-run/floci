@@ -273,18 +273,22 @@ public class AmazonMqService implements ResourceProvider {
     // CreateBroker time; additional users are managed through the RabbitMQ console.
 
     public MqUser createUser(String brokerId, MqUser user) {
+        describeBroker(brokerId);
         throw userApiNotSupported();
     }
 
     public MqUser describeUser(String brokerId, String username) {
+        describeBroker(brokerId);
         throw userApiNotSupported();
     }
 
     public List<MqUser> listUsers(String brokerId) {
+        describeBroker(brokerId);
         throw userApiNotSupported();
     }
 
     public void deleteUser(String brokerId, String username) {
+        describeBroker(brokerId);
         throw userApiNotSupported();
     }
 

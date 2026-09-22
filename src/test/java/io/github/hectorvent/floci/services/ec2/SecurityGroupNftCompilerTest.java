@@ -72,6 +72,39 @@ class SecurityGroupNftCompilerTest {
         assertTrue(nft.contains("ip saddr 10.1.0.0/16 meta l4proto icmpv6 accept"));
     }
 
+    @Test
+    void translationUsesOnlyAccountRegionVpcPeersBeforeSecurityGroupFiltering() {
+        SecurityGroup group = new SecurityGroup();
+        SecurityGroupNftCompiler.Endpoint source = endpoint("eni-source", "10.0.1.78", "10.240.1.78", group);
+        SecurityGroupNftCompiler.Endpoint target = endpoint("eni-target", "10.0.1.77", "10.240.1.77", group);
+        SecurityGroupNftCompiler.Endpoint foreign = new SecurityGroupNftCompiler.Endpoint(
+                "000000000000", "us-east-1", "vpc-other", "eni-other", "10.0.1.77", "10.241.1.77", Set.of(), List.of());
+        SecurityGroupNftCompiler.Endpoint otherAccount = new SecurityGroupNftCompiler.Endpoint(
+                "111111111111", "us-east-1", "vpc-1", "eni-account", "10.0.1.77", "10.242.1.77", Set.of(), List.of());
+        SecurityGroupNftCompiler.Endpoint otherRegion = new SecurityGroupNftCompiler.Endpoint(
+                "000000000000", "us-west-2", "vpc-1", "eni-region", "10.0.1.77", "10.243.1.77", Set.of(), List.of());
+        List<SecurityGroupNftCompiler.Endpoint> peers = List.of(source, target, foreign, otherAccount, otherRegion);
+        String nft = SecurityGroupNftCompiler.compile(source, peers, Map.of());
+        assertTrue(nft.contains("type nat hook output priority -100"));
+        assertTrue(nft.contains("private_output ip daddr 10.0.1.77 dnat ip to 10.240.1.77"));
+        assertTrue(nft.contains("private_source ip daddr 10.240.1.77 snat ip to 10.240.1.78"));
+        assertFalse(nft.contains("dnat ip to 10.241.1.77"));
+        assertFalse(nft.contains("dnat ip to 10.242.1.77"));
+        assertFalse(nft.contains("dnat ip to 10.243.1.77"));
+        assertTrue(nft.contains("egress ip daddr 10.241.1.77 drop"));
+        String networkOnly = SecurityGroupNftCompiler.compileNetworkOnly(source, peers);
+        assertTrue(networkOnly.indexOf("egress ip daddr 10.241.1.77 drop")
+                < networkOnly.indexOf("add rule inet floci_sg egress accept"));
+    }
+
+    @Test
+    void unchangedLogicalAndTransportAddressNeedsNoDestinationTranslation() {
+        SecurityGroup group = new SecurityGroup();
+        SecurityGroupNftCompiler.Endpoint target = endpoint("eni-a", "10.0.1.77", "10.0.1.77", group);
+        String nft = SecurityGroupNftCompiler.privateAddressTranslation(target, List.of(target));
+        assertFalse(nft.contains("dnat"));
+    }
+
     private static SecurityGroupNftCompiler.Endpoint endpoint(String eni, String logical,
                                                                String transport, SecurityGroup group) {
         return new SecurityGroupNftCompiler.Endpoint("000000000000", "us-east-1", "vpc-1",

@@ -69,22 +69,21 @@ class DetectiveIntegrationTest {
                 .statusCode(200).body("MemberDetails", hasSize(0));
 
         String create = "{\"GraphArn\":\"" + graphArn
-                + "\",\"Accounts\":[{\"AccountId\":\"111111111111\"}]}";
+                + "\",\"Accounts\":[{\"AccountId\":\"111111111111\",\"EmailAddress\":\"member@example.com\"}]}";
         post("/graph/members", create)
                 .statusCode(200)
-                .body("Members[0].Status", equalTo("ACCEPTED_BUT_DISABLED"))
+                .body("Members[0].Status", equalTo("INVITED"))
                 .body("UnprocessedAccounts", hasSize(0));
         post("/graph/members", create)
                 .statusCode(200)
                 .body("Members", hasSize(0))
                 .body("UnprocessedAccounts[0].AccountId", equalTo("111111111111"));
 
-        String monitoringBody = post("/graph/member/monitoringstate",
+        post("/graph/member/monitoringstate",
                 "{\"GraphArn\":\"" + graphArn + "\",\"AccountId\":\"111111111111\"}")
-                .statusCode(200).extract().asString();
-        assertTrue(monitoringBody.isEmpty());
+                .statusCode(409).body("__type", equalTo("ConflictException"));
         post("/graph/members/list", "{\"GraphArn\":\"" + graphArn + "\",\"MaxResults\":200}")
-                .statusCode(200).body("MemberDetails[0].Status", equalTo("ENABLED"));
+                .statusCode(200).body("MemberDetails[0].Status", equalTo("INVITED"));
     }
 
     @Test

@@ -10,9 +10,12 @@ import org.junit.jupiter.api.TestMethodOrder;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.BedrockAgentCoreControlClient;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.model.*;
 
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("Bedrock AgentCore tools")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -39,6 +42,92 @@ class BedrockAgentCoreToolsTest {
         if (client != null) {
             client.close();
         }
+    }
+
+    @Test
+    @DisplayName("Custom browser tags survive mutation and disappear with the browser")
+    void browserTagLifecycle() {
+        CreateBrowserResponse created = client.createBrowser(CreateBrowserRequest.builder()
+                .name("tag" + browserName)
+                .networkConfiguration(BrowserNetworkConfiguration.builder().networkMode(BrowserNetworkMode.PUBLIC).build())
+                .tags(Map.of("env", "test", "alchemy::id", "Tool")).build());
+        try {
+            assertToolTagRoundTrip(created.browserArn());
+        } finally {
+            client.deleteBrowser(DeleteBrowserRequest.builder().browserId(created.browserId()).build());
+        }
+        assertTagResourceNotFound(created.browserArn());
+        assertThatThrownBy(() -> client.getBrowser(GetBrowserRequest.builder().browserId(created.browserId()).build()))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("Browser profile tags use the shared tagging endpoint")
+    void browserProfileTagLifecycle() {
+        CreateBrowserProfileResponse created = client.createBrowserProfile(CreateBrowserProfileRequest.builder()
+                .name("tag" + profileName).tags(Map.of("env", "test", "alchemy::id", "Tool")).build());
+        try {
+            assertToolTagRoundTrip(created.profileArn());
+        } finally {
+            client.deleteBrowserProfile(DeleteBrowserProfileRequest.builder().profileId(created.profileId()).build());
+        }
+        assertTagResourceNotFound(created.profileArn());
+    }
+
+    @Test
+    @DisplayName("Custom interpreter tags survive mutation and disappear with the interpreter")
+    void codeInterpreterTagLifecycle() {
+        CreateCodeInterpreterResponse created = client.createCodeInterpreter(CreateCodeInterpreterRequest.builder()
+                .name("tag" + codeInterpreterName)
+                .networkConfiguration(CodeInterpreterNetworkConfiguration.builder()
+                        .networkMode(CodeInterpreterNetworkMode.SANDBOX).build())
+                .tags(Map.of("env", "test", "alchemy::id", "Tool")).build());
+        try {
+            assertToolTagRoundTrip(created.codeInterpreterArn());
+        } finally {
+            client.deleteCodeInterpreter(DeleteCodeInterpreterRequest.builder()
+                    .codeInterpreterId(created.codeInterpreterId()).build());
+        }
+        assertTagResourceNotFound(created.codeInterpreterArn());
+        assertThatThrownBy(() -> client.getCodeInterpreter(GetCodeInterpreterRequest.builder()
+                .codeInterpreterId(created.codeInterpreterId()).build())).isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    private void assertToolTagRoundTrip(String arn) {
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(arn).build()).tags())
+                .isEqualTo(Map.of("env", "test", "alchemy::id", "Tool"));
+        String[] parts = arn.split(":", 6);
+        assertTagResourceNotFound(arn.replace(":" + parts[4] + ":",
+                ":" + ("111111111111".equals(parts[4]) ? "222222222222" : "111111111111") + ":"));
+        assertTagResourceNotFound(arn.replace(":" + parts[3] + ":",
+                ":" + ("eu-west-1".equals(parts[3]) ? "us-east-1" : "eu-west-1") + ":"));
+        assertThatThrownBy(() -> client.tagResource(TagResourceRequest.builder()
+                .resourceArn(arn).tags(Map.of("env", "invalid*")).build())).isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> client.untagResource(UntagResourceRequest.builder()
+                .resourceArn(arn).tagKeys("env", "invalid*").build())).isInstanceOf(ValidationException.class);
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(arn).build()).tags())
+                .isEqualTo(Map.of("env", "test", "alchemy::id", "Tool"));
+
+        client.tagResource(TagResourceRequest.builder().resourceArn(arn)
+                .tags(Map.of("env", "prod", "team/name", "core")).build());
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(arn).build()).tags())
+                .isEqualTo(Map.of("env", "prod", "alchemy::id", "Tool", "team/name", "core"));
+        client.untagResource(UntagResourceRequest.builder().resourceArn(arn)
+                .tagKeys(List.of("env", "team/name", "missing")).build());
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(arn).build()).tags())
+                .isEqualTo(Map.of("alchemy::id", "Tool"));
+        client.untagResource(UntagResourceRequest.builder().resourceArn(arn).tagKeys("alchemy::id").build());
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(arn).build()).tags())
+                .isEmpty();
+    }
+
+    private void assertTagResourceNotFound(String arn) {
+        assertThatThrownBy(() -> client.listTagsForResource(ListTagsForResourceRequest.builder()
+                .resourceArn(arn).build())).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> client.tagResource(TagResourceRequest.builder()
+                .resourceArn(arn).tags(Map.of("env", "stolen")).build())).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> client.untagResource(UntagResourceRequest.builder()
+                .resourceArn(arn).tagKeys("env").build())).isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test

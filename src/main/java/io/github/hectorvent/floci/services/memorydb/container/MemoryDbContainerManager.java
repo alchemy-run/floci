@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.memorydb.container;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
@@ -13,10 +14,13 @@ import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.services.elasticache.container.RespLineReader;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.jboss.logging.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -193,6 +197,41 @@ public class MemoryDbContainerManager {
         throw new RuntimeException(
                 "MemoryDB backend for cluster " + clusterName + " did not become ready on " + host + ":" + port
                         + " within " + BACKEND_READY_DEADLINE_MS + "ms");
+    }
+
+    public byte[] captureSnapshot(MemoryDbContainerHandle handle) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(handle.getHost(), handle.getPort()), BACKEND_PROBE_CONNECT_MS);
+            socket.setSoTimeout(30_000);
+            socket.getOutputStream().write("*1\r\n$4\r\nSAVE\r\n".getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            String response = RespLineReader.readAsciiLineCrLf(socket.getInputStream());
+            if (!response.equals("+OK")) {
+                throw new IOException("Backend rejected SAVE: " + response);
+            }
+            try (InputStream archive = lifecycleManager.getDockerClient()
+                    .copyArchiveFromContainerCmd(handle.getContainerId(), "/data/dump.rdb").exec();
+                 TarArchiveInputStream tar = new TarArchiveInputStream(archive)) {
+                TarArchiveEntry entry;
+                while ((entry = tar.getNextEntry()) != null) {
+                    if (entry.isFile() && entry.getName().endsWith("dump.rdb") && tar.canReadEntryData(entry)) {
+                        // Storage persists the actual RDB bytes, not a successful metadata-only snapshot.
+                        if (entry.getSize() > 64L * 1024 * 1024) {
+                            throw new IOException("Snapshot exceeds the local 64 MiB capture limit");
+                        }
+                        byte[] data = tar.readNBytes((int) entry.getSize());
+                        if (data.length != entry.getSize()) {
+                            throw new IOException("Truncated RDB snapshot");
+                        }
+                        return data;
+                    }
+                }
+                throw new IOException("Backend did not provide dump.rdb");
+            }
+        } catch (IOException | RuntimeException exception) {
+            LOG.warnv(exception, "Could not capture MemoryDB snapshot for {0}", handle.getClusterName());
+            throw new AwsException("InvalidClusterStateFault", "Could not capture the cluster's RDB data.", 400);
+        }
     }
 
     public void stop(MemoryDbContainerHandle handle) {

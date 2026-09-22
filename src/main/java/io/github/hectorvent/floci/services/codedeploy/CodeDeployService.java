@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.codedeploy.model.Application;
+import io.github.hectorvent.floci.services.codedeploy.model.ApplicationRevision;
 import io.github.hectorvent.floci.services.codedeploy.model.Deployment;
 import io.github.hectorvent.floci.services.codedeploy.model.DeploymentConfig;
 import io.github.hectorvent.floci.services.codedeploy.model.DeploymentGroup;
@@ -28,10 +29,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -103,13 +108,16 @@ public class CodeDeployService {
     // key: region -> instanceName -> OnPremisesInstance
     private Map<String, Map<String, OnPremisesInstance>> onPremisesInstances = new ConcurrentHashMap<>();
 
+    // key: region -> applicationId -> registered revisions
+    private Map<String, Map<String, List<ApplicationRevision>>> applicationRevisions = new ConcurrentHashMap<>();
+
     // ---- Transient runtime state (in memory only) ----
-    // key: region -> deploymentId -> Deployment
+    // key: account/region -> deploymentId -> Deployment
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, Deployment>> deployments = new ConcurrentHashMap<>();
-    // key: region -> deploymentId -> targetId -> DeploymentTarget wrapper
+    // key: account/region -> deploymentId -> targetId -> DeploymentTarget wrapper
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, ConcurrentHashMap<String, Map<String, Object>>>> deploymentTargets = new ConcurrentHashMap<>();
-    // key: lifecycleEventHookExecutionId -> CompletableFuture<status>
-    private final ConcurrentHashMap<String, CompletableFuture<String>> hookFutures = new ConcurrentHashMap<>();
+    private record HookExecution(Deployment deployment, CompletableFuture<String> result) {}
+    private final ConcurrentHashMap<String, HookExecution> hookExecutions = new ConcurrentHashMap<>();
     // key: deploymentId -> stop flag
     private final ConcurrentHashMap<String, AtomicBoolean> stopFlags = new ConcurrentHashMap<>();
 
@@ -128,7 +136,10 @@ public class CodeDeployService {
                 new TypeReference<Map<String, Map<String, String>>>() {});
         this.onPremisesInstances = storageBacked("codedeploy-on-premises-instances.json",
                 new TypeReference<Map<String, Map<String, OnPremisesInstance>>>() {});
+        this.applicationRevisions = storageBacked("codedeploy-application-revisions.json",
+                new TypeReference<Map<String, Map<String, List<ApplicationRevision>>>>() {});
         normalizeRegionMaps(applications);
+        normalizeRegionMaps(applicationRevisions);
         normalizeDeploymentGroups();
         normalizeRegionMaps(deploymentConfigs);
         normalizeRegionMaps(tags);
@@ -349,6 +360,9 @@ public class CodeDeployService {
     }
 
     public Application getApplication(String region, String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("ApplicationNameRequiredException", "Application name is required", 400);
+        }
         Application app = applicationsFor(region).get(name);
         if (app == null) {
             throw new AwsException("ApplicationDoesNotExistException",
@@ -376,12 +390,17 @@ public class CodeDeployService {
         }
     }
 
-    public void deleteApplication(String region, String name) {
-        if (applicationsFor(region).remove(name) == null) {
-            throw new AwsException("ApplicationDoesNotExistException",
-                    "Application does not exist: " + name, 400);
-        }
+    public synchronized void deleteApplication(String region, String name) {
+        Application app = getApplication(region, name);
+        applicationsFor(region).remove(name);
         persistRegion(applications, region);
+        Map<String, List<ApplicationRevision>> revisions = applicationRevisions.get(region);
+        if (revisions != null) {
+            revisions.remove(app.getApplicationId());
+            persistRegion(applicationRevisions, region);
+        }
+        deploymentGroupsFor(region).remove(name);
+        persistRegion(deploymentGroups, region);
     }
 
     public List<String> listApplications(String region) {
@@ -407,7 +426,7 @@ public class CodeDeployService {
     public DeploymentGroup createDeploymentGroup(String region, String appName, String groupName,
                                                   String deploymentConfigName, String serviceRoleArn,
                                                   Map<String, Object> fields) {
-        getApplication(region, appName);
+        Application app = getApplication(region, appName);
         Map<String, Map<String, DeploymentGroup>> appGroups = deploymentGroupsFor(region);
         Map<String, DeploymentGroup> groupStore = appGroups.computeIfAbsent(appName, a -> new ConcurrentHashMap<>());
         if (groupStore.containsKey(groupName)) {
@@ -421,6 +440,7 @@ public class CodeDeployService {
         group.setDeploymentGroupName(groupName);
         group.setDeploymentConfigName(deploymentConfigName != null ? deploymentConfigName : "CodeDeployDefault.OneAtATime");
         group.setServiceRoleArn(serviceRoleArn);
+        group.setComputePlatform(app.getComputePlatform());
         applyGroupFields(group, fields);
         groupStore.put(groupName, group);
         persistRegion(deploymentGroups, region);
@@ -428,7 +448,7 @@ public class CodeDeployService {
     }
 
     public DeploymentGroup getDeploymentGroup(String region, String appName, String groupName) {
-        getApplication(region, appName);
+        Application app = getApplication(region, appName);
         Map<String, Map<String, DeploymentGroup>> appGroups = deploymentGroupsFor(region);
         Map<String, DeploymentGroup> groupStore = appGroups.get(appName);
         DeploymentGroup group = groupStore != null ? groupStore.get(groupName) : null;
@@ -436,6 +456,7 @@ public class CodeDeployService {
             throw new AwsException("DeploymentGroupDoesNotExistException",
                     "Deployment group does not exist: " + groupName, 400);
         }
+        group.setComputePlatform(app.getComputePlatform());
         return group;
     }
 
@@ -455,6 +476,7 @@ public class CodeDeployService {
             groupStore.remove(currentGroupName);
             group.setDeploymentGroupName(newGroupName);
             groupStore.put(newGroupName, group);
+            updateRevisionGroupName(region, appName, currentGroupName, newGroupName);
         }
         persistRegion(deploymentGroups, region);
         return group;
@@ -469,6 +491,7 @@ public class CodeDeployService {
                     "Deployment group does not exist: " + groupName, 400);
         }
         persistRegion(deploymentGroups, region);
+        updateRevisionGroupName(region, appName, groupName, null);
     }
 
     public List<String> listDeploymentGroups(String region, String appName) {
@@ -486,8 +509,8 @@ public class CodeDeployService {
             return List.of();
         }
         return names.stream()
-                .map(groupStore::get)
-                .filter(g -> g != null)
+                .filter(groupStore::containsKey)
+                .map(name -> getDeploymentGroup(region, appName, name))
                 .collect(Collectors.toList());
     }
 
@@ -545,14 +568,231 @@ public class CodeDeployService {
         return new ArrayList<>(deploymentConfigsFor(region).keySet());
     }
 
+    // ---- Application Revisions ----
+
+    private List<ApplicationRevision> revisionsFor(String region, Application app) {
+        return applicationRevisions.computeIfAbsent(region, r -> new ConcurrentHashMap<>())
+                .computeIfAbsent(app.getApplicationId(), id -> new ArrayList<>());
+    }
+
+    public synchronized void registerApplicationRevision(String region, String appName,
+                                                         Map<String, Object> revision, String description) {
+        Application app = getApplication(region, appName);
+        validateRevision(revision);
+        ApplicationRevision registered = ensureRevision(region, app, revision);
+        if (description != null) {
+            registered.getGenericRevisionInfo().put("description", description);
+        }
+        registered.getGenericRevisionInfo().put("registerTime", clock.millis() / 1000.0);
+        persistRegion(applicationRevisions, region);
+    }
+
+    private ApplicationRevision ensureRevision(String region, Application app, Map<String, Object> revision) {
+        List<ApplicationRevision> revisions = revisionsFor(region, app);
+        for (ApplicationRevision registered : revisions) {
+            if (registered.getRevisionLocation().equals(revision)) {
+                return registered;
+            }
+        }
+        ApplicationRevision registered = new ApplicationRevision();
+        registered.setRevisionLocation(mapper.convertValue(revision, new TypeReference<Map<String, Object>>() {}));
+        registered.getGenericRevisionInfo().put("registerTime", clock.millis() / 1000.0);
+        registered.getGenericRevisionInfo().put("deploymentGroups", List.of());
+        revisions.add(registered);
+        return registered;
+    }
+
+    private synchronized void recordRevisionUse(String region, String appName, String groupName,
+                                                 Map<String, Object> revision) {
+        Application app = getApplication(region, appName);
+        ApplicationRevision registered = ensureRevision(region, app, revision);
+        double now = clock.millis() / 1000.0;
+        registered.getGenericRevisionInfo().putIfAbsent("firstUsedTime", now);
+        registered.getGenericRevisionInfo().put("lastUsedTime", now);
+        for (ApplicationRevision item : revisionsFor(region, app)) {
+            Object value = item.getGenericRevisionInfo().get("deploymentGroups");
+            List<String> groups = new ArrayList<>();
+            if (value instanceof List<?> existing) {
+                for (Object name : existing) {
+                    if (name instanceof String group && !group.equals(groupName)) {
+                        groups.add(group);
+                    }
+                }
+            }
+            if (item == registered) {
+                groups.add(groupName);
+            }
+            item.getGenericRevisionInfo().put("deploymentGroups", groups);
+        }
+        persistRegion(applicationRevisions, region);
+    }
+
+    private synchronized void updateRevisionGroupName(String region, String appName, String oldName, String newName) {
+        Application app = getApplication(region, appName);
+        for (ApplicationRevision revision : revisionsFor(region, app)) {
+            Object value = revision.getGenericRevisionInfo().get("deploymentGroups");
+            if (value instanceof List<?> existing) {
+                List<String> groups = new ArrayList<>();
+                for (Object item : existing) {
+                    if (item instanceof String name) {
+                        String replacement = name.equals(oldName) ? newName : name;
+                        if (replacement != null) {
+                            groups.add(replacement);
+                        }
+                    }
+                }
+                revision.getGenericRevisionInfo().put("deploymentGroups", groups);
+            }
+        }
+        persistRegion(applicationRevisions, region);
+    }
+
+    public synchronized Map<String, Object> getApplicationRevision(String region, String appName,
+                                                                  Map<String, Object> revision) {
+        Application app = getApplication(region, appName);
+        validateRevision(revision);
+        ApplicationRevision registered = revisionsFor(region, app).stream()
+                .filter(item -> item.getRevisionLocation().equals(revision)).findFirst()
+                .orElseThrow(() -> new AwsException("RevisionDoesNotExistException", "Revision does not exist", 400));
+        return Map.of("applicationName", appName, "revision", registered.getRevisionLocation(),
+                "revisionInfo", registered.getGenericRevisionInfo());
+    }
+
+    public synchronized Map<String, Object> batchGetApplicationRevisions(String region, String appName,
+                                                                        List<Map<String, Object>> revisions) {
+        Application app = getApplication(region, appName);
+        if (revisions.isEmpty()) {
+            throw new AwsException("RevisionRequiredException", "At least one revision is required", 400);
+        }
+        if (revisions.size() > 25) {
+            throw new AwsException("BatchLimitExceededException", "At most 25 revisions may be requested", 400);
+        }
+        revisions.forEach(this::validateRevision);
+        List<ApplicationRevision> found = revisionsFor(region, app).stream()
+                .filter(item -> revisions.contains(item.getRevisionLocation())).toList();
+        return Map.of("applicationName", appName, "revisions", found);
+    }
+
+    public synchronized Map<String, Object> listApplicationRevisions(String region, String appName,
+                                                                    String sortBy, String sortOrder,
+                                                                    String bucket, String keyPrefix,
+                                                                    String deployed, String nextToken) {
+        Application app = getApplication(region, appName);
+        String sort = sortBy == null ? "registerTime" : sortBy;
+        if (!List.of("registerTime", "firstUsedTime", "lastUsedTime").contains(sort)) {
+            throw new AwsException("InvalidSortByException", "Invalid revision sort field", 400);
+        }
+        if (sortOrder != null && !List.of("ascending", "descending").contains(sortOrder)) {
+            throw new AwsException("InvalidSortOrderException", "Invalid revision sort order", 400);
+        }
+        if (deployed != null && !List.of("include", "exclude", "ignore").contains(deployed)) {
+            throw new AwsException("InvalidDeployedStateFilterException", "Invalid deployed filter", 400);
+        }
+        if (keyPrefix != null && bucket == null) {
+            throw new AwsException("BucketNameFilterRequiredException", "s3Bucket is required with s3KeyPrefix", 400);
+        }
+        if (bucket != null && (bucket.isBlank() || bucket.length() > 255)) {
+            throw new AwsException("InvalidBucketNameFilterException", "Invalid bucket filter", 400);
+        }
+        if (keyPrefix != null && keyPrefix.length() > 1024) {
+            throw new AwsException("InvalidKeyPrefixFilterException", "Invalid key prefix filter", 400);
+        }
+        Comparator<ApplicationRevision> comparator = Comparator.comparingDouble(item -> {
+            Object value = item.getGenericRevisionInfo().get(sort);
+            return value instanceof Number number ? number.doubleValue() : 0;
+        });
+        if ("descending".equals(sortOrder)) {
+            comparator = comparator.reversed();
+        }
+        List<Map<String, Object>> revisions = revisionsFor(region, app).stream()
+                .filter(item -> matchesRevisionFilter(item, bucket, keyPrefix, deployed))
+                .sorted(comparator).map(ApplicationRevision::getRevisionLocation).toList();
+        String scope = mapper.valueToTree(List.of(regionResolver.getAccountId(), region, app.getApplicationId(),
+                sort, sortOrder == null ? "ascending" : sortOrder, bucket == null ? "" : bucket,
+                keyPrefix == null ? "" : keyPrefix, deployed == null ? "ignore" : deployed)).toString();
+        int offset = 0;
+        if (nextToken != null) {
+            try {
+                String token = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
+                if (!token.startsWith(scope + "\n")) {
+                    throw new IllegalArgumentException("Token belongs to another revision query");
+                }
+                offset = Integer.parseInt(token.substring(scope.length() + 1));
+                if (offset < 0 || offset >= revisions.size()) {
+                    throw new IllegalArgumentException("Invalid revision offset");
+                }
+            } catch (IllegalArgumentException error) {
+                throw new AwsException("InvalidNextTokenException", "Invalid revision pagination token", 400);
+            }
+        }
+        int end = Math.min(offset + 100, revisions.size());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("revisions", revisions.subList(offset, end));
+        if (end < revisions.size()) {
+            result.put("nextToken", Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString((scope + "\n" + end).getBytes(StandardCharsets.UTF_8)));
+        }
+        return result;
+    }
+
+    private boolean matchesRevisionFilter(ApplicationRevision revision, String bucket, String keyPrefix,
+                                           String deployed) {
+        if (bucket != null) {
+            Object location = revision.getRevisionLocation().get("s3Location");
+            if (!(location instanceof Map<?, ?> s3) || !bucket.equals(s3.get("bucket"))) {
+                return false;
+            }
+            if (keyPrefix != null && (!(s3.get("key") instanceof String key) || !key.startsWith(keyPrefix))) {
+                return false;
+            }
+        }
+        Object groups = revision.getGenericRevisionInfo().get("deploymentGroups");
+        boolean isDeployed = groups instanceof List<?> list && !list.isEmpty();
+        return !"include".equals(deployed) && !"exclude".equals(deployed)
+                || "include".equals(deployed) == isDeployed;
+    }
+
+    private void validateRevision(Map<String, Object> revision) {
+        if (revision == null) {
+            throw new AwsException("RevisionRequiredException", "Revision is required", 400);
+        }
+        String revisionType = revision.get("revisionType") instanceof String value ? value : null;
+        String locationName = switch (revisionType) {
+            case "S3" -> "s3Location";
+            case "GitHub" -> "gitHubLocation";
+            case "String" -> "string";
+            case "AppSpecContent" -> "appSpecContent";
+            case null, default -> throw new AwsException("InvalidRevisionException", "Invalid revision type", 400);
+        };
+        if (!(revision.get(locationName) instanceof Map<?, ?> location)) {
+            throw new AwsException("InvalidRevisionException", "Revision location is required", 400);
+        }
+        List<String> required = switch (locationName) {
+            case "s3Location" -> List.of("bucket", "key", "bundleType");
+            case "gitHubLocation" -> List.of("repository", "commitId");
+            default -> List.of("content");
+        };
+        for (String field : required) {
+            if (!(location.get(field) instanceof String value) || value.isBlank()) {
+                throw new AwsException("InvalidRevisionException", "Revision location requires " + field, 400);
+            }
+        }
+        if ("s3Location".equals(locationName)
+                && !List.of("tar", "tgz", "zip", "YAML", "JSON").contains(location.get("bundleType"))) {
+            throw new AwsException("InvalidRevisionException", "Invalid S3 bundle type", 400);
+        }
+    }
+
     // ---- Deployments ----
 
     private Map<String, Deployment> deploymentsFor(String region) {
-        return deployments.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+        return deployments.computeIfAbsent(regionResolver.getAccountId() + "/" + region,
+                r -> new ConcurrentHashMap<>());
     }
 
     private Map<String, ConcurrentHashMap<String, Map<String, Object>>> deploymentTargetsFor(String region) {
-        return deploymentTargets.computeIfAbsent(region, r -> new ConcurrentHashMap<>());
+        return deploymentTargets.computeIfAbsent(regionResolver.getAccountId() + "/" + region,
+                r -> new ConcurrentHashMap<>());
     }
 
     private Map<String, OnPremisesInstance> onPremisesFor(String region) {
@@ -563,6 +803,7 @@ public class CodeDeployService {
                                    String configName, Map<String, Object> revision, String description) {
         Application app = getApplication(region, appName);
         DeploymentGroup group = getDeploymentGroup(region, appName, groupName);
+        validateRevision(revision);
         // Compute platform is authoritative on the Application; the deployment group may also carry it
         String computePlatform = group.getComputePlatform();
         if (computePlatform == null) {
@@ -594,6 +835,7 @@ public class CodeDeployService {
         deployment.setDescription(description);
         deployment.setCreator("user");
         deployment.setComputePlatform("Lambda");
+        recordRevisionUse(region, appName, groupName, revision);
         deploymentsFor(region).put(deploymentId, deployment);
 
         // Build initial target map
@@ -625,6 +867,12 @@ public class CodeDeployService {
     }
 
     public Deployment getDeployment(String region, String deploymentId) {
+        if (deploymentId == null || deploymentId.isBlank()) {
+            throw new AwsException("DeploymentIdRequiredException", "Deployment ID is required", 400);
+        }
+        if (!deploymentId.matches("d-[A-Z0-9]{9}")) {
+            throw new AwsException("InvalidDeploymentIdException", "Invalid deployment ID: " + deploymentId, 400);
+        }
         Deployment d = deploymentsFor(region).get(deploymentId);
         if (d == null) {
             throw new AwsException("DeploymentDoesNotExistException",
@@ -646,7 +894,7 @@ public class CodeDeployService {
         Deployment d = getDeployment(region, deploymentId);
         String status = d.getStatus();
         if ("Succeeded".equals(status) || "Failed".equals(status) || "Stopped".equals(status)) {
-            return Map.of("status", "Succeeded", "statusMessage", "Deployment is already in a terminal state.");
+            throw new AwsException("DeploymentAlreadyCompletedException", "Deployment has already completed", 400);
         }
         AtomicBoolean flag = stopFlags.get(deploymentId);
         if (flag != null) {
@@ -693,10 +941,36 @@ public class CodeDeployService {
                 .collect(Collectors.toList());
     }
 
-    public String putLifecycleEventHookExecutionStatus(String deploymentId, String executionId, String status) {
-        CompletableFuture<String> future = hookFutures.get(executionId);
-        if (future != null && !future.isDone()) {
-            future.complete(status);
+    public void continueDeployment(String region, String deploymentId, String waitType) {
+        Deployment deployment = getDeployment(region, deploymentId);
+        if (waitType != null && !List.of("READY_WAIT", "TERMINATION_WAIT").contains(waitType)) {
+            throw new AwsException("InvalidDeploymentWaitTypeException", "Invalid deployment wait type", 400);
+        }
+        if (List.of("Succeeded", "Failed", "Stopped").contains(deployment.getStatus())) {
+            throw new AwsException("DeploymentAlreadyCompletedException", "Deployment has already completed", 400);
+        }
+        // The state machines do not enter a blue/green readiness or termination wait.
+        throw new AwsException("DeploymentIsNotInReadyStateException", "Deployment is not waiting to continue", 400);
+    }
+
+    public String putLifecycleEventHookExecutionStatus(String region, String deploymentId,
+                                                       String executionId, String status) {
+        Deployment deployment = getDeployment(region, deploymentId);
+        if (!"Lambda".equals(deployment.getComputePlatform()) && !"ECS".equals(deployment.getComputePlatform())) {
+            throw new AwsException("UnsupportedActionForDeploymentTypeException",
+                    "Lifecycle hook callbacks require a Lambda or ECS deployment", 400);
+        }
+        if (!"Succeeded".equals(status) && !"Failed".equals(status)) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionStatusException",
+                    "Lifecycle hook status must be Succeeded or Failed", 400);
+        }
+        HookExecution execution = executionId == null ? null : hookExecutions.get(executionId);
+        if (execution == null || execution.deployment() != deployment) {
+            throw new AwsException("InvalidLifecycleEventHookExecutionIdException",
+                    "Lifecycle hook execution does not belong to this deployment", 400);
+        }
+        if (!execution.result().complete(status)) {
+            throw new AwsException("LifecycleEventAlreadyCompletedException", "Lifecycle hook has already completed", 400);
         }
         return executionId;
     }
@@ -797,6 +1071,7 @@ public class CodeDeployService {
         deployment.setDescription(description);
         deployment.setCreator("user");
         deployment.setComputePlatform("Server");
+        recordRevisionUse(region, appName, groupName, revision);
         deploymentsFor(region).put(deploymentId, deployment);
 
         // Resolve target instances
@@ -1242,6 +1517,7 @@ public class CodeDeployService {
         deployment.setDescription(description);
         deployment.setCreator("user");
         deployment.setComputePlatform("ECS");
+        recordRevisionUse(region, appName, groupName, revision);
         deploymentsFor(region).put(deploymentId, deployment);
 
         // Determine ECS cluster/service from deployment group
@@ -1685,7 +1961,7 @@ public class CodeDeployService {
                                 AtomicBoolean stopFlag) throws InterruptedException {
         String executionId = UUID.randomUUID().toString();
         CompletableFuture<String> future = new CompletableFuture<>();
-        hookFutures.put(executionId, future);
+        hookExecutions.put(executionId, new HookExecution(deployment, future));
 
         Map<String, Object> event = addLifecycleEvent(lambdaTargetMap, lifecycleEventName);
 
@@ -1748,7 +2024,7 @@ public class CodeDeployService {
             }
             return "Succeeded".equals(status);
         } finally {
-            hookFutures.remove(executionId);
+            future.complete("Failed");
         }
     }
 
@@ -1869,9 +2145,6 @@ public class CodeDeployService {
         Object ecsServices = fields.get("ecsServices");
         if (ecsServices instanceof List<?> list) {
             group.setEcsServices((List<Map<String, Object>>) list);
-        }
-        if (fields.containsKey("computePlatform")) {
-            group.setComputePlatform((String) fields.get("computePlatform"));
         }
         if (fields.containsKey("outdatedInstancesStrategy")) {
             group.setOutdatedInstancesStrategy((String) fields.get("outdatedInstancesStrategy"));

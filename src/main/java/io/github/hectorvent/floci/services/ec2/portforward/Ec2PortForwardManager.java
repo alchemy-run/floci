@@ -303,13 +303,30 @@ public class Ec2PortForwardManager {
         return "floci-ec2-fwd-" + instanceId + "-" + appPort;
     }
 
-    private NetworkTarget resolveInstanceTarget(Instance instance) {
+    NetworkTarget resolveInstanceTarget(Instance instance) {
+        boolean managed = instance.getLogicalPrivateIpAddress() != null;
         String containerId = instance.getDockerContainerId();
         if (containerId != null) {
             try {
                 InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+                String mode = inspect.getHostConfig() == null ? null : inspect.getHostConfig().getNetworkMode();
+                if (mode != null && mode.startsWith("container:")) {
+                    managed = true;
+                    inspect = dockerClient.inspectContainerCmd(mode.substring("container:".length())).exec();
+                }
                 if (inspect.getNetworkSettings() != null) {
                     Map<String, ContainerNetwork> networks = inspect.getNetworkSettings().getNetworks();
+                    String retained = instance.getContainerBridgeIp();
+                    if (managed && retained != null && !retained.isBlank()) {
+                        if (networks != null) {
+                            for (Map.Entry<String, ContainerNetwork> entry : networks.entrySet()) {
+                                if (entry.getValue() != null && retained.equals(entry.getValue().getIpAddress())) {
+                                    return new NetworkTarget("bridge".equals(entry.getKey()) ? null : entry.getKey(), retained);
+                                }
+                            }
+                        }
+                        return null;
+                    }
                     NetworkTarget target = pickTarget(networks);
                     if (target != null) {
                         return target;
@@ -325,7 +342,7 @@ public class Ec2PortForwardManager {
             }
         }
         String stored = instance.getContainerBridgeIp();
-        if (stored != null && !stored.isBlank()) {
+        if (!managed && stored != null && !stored.isBlank()) {
             return new NetworkTarget(null, stored);
         }
         return null;

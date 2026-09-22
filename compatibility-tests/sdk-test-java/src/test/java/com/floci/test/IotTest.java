@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.iot.IotClient;
 import software.amazon.awssdk.services.iot.model.AttributePayload;
 import software.amazon.awssdk.services.iot.model.AttachPolicyRequest;
@@ -67,6 +70,7 @@ import software.amazon.awssdk.services.iot.model.TagResourceRequest;
 import software.amazon.awssdk.services.iot.model.ThingGroupProperties;
 import software.amazon.awssdk.services.iot.model.ThingTypeProperties;
 import software.amazon.awssdk.services.iot.model.TopicRulePayload;
+import software.amazon.awssdk.services.iot.model.UnauthorizedException;
 import software.amazon.awssdk.services.iot.model.UpdateDomainConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.UntagResourceRequest;
 import software.amazon.awssdk.services.iot.model.UpdateCertificateRequest;
@@ -96,8 +100,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -120,6 +126,91 @@ class IotTest {
                 .build());
 
         assertThat(response.endpointAddress()).isNotBlank();
+    }
+
+    @Test
+    void describedEndpointServesSignedDataPlaneRequests() {
+        String address = iot.describeEndpoint(r -> r.endpointType("iot:Data-ATS")).endpointAddress();
+        URI endpoint = URI.create(TestFixtures.endpoint().getScheme() + "://" + address);
+        String topic = "devices/java-iot/endpoint-route";
+        try (IotDataPlaneClient data = IotDataPlaneClient.builder()
+                .endpointOverride(endpoint).region(Region.US_EAST_1)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                .build()) {
+            try {
+                long before = System.currentTimeMillis();
+                data.publish(r -> r.topic(topic).retain(true).payload(SdkBytes.fromUtf8String("routable-endpoint")));
+                var retained = data.getRetainedMessage(r -> r.topic(topic));
+                assertThat(retained.payload().asUtf8String()).isEqualTo("routable-endpoint");
+                assertThat(retained.lastModifiedTime()).isBetween(before, System.currentTimeMillis());
+                assertThat(data.listRetainedMessages(r -> {}).retainedTopics()).anySatisfy(message -> {
+                    assertThat(message.topic()).isEqualTo(topic);
+                    assertThat(message.lastModifiedTime()).isEqualTo(retained.lastModifiedTime());
+                });
+            } finally {
+                data.publish(r -> r.topic(topic).retain(true).payload(SdkBytes.fromByteArray(new byte[0])));
+            }
+        }
+    }
+
+    @Test
+    void missingTopicRuleUsesTheSdkUnauthorizedException() {
+        String name = "java_missing_topic_rule_wire";
+        assertThatThrownBy(() -> iot.getTopicRule(r -> r.ruleName(name)))
+                .isInstanceOfSatisfying(UnauthorizedException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(401);
+                    assertThat(error.awsErrorDetails().errorMessage()).isEqualTo("Access to topic rule '" + name + "' was denied");
+                });
+        assertThatThrownBy(() -> iot.deleteTopicRule(r -> r.ruleName(name)))
+                .isInstanceOfSatisfying(UnauthorizedException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(401);
+                    assertThat(error.awsErrorDetails().errorMessage()).contains("Access to topic rule");
+                });
+    }
+
+    @Test
+    void signedTopicRuleOperationsRespectAccountAndRegionOwnership() {
+        String name = "java_topic_rule_ownership";
+        TopicRulePayload payload = TopicRulePayload.builder().sql("SELECT * FROM 'devices/java-iot/ownership'")
+                .actions(Action.builder().republish(r -> r.topic("devices/java-iot/ownership-target")
+                        .roleArn("arn:aws:iam::000000000000:role/iot-rule-role")).build())
+                .build();
+        iot.createTopicRule(r -> r.ruleName(name).topicRulePayload(payload));
+        String ownedArn = iot.getTopicRule(r -> r.ruleName(name)).ruleArn();
+        try (IotClient otherAccount = IotClient.builder()
+                    .endpointOverride(TestFixtures.endpoint()).region(Region.US_EAST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("111111111111", "test")))
+                    .build();
+             IotClient otherRegion = IotClient.builder()
+                    .endpointOverride(TestFixtures.endpoint()).region(Region.EU_WEST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                    .build()) {
+            for (IotClient foreign : List.of(otherAccount, otherRegion)) {
+                assertThatThrownBy(() -> foreign.getTopicRule(r -> r.ruleName(name)))
+                        .isInstanceOf(UnauthorizedException.class);
+                assertThatThrownBy(() -> foreign.deleteTopicRule(r -> r.ruleName(name)))
+                        .isInstanceOf(UnauthorizedException.class);
+                assertThat(foreign.listTopicRules(r -> {}).rules()).noneMatch(rule -> name.equals(rule.ruleName()));
+                foreign.createTopicRule(r -> r.ruleName(name).topicRulePayload(payload));
+                try {
+                    assertThatThrownBy(() -> foreign.listTagsForResource(r -> r.resourceArn(ownedArn)))
+                            .isInstanceOf(ResourceNotFoundException.class);
+                    assertThatThrownBy(() -> foreign.tagResource(r -> r.resourceArn(ownedArn)
+                            .tags(Tag.builder().key("foreign").value("blocked").build())))
+                            .isInstanceOf(ResourceNotFoundException.class);
+                    assertThatThrownBy(() -> foreign.untagResource(r -> r.resourceArn(ownedArn).tagKeys("owner")))
+                            .isInstanceOf(ResourceNotFoundException.class);
+                    String foreignArn = foreign.getTopicRule(r -> r.ruleName(name)).ruleArn();
+                    assertThat(foreign.listTagsForResource(r -> r.resourceArn(foreignArn)).tags()).isEmpty();
+                } finally {
+                    foreign.deleteTopicRule(r -> r.ruleName(name));
+                }
+            }
+            assertThat(iot.getTopicRule(r -> r.ruleName(name)).ruleArn()).isEqualTo(ownedArn);
+            assertThat(iot.listTagsForResource(r -> r.resourceArn(ownedArn)).tags()).isEmpty();
+        } finally {
+            iot.deleteTopicRule(r -> r.ruleName(name));
+        }
     }
 
     @Test
@@ -674,7 +765,7 @@ class IotTest {
 
     private Socket mqttConnect(String clientId) throws IOException {
         Socket socket = new Socket();
-        socket.connect(new InetSocketAddress("floci", 1883), 5_000);
+        socket.connect(new InetSocketAddress(TestFixtures.proxyHost(), 1883), 5_000);
         socket.setSoTimeout(5_000);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         mqttUtf8(body, "MQTT");
@@ -690,7 +781,7 @@ class IotTest {
 
     private Socket mqtt5Connect(String clientId) throws IOException {
         Socket socket = new Socket();
-        socket.connect(new InetSocketAddress("floci", 1883), 5_000);
+        socket.connect(new InetSocketAddress(TestFixtures.proxyHost(), 1883), 5_000);
         socket.setSoTimeout(5_000);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         mqttUtf8(body, "MQTT");

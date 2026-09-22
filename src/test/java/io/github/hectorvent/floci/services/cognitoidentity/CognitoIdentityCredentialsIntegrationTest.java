@@ -107,6 +107,81 @@ class CognitoIdentityCredentialsIntegrationTest {
     }
 
     @Test
+    void emptyRolesDetachAndCanBeReattachedOverJsonProtocol() {
+        String poolId = action("CreateIdentityPool", Map.of(
+                "IdentityPoolName", "role detach regression", "AllowUnauthenticatedIdentities", true))
+                .then().statusCode(200).extract().path("IdentityPoolId");
+        try {
+            action("SetIdentityPoolRoles", Map.of("IdentityPoolId", poolId,
+                    "Roles", Map.of("authenticated", ROLE, "unauthenticated", ROLE),
+                    "RoleMappings", Map.of("example.com", Map.of("Type", "Token",
+                            "AmbiguousRoleResolution", "AuthenticatedRole"))))
+                    .then().statusCode(200);
+            String identityId = action("GetId", Map.of("IdentityPoolId", poolId))
+                    .then().statusCode(200).extract().path("IdentityId");
+            action("GetCredentialsForIdentity", Map.of("IdentityId", identityId)).then().statusCode(200);
+
+            for (int attempt = 0; attempt < 2; attempt++) {
+                action("SetIdentityPoolRoles", Map.of("IdentityPoolId", poolId, "Roles", Map.of()))
+                        .then().statusCode(200);
+                action("GetIdentityPoolRoles", Map.of("IdentityPoolId", poolId))
+                        .then().statusCode(200)
+                        .body("IdentityPoolId", equalTo(poolId))
+                        .body("Roles.size()", equalTo(0))
+                        .body("RoleMappings.size()", equalTo(0));
+            }
+            assertTrue(legacyService.getIdentityPoolRoles(poolId).getRoles().isEmpty());
+            action("DescribeIdentityPool", Map.of("IdentityPoolId", poolId)).then().statusCode(200);
+            action("DescribeIdentity", Map.of("IdentityId", identityId)).then().statusCode(200);
+            action("GetCredentialsForIdentity", Map.of("IdentityId", identityId))
+                    .then().statusCode(400)
+                    .body("__type", equalTo("InvalidIdentityPoolConfigurationException"));
+
+            legacyService.setIdentityPoolRoles(poolId, Map.of("unauthenticated", ROLE), Map.of());
+            action("GetCredentialsForIdentity", Map.of("IdentityId", identityId)).then().statusCode(200);
+            legacyService.setIdentityPoolRoles(poolId, Map.of(), Map.of());
+            action("GetIdentityPoolRoles", Map.of("IdentityPoolId", poolId))
+                    .then().statusCode(200).body("Roles.size()", equalTo(0));
+        } finally {
+            action("DeleteIdentityPool", Map.of("IdentityPoolId", poolId)).then().statusCode(200);
+        }
+        action("SetIdentityPoolRoles", Map.of("IdentityPoolId", poolId, "Roles", Map.of()))
+                .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void missingNullAndMalformedRolesDoNotDetachExistingRoles() {
+        String poolId = action("CreateIdentityPool", Map.of(
+                "IdentityPoolName", "role validation regression", "AllowUnauthenticatedIdentities", true))
+                .then().statusCode(200).extract().path("IdentityPoolId");
+        try {
+            action("SetIdentityPoolRoles", Map.of("IdentityPoolId", poolId,
+                    "Roles", Map.of("unauthenticated", ROLE))).then().statusCode(200);
+            action("SetIdentityPoolRoles", Map.of("IdentityPoolId", poolId))
+                    .then().statusCode(400).body("__type", equalTo("InvalidParameterException"));
+            Map<String, String> invalidRoles = Map.of(
+                    "null", "InvalidParameterException",
+                    "[]", "SerializationException",
+                    "\"invalid\"", "SerializationException",
+                    "{\"unauthenticated\":123}", "SerializationException",
+                    "{\"unauthenticated\":null}", "InvalidParameterException",
+                    "{\"unauthenticated\":\"\"}", "InvalidParameterException");
+            for (Map.Entry<String, String> invalid : invalidRoles.entrySet()) {
+                String roles = invalid.getKey();
+                given().header("X-Amz-Target", "AWSCognitoIdentityService.SetIdentityPoolRoles")
+                        .contentType("application/x-amz-json-1.1")
+                        .body("{\"IdentityPoolId\":\"" + poolId + "\",\"Roles\":" + roles + "}")
+                        .post("/").then().statusCode(400)
+                        .body("__type", equalTo(invalid.getValue()));
+            }
+            action("GetIdentityPoolRoles", Map.of("IdentityPoolId", poolId))
+                    .then().statusCode(200).body("Roles.unauthenticated", equalTo(ROLE));
+        } finally {
+            action("DeleteIdentityPool", Map.of("IdentityPoolId", poolId)).then().statusCode(200);
+        }
+    }
+
+    @Test
     void authenticatedCredentialsAndPrincipalTagsSurvivePoolUpdate() {
         String provider = "cognito-idp.us-east-1.amazonaws.com/us-east-1_example";
         String poolId = action("CreateIdentityPool", Map.of(

@@ -2,13 +2,16 @@ package io.github.hectorvent.floci.services.redshift;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.redshift.model.Cluster;
 import io.github.hectorvent.floci.services.redshift.model.ClusterParameterGroup;
 import io.github.hectorvent.floci.services.redshift.model.ClusterSubnetGroup;
+import io.github.hectorvent.floci.services.redshift.model.EventSubscription;
 import io.github.hectorvent.floci.services.redshift.model.Integration;
 import io.github.hectorvent.floci.services.redshift.model.Parameter;
+import io.github.hectorvent.floci.services.redshift.model.RedshiftEvent;
 import io.github.hectorvent.floci.services.redshift.model.Snapshot;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -17,12 +20,16 @@ import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
@@ -117,6 +124,80 @@ public class RedshiftQueryHandler {
                     .build();
             return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
         }
+        case "DescribeClusterDbRevisions" -> {
+            RedshiftService.Page<Cluster> page = service.describeClusterDbRevisions(params.getFirst("ClusterIdentifier"),
+                    intParam(params, "MaxRecords"), params.getFirst("Marker"));
+            XmlBuilder builder = new XmlBuilder().start("ClusterDbRevisions");
+            for (Cluster cluster : page.items()) {
+                // The PostgreSQL backend has no AWS database revision or upgrade targets.
+                builder.start("ClusterDbRevision").elem("ClusterIdentifier", cluster.getClusterIdentifier())
+                        .start("RevisionTargets").end("RevisionTargets").end("ClusterDbRevision");
+            }
+            builder.end("ClusterDbRevisions").elem("Marker", page.marker());
+            return queryResponse(action, builder.build());
+        }
+        case "DescribeResize" -> {
+            String identifier = requireParam(params, "ClusterIdentifier");
+            service.describeClusters(identifier);
+            throw new AwsException("ResizeNotFound", "No resize operation exists for cluster " + identifier + ".", 404);
+        }
+        case "GetReservedNodeExchangeOfferings" -> {
+            String nodeId = requireParam(params, "ReservedNodeId");
+            // Reserved-node purchases are not implemented, so no owned node can be exchanged.
+            throw new AwsException("ReservedNodeNotFound", "Reserved node " + nodeId + " not found.", 404);
+        }
+        case "CreateEventSubscription" -> {
+            EventSubscription subscription = service.createEventSubscription(requireParam(params, "SubscriptionName"),
+                    requireParam(params, "SnsTopicArn"), params.getFirst("SourceType"), memberList(params, "SourceIds"),
+                    memberList(params, "EventCategories"), params.getFirst("Severity"), booleanParam(params, "Enabled"),
+                    parseTags(params));
+            return queryResponse(action, buildEventSubscriptionXml(subscription));
+        }
+        case "ModifyEventSubscription" -> {
+            EventSubscription subscription = service.modifyEventSubscription(requireParam(params, "SubscriptionName"),
+                    params.getFirst("SnsTopicArn"), params.getFirst("SourceType"), optionalMemberList(params, "SourceIds"),
+                    optionalMemberList(params, "EventCategories"), params.getFirst("Severity"), booleanParam(params, "Enabled"));
+            return queryResponse(action, buildEventSubscriptionXml(subscription));
+        }
+        case "DeleteEventSubscription" -> {
+            service.deleteEventSubscription(requireParam(params, "SubscriptionName"));
+            return queryResponse(action, "");
+        }
+        case "DescribeEventSubscriptions" -> {
+            RedshiftService.Page<EventSubscription> page = service.describeEventSubscriptions(params.getFirst("SubscriptionName"),
+                    intParam(params, "MaxRecords"), params.getFirst("Marker"), memberList(params, "TagKeys"),
+                    memberList(params, "TagValues"));
+            XmlBuilder builder = new XmlBuilder().start("EventSubscriptionsList");
+            for (EventSubscription subscription : page.items()) {
+                builder.raw(buildEventSubscriptionXml(subscription));
+            }
+            builder.end("EventSubscriptionsList").elem("Marker", page.marker());
+            return queryResponse(action, builder.build());
+        }
+        case "DescribeEvents" -> {
+            RedshiftService.EventPage page = service.describeEvents(params.getFirst("SourceIdentifier"),
+                    params.getFirst("SourceType"), instantParam(params, "StartTime"), instantParam(params, "EndTime"),
+                    intParam(params, "Duration"), intParam(params, "MaxRecords"), params.getFirst("Marker"));
+            XmlBuilder builder = new XmlBuilder().start("Events");
+            for (RedshiftEvent event : page.events()) {
+                builder.start("Event")
+                        .elem("SourceIdentifier", event.sourceIdentifier())
+                        .elem("SourceType", event.sourceType())
+                        .elem("Message", event.message())
+                        .start("EventCategories").elem("EventCategory", "management").end("EventCategories")
+                        .elem("Severity", "INFO")
+                        .elem("Date", event.date())
+                        .end("Event");
+            }
+            builder.end("Events").elem("Marker", page.marker());
+            return queryResponse(action, builder.build());
+        }
+        case "CopyClusterSnapshot" -> {
+            Snapshot snapshot = service.copyClusterSnapshot(requireParam(params, "SourceSnapshotIdentifier"),
+                    params.getFirst("SourceSnapshotClusterIdentifier"), requireParam(params, "TargetSnapshotIdentifier"),
+                    intParam(params, "ManualSnapshotRetentionPeriod"));
+            return queryResponse(action, buildSnapshotXml(snapshot));
+        }
         case "CreateClusterSnapshot" -> {
             String snapshotIdentifier = params.getFirst("SnapshotIdentifier");
             String clusterIdentifier = params.getFirst("ClusterIdentifier");
@@ -191,6 +272,7 @@ public class RedshiftQueryHandler {
             String parameterGroupFamily = params.getFirst("ParameterGroupFamily");
             String description = params.getFirst("Description");
             ClusterParameterGroup group = service.createClusterParameterGroup(parameterGroupName, parameterGroupFamily, description);
+            applyCreateTags(params, "parametergroup", parameterGroupName);
             String xml = new XmlBuilder()
                     .start("CreateClusterParameterGroupResponse")
                       .start("CreateClusterParameterGroupResult")
@@ -228,7 +310,9 @@ public class RedshiftQueryHandler {
             if (parameterGroupName == null || parameterGroupName.isBlank()) {
                 throw new AwsException("InvalidParameterValue", "ParameterGroupName is required", 400);
             }
-            List<Parameter> parameters = service.describeClusterParameters(parameterGroupName);
+            List<Parameter> parameters = params.getFirst("Source") == null
+                    ? service.describeClusterParameters(parameterGroupName)
+                    : service.describeClusterParameters(parameterGroupName, params.getFirst("Source"));
 
             XmlBuilder xmlBuilder = new XmlBuilder()
                     .start("DescribeClusterParametersResponse")
@@ -265,6 +349,13 @@ public class RedshiftQueryHandler {
                     .end("ModifyClusterParameterGroupResponse")
                     .build();
             return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
+        case "ResetClusterParameterGroup" -> {
+            String name = requireParam(params, "ParameterGroupName");
+            service.resetClusterParameterGroup(name, Boolean.parseBoolean(params.getFirst("ResetAllParameters")),
+                    parseParameters(params));
+            return queryResponse(action, new XmlBuilder().elem("ParameterGroupName", name)
+                    .elem("ParameterGroupStatus", "pending-reboot").build());
         }
         case "DeleteClusterParameterGroup" -> {
             String parameterGroupName = params.getFirst("ParameterGroupName");
@@ -340,6 +431,7 @@ public class RedshiftQueryHandler {
             String description = params.getFirst("Description");
             List<String> subnetIds = memberList(params, "SubnetIds");
             ClusterSubnetGroup group = service.createClusterSubnetGroup(name, description, null, subnetIds);
+            applyCreateTags(params, "subnetgroup", name);
             String xml = new XmlBuilder()
                     .start("CreateClusterSubnetGroupResponse")
                       .start("CreateClusterSubnetGroupResult")
@@ -539,6 +631,56 @@ public class RedshiftQueryHandler {
         }
     }
 
+    private static Response queryResponse(String action, String result) {
+        String xml = new XmlBuilder().start(action + "Response", AwsNamespaces.REDSHIFT)
+                .start(action + "Result").raw(result).end(action + "Result")
+                .start("ResponseMetadata").elem("RequestId", UUID.randomUUID().toString()).end("ResponseMetadata")
+                .end(action + "Response").build();
+        return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+    }
+
+    private static String buildEventSubscriptionXml(EventSubscription subscription) {
+        XmlBuilder builder = new XmlBuilder().start("EventSubscription")
+                .elem("CustomerAwsId", subscription.customerAwsId()).elem("CustSubscriptionId", subscription.name())
+                .elem("SnsTopicArn", subscription.snsTopicArn()).elem("Status", subscription.status())
+                .elem("SubscriptionCreationTime", subscription.creationTime()).elem("SourceType", subscription.sourceType())
+                .start("SourceIdsList");
+        subscription.sourceIds().forEach(id -> builder.elem("SourceId", id));
+        builder.end("SourceIdsList").start("EventCategoriesList");
+        subscription.eventCategories().forEach(category -> builder.elem("EventCategory", category));
+        builder.end("EventCategoriesList").elem("Severity", subscription.severity()).elem("Enabled", subscription.enabled());
+        appendTags(builder, subscription.tags());
+        return builder.end("EventSubscription").build();
+    }
+
+    private static Boolean booleanParam(MultivaluedMap<String, String> params, String name) {
+        String value = params.getFirst(name);
+        if (value == null) {
+            return null;
+        }
+        if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+            throw new AwsException("InvalidParameterValue", name + " must be a boolean.", 400);
+        }
+        return Boolean.valueOf(value);
+    }
+
+    private static List<String> optionalMemberList(MultivaluedMap<String, String> params, String name) {
+        return params.keySet().stream().anyMatch(key -> key.equals(name) || key.startsWith(name + "."))
+                ? memberList(params, name) : null;
+    }
+
+    private static Instant instantParam(MultivaluedMap<String, String> params, String name) {
+        String value = params.getFirst(name);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw new AwsException("InvalidParameterValue", name + " must be an ISO-8601 timestamp.", 400);
+        }
+    }
+
     private static String requireParam(MultivaluedMap<String, String> params, String name) {
         String value = params.getFirst(name);
         if (value == null || value.isBlank()) {
@@ -674,9 +816,25 @@ public class RedshiftQueryHandler {
             .elem("ClusterIdentifier", snapshot.getClusterIdentifier())
             .elem("Status", snapshot.getStatus())
             .elem("Port", String.valueOf(snapshot.getPort()))
-            .elem("MasterUsername", snapshot.getMasterUsername());
-        
+            .elem("MasterUsername", snapshot.getMasterUsername())
+            .elem("ManualSnapshotRetentionPeriod", snapshot.getManualSnapshotRetentionPeriod());
+        appendTags(builder, snapshot.getTags());
         return builder.end("Snapshot").build();
+    }
+
+    private void applyCreateTags(MultivaluedMap<String, String> params, String type, String name) {
+        Map<String, String> tags = parseTags(params);
+        if (!tags.isEmpty()) {
+            service.createTags(regionResolver.buildArn("redshift", regionResolver.getRegion(), type + ":" + name), tags);
+        }
+    }
+
+    private static void appendTags(XmlBuilder builder, Map<String, String> tags) {
+        builder.start("Tags");
+        for (Map.Entry<String, String> tag : tags.entrySet()) {
+            builder.start("Tag").elem("Key", tag.getKey()).elem("Value", tag.getValue()).end("Tag");
+        }
+        builder.end("Tags");
     }
 
     private String buildClusterParameterGroupXml(ClusterParameterGroup group) {
@@ -685,7 +843,7 @@ public class RedshiftQueryHandler {
             .elem("ParameterGroupName", group.getParameterGroupName())
             .elem("ParameterGroupFamily", group.getParameterGroupFamily())
             .elem("Description", group.getDescription());
-        
+        appendTags(builder, group.getTags());
         return builder.end("ClusterParameterGroup").build();
     }
 
@@ -699,14 +857,17 @@ public class RedshiftQueryHandler {
         for (String subnetId : group.getSubnetIds()) {
             builder.start("Subnet").elem("SubnetIdentifier", subnetId).end("Subnet");
         }
-        return builder.end("Subnets").end("ClusterSubnetGroup").build();
+        builder.end("Subnets").elem("SubnetGroupStatus", "Complete");
+        appendTags(builder, group.getTags());
+        return builder.end("ClusterSubnetGroup").build();
     }
 
     private String buildParameterXml(Parameter param) {
         XmlBuilder builder = new XmlBuilder()
             .start("Parameter")
             .elem("ParameterName", param.getParameterName())
-            .elem("ParameterValue", param.getParameterValue());
+            .elem("ParameterValue", param.getParameterValue())
+            .elem("Source", param.getSource());
 
         if (param.getDescription() != null) {
             builder.elem("Description", param.getDescription());
@@ -803,7 +964,7 @@ public class RedshiftQueryHandler {
     private static List<RedshiftService.IntegrationFilter> integrationFilters(MultivaluedMap<String, String> params) {
         Map<String, RedshiftService.IntegrationFilter> byIndex = new LinkedHashMap<>();
         for (String key : params.keySet()) {
-            java.util.regex.Matcher matcher = FILTER_NAME.matcher(key);
+            Matcher matcher = FILTER_NAME.matcher(key);
             if (!matcher.matches()) {
                 continue;
             }
@@ -849,6 +1010,9 @@ public class RedshiftQueryHandler {
             case "SubnetIds" -> quoted + "(\\.member|\\.SubnetIdentifier)?\\.\\d+";
             case "VpcSecurityGroupIds" -> quoted + "(\\.member|\\.VpcSecurityGroupId)?\\.\\d+";
             case "TagKeys" -> quoted + "(\\.member|\\.TagKey)?\\.\\d+";
+            case "TagValues" -> quoted + "(\\.member|\\.TagValue)?\\.\\d+";
+            case "SourceIds" -> quoted + "(\\.member|\\.SourceId)?\\.\\d+";
+            case "EventCategories" -> quoted + "(\\.member|\\.EventCategory)?\\.\\d+";
             case "DbGroups" -> quoted + "(\\.member|\\.DbGroup)?\\.\\d+";
             default -> quoted + "(\\.member)?\\.\\d+";
         };

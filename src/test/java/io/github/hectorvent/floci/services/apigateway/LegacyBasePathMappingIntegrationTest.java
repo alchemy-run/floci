@@ -42,8 +42,9 @@ class LegacyBasePathMappingIntegrationTest {
 
     private void seedLegacyState() {
         service.createDomainName(REGION, Map.of("domainName", DOMAIN));
-        // The canonical root, as writes produce it today.
-        service.createBasePathMapping(REGION, DOMAIN, Map.of("restApiId", "api-canonical", "stage", "prod"));
+        // Both records predate persisted mapping IDs, including the canonical root.
+        mappings().put(REGION + "::" + DOMAIN + "::(none)",
+                new BasePathMapping("(none)", "api-canonical", "prod"));
         // And one the old write path left under the empty key; its field still reads "(none)".
         mappings().put(REGION + "::" + DOMAIN + "::", new BasePathMapping("", "api-legacy", "prod"));
     }

@@ -8,6 +8,7 @@ import software.amazon.awssdk.services.detective.model.Account;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 @DisplayName("Detective organization administration")
@@ -46,13 +47,13 @@ class DetectiveOrganizationAdministrationTest {
 
             var created = administrator.createMembers(request -> request
                     .graphArn(graphArn)
-                    .accounts(List.of(Account.builder().accountId(MEMBER_ACCOUNT).build())));
+                    .accounts(List.of(Account.builder().accountId(MEMBER_ACCOUNT).emailAddress("member@example.com").build())));
             assertThat(created.members()).extracting(member -> member.accountId()).containsExactly(MEMBER_ACCOUNT);
             assertThat(created.unprocessedAccounts()).isEmpty();
 
             var duplicate = administrator.createMembers(request -> request
                     .graphArn(graphArn)
-                    .accounts(List.of(Account.builder().accountId(MEMBER_ACCOUNT).build())));
+                    .accounts(List.of(Account.builder().accountId(MEMBER_ACCOUNT).emailAddress("member@example.com").build())));
             assertThat(duplicate.members()).isEmpty();
             assertThat(duplicate.unprocessedAccounts())
                     .extracting(account -> account.accountId())
@@ -62,10 +63,12 @@ class DetectiveOrganizationAdministrationTest {
                     .extracting(member -> member.accountId())
                     .containsExactly(MEMBER_ACCOUNT);
 
-            administrator.startMonitoringMember(request -> request.graphArn(graphArn).accountId(MEMBER_ACCOUNT));
+            assertThatThrownBy(() -> administrator.startMonitoringMember(
+                    request -> request.graphArn(graphArn).accountId(MEMBER_ACCOUNT)))
+                    .isInstanceOf(software.amazon.awssdk.services.detective.model.ConflictException.class);
             assertThat(administrator.listMembers(request -> request.graphArn(graphArn)).memberDetails())
                     .singleElement()
-                    .satisfies(member -> assertThat(member.statusAsString()).isEqualTo("ENABLED"));
+                    .satisfies(member -> assertThat(member.statusAsString()).isEqualTo("INVITED"));
         }
     }
 }

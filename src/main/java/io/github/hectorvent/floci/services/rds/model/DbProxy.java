@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.rds.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
@@ -39,10 +40,12 @@ public class DbProxy {
     private List<String> vpcSecurityGroupIds = new ArrayList<>();
     private List<DbProxyAuth> auth = new ArrayList<>();
     private Map<String, String> tags = new LinkedHashMap<>();
+    private List<DbProxyEndpoint> endpoints = new ArrayList<>();
 
     public DbProxy() {}
 
     /** AWS RDS Proxy exposes a bare hostname and clients connect on the engine's default port. */
+    @JsonIgnore
     public String getEndpoint() {
         return endpointHost;
     }
@@ -120,6 +123,12 @@ public class DbProxy {
     public List<DbProxyAuth> getAuth() { return auth; }
     public void setAuth(List<DbProxyAuth> auth) {
         this.auth = auth != null ? new ArrayList<>(auth) : new ArrayList<>();
+    }
+
+    public List<DbProxyEndpoint> getEndpoints() { return endpoints; }
+    public void setEndpoints(List<DbProxyEndpoint> endpoints) {
+        this.endpoints = endpoints == null ? new ArrayList<>()
+                : new ArrayList<>(endpoints.stream().map(DbProxyEndpoint::new).toList());
     }
 
     public Map<String, String> getTags() { return tags; }

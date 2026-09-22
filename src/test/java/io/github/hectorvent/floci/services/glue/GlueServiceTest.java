@@ -92,7 +92,7 @@ class GlueServiceTest {
 
     @Test
     void createDatabasePersistsCatalogIdSoReadsDoNotWriteIt() {
-        assertEquals(ACCOUNT_ID, databaseStore.get("db1").orElseThrow().getCatalogId());
+        assertEquals(ACCOUNT_ID, databaseStore.scan(key -> true).getFirst().getCatalogId());
         assertEquals(ACCOUNT_ID, glueService.getDatabase("db1").getCatalogId());
     }
 

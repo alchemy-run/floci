@@ -49,10 +49,16 @@ public class ClusterParameterGroup {
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
 
-    private List<Parameter> parameters = new ArrayList<>(List.of(
-            new Parameter("max_cursor_result_set_size", "0", "Maximum cursor result set size", "integer"),
-            new Parameter("wlm_json_configuration", "{}", "WLM configuration", "string")
-    ));
+    public static List<Parameter> defaultParameters() {
+        return new ArrayList<>(List.of(
+                new Parameter("max_cursor_result_set_size", "0", "Maximum cursor result set size", "integer"),
+                new Parameter("wlm_json_configuration", "{}", "WLM configuration", "string"),
+                new Parameter("enable_user_activity_logging", "false", "Enable user activity logging", "boolean"),
+                new Parameter("statement_timeout", "0", "Statement timeout in milliseconds", "integer")
+        ));
+    }
+
+    private List<Parameter> parameters = defaultParameters();
 
     public List<Parameter> getParameters() { return parameters; }
     public void setParameters(List<Parameter> parameters) { this.parameters = parameters; }

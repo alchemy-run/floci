@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.securityhub.model.SecurityHubAssociat
 import io.github.hectorvent.floci.services.securityhub.model.SecurityHubState;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
@@ -101,6 +102,13 @@ public class SecurityHubController {
         return empty();
     }
 
+    @DELETE
+    @Path("/accounts")
+    public Response disableSecurityHub(@Context HttpHeaders headers) {
+        securityHubService.disableSecurityHub(region(headers));
+        return empty();
+    }
+
     @PATCH
     @Path("/accounts")
     public Response updateSecurityHubConfiguration(@Context HttpHeaders headers, String body) {
@@ -114,7 +122,7 @@ public class SecurityHubController {
                                            @QueryParam("MaxResults") String maxResultsValue,
                                            @QueryParam("NextToken") String nextToken) {
         Integer maxResults = Pagination.parseMaxResults(maxResultsValue, "InvalidInputException");
-        if (maxResults != null && maxResults > 100) {
+        if (maxResults != null && (maxResults < 1 || maxResults > 100)) {
             throw new AwsException("InvalidInputException", "MaxResults must be between 1 and 100.", 400);
         }
         if (nextToken != null && !nextToken.isBlank()) {
@@ -149,9 +157,7 @@ public class SecurityHubController {
     public Response updateFindingAggregator(@Context HttpHeaders headers, String body) {
         String region = region(headers);
         SecurityHubState state = securityHubService.updateFindingAggregator(region, readTree(body));
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("FindingAggregatorArn", state.getAggregatorArn());
-        return Response.ok(response).build();
+        return aggregator(state, region);
     }
 
     @GET
@@ -254,6 +260,255 @@ public class SecurityHubController {
         return Response.ok(response).build();
     }
 
+    @POST
+    @Path("/actionTargets/get")
+    public Response describeActionTargets(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.describeActionTargets(region(headers), readTree(body))).build();
+    }
+
+    @POST
+    @Path("/actionTargets")
+    public Response createActionTarget(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.createActionTarget(region(headers), readTree(body))).build();
+    }
+
+    @PATCH
+    @Path("/actionTargets/{arn: .+}")
+    public Response updateActionTarget(@Context HttpHeaders headers, @PathParam("arn") String arn, String body) {
+        securityHubService.updateActionTarget(region(headers), arn, readTree(body));
+        return empty();
+    }
+
+    @DELETE
+    @Path("/actionTargets/{arn: .+}")
+    public Response deleteActionTarget(@Context HttpHeaders headers, @PathParam("arn") String arn) {
+        return Response.ok(securityHubService.deleteActionTarget(region(headers), arn)).build();
+    }
+
+    @POST
+    @Path("/insights/get")
+    public Response getInsights(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.getInsights(region(headers), readTree(body))).build();
+    }
+
+    @POST
+    @Path("/insights")
+    public Response createInsight(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.createInsight(region(headers), readTree(body))).build();
+    }
+
+    @PATCH
+    @Path("/insights/{arn: .+}")
+    public Response updateInsight(@Context HttpHeaders headers, @PathParam("arn") String arn, String body) {
+        securityHubService.updateInsight(region(headers), arn, readTree(body));
+        return empty();
+    }
+
+    @DELETE
+    @Path("/insights/{arn: .+}")
+    public Response deleteInsight(@Context HttpHeaders headers, @PathParam("arn") String arn) {
+        return Response.ok(securityHubService.deleteInsight(region(headers), arn)).build();
+    }
+
+    @POST
+    @Path("/automationrules/create")
+    public Response createAutomationRule(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.createAutomationRule(region(headers), readTree(body))).build();
+    }
+
+    @GET
+    @Path("/automationrules/list")
+    public Response listAutomationRules(@Context HttpHeaders headers, @QueryParam("MaxResults") String maxResults,
+                                        @QueryParam("NextToken") String nextToken) {
+        return Response.ok(securityHubService.listAutomationRules(region(headers), pageRequest(maxResults, nextToken))).build();
+    }
+
+    @POST
+    @Path("/automationrules/get")
+    public Response batchGetAutomationRules(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.batchAutomationRules(region(headers), readTree(body), "get")).build();
+    }
+
+    @PATCH
+    @Path("/automationrules/update")
+    public Response batchUpdateAutomationRules(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.batchAutomationRules(region(headers), readTree(body), "update")).build();
+    }
+
+    @POST
+    @Path("/automationrules/delete")
+    public Response batchDeleteAutomationRules(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.batchAutomationRules(region(headers), readTree(body), "delete")).build();
+    }
+
+    @DELETE
+    @Path("/findingAggregator/delete/{arn: .+}")
+    public Response deleteFindingAggregator(@Context HttpHeaders headers, @PathParam("arn") String arn) {
+        securityHubService.deleteFindingAggregator(region(headers), arn);
+        return empty();
+    }
+
+    @POST
+    @Path("/_securityhub/findings/import")
+    public Response batchImportFindings(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.batchImportFindings(region(headers), readTree(body))).build();
+    }
+
+    @POST
+    @Path("/_securityhub/findings")
+    public Response getFindings(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.getFindings(region(headers), readTree(body))).build();
+    }
+
+    @PATCH
+    @Path("/_securityhub/findings/batchupdate")
+    public Response batchUpdateFindings(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.batchUpdateFindings(region(headers), readTree(body))).build();
+    }
+
+    @POST
+    @Path("/findingHistory/get")
+    public Response getFindingHistory(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.getFindingHistory(region(headers), readTree(body))).build();
+    }
+
+    @GET
+    @Path("/products")
+    public Response describeProducts(@Context HttpHeaders headers, @QueryParam("MaxResults") String maxResults,
+                                     @QueryParam("NextToken") String nextToken, @QueryParam("ProductArn") String arn) {
+        ObjectNode request = pageRequest(maxResults, nextToken);
+        if (arn != null) {
+            request.put("ProductArn", arn);
+        }
+        return Response.ok(securityHubService.describeProducts(region(headers), request)).build();
+    }
+
+    @GET
+    @Path("/standards")
+    public Response describeStandards(@Context HttpHeaders headers, @QueryParam("MaxResults") String maxResults,
+                                      @QueryParam("NextToken") String nextToken) {
+        return Response.ok(securityHubService.describeStandards(region(headers), pageRequest(maxResults, nextToken))).build();
+    }
+
+    @POST
+    @Path("/standards/get")
+    public Response getEnabledStandards(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.getEnabledStandards(region(headers), readTree(body))).build();
+    }
+
+    @POST
+    @Path("/standards/register")
+    public Response batchEnableStandards(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.batchEnableStandards(region(headers), readTree(body))).build();
+    }
+
+    @POST
+    @Path("/standards/deregister")
+    public Response batchDisableStandards(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.batchDisableStandards(region(headers), readTree(body))).build();
+    }
+
+    @GET
+    @Path("/securityControls/definitions")
+    public Response listSecurityControlDefinitions(@Context HttpHeaders headers, @QueryParam("MaxResults") String maxResults,
+            @QueryParam("NextToken") String nextToken, @QueryParam("StandardsArn") String arn) {
+        ObjectNode request = pageRequest(maxResults, nextToken);
+        if (arn != null) {
+            request.put("StandardsArn", arn);
+        }
+        return Response.ok(securityHubService.listSecurityControlDefinitions(region(headers), request)).build();
+    }
+
+    @GET
+    @Path("/securityControl/definition")
+    public Response getSecurityControlDefinition(@QueryParam("SecurityControlId") String id) {
+        return Response.ok(securityHubService.getSecurityControlDefinition(id)).build();
+    }
+
+    @GET
+    @Path("/productSubscriptions")
+    public Response listEnabledProductsForImport(@Context HttpHeaders headers, @QueryParam("MaxResults") String maxResults,
+                                                  @QueryParam("NextToken") String nextToken) {
+        return Response.ok(securityHubService.listEnabledProductsForImport(region(headers), pageRequest(maxResults, nextToken)))
+                .build();
+    }
+
+    @POST
+    @Path("/productSubscriptions")
+    public Response enableImportFindingsForProduct(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.enableImportFindingsForProduct(region(headers), readTree(body))).build();
+    }
+
+    @DELETE
+    @Path("/productSubscriptions/{arn: .+}")
+    public Response disableImportFindingsForProduct(@Context HttpHeaders headers, @PathParam("arn") String arn) {
+        securityHubService.disableImportFindingsForProduct(region(headers), arn);
+        return empty();
+    }
+
+    @GET
+    @Path("/_securityhub/members")
+    public Response listMembers(@Context HttpHeaders headers, @QueryParam("MaxResults") String maxResults,
+                               @QueryParam("NextToken") String nextToken, @QueryParam("OnlyAssociated") String associated) {
+        ObjectNode request = pageRequest(maxResults, nextToken);
+        if (associated != null) {
+            if (!"true".equals(associated) && !"false".equals(associated)) {
+                throw new AwsException("InvalidInputException", "OnlyAssociated must be a boolean.", 400);
+            }
+            request.put("OnlyAssociated", Boolean.parseBoolean(associated));
+        }
+        return Response.ok(securityHubService.listMembers(region(headers), request)).build();
+    }
+
+    @POST
+    @Path("/_securityhub/members")
+    public Response createMembers(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.createMembers(region(headers), readTree(body))).build();
+    }
+
+    @POST
+    @Path("/_securityhub/members/get")
+    public Response getMembers(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.memberBatch(region(headers), readTree(body), false)).build();
+    }
+
+    @POST
+    @Path("/_securityhub/members/delete")
+    public Response deleteMembers(@Context HttpHeaders headers, String body) {
+        return Response.ok(securityHubService.memberBatch(region(headers), readTree(body), true)).build();
+    }
+
+    @GET
+    @Path("/_securityhub/administrator")
+    public Response getAdministratorAccount(@Context HttpHeaders headers) {
+        return Response.ok(securityHubService.getAdministratorAccount(region(headers))).build();
+    }
+
+    @GET
+    @Path("/_securityhub/invitations")
+    public Response listInvitations(@Context HttpHeaders headers, @QueryParam("MaxResults") String maxResults,
+                                   @QueryParam("NextToken") String nextToken) {
+        return Response.ok(securityHubService.listInvitations(region(headers), pageRequest(maxResults, nextToken))).build();
+    }
+
+    @GET
+    @Path("/_securityhub/invitations/count")
+    public Response getInvitationsCount(@Context HttpHeaders headers) {
+        return Response.ok(securityHubService.getInvitationsCount(region(headers))).build();
+    }
+
+    private ObjectNode pageRequest(String maxResults, String nextToken) {
+        ObjectNode request = objectMapper.createObjectNode();
+        Integer maximum = Pagination.parseMaxResults(maxResults, "InvalidInputException");
+        if (maximum != null) {
+            request.put("MaxResults", maximum);
+        }
+        if (nextToken != null) {
+            request.put("NextToken", nextToken);
+        }
+        return request;
+    }
+
     private Response aggregator(SecurityHubState state, String region) {
         ObjectNode response = objectMapper.createObjectNode();
         response.put("FindingAggregatorArn", state.getAggregatorArn());
@@ -316,7 +571,11 @@ public class SecurityHubController {
 
     private JsonNode readTree(String body) {
         try {
-            return objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            if (request == null || !request.isObject()) {
+                throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
+            }
+            return request;
         } catch (Exception e) {
             throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
         }

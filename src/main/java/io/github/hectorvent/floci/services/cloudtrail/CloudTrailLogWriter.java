@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ManagedContext;
 import io.github.hectorvent.floci.services.cloudtrail.model.Trail;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.quarkus.runtime.ShutdownEvent;
@@ -115,7 +118,7 @@ public class CloudTrailLogWriter {
         try {
             for (CloudTrailService.TrailKey key : cloudTrailService.trailsWithPendingRecords()) {
                 try {
-                    flushTrailBatches(key);
+                    flushForAccount(key);
                 } catch (RuntimeException e) {
                     LOG.warnv(e, "CloudTrail log flush failed for trail {0} in {1}",
                             key.trailName(), key.region());
@@ -123,6 +126,24 @@ public class CloudTrailLogWriter {
             }
         } catch (RuntimeException outer) {
             LOG.errorv(outer, "CloudTrail log writer iteration failed");
+        }
+    }
+
+    private void flushForAccount(CloudTrailService.TrailKey key) {
+        ManagedContext context = Arc.container().requestContext();
+        boolean active = context.isActive();
+        if (!active) context.activate();
+        RequestContext request = Arc.container().instance(RequestContext.class).get();
+        String previousAccount = request.getAccountId();
+        String previousRegion = request.getRegion();
+        try {
+            request.setAccountId(key.accountId() == null ? regionResolver.getDefaultAccountId() : key.accountId());
+            request.setRegion(key.region());
+            flushTrailBatches(key);
+        } finally {
+            request.setAccountId(previousAccount);
+            request.setRegion(previousRegion);
+            if (!active) context.terminate();
         }
     }
 

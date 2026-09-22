@@ -154,6 +154,12 @@ class LeafCfnProvisionerTest {
         private final SsmService ssm = mock(SsmService.class);
         private final SsmCfnProvisioner provisioner = new SsmCfnProvisioner(ssm);
 
+        @BeforeEach
+        void observedParameters() {
+            when(ssm.getParameter(anyString(), eq(REGION))).thenAnswer(invocation ->
+                    new io.github.hectorvent.floci.services.ssm.model.Parameter(invocation.getArgument(0), "secret", "String"));
+        }
+
         @Test
         void refIsTheParameterNameAndAttributesEchoTheStoredValue() {
             StackResource r = resource("Param", "AWS::SSM::Parameter");
@@ -161,7 +167,8 @@ class LeafCfnProvisionerTest {
                     {"Name": "/app/db", "Value": "secret", "Type": "String"}
                     """), ctx);
 
-            verify(ssm).putParameter("/app/db", "secret", "String", null, true, REGION);
+            verify(ssm).putParameter("/app/db", "secret", "String", null, false, REGION,
+                    Map.of(), "Standard", null, "", "text");
             assertEquals("/app/db", r.getPhysicalId());
             assertEquals(Map.of("Name", "/app/db", "Type", "String", "Value", "secret",
                     "Arn", "arn:aws:ssm:us-east-1:000000000000:parameter/app/db"), r.getAttributes());
@@ -182,12 +189,12 @@ class LeafCfnProvisionerTest {
         @Test
         void anUnnamedParameterGetsAGeneratedStackScopedName() {
             StackResource r = resource("Param", "AWS::SSM::Parameter");
-            provisioner.provision(r, props("{}"), ctx);
+            provisioner.provision(r, props("{\"Value\":\"secret\"}"), ctx);
 
             assertTrue(r.getPhysicalId().startsWith("my-stack-Param-"),
                     "generated names stay stack-scoped: " + r.getPhysicalId());
-            // Absent Value and Type fall back rather than reaching the service as null.
-            verify(ssm).putParameter(anyString(), eq(""), eq("String"), eq(null), eq(true), eq(REGION));
+            verify(ssm).putParameter(anyString(), eq("secret"), eq("String"), eq(null), eq(false), eq(REGION),
+                    eq(Map.of()), eq("Standard"), eq(null), eq(""), eq("text"));
         }
 
         @Test

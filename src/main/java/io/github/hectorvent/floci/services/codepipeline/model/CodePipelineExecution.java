@@ -35,6 +35,8 @@ public class CodePipelineExecution {
     private volatile boolean stopRequested;
     private volatile boolean abandon;
     private String rollbackTargetPipelineExecutionId;
+    private String resumeStageName;
+    private boolean retryFailedActionsOnly;
 
     public String getAccountId() {
         return accountId;
@@ -203,6 +205,22 @@ public class CodePipelineExecution {
 
     public void setRollbackTargetPipelineExecutionId(String rollbackTargetPipelineExecutionId) {
         this.rollbackTargetPipelineExecutionId = rollbackTargetPipelineExecutionId;
+    }
+
+    public String getResumeStageName() {
+        return resumeStageName;
+    }
+
+    public void setResumeStageName(String resumeStageName) {
+        this.resumeStageName = resumeStageName;
+    }
+
+    public boolean isRetryFailedActionsOnly() {
+        return retryFailedActionsOnly;
+    }
+
+    public void setRetryFailedActionsOnly(boolean retryFailedActionsOnly) {
+        this.retryFailedActionsOnly = retryFailedActionsOnly;
     }
 
     @RegisterForReflection

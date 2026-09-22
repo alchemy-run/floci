@@ -4,7 +4,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.lakeformation.model.*;
+import io.github.hectorvent.floci.services.lakeformation.model.AddLFTagsToResourceRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.CreateLFTagRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.DeleteLFTagRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.DeregisterResourceRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.DescribeResourceRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.GetDataLakeSettingsRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.GetLFTagRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.GrantPermissionsRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.ListLFTagsRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.ListPermissionsRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.ListResourcesRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.PutDataLakeSettingsRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.RegisterResourceRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.RemoveLFTagsFromResourceRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.RevokePermissionsRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.UpdateLFTagRequest;
+import io.github.hectorvent.floci.services.lakeformation.model.UpdateResourceRequest;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
@@ -23,12 +39,15 @@ public class LakeFormationController {
     private final LakeFormationService service;
     private final ObjectMapper mapper;
     private final RegionResolver regionResolver;
+    private final LakeFormationCatalogService catalog;
 
     @Inject
-    public LakeFormationController(LakeFormationService service, ObjectMapper mapper, RegionResolver regionResolver) {
+    public LakeFormationController(LakeFormationService service, ObjectMapper mapper, RegionResolver regionResolver,
+                                   LakeFormationCatalogService catalog) {
         this.service = service;
         this.mapper = mapper;
         this.regionResolver = regionResolver;
+        this.catalog = catalog;
     }
 
     private JsonNode parse(String body) {
@@ -160,5 +179,108 @@ public class LakeFormationController {
     @Path("/RemoveLFTagsFromResource")
     public Response removeLFTagsFromResource(@Context HttpHeaders headers, String body) throws Exception {
         return handleResponse(service.removeLFTagsFromResource(regionResolver.resolveRegion(headers), mapper.treeToValue(parse(body), RemoveLFTagsFromResourceRequest.class)));
+    }
+
+    @POST
+    @Path("/GetDataLakePrincipal")
+    public Response getDataLakePrincipal(@Context HttpHeaders headers, String body) {
+        parse(body);
+        return handleResponse(catalog.getDataLakePrincipal(headers.getHeaderString("Authorization")));
+    }
+
+    @POST
+    @Path("/GetResourceLFTags")
+    public Response getResourceLFTags(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.getResourceLFTags(regionResolver.resolveRegion(headers), parse(body)));
+    }
+
+    @POST
+    @Path("/SearchDatabasesByLFTags")
+    public Response searchDatabasesByLFTags(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.search(regionResolver.resolveRegion(headers), parse(body), false));
+    }
+
+    @POST
+    @Path("/SearchTablesByLFTags")
+    public Response searchTablesByLFTags(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.search(regionResolver.resolveRegion(headers), parse(body), true));
+    }
+
+    @POST
+    @Path("/CreateLFTagExpression")
+    public Response createLFTagExpression(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.expression(regionResolver.resolveRegion(headers), "CreateLFTagExpression", parse(body)));
+    }
+
+    @POST
+    @Path("/GetLFTagExpression")
+    public Response getLFTagExpression(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.expression(regionResolver.resolveRegion(headers), "GetLFTagExpression", parse(body)));
+    }
+
+    @POST
+    @Path("/UpdateLFTagExpression")
+    public Response updateLFTagExpression(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.expression(regionResolver.resolveRegion(headers), "UpdateLFTagExpression", parse(body)));
+    }
+
+    @POST
+    @Path("/DeleteLFTagExpression")
+    public Response deleteLFTagExpression(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.expression(regionResolver.resolveRegion(headers), "DeleteLFTagExpression", parse(body)));
+    }
+
+    @POST
+    @Path("/ListLFTagExpressions")
+    public Response listLFTagExpressions(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.expression(regionResolver.resolveRegion(headers), "ListLFTagExpressions", parse(body)));
+    }
+
+    @POST
+    @Path("/CreateDataCellsFilter")
+    public Response createDataCellsFilter(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.dataCellsFilter(regionResolver.resolveRegion(headers), "CreateDataCellsFilter", parse(body)));
+    }
+
+    @POST
+    @Path("/GetDataCellsFilter")
+    public Response getDataCellsFilter(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.dataCellsFilter(regionResolver.resolveRegion(headers), "GetDataCellsFilter", parse(body)));
+    }
+
+    @POST
+    @Path("/UpdateDataCellsFilter")
+    public Response updateDataCellsFilter(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.dataCellsFilter(regionResolver.resolveRegion(headers), "UpdateDataCellsFilter", parse(body)));
+    }
+
+    @POST
+    @Path("/DeleteDataCellsFilter")
+    public Response deleteDataCellsFilter(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.dataCellsFilter(regionResolver.resolveRegion(headers), "DeleteDataCellsFilter", parse(body)));
+    }
+
+    @POST
+    @Path("/ListDataCellsFilter")
+    public Response listDataCellsFilter(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.dataCellsFilter(regionResolver.resolveRegion(headers), "ListDataCellsFilter", parse(body)));
+    }
+
+    @POST
+    @Path("/CreateLakeFormationOptIn")
+    public Response createLakeFormationOptIn(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.optIn(regionResolver.resolveRegion(headers), "CreateLakeFormationOptIn", parse(body), headers.getHeaderString("Authorization")));
+    }
+
+    @POST
+    @Path("/DeleteLakeFormationOptIn")
+    public Response deleteLakeFormationOptIn(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.optIn(regionResolver.resolveRegion(headers), "DeleteLakeFormationOptIn", parse(body), headers.getHeaderString("Authorization")));
+    }
+
+    @POST
+    @Path("/ListLakeFormationOptIns")
+    public Response listLakeFormationOptIns(@Context HttpHeaders headers, String body) {
+        return handleResponse(catalog.optIn(regionResolver.resolveRegion(headers), "ListLakeFormationOptIns", parse(body), headers.getHeaderString("Authorization")));
     }
 }

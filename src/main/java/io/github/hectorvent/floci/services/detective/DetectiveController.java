@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.detective;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -18,7 +19,9 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
@@ -58,15 +61,52 @@ public class DetectiveController {
     }
 
     @POST
+    @Path("/graph")
+    public Response createGraph(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        Map<String, String> tags = new LinkedHashMap<>();
+        JsonNode value = request.get("Tags");
+        if (value != null && !value.isNull()) {
+            if (!value.isObject()) {
+                throw new AwsException("ValidationException", "Tags must be an object.", 400);
+            }
+            value.fields().forEachRemaining(entry -> {
+                if (!entry.getValue().isTextual()) {
+                    throw new AwsException("ValidationException", "Tag values must be strings.", 400);
+                }
+                tags.put(entry.getKey(), entry.getValue().textValue());
+            });
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("GraphArn", service.createGraph(region(headers), tags));
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/graph/removal")
+    public Response deleteGraph(@Context HttpHeaders headers, String body) {
+        service.deleteGraph(region(headers), parse(body).path("GraphArn").asText(null));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
     @Path("/graphs/list")
     public Response listGraphs(@Context HttpHeaders headers, String body) {
         String region = region(headers);
-        validatePageRequest(parse(body));
+        JsonNode request = parse(body);
+        validatePageRequest(request);
+        if (request.hasNonNull("NextToken")) {
+            throw new AwsException("ValidationException", "NextToken is invalid.", 400);
+        }
         DetectiveState state = service.state(region);
-        var response = objectMapper.createObjectNode();
-        var graphs = response.putArray("GraphList");
+        ObjectNode response = objectMapper.createObjectNode();
         if (state.isGraph()) {
-            graphs.addObject().put("Arn", service.graphArn(region));
+            ObjectNode graph = response.putArray("GraphList").addObject().put("Arn", state.getGraphArn());
+            if (state.getCreatedTime() != null) {
+                graph.put("CreatedTime", state.getCreatedTime());
+            }
+        } else {
+            response.putArray("GraphList");
         }
         return Response.ok(response).build();
     }
@@ -123,6 +163,134 @@ public class DetectiveController {
     }
 
     @POST
+    @Path("/graph/members/get")
+    public Response getMembers(@Context HttpHeaders headers, String body) {
+        String region = region(headers);
+        JsonNode request = parse(body);
+        List<String> accounts = accountIds(request);
+        Map<String, DetectiveMember> found = service.getMembers(region, request.path("GraphArn").asText(null), accounts);
+        ObjectNode response = objectMapper.createObjectNode();
+        var members = response.putArray("MemberDetails");
+        var unprocessed = response.putArray("UnprocessedAccounts");
+        for (String account : accounts) {
+            DetectiveMember member = found.get(account);
+            if (member == null) {
+                unprocessed.addObject().put("AccountId", account).put("Reason", "Member account not found.");
+            } else {
+                members.add(memberNode(region, member));
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/invitations/list")
+    public Response listInvitations(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        validatePageRequest(request);
+        var all = service.listInvitations(region(headers));
+        Integer limit = integer(request, "MaxResults");
+        int start = offset(request.path("NextToken").asText(null), all.size());
+        int end = Math.min(all.size(), start + (limit == null ? 200 : limit));
+        ObjectNode response = objectMapper.createObjectNode();
+        var invitations = response.putArray("Invitations");
+        for (var invitation : all.subList(start, end)) {
+            invitations.add(memberNode(invitation.graphArn(), invitation.administratorId(), invitation.member()));
+        }
+        if (end < all.size()) {
+            response.put("NextToken", Integer.toString(end));
+        }
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/investigations/listInvestigations")
+    public Response listInvestigations(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        service.requireGraphArn(region(headers), request.path("GraphArn").asText(null));
+        validatePageRequest(request);
+        if (request.hasNonNull("NextToken")) {
+            throw new AwsException("ValidationException", "NextToken is invalid.", 400);
+        }
+        if (request.hasNonNull("FilterCriteria") || request.hasNonNull("SortCriteria")) {
+            throw DetectiveService.unsupported("investigation filtering and sorting");
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        // Local event collection does not produce investigation analyses.
+        response.putArray("InvestigationDetails");
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/graph/datasources/list")
+    public Response listDatasourcePackages(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        service.requireGraphArn(region(headers), request.path("GraphArn").asText(null));
+        validatePageRequest(request);
+        if (request.hasNonNull("NextToken")) {
+            throw new AwsException("ValidationException", "NextToken is invalid.", 400);
+        }
+        return Response.ok(service.listDatasourcePackages(region(headers), request.path("GraphArn").asText(null)))
+                .build();
+    }
+
+    @POST
+    @Path("/graph/datasources/update")
+    public Response updateDatasourcePackages(@Context HttpHeaders headers, String body) {
+        service.requireGraphArn(region(headers), parse(body).path("GraphArn").asText(null));
+        throw DetectiveService.unsupported("optional datasource ingestion and configuration");
+    }
+
+    @POST
+    @Path("/investigations/startInvestigation")
+    public Response startInvestigation(@Context HttpHeaders headers, String body) {
+        service.requireGraphArn(region(headers), parse(body).path("GraphArn").asText(null));
+        throw DetectiveService.unsupported("investigation analysis");
+    }
+
+    @POST
+    @Path("/investigations/getInvestigation")
+    public Response getInvestigation(@Context HttpHeaders headers, String body) {
+        return missingInvestigation(headers, body);
+    }
+
+    @POST
+    @Path("/investigations/listIndicators")
+    public Response listIndicators(@Context HttpHeaders headers, String body) {
+        return missingInvestigation(headers, body);
+    }
+
+    @POST
+    @Path("/investigations/updateInvestigationState")
+    public Response updateInvestigationState(@Context HttpHeaders headers, String body) {
+        return missingInvestigation(headers, body);
+    }
+
+    private Response missingInvestigation(HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        service.requireGraphArn(region(headers), request.path("GraphArn").asText(null));
+        if (!request.path("InvestigationId").isTextual() || request.path("InvestigationId").asText().isBlank()) {
+            throw new AwsException("ValidationException", "InvestigationId is required.", 400);
+        }
+        throw new AwsException("ResourceNotFoundException", "Investigation not found.", 404);
+    }
+
+    private static List<String> accountIds(JsonNode request) {
+        JsonNode accounts = request.get("AccountIds");
+        if (accounts == null || !accounts.isArray() || accounts.isEmpty() || accounts.size() > 50) {
+            throw new AwsException("ValidationException", "AccountIds must contain between 1 and 50 accounts.", 400);
+        }
+        List<String> result = new java.util.ArrayList<>();
+        for (JsonNode account : accounts) {
+            if (!account.isTextual()) {
+                throw new AwsException("ValidationException", "AccountIds must contain strings.", 400);
+            }
+            result.add(account.textValue());
+        }
+        return result;
+    }
+
+    @POST
     @Path("/graph/members")
     public Response createMembers(@Context HttpHeaders headers, String body) {
         String region = region(headers);
@@ -168,14 +336,23 @@ public class DetectiveController {
         return Response.ok().build();
     }
 
-    private com.fasterxml.jackson.databind.node.ObjectNode memberNode(String region, DetectiveMember member) {
-        var node = objectMapper.createObjectNode();
+    private ObjectNode memberNode(String region, DetectiveMember member) {
+        return memberNode(service.graphArn(region), regionResolver.getAccountId(), member);
+    }
+
+    private ObjectNode memberNode(String graphArn, String administratorId, DetectiveMember member) {
+        ObjectNode node = objectMapper.createObjectNode();
         node.put("AccountId", member.getAccountId());
-        node.put("EmailAddress", member.getEmailAddress());
+        if (member.getEmailAddress() != null) {
+            node.put("EmailAddress", member.getEmailAddress());
+        }
         node.put("Status", member.getStatus());
-        node.put("GraphArn", service.graphArn(region));
-        node.put("AdministratorId", regionResolver.getAccountId());
-        node.put("InvitationType", "ORGANIZATION");
+        node.put("GraphArn", graphArn);
+        node.put("AdministratorId", administratorId);
+        node.put("InvitationType", member.getInvitationType());
+        if (member.getInvitedTime() != null) {
+            node.put("InvitedTime", member.getInvitedTime());
+        }
         return node;
     }
 
@@ -184,7 +361,7 @@ public class DetectiveController {
         if (value == null || value.isNull()) {
             return null;
         }
-        if (!value.isIntegralNumber()) {
+        if (!value.isIntegralNumber() || !value.canConvertToInt()) {
             throw new AwsException("ValidationException", field + " must be an integer.", 400);
         }
         return value.intValue();
@@ -223,10 +400,15 @@ public class DetectiveController {
     }
 
     private JsonNode parse(String body) {
+        JsonNode request;
         try {
-            return objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
         } catch (Exception e) {
             throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
         }
+        if (request == null || !request.isObject()) {
+            throw new AwsException("ValidationException", "Request must be a JSON object.", 400);
+        }
+        return request;
     }
 }

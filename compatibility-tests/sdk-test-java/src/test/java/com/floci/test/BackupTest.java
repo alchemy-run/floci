@@ -25,7 +25,7 @@ class BackupTest {
     private static String planArn;
     private static String selectionId;
     private static String jobId;
-    private static String recoveryPointArn;
+    private static final String MISSING_POINT = "arn:aws:ec2:us-east-1::snapshot/snap-sdk-missing";
 
     @BeforeAll
     static void setup() {
@@ -107,6 +107,54 @@ class BackupTest {
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
+    @Test
+    @Order(15)
+    @DisplayName("Vault policy and notification configuration persist and delete through the SDK")
+    void vaultConfigurationRoundTrip() {
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"backup:DeleteRecoveryPoint\",\"Resource\":\"*\"}]}";
+        backup.putBackupVaultAccessPolicy(r -> r.backupVaultName(VAULT_NAME).policy(policy));
+        assertThat(backup.getBackupVaultAccessPolicy(r -> r.backupVaultName(VAULT_NAME)).policy()).isEqualTo(policy);
+        backup.deleteBackupVaultAccessPolicy(r -> r.backupVaultName(VAULT_NAME));
+        backup.deleteBackupVaultAccessPolicy(r -> r.backupVaultName(VAULT_NAME));
+        assertThatThrownBy(() -> backup.getBackupVaultAccessPolicy(r -> r.backupVaultName(VAULT_NAME)))
+                .isInstanceOf(ResourceNotFoundException.class);
+        String topic = "arn:aws:sns:us-east-1:000000000000:backup-sdk-events";
+        backup.putBackupVaultNotifications(r -> r.backupVaultName(VAULT_NAME).snsTopicArn(topic)
+                .backupVaultEvents(BackupVaultEvent.BACKUP_JOB_FAILED));
+        GetBackupVaultNotificationsResponse notifications = backup.getBackupVaultNotifications(r -> r.backupVaultName(VAULT_NAME));
+        assertThat(notifications.snsTopicArn()).isEqualTo(topic);
+        assertThat(notifications.backupVaultEvents()).containsExactly(BackupVaultEvent.BACKUP_JOB_FAILED);
+        backup.deleteBackupVaultNotifications(r -> r.backupVaultName(VAULT_NAME));
+        assertThatThrownBy(() -> backup.getBackupVaultNotifications(r -> r.backupVaultName(VAULT_NAME)))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    @Order(16)
+    @DisplayName("Runtime query and error routes decode as Backup responses, not S3 errors")
+    void runtimeQueriesAndTypedErrors() {
+        assertThat(backup.listRestoreJobs(r -> r.maxResults(25)).restoreJobs()).isNotNull();
+        assertThat(backup.listCopyJobs(r -> r.maxResults(25)).copyJobs()).isNotNull();
+        assertThat(backup.listProtectedResources(r -> r.maxResults(25)).results()).isNotNull();
+        String missing = "00000000-0000-0000-0000-000000000000";
+        String point = "arn:aws:ec2:us-east-1::snapshot/snap-00000000000000000";
+        assertThatThrownBy(() -> backup.describeRestoreJob(r -> r.restoreJobId(missing))).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.describeCopyJob(r -> r.copyJobId(missing))).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.getRestoreJobMetadata(r -> r.restoreJobId(missing))).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.getRecoveryPointRestoreMetadata(r -> r.backupVaultName(VAULT_NAME).recoveryPointArn(point)))
+                .isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.putRestoreValidationResult(r -> r.restoreJobId(missing).validationStatus(RestoreValidationStatus.SUCCESSFUL)))
+                .isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.startRestoreJob(r -> r.recoveryPointArn(point).metadata(Map.of()).iamRoleArn(IAM_ROLE)))
+                .isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.startCopyJob(r -> r.recoveryPointArn(point).sourceBackupVaultName(VAULT_NAME)
+                .destinationBackupVaultArn(vaultArn).iamRoleArn(IAM_ROLE))).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.stopBackupJob(r -> r.backupJobId(missing))).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> backup.describeProtectedResource(r -> r.resourceArn(RESOURCE_ARN + "-missing")))
+                .isInstanceOf(ResourceNotFoundException.class);
+        assertThat(backup.listRecoveryPointsByResource(r -> r.resourceArn(RESOURCE_ARN + "-missing")).recoveryPoints()).isEmpty();
+    }
+
     // ── Plan ───────────────────────────────────────────────────────────────────
 
     @Test
@@ -114,6 +162,7 @@ class BackupTest {
     @DisplayName("CreateBackupPlan - creates plan with rules")
     void createBackupPlan() {
         CreateBackupPlanResponse resp = backup.createBackupPlan(r -> r
+                .backupPlanTags(Map.of("env", "compat-test"))
                 .backupPlan(p -> p
                         .backupPlanName("compat-daily")
                         .rules(BackupRuleInput.builder()
@@ -176,6 +225,16 @@ class BackupTest {
                 .anyMatch(p -> planId.equals(p.backupPlanId()));
     }
 
+    @Test
+    @Order(24)
+    @DisplayName("Backup plan tags persist from creation and reconcile updates and removals")
+    void planTagRoundTrip() {
+        assertThat(backup.listTags(r -> r.resourceArn(planArn)).tags()).containsEntry("env", "compat-test");
+        backup.tagResource(r -> r.resourceArn(planArn).tags(Map.of("phase", "two")));
+        backup.untagResource(r -> r.resourceArn(planArn).tagKeyList("env"));
+        assertThat(backup.listTags(r -> r.resourceArn(planArn)).tags()).containsEntry("phase", "two").doesNotContainKey("env");
+    }
+
     // ── Selection ──────────────────────────────────────────────────────────────
 
     @Test
@@ -185,6 +244,8 @@ class BackupTest {
         CreateBackupSelectionResponse resp = backup.createBackupSelection(r -> r
                 .backupPlanId(planId)
                 .backupSelection(s -> s
+                        .listOfTags(Condition.builder().conditionType(ConditionType.STRINGEQUALS)
+                                .conditionKey("aws:ResourceTag/backup").conditionValue("daily").build())
                         .selectionName("compat-selection")
                         .iamRoleArn(IAM_ROLE)
                         .resources(RESOURCE_ARN)));
@@ -207,6 +268,8 @@ class BackupTest {
         assertThat(resp.backupSelection().selectionName()).isEqualTo("compat-selection");
         assertThat(resp.backupSelection().iamRoleArn()).isEqualTo(IAM_ROLE);
         assertThat(resp.backupSelection().resources()).contains(RESOURCE_ARN);
+        assertThat(resp.backupSelection().listOfTags()).hasSize(1);
+        assertThat(resp.backupSelection().listOfTags().get(0).conditionKey()).isEqualTo("aws:ResourceTag/backup");
     }
 
     @Test
@@ -232,7 +295,7 @@ class BackupTest {
 
     @Test
     @Order(40)
-    @DisplayName("StartBackupJob - returns job ID in CREATED state")
+    @DisplayName("StartBackupJob - returns a tracked job ID")
     void startBackupJob() {
         StartBackupJobResponse resp = backup.startBackupJob(r -> r
                 .backupVaultName(VAULT_NAME)
@@ -246,33 +309,26 @@ class BackupTest {
 
     @Test
     @Order(41)
-    @DisplayName("DescribeBackupJob - job is in progress shortly after start")
-    void describeBackupJobInProgress() {
+    @DisplayName("DescribeBackupJob - unsupported execution is a failed job")
+    void describeBackupJobExecutionFailure() {
         DescribeBackupJobResponse resp = backup.describeBackupJob(r -> r.backupJobId(jobId));
 
         assertThat(resp.backupJobId()).isEqualTo(jobId);
-        assertThat(resp.state().toString()).isIn("CREATED", "RUNNING", "COMPLETED");
+        assertThat(resp.state()).isEqualTo(BackupJobState.FAILED);
         assertThat(resp.backupVaultName()).isEqualTo(VAULT_NAME);
         assertThat(resp.resourceArn()).isEqualTo(RESOURCE_ARN);
     }
 
     @Test
     @Order(42)
-    @DisplayName("DescribeBackupJob - job completes within 10 seconds")
-    void describeBackupJobCompleted() throws InterruptedException {
-        BackupJobState state = null;
-        for (int i = 0; i < 10; i++) {
-            Thread.sleep(1000);
-            DescribeBackupJobResponse resp = backup.describeBackupJob(r -> r.backupJobId(jobId));
-            state = resp.state();
-            if (state == BackupJobState.COMPLETED) {
-                recoveryPointArn = resp.recoveryPointArn();
-                assertThat(recoveryPointArn).contains("recovery-point:");
-                assertThat(resp.completionDate()).isNotNull();
-                return;
-            }
-        }
-        Assertions.fail("Backup job did not complete within 10 seconds, last state: " + state);
+    @DisplayName("Failed backup execution never creates a recovery point")
+    void failedBackupDoesNotCreateRecoveryPoint() {
+        DescribeBackupJobResponse job = backup.describeBackupJob(r -> r.backupJobId(jobId));
+        assertThat(job.state()).isEqualTo(BackupJobState.FAILED);
+        assertThat(job.statusMessage()).contains("not supported");
+        assertThat(job.recoveryPointArn()).isNull();
+        assertThat(job.completionDate()).isNotNull();
+        assertThat(backup.listRecoveryPointsByBackupVault(r -> r.backupVaultName(VAULT_NAME)).recoveryPoints()).isEmpty();
     }
 
     @Test
@@ -287,72 +343,50 @@ class BackupTest {
 
     @Test
     @Order(44)
-    @DisplayName("ListBackupJobs - filter by COMPLETED state")
+    @DisplayName("ListBackupJobs - filter by FAILED state")
     void listBackupJobsByState() {
-        ListBackupJobsResponse resp = backup.listBackupJobs(r -> r.byState(BackupJobState.COMPLETED));
+        ListBackupJobsResponse resp = backup.listBackupJobs(r -> r.byState(BackupJobState.FAILED));
 
         assertThat(resp.backupJobs()).isNotEmpty();
-        assertThat(resp.backupJobs()).allMatch(j -> j.state() == BackupJobState.COMPLETED);
+        assertThat(resp.backupJobs()).allMatch(j -> j.state() == BackupJobState.FAILED);
     }
 
     // ── Recovery Point ─────────────────────────────────────────────────────────
 
     @Test
     @Order(50)
-    @DisplayName("DescribeRecoveryPoint - returns completed recovery point")
-    void describeRecoveryPoint() {
-        DescribeRecoveryPointResponse resp = backup.describeRecoveryPoint(r -> r
-                .backupVaultName(VAULT_NAME)
-                .recoveryPointArn(recoveryPointArn));
-
-        assertThat(resp.recoveryPointArn()).isEqualTo(recoveryPointArn);
-        assertThat(resp.backupVaultName()).isEqualTo(VAULT_NAME);
-        assertThat(resp.status()).isEqualTo(RecoveryPointStatus.COMPLETED);
-        assertThat(resp.resourceArn()).isEqualTo(RESOURCE_ARN);
-        assertThat(resp.completionDate()).isNotNull();
+    @DisplayName("DescribeRecoveryPoint - missing point is a typed error")
+    void describeMissingRecoveryPoint() {
+        assertThatThrownBy(() -> backup.describeRecoveryPoint(r -> r.backupVaultName(VAULT_NAME).recoveryPointArn(MISSING_POINT)))
+                .isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test
     @Order(51)
-    @DisplayName("ListRecoveryPointsByBackupVault - returns created recovery point")
+    @DisplayName("ListRecoveryPointsByBackupVault - failed jobs create no recovery points")
     void listRecoveryPointsByBackupVault() {
-        ListRecoveryPointsByBackupVaultResponse resp = backup.listRecoveryPointsByBackupVault(r -> r
-                .backupVaultName(VAULT_NAME));
-
-        assertThat(resp.recoveryPoints()).hasSize(1);
-        assertThat(resp.recoveryPoints().get(0).recoveryPointArn()).isEqualTo(recoveryPointArn);
+        assertThat(backup.listRecoveryPointsByBackupVault(r -> r.backupVaultName(VAULT_NAME)).recoveryPoints()).isEmpty();
     }
 
     @Test
     @Order(52)
-    @DisplayName("DescribeBackupVault - NumberOfRecoveryPoints incremented")
-    void vaultCountAfterJob() {
-        DescribeBackupVaultResponse resp = backup.describeBackupVault(r -> r.backupVaultName(VAULT_NAME));
-        assertThat(resp.numberOfRecoveryPoints()).isEqualTo(1);
+    @DisplayName("DescribeBackupVault - failed jobs leave the recovery-point count unchanged")
+    void vaultCountAfterFailedJob() {
+        assertThat(backup.describeBackupVault(r -> r.backupVaultName(VAULT_NAME)).numberOfRecoveryPoints()).isZero();
     }
 
     @Test
     @Order(53)
-    @DisplayName("DeleteBackupVault - non-empty vault returns InvalidRequestException")
-    void deleteNonEmptyVaultFails() {
-        assertThatThrownBy(() -> backup.deleteBackupVault(r -> r.backupVaultName(VAULT_NAME)))
-                .isInstanceOf(InvalidRequestException.class);
+    @DisplayName("StopBackupJob - terminal failed jobs cannot be stopped")
+    void stopFailedBackupJobFails() {
+        assertThatThrownBy(() -> backup.stopBackupJob(r -> r.backupJobId(jobId))).isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
     @Order(54)
-    @DisplayName("DeleteRecoveryPoint - removes recovery point and decrements vault count")
-    void deleteRecoveryPoint() {
-        backup.deleteRecoveryPoint(r -> r
-                .backupVaultName(VAULT_NAME)
-                .recoveryPointArn(recoveryPointArn));
-
-        DescribeBackupVaultResponse vault = backup.describeBackupVault(r -> r.backupVaultName(VAULT_NAME));
-        assertThat(vault.numberOfRecoveryPoints()).isEqualTo(0);
-
-        assertThatThrownBy(() -> backup.describeRecoveryPoint(r -> r
-                .backupVaultName(VAULT_NAME)
-                .recoveryPointArn(recoveryPointArn)))
+    @DisplayName("DeleteRecoveryPoint - missing point is a typed error")
+    void deleteMissingRecoveryPoint() {
+        assertThatThrownBy(() -> backup.deleteRecoveryPoint(r -> r.backupVaultName(VAULT_NAME).recoveryPointArn(MISSING_POINT)))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 

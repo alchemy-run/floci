@@ -152,6 +152,23 @@ class TlsProxyServerTest {
 
     @Test
     @Timeout(20)
+    void sourceBridgeUsesOnlyTheExistingLoopbackGateway() throws Exception {
+        httpsBackend = startMarkerBackend(0, "TLS");
+        int httpsBe = httpsBackend.actualPort();
+        int publicPort = freePort();
+        proxy = new TlsProxyServer(vertx, configWith(true, publicPort, 0), "127.0.0.1", 4510, httpsBe);
+
+        assertEquals(Set.of(publicPort), proxy.listenPorts());
+        assertFalse(proxy.reservesPort(443));
+        assertEquals("TLS", roundTrip(publicPort, TLS_HANDSHAKE));
+        InetAddress external = nonLoopbackIpv4();
+        if (external != null) {
+            assertFalse(accepts(external, publicPort));
+        }
+    }
+
+    @Test
+    @Timeout(20)
     void tlsDisabled_bindsNothing() throws Exception {
         int publicPort = freePort();
         proxy = new TlsProxyServer(vertx, configWith(false, publicPort, 443), "127.0.0.1", 4510, 4511);

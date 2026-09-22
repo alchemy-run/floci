@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.msk;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
@@ -10,7 +13,15 @@ import io.github.hectorvent.floci.services.msk.model.CreateClusterV2Request;
 import io.github.hectorvent.floci.services.msk.model.MskCluster;
 import io.github.hectorvent.floci.services.msk.model.MskConfiguration;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.*;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
@@ -30,10 +41,12 @@ public class MskController {
     private static final String PROVISIONED_CLUSTER_TYPE = "PROVISIONED";
 
     private final MskService mskService;
+    private final ObjectMapper objectMapper;
 
     @Inject
-    public MskController(MskService mskService) {
+    public MskController(MskService mskService, ObjectMapper objectMapper) {
         this.mskService = mskService;
+        this.objectMapper = objectMapper;
     }
 
     @POST
@@ -94,6 +107,57 @@ public class MskController {
     public Response getBootstrapBrokers(@PathParam("clusterArn") String clusterArn) {
         String bootstrapBrokers = mskService.getBootstrapBrokers(clusterArn);
         return Response.ok(Map.of("bootstrapBrokerString", bootstrapBrokers)).build();
+    }
+
+    @GET
+    @Path("/v1/clusters/{clusterArn}/topics")
+    public Response listTopics(@PathParam("clusterArn") String clusterArn) {
+        return topicControlPlaneUnavailable(clusterArn);
+    }
+
+    @GET
+    @Path("/v1/clusters/{clusterArn}/topics/{topicName}")
+    public Response describeTopic(@PathParam("clusterArn") String clusterArn,
+                                  @PathParam("topicName") String topicName) {
+        return topicControlPlaneUnavailable(clusterArn);
+    }
+
+    @POST
+    @Path("/v1/clusters/{clusterArn}/topics")
+    public Response createTopic(@PathParam("clusterArn") String clusterArn, String body) {
+        JsonNode request;
+        try {
+            request = objectMapper.readTree(body == null ? "" : body);
+        } catch (JsonProcessingException e) {
+            throw new AwsException("BadRequestException", "Request body must be valid JSON.", 400);
+        }
+        if (request == null || !request.isObject()) {
+            throw new AwsException("BadRequestException", "Request body must be a JSON object.", 400);
+        }
+        JsonNode topicName = request.path("topicName");
+        if (!topicName.isTextual() || topicName.asText().isBlank()) {
+            throw topicValidationError("topicName", "topicName is required and must be a nonempty string.");
+        }
+        requirePositiveInteger(request, "partitionCount");
+        requirePositiveInteger(request, "replicationFactor");
+        return topicControlPlaneUnavailable(clusterArn);
+    }
+
+    private void requirePositiveInteger(JsonNode request, String field) {
+        JsonNode value = request.path(field);
+        if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 1) {
+            throw topicValidationError(field, field + " is required and must be a positive integer.");
+        }
+    }
+
+    private AwsException topicValidationError(String field, String message) {
+        return new AwsException("BadRequestException", message, 400, Map.of("invalidParameter", field));
+    }
+
+    private Response topicControlPlaneUnavailable(String clusterArn) {
+        mskService.describeCluster(clusterArn);
+        // Topic metadata must come from the broker, not an independent control-plane store.
+        throw new AwsException("UnsupportedOperationException", "MSK topic control-plane operations are not implemented.", 501);
     }
 
     // ── Configurations ───────────────────────────────────────────────────────

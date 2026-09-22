@@ -7,6 +7,7 @@ import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerReachableUrls;
@@ -105,6 +106,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
     private final ImageResolver imageResolver;
     private final RuntimeApiServerFactory runtimeApiServerFactory;
     private final DockerHostResolver dockerHostResolver;
+    private final ContainerDetector containerDetector;
     private final EmulatorConfig config;
     private final EcrRegistryManager ecrRegistryManager;
     private final LambdaLayerService layerService;
@@ -118,6 +120,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
                              ImageResolver imageResolver,
                              RuntimeApiServerFactory runtimeApiServerFactory,
                              DockerHostResolver dockerHostResolver,
+                             ContainerDetector containerDetector,
                              EmulatorConfig config,
                              EcrRegistryManager ecrRegistryManager,
                              LambdaLayerService layerService,
@@ -129,6 +132,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         this.imageResolver = imageResolver;
         this.runtimeApiServerFactory = runtimeApiServerFactory;
         this.dockerHostResolver = dockerHostResolver;
+        this.containerDetector = containerDetector;
         this.config = config;
         this.ecrRegistryManager = ecrRegistryManager;
         this.layerService = layerService;
@@ -260,7 +264,8 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
                         env.add(k + "=" + v);
                     }
                 } else {
-                    env.add(k + "=" + ContainerReachableUrls.rewriteFunctionEnv(v, hostGatewayPort()));
+                    env.add(k + "=" + ContainerReachableUrls.rewriteFunctionEnv(
+                            v, hostGatewayPort(), containerDetector.isRunningInContainer(), hostAddress));
                 }
             });
         }
@@ -291,6 +296,9 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
             }
             specBuilder.withExtraHost(entry.substring(0, sep), entry.substring(sep + 1));
         }));
+        if (!containerDetector.isRunningInContainer()) {
+            specBuilder.withDefaultExtraHost(ContainerReachableUrls.FLOCI_DNS_HOST, "host-gateway");
+        }
 
         // Whether /var/task is served from a shared read-only volume (large code) or copied
         // directly into this container (small code). Decided once here so both the spec (below)

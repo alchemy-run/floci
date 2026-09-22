@@ -10,6 +10,9 @@ import io.github.hectorvent.floci.services.appsync.graphql.auth.AppSyncAuthConte
 import io.github.hectorvent.floci.services.appsync.graphql.auth.AuthMiddleware;
 import io.github.hectorvent.floci.services.appsync.model.AuthenticationType;
 import io.github.hectorvent.floci.services.appsync.model.GraphqlApi;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.ext.web.RoutingContext;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.Response;
@@ -27,10 +30,12 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,6 +57,12 @@ class AppSyncExecutionControllerTest {
 
     @BeforeEach
     void setUp() {
+        CurrentVertxRequest currentRequest = mock(CurrentVertxRequest.class);
+        RoutingContext routingContext = mock(RoutingContext.class);
+        HttpServerRequest httpRequest = mock(HttpServerRequest.class);
+        lenient().when(currentRequest.getCurrent()).thenReturn(routingContext);
+        lenient().when(routingContext.request()).thenReturn(httpRequest);
+        lenient().when(httpRequest.path()).thenReturn("/graphql");
         controller = new AppSyncExecutionController(
                 appSyncService,
                 schemaRegistry,
@@ -59,7 +70,8 @@ class AppSyncExecutionControllerTest {
                 new AppSyncErrorFormatter(),
                 new ObjectMapper(),
                 authMiddleware,
-                requestContext);
+                requestContext,
+                currentRequest);
 
         jsonHeaders = mock(HttpHeaders.class);
         lenient().when(jsonHeaders.getHeaderString(HttpHeaders.CONTENT_TYPE)).thenReturn("application/json");
@@ -87,6 +99,7 @@ class AppSyncExecutionControllerTest {
         Map<String, Object> error = ((List<Map<String, Object>>) body.get("errors")).get(0);
         assertEquals("InternalFailure", error.get("errorType"));
         assertEquals("InternalFailure", error.get("message"));
+        verify(authMiddleware).authenticate(any(), any(), argThat(info -> "/graphql".equals(info.requestPath())));
     }
 
     @Test

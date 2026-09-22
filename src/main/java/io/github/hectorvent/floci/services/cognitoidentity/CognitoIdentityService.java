@@ -167,7 +167,7 @@ public class CognitoIdentityService {
     public IdentityPool setIdentityPoolRoles(String identityPoolId, Map<String, String> roles,
                                              JsonNode roleMappings, String region) {
         IdentityPool pool = describeIdentityPool(identityPoolId, region);
-        if (roles == null || roles.isEmpty()) {
+        if (roles == null) {
             throw new AwsException("InvalidParameterException", "Roles is required.", 400);
         }
         for (Map.Entry<String, String> entry : roles.entrySet()) {

@@ -1,20 +1,30 @@
 package io.github.hectorvent.floci.services.codeartifact;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.AuthorizationToken;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.DomainView;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PackageCoordinate;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.VersionMutation;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.ResourcePolicy;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactDomain;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -23,7 +33,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,13 +51,14 @@ class CodeArtifactServiceTest {
     private static final String ACCOUNT_ID = "123456789012";
 
     private CodeArtifactService service;
+    private AccountAwareStorageBackend<CodeArtifactRepository> repoStore;
 
     @BeforeEach
     @SuppressWarnings({"unchecked", "rawtypes"})
     void setUp() {
         StorageFactory storageFactory = mock(StorageFactory.class);
         AccountAwareStorageBackend<CodeArtifactDomain> domainStore = AccountAwareStorageBackend.inMemory(ACCOUNT_ID);
-        AccountAwareStorageBackend<CodeArtifactRepository> repoStore = AccountAwareStorageBackend.inMemory(ACCOUNT_ID);
+        repoStore = AccountAwareStorageBackend.inMemory(ACCOUNT_ID);
         when(storageFactory.create(eq("codeartifact"), eq("codeartifact-domains.json"), any(TypeReference.class)))
                 .thenReturn((AccountAwareStorageBackend) domainStore);
         when(storageFactory.create(eq("codeartifact"), eq("codeartifact-repositories.json"), any(TypeReference.class)))
@@ -308,6 +322,187 @@ class CodeArtifactServiceTest {
         AwsException viaUpstream = assertThrows(AwsException.class, () -> service
                 .updateRepository(REGION, "dom", null, "with-connection", null, List.of("store")));
         assertEquals("ConflictException", viaUpstream.getErrorCode());
+    }
+
+    @Test
+    void authorizationTokensAreOpaqueUniqueDomainScopedAndBounded() {
+        service.createDomain(REGION, "tokens", null, Map.of());
+        service.createDomain(REGION, "other-tokens", null, Map.of());
+        long before = Instant.now().getEpochSecond();
+        AuthorizationToken token = service.getAuthorizationToken(REGION, "tokens", null, 900L);
+        assertEquals(256, Base64.getDecoder().decode(token.authorizationToken()).length);
+        assertTrue(token.expiration() >= before + 900);
+        assertTrue(token.expiration() <= Instant.now().getEpochSecond() + 900);
+        assertTrue(service.isAuthorizationTokenValid(REGION, "tokens", null, token.authorizationToken()));
+        assertFalse(service.isAuthorizationTokenValid(REGION, "other-tokens", null, token.authorizationToken()));
+        AuthorizationToken second = service.getAuthorizationToken(REGION, "tokens", null, null);
+        assertNotEquals(token.authorizationToken(), second.authorizationToken());
+        assertTrue(second.expiration() >= before + 43200);
+        for (long duration : List.of(-1L, 899L, 43201L)) {
+            assertEquals("ValidationException", assertThrows(AwsException.class,
+                    () -> service.getAuthorizationToken(REGION, "tokens", null, duration)).getErrorCode());
+        }
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.getAuthorizationToken(OTHER_REGION, "tokens", null, 900L)).getErrorCode());
+        CodeArtifactDomain domain = service.describeDomain(REGION, "tokens", null).domain();
+        Map<String, Long> expired = new LinkedHashMap<>(domain.getAuthorizationTokens());
+        assertFalse(expired.containsKey(token.authorizationToken()));
+        expired.replaceAll((key, value) -> before - 1);
+        domain.setAuthorizationTokens(expired);
+        assertFalse(service.isAuthorizationTokenValid(REGION, "tokens", null, token.authorizationToken()));
+    }
+
+    @Test
+    void genericAssetsPersistAndCopiesAreIndependent() throws Exception {
+        PackageCoordinate source = packageFixture();
+        byte[] content = new byte[] {0, 1, (byte) 255, 13, 10};
+        String hash = hash(content);
+        Map<String, Object> published = service.publishPackageVersion(source, "1.0.0", "data.bin", content, hash, false);
+        assertEquals("Published", published.get("status"));
+        assertArrayEquals(content, service.getPackageVersionAsset(source, "1.0.0", "data.bin", null).content());
+        assertEquals("ConflictException", assertThrows(AwsException.class,
+                () -> service.publishPackageVersion(source, "1.0.0", "other.bin", content, hash, false)).getErrorCode());
+
+        ObjectMapper mapper = new ObjectMapper();
+        CodeArtifactRepository stored = service.describeRepository(REGION, "packages", null, "source");
+        CodeArtifactRepository restored = mapper.readValue(mapper.writeValueAsString(stored), CodeArtifactRepository.class);
+        repoStore.putForAccount(ACCOUNT_ID, REGION + "::packages::source", restored);
+        assertArrayEquals(content, service.getPackageVersionAsset(source, "1.0.0", "data.bin", null).content());
+        assertEquals(published.get("versionRevision"),
+                service.getPackageVersionAsset(source, "1.0.0", "data.bin", null).revision());
+
+        service.copyPackageVersions(source, "mirror", mutation(List.of("1.0.0"), Map.of(), null, null, false));
+        PackageCoordinate mirror = new PackageCoordinate(REGION, "packages", null, "mirror", "generic", "scope", "artifact");
+        service.mutatePackageVersions(mirror, "dispose", mutation(List.of("1.0.0"), Map.of(), null, null, false));
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.getPackageVersionAsset(mirror, "1.0.0", "data.bin", null)).getErrorCode());
+        assertArrayEquals(content, service.getPackageVersionAsset(source, "1.0.0", "data.bin", null).content());
+        service.mutatePackageVersions(mirror, "delete", mutation(List.of("1.0.0"), Map.of(), null, null, false));
+        service.describePackage(mirror);
+        service.deletePackage(mirror);
+        assertEquals(List.of(), service.listPackages(mirror, null, null, null, null, null).get("packages"));
+        service.deleteRepository(REGION, "packages", null, "source");
+        service.createRepository(REGION, "packages", null, "source", null, null, Map.of());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.describePackage(source)).getErrorCode());
+    }
+
+    @Test
+    void hashesRevisionsStatusesAndOriginRestrictionsAreEnforced() throws Exception {
+        PackageCoordinate source = packageFixture();
+        byte[] content = "payload".getBytes(StandardCharsets.UTF_8);
+        assertEquals("ValidationException", assertThrows(AwsException.class,
+                () -> service.publishPackageVersion(source, "1", "data", content, "0".repeat(64), false)).getErrorCode());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.describePackage(source)).getErrorCode());
+        Map<String, Object> published = service.publishPackageVersion(source, "1", "data", content, hash(content), true);
+        String originalRevision = (String) published.get("versionRevision");
+        assertEquals(originalRevision, service.publishPackageVersion(source, "1", "data", content, hash(content), true)
+                .get("versionRevision"));
+        service.publishPackageVersion(source, "1", "more", content, hash(content), true);
+        String revision = service.getPackageVersionAsset(source, "1", "data", null).revision();
+        assertNotEquals(originalRevision, revision);
+        assertEquals("ConflictException", assertThrows(AwsException.class,
+                () -> service.getPackageVersionAsset(source, "1", "data", originalRevision)).getErrorCode());
+        Map<String, Object> failures = service.mutatePackageVersions(source, "status",
+                mutation(List.of("1", "missing"), Map.of("1", originalRevision), null, "Published", false));
+        assertEquals(Map.of(), failures.get("successfulVersions"));
+        assertEquals(Map.of("1", Map.of("errorCode", "MISMATCHED_REVISION",
+                        "errorMessage", "Package version operation failed: MISMATCHED_REVISION"),
+                "missing", Map.of("errorCode", "NOT_FOUND", "errorMessage", "Package version operation failed: NOT_FOUND")),
+                failures.get("failedVersions"));
+        Map<String, Object> wrongStatus = service.mutatePackageVersions(source, "status",
+                mutation(List.of("1"), Map.of(), "Published", "Archived", false));
+        assertEquals(Map.of(), wrongStatus.get("successfulVersions"));
+        Map<String, Object> finished = service.mutatePackageVersions(source, "status",
+                mutation(List.of("1"), Map.of("1", revision), "Unfinished", "Published", false));
+        assertEquals(Map.of(), finished.get("failedVersions"));
+        Map<String, Object> skipped = service.mutatePackageVersions(source, "status",
+                mutation(List.of("1", "missing"), Map.of(), null, "Archived", false));
+        assertEquals(Map.of(), skipped.get("successfulVersions"));
+        assertArrayEquals(content, service.getPackageVersionAsset(source, "1", "data", null).content());
+        service.putPackageOriginConfiguration(source, Map.of("publish", "BLOCK", "upstream", "ALLOW"));
+        assertEquals("AccessDeniedException", assertThrows(AwsException.class,
+                () -> service.publishPackageVersion(source, "2", "data", content, hash(content), false)).getErrorCode());
+        service.mutatePackageVersions(source, "dispose", mutation(List.of("1"), Map.of(), null, null, false));
+        Map<String, Object> resurrection = service.mutatePackageVersions(source, "status",
+                mutation(List.of("1"), Map.of(), null, "Published", false));
+        assertEquals(Map.of(), resurrection.get("successfulVersions"));
+    }
+
+    @Test
+    void packageListsPaginateAndCopiesCheckOverwriteAndRevision() throws Exception {
+        PackageCoordinate source = packageFixture();
+        PackageCoordinate mirror = new PackageCoordinate(REGION, "packages", null, "mirror", "generic", "scope", "artifact");
+        byte[] content = "source".getBytes(StandardCharsets.UTF_8);
+        byte[] other = "different".getBytes(StandardCharsets.UTF_8);
+        service.publishPackageVersion(source, "1", "data", content, hash(content), false);
+        service.publishPackageVersion(source, "2", "data", content, hash(content), false);
+        service.publishPackageVersion(mirror, "1", "data", other, hash(other), false);
+        Map<String, Object> page = service.listPackageVersions(source, null, null, null, 1, null);
+        assertTrue(page.containsKey("nextToken"));
+        Map<String, Object> last = service.listPackageVersions(source, null, null, null, 1, (String) page.get("nextToken"));
+        assertFalse(last.containsKey("nextToken"));
+        assertNotEquals(page.get("versions"), last.get("versions"));
+        Map<String, Object> conflict = service.copyPackageVersions(source, "mirror",
+                mutation(List.of("1", "2"), Map.of(), null, null, false));
+        assertEquals(Map.of("1", Map.of("errorCode", "ALREADY_EXISTS",
+                        "errorMessage", "Package version operation failed: ALREADY_EXISTS"),
+                "2", Map.of("errorCode", "SKIPPED", "errorMessage", "Package version operation failed: SKIPPED")),
+                conflict.get("failedVersions"));
+        assertEquals(Map.of(), conflict.get("successfulVersions"));
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.describePackageVersion(mirror, "2")).getErrorCode());
+        assertArrayEquals(other, service.getPackageVersionAsset(mirror, "1", "data", null).content());
+        service.copyPackageVersions(source, "mirror", mutation(List.of("1"), Map.of(), null, null, true));
+        assertArrayEquals(content, service.getPackageVersionAsset(mirror, "1", "data", null).content());
+        assertEquals(Map.of(), service.copyPackageVersions(source, "mirror",
+                mutation(List.of("1"), Map.of(), null, null, false)).get("successfulVersions"));
+        String revision = service.getPackageVersionAsset(source, "2", "data", null).revision();
+        assertEquals(Map.of(), service.copyPackageVersions(source, "mirror",
+                mutation(null, Map.of("2", revision), null, null, false)).get("failedVersions"));
+        assertArrayEquals(content, service.getPackageVersionAsset(mirror, "2", "data", null).content());
+        PackageCoordinate wrongNamespace = new PackageCoordinate(REGION, "packages", null, "source",
+                "generic", "other", "artifact");
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.describePackage(wrongNamespace)).getErrorCode());
+    }
+
+    @Test
+    void packageKeysDoNotCollideAndCopyCanResolveStoredUpstreams() throws Exception {
+        PackageCoordinate source = packageFixture();
+        byte[] content = "upstream".getBytes(StandardCharsets.UTF_8);
+        PackageCoordinate first = new PackageCoordinate(REGION, "packages", null, "source", "generic", "a:b", "c");
+        PackageCoordinate second = new PackageCoordinate(REGION, "packages", null, "source", "generic", "a", "b:c");
+        service.publishPackageVersion(first, "1", "data + file.bin", content, hash(content), false);
+        service.publishPackageVersion(second, "1", "other.bin", new byte[0], hash(new byte[0]), false);
+        assertArrayEquals(content, service.getPackageVersionAsset(first, "1", "data + file.bin", null).content());
+        assertEquals(0, service.getPackageVersionAsset(second, "1", "other.bin", null).content().length);
+        service.publishPackageVersion(source, "1", "data", content, hash(content), false);
+        service.createRepository(REGION, "packages", null, "consumer", null, List.of("source"), Map.of());
+        PackageCoordinate consumer = new PackageCoordinate(REGION, "packages", null, "consumer",
+                "generic", "scope", "artifact");
+        VersionMutation includeUpstream = new VersionMutation(List.of("1"), Map.of(), null, null, false, true);
+        assertEquals(Map.of(), service.copyPackageVersions(consumer, "mirror", includeUpstream).get("failedVersions"));
+        PackageCoordinate mirror = new PackageCoordinate(REGION, "packages", null, "mirror",
+                "generic", "scope", "artifact");
+        assertArrayEquals(content, service.getPackageVersionAsset(mirror, "1", "data", null).content());
+    }
+
+    private PackageCoordinate packageFixture() {
+        service.createDomain(REGION, "packages", null, Map.of());
+        service.createRepository(REGION, "packages", null, "source", null, null, Map.of());
+        service.createRepository(REGION, "packages", null, "mirror", null, null, Map.of());
+        return new PackageCoordinate(REGION, "packages", null, "source", "generic", "scope", "artifact");
+    }
+
+    private static VersionMutation mutation(List<String> versions, Map<String, String> revisions,
+                                             String expected, String target, boolean overwrite) {
+        return new VersionMutation(versions, revisions, expected, target, overwrite, false);
+    }
+
+    private static String hash(byte[] content) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
     }
 
     // ------------------------------------------------------------------- tags

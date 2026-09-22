@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.lakeformation;
 
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lakeformation.model.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,8 @@ class LakeFormationServiceTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         when(regionResolver.getAccountId()).thenReturn("123456789012");
-        service = new LakeFormationService(storage, regionResolver);
+        service = new LakeFormationService(storage, regionResolver, mock(IamService.class),
+                mock(LakeFormationCatalogService.class));
     }
 
     @Test
@@ -57,7 +59,12 @@ class LakeFormationServiceTest {
         RegisterResourceResponse res = service.registerResource("us-east-1", req);
         
         assertNotNull(res);
-        verify(storage).registerResource("us-east-1", "arn:aws:s3:::my-bucket", "arn:aws:iam::123:role/MyRole", true, null);
+        verify(storage).registerResource(eq("us-east-1"), argThat(info ->
+                "arn:aws:s3:::my-bucket".equals(info.getResourceArn())
+                        && "arn:aws:iam::123:role/MyRole".equals(info.getRoleArn())
+                        && Boolean.FALSE.equals(info.getHybridAccessEnabled())
+                        && Boolean.FALSE.equals(info.getWithFederation())
+                        && info.getLastModified() != null));
     }
 
     @Test

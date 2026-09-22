@@ -3,9 +3,13 @@ package io.github.hectorvent.floci.services.account;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.account.model.AccountMetadata;
 import io.github.hectorvent.floci.services.account.model.AlternateContact;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.organizations.model.Organization;
@@ -13,6 +17,11 @@ import io.github.hectorvent.floci.services.organizations.model.OrganizationAccou
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -25,14 +34,188 @@ public class AccountService implements Resettable {
     private static final Pattern PHONE = Pattern.compile("[\\s0-9()+-]+");
     private static final Set<String> CONTACT_TYPES = Set.of("BILLING", "OPERATIONS", "SECURITY");
 
+    private static final Pattern ACCOUNT_NAME = Pattern.compile("^[ -;=?-~]+$");
+    private static final Pattern PRIMARY_PHONE = Pattern.compile("^[+][\\s0-9()-]+$");
+    private static final Set<String> COUNTRY_CODES = Set.of(Locale.getISOCountries());
+    private static final Set<String> STATE_REQUIRED = Set.of("US", "CA", "GB", "DE", "JP", "IN", "BR");
+    private static final Set<String> REGION_STATUSES = Set.of(
+            "ENABLED", "ENABLING", "DISABLING", "DISABLED", "ENABLED_BY_DEFAULT");
+
     private final AccountAwareStorageBackend<AlternateContact> contacts;
+    private final AccountAwareStorageBackend<AccountMetadata> metadata;
+    private final AccountAwareStorageBackend<Map<String, String>> primaryContacts;
+    private final StorageFactory storageFactory;
     private final OrganizationsService organizationsService;
 
     @Inject
     public AccountService(StorageFactory storageFactory, OrganizationsService organizationsService) {
         this.contacts = storageFactory.create("account", "account-alternate-contacts.json",
                 new TypeReference<Map<String, AlternateContact>>() {});
+        this.metadata = storageFactory.create("account", "account-metadata.json",
+                new TypeReference<Map<String, AccountMetadata>>() {});
+        this.primaryContacts = storageFactory.create("account", "account-primary-contacts.json",
+                new TypeReference<Map<String, Map<String, String>>>() {});
+        this.storageFactory = storageFactory;
         this.organizationsService = organizationsService;
+    }
+
+    public synchronized Map<String, Object> getAccountInformation(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
+        OrganizationAccount organizationAccount = organizationsService.findAccountForPortal(accountId).orElse(null);
+        AccountMetadata account = ensureMetadata(accountId, organizationAccount);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("AccountId", accountId);
+        result.put("AccountName", account.accountName());
+        result.put("AccountState", organizationAccount == null ? "ACTIVE" : organizationAccount.getStatus());
+        if (account.accountCreatedDate() != null) {
+            result.put("AccountCreatedDate", account.accountCreatedDate());
+        }
+        return result;
+    }
+
+    public synchronized void putAccountName(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
+        String name = requirePattern(request, "AccountName", 1, 50, ACCOUNT_NAME);
+        OrganizationAccount organizationAccount = organizationsService.findAccountForPortal(accountId).orElse(null);
+        AccountMetadata account = ensureMetadata(accountId, organizationAccount);
+        if (organizationAccount != null) {
+            Organization organization = organizationsService.describeOrganization(accountId);
+            // StorageFactory reuses Organizations' canonical backend, including its persistence lifecycle.
+            AccountAwareStorageBackend<OrganizationAccount> accounts = storageFactory.create(
+                    "organizations", "organizations-accounts.json",
+                    new TypeReference<Map<String, OrganizationAccount>>() {});
+            organizationAccount.setName(name);
+            accounts.putForAccount(organization.getMasterAccountId(), accountId, organizationAccount);
+        }
+        metadata.putForAccount(accountId, "identity", new AccountMetadata(name, account.accountCreatedDate()));
+    }
+
+    private AccountMetadata ensureMetadata(String accountId, OrganizationAccount organizationAccount) {
+        AccountMetadata current = metadata.getForAccount(accountId, "identity").orElse(null);
+        if (organizationAccount != null) {
+            // Joining an organization does not establish an invited account's creation date.
+            String created = "CREATED".equals(organizationAccount.getJoinedMethod())
+                    && organizationAccount.getJoinedTimestamp() != null
+                    ? organizationAccount.getJoinedTimestamp().toString()
+                    : current == null ? null : current.accountCreatedDate();
+            AccountMetadata observed = new AccountMetadata(organizationAccount.getName(), created);
+            if (!observed.equals(current)) {
+                metadata.putForAccount(accountId, "identity", observed);
+            }
+            return observed;
+        }
+        if (current == null) {
+            // Standalone identities are provisioned on first use; the account ID is their initial display name.
+            current = new AccountMetadata(accountId, Instant.now().toString());
+            metadata.putForAccount(accountId, "identity", current);
+        }
+        return current;
+    }
+
+    public Map<String, String> getContactInformation(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
+        return primaryContacts.getForAccount(accountId, "contact").map(Map::copyOf)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "No primary contact has been configured for this emulator account. "
+                                + "Use PutContactInformation to supply the account owner's contact information.", 404));
+    }
+
+    public void putContactInformation(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
+        JsonNode contact = request.get("ContactInformation");
+        if (contact == null || !contact.isObject()) {
+            throw validation("ContactInformation must be an object.");
+        }
+        Map<String, String> value = new LinkedHashMap<>();
+        value.put("FullName", requireLength(contact, "FullName", 1, 50));
+        value.put("AddressLine1", requireLength(contact, "AddressLine1", 1, 60));
+        value.put("City", requireLength(contact, "City", 1, 50));
+        value.put("PostalCode", requireLength(contact, "PostalCode", 1, 20));
+        String country = requireLength(contact, "CountryCode", 2, 2);
+        if (!COUNTRY_CODES.contains(country)) {
+            throw validation("CountryCode must be an ISO-3166 two-letter country code.");
+        }
+        value.put("CountryCode", country);
+        value.put("PhoneNumber", requirePattern(contact, "PhoneNumber", 1, 20, PRIMARY_PHONE));
+        for (String field : List.of("AddressLine2", "AddressLine3")) {
+            copyOptional(contact, value, field, 60);
+        }
+        for (String field : List.of("StateOrRegion", "DistrictOrCounty", "CompanyName")) {
+            copyOptional(contact, value, field, 50);
+        }
+        copyOptional(contact, value, "WebsiteUrl", 256);
+        if (STATE_REQUIRED.contains(country) && !value.containsKey("StateOrRegion")) {
+            throw validation("StateOrRegion is required for the specified CountryCode.");
+        }
+        primaryContacts.putForAccount(accountId, "contact", value);
+    }
+
+    private static void copyOptional(JsonNode request, Map<String, String> value, String field, int max) {
+        if (request.hasNonNull(field)) {
+            value.put(field, requireLength(request, field, 1, max));
+        }
+    }
+
+    public Map<String, String> getRegionOptStatus(String callerAccountId, JsonNode request) {
+        resolveTargetAccount(callerAccountId, request);
+        String region = requireAdvertisedRegion(request);
+        return regionStatus(region);
+    }
+
+    public Map<String, Object> listRegions(String callerAccountId, JsonNode request) {
+        resolveTargetAccount(callerAccountId, request);
+        Set<String> statuses = new HashSet<>();
+        JsonNode filter = request.get("RegionOptStatusContains");
+        if (filter != null && !filter.isNull()) {
+            if (!filter.isArray()) {
+                throw validation("RegionOptStatusContains must be a list of region statuses.");
+            }
+            for (JsonNode status : filter) {
+                if (!status.isTextual() || !REGION_STATUSES.contains(status.textValue())) {
+                    throw validation("RegionOptStatusContains contains an invalid region status.");
+                }
+                statuses.add(status.textValue());
+            }
+        }
+        Integer maxResults = null;
+        if (request.hasNonNull("MaxResults")) {
+            JsonNode max = request.get("MaxResults");
+            if (!max.isIntegralNumber() || !max.canConvertToInt()) {
+                throw validation("MaxResults must be an integer between 1 and 50.");
+            }
+            maxResults = max.intValue();
+        }
+        String nextToken = request.hasNonNull("NextToken")
+                ? requireLength(request, "NextToken", 0, 1000) : null;
+        List<String> regions = statuses.isEmpty() || statuses.contains("ENABLED_BY_DEFAULT")
+                ? AwsRegions.ALL : List.of();
+        PaginatedResult<String> page = Pagination.paginate(regions, region -> region, maxResults, nextToken,
+                20, 50, "ValidationException");
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("Regions", page.items().stream().map(AccountService::regionStatus).toList());
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
+        return response;
+    }
+
+    public void rejectRegionChange(String callerAccountId, JsonNode request) {
+        resolveTargetAccount(callerAccountId, request);
+        requireAdvertisedRegion(request);
+        throw validation("Regions enabled by default cannot be enabled or disabled.");
+    }
+
+    private static String requireAdvertisedRegion(JsonNode request) {
+        String region = requireLength(request, "RegionName", 1, 50);
+        if (!AwsRegions.ALL.contains(region)) {
+            throw validation("The region is not in the emulator's supported region catalog. "
+                    + "Per-account region activation is not supported.");
+        }
+        return region;
+    }
+
+    private static Map<String, String> regionStatus(String region) {
+        return Map.of("RegionName", region, "RegionOptStatus", "ENABLED_BY_DEFAULT");
     }
 
     public void putAlternateContact(String callerAccountId, JsonNode request) {
@@ -53,6 +236,16 @@ public class AccountService implements Resettable {
         return contacts.getForAccount(targetAccountId, type)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "The alternate contact does not exist for the specified account and contact type.", 404));
+    }
+
+    public void deleteAlternateContact(String callerAccountId, JsonNode request) {
+        String targetAccountId = resolveTargetAccount(callerAccountId, request);
+        String type = requireContactType(request);
+        if (contacts.getForAccount(targetAccountId, type).isEmpty()) {
+            throw new AwsException("ResourceNotFoundException",
+                    "The alternate contact does not exist for the specified account and contact type.", 404);
+        }
+        contacts.deleteForAccount(targetAccountId, type);
     }
 
     private String resolveTargetAccount(String callerAccountId, JsonNode request) {
@@ -105,6 +298,8 @@ public class AccountService implements Resettable {
     @Override
     public void clear() {
         contacts.clear();
+        metadata.clear();
+        primaryContacts.clear();
     }
 
     private static String requireContactType(JsonNode request) {

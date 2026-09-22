@@ -1,24 +1,35 @@
 package io.github.hectorvent.floci.services.backup;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import io.github.hectorvent.floci.config.EmulatorConfig;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.backup.model.*;
-import jakarta.annotation.PreDestroy;
+import io.github.hectorvent.floci.services.backup.model.BackupJob;
+import io.github.hectorvent.floci.services.backup.model.BackupPlan;
+import io.github.hectorvent.floci.services.backup.model.BackupRule;
+import io.github.hectorvent.floci.services.backup.model.BackupSelection;
+import io.github.hectorvent.floci.services.backup.model.BackupVault;
+import io.github.hectorvent.floci.services.backup.model.Lifecycle;
+import io.github.hectorvent.floci.services.backup.model.RecoveryPoint;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.*;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 @ApplicationScoped
 public class BackupService {
@@ -37,28 +48,22 @@ public class BackupService {
     private final StorageBackend<String, RecoveryPoint>   recoveryStore;
 
     private final RegionResolver regionResolver;
-    private final int jobCompletionDelaySeconds;
-
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "backup-job-scheduler");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ObjectMapper objectMapper;
+    private final StorageBackend<String, Map<String, Object>> restoreJobStore;
+    private final StorageBackend<String, Map<String, Object>> copyJobStore;
 
     @Inject
-    public BackupService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver) {
+    public BackupService(StorageFactory storageFactory, RegionResolver regionResolver,
+                         ObjectMapper objectMapper) {
         this.vaultStore     = storageFactory.create("backup", "backup-vaults.json",     new TypeReference<>() {});
         this.planStore      = storageFactory.create("backup", "backup-plans.json",      new TypeReference<>() {});
         this.selectionStore = storageFactory.create("backup", "backup-selections.json", new TypeReference<>() {});
         this.jobStore       = storageFactory.create("backup", "backup-jobs.json",       new TypeReference<>() {});
         this.recoveryStore  = storageFactory.create("backup", "backup-recovery-points.json", new TypeReference<>() {});
         this.regionResolver = regionResolver;
-        this.jobCompletionDelaySeconds = config.services().backup().jobCompletionDelaySeconds();
-    }
-
-    @PreDestroy
-    void shutdown() {
-        scheduler.shutdownNow();
+        this.objectMapper = objectMapper;
+        this.restoreJobStore = storageFactory.create("backup", "backup-restore-jobs.json", new TypeReference<>() {});
+        this.copyJobStore = storageFactory.create("backup", "backup-copy-jobs.json", new TypeReference<>() {});
     }
 
     // ── Vault ──────────────────────────────────────────────────────────────────
@@ -100,6 +105,60 @@ public class BackupService {
     public List<BackupVault> listBackupVaults(String region) {
         String prefix = region + ":";
         return vaultStore.scan(k -> k.startsWith(prefix));
+    }
+
+    public String getVaultPolicy(String vaultName, String region) {
+        String policy = describeBackupVault(vaultName, region).getAccessPolicy();
+        if (policy == null) {
+            throw new AwsException("ResourceNotFoundException", "No access policy configured for vault: " + vaultName, 400);
+        }
+        return policy;
+    }
+
+    public void putVaultPolicy(String vaultName, String policy, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        try {
+            JsonNode document = objectMapper.readTree(policy == null ? "" : policy);
+            if (document == null || !document.isObject() || !document.has("Statement")) {
+                throw new AwsException("InvalidParameterValueException", "Policy must be a JSON policy document", 400);
+            }
+        } catch (IOException e) {
+            throw new AwsException("InvalidParameterValueException", "Policy must be valid JSON", 400);
+        }
+        vault.setAccessPolicy(policy);
+        vaultStore.put(vaultKey(region, vaultName), vault);
+    }
+
+    public void deleteVaultPolicy(String vaultName, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        vault.setAccessPolicy(null);
+        vaultStore.put(vaultKey(region, vaultName), vault);
+    }
+
+    public Map<String, Object> getVaultNotifications(String vaultName, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        if (vault.getSnsTopicArn() == null) {
+            throw new AwsException("ResourceNotFoundException", "No notification configuration for vault: " + vaultName, 400);
+        }
+        return Map.of("BackupVaultName", vaultName, "BackupVaultArn", vault.getBackupVaultArn(),
+                "SNSTopicArn", vault.getSnsTopicArn(), "BackupVaultEvents", vault.getBackupVaultEvents());
+    }
+
+    public void putVaultNotifications(String vaultName, String topicArn, List<String> events, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        if (topicArn == null || !topicArn.startsWith("arn:") || events == null || events.isEmpty()) {
+            throw new AwsException("InvalidParameterValueException", "SNSTopicArn and BackupVaultEvents are required", 400);
+        }
+        vault.setSnsTopicArn(topicArn);
+        vault.setBackupVaultEvents(new ArrayList<>(events));
+        vaultStore.put(vaultKey(region, vaultName), vault);
+    }
+
+    public void deleteVaultNotifications(String vaultName, String region) {
+        BackupVault vault = describeBackupVault(vaultName, region);
+        vault.setSnsTopicArn(null);
+        vault.setBackupVaultEvents(null);
+        vaultStore.put(vaultKey(region, vaultName), vault);
     }
 
     // ── Plan ───────────────────────────────────────────────────────────────────
@@ -187,6 +246,7 @@ public class BackupService {
     }
 
     public List<BackupSelection> listBackupSelections(String planId) {
+        getBackupPlan(planId);
         return selectionStore.scan(k -> true).stream()
                 .filter(s -> planId.equals(s.getBackupPlanId()))
                 .toList();
@@ -197,6 +257,9 @@ public class BackupService {
     public BackupJob startBackupJob(String vaultName, String resourceArn, String iamRoleArn,
                                      Lifecycle lifecycle, String region) {
         BackupVault vault = describeBackupVault(vaultName, region);
+        if (resourceArn == null || resourceArn.isBlank() || iamRoleArn == null || iamRoleArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "ResourceArn and IamRoleArn are required", 400);
+        }
 
         String jobId = UUID.randomUUID().toString();
         long now = Instant.now().getEpochSecond();
@@ -208,16 +271,14 @@ public class BackupService {
         job.setResourceArn(resourceArn);
         job.setResourceType(inferResourceType(resourceArn));
         job.setIamRoleArn(iamRoleArn);
-        job.setState("CREATED");
+        job.setState("FAILED");
+        job.setStatusMessage("Backup execution is not supported by this emulator; no resource data was copied.");
+        job.setCompletionDate(now);
         job.setPercentDone("0.0");
         job.setCreationDate(now);
-        job.setExpectedCompletionDate(now + jobCompletionDelaySeconds);
         job.setStartBy(now + 3600L);
         job.setAccountId(regionResolver.getAccountId());
         jobStore.put(jobId, job);
-
-        scheduler.schedule(() -> transitionJob(jobId, vaultName, region), 1, TimeUnit.SECONDS);
-        scheduler.schedule(() -> completeJob(jobId, vaultName, region), jobCompletionDelaySeconds, TimeUnit.SECONDS);
 
         return job;
     }
@@ -227,50 +288,270 @@ public class BackupService {
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Backup job not found: " + jobId, 404));
     }
 
-    public void stopBackupJob(String jobId) {
+    public BackupJob describeBackupJob(String jobId, String region) {
         BackupJob job = describeBackupJob(jobId);
+        if (!inRegion(job.getBackupVaultArn(), region)) {
+            throw new AwsException("ResourceNotFoundException", "Backup job not found: " + jobId, 400);
+        }
+        return job;
+    }
+
+    public List<BackupJob> listBackupJobs(String region) {
+        return jobStore.scan(k -> true).stream().filter(job -> inRegion(job.getBackupVaultArn(), region)).toList();
+    }
+
+    public void stopBackupJob(String jobId, String region) {
+        BackupJob job = describeBackupJob(jobId, region);
         String state = job.getState();
         if ("COMPLETED".equals(state) || "ABORTED".equals(state) || "FAILED".equals(state)) {
             throw new AwsException("InvalidRequestException",
                     "Job cannot be stopped in state: " + state, 400);
         }
-        job.setState("ABORTING");
+        job.setState("ABORTED");
         job.setStatusMessage("Job stop requested");
+        job.setCompletionDate(Instant.now().getEpochSecond());
         jobStore.put(jobId, job);
-        scheduler.schedule(() -> abortJob(jobId), 1, TimeUnit.SECONDS);
-    }
-
-    public List<BackupJob> listBackupJobs(String byVaultName, String byState,
-                                           String byResourceArn, String byResourceType) {
-        return jobStore.scan(k -> true).stream()
-                .filter(j -> byVaultName == null || byVaultName.equals(j.getBackupVaultName()))
-                .filter(j -> byState == null || byState.equals(j.getState()))
-                .filter(j -> byResourceArn == null || byResourceArn.equals(j.getResourceArn()))
-                .filter(j -> byResourceType == null || byResourceType.equals(j.getResourceType()))
-                .toList();
     }
 
     // ── Recovery Point ─────────────────────────────────────────────────────────
 
     public RecoveryPoint describeRecoveryPoint(String vaultName, String recoveryPointArn, String region) {
-        describeBackupVault(vaultName, region);
+        BackupVault vault = describeBackupVault(vaultName, region);
+        if (recoveryPointArn == null || recoveryPointArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "RecoveryPointArn is required", 400);
+        }
         return recoveryStore.get(recoveryPointArn)
-                .filter(rp -> vaultName.equals(rp.getBackupVaultName()))
+                .filter(rp -> vault.getBackupVaultArn().equals(rp.getBackupVaultArn()))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Recovery point not found: " + recoveryPointArn, 404));
     }
 
     public List<RecoveryPoint> listRecoveryPointsByBackupVault(String vaultName, String region) {
-        describeBackupVault(vaultName, region);
+        BackupVault vault = describeBackupVault(vaultName, region);
         return recoveryStore.scan(k -> true).stream()
-                .filter(rp -> vaultName.equals(rp.getBackupVaultName()))
+                .filter(rp -> vault.getBackupVaultArn().equals(rp.getBackupVaultArn()))
                 .toList();
     }
 
     public void deleteRecoveryPoint(String vaultName, String recoveryPointArn, String region) {
-        RecoveryPoint rp = describeRecoveryPoint(vaultName, recoveryPointArn, region);
+        describeRecoveryPoint(vaultName, recoveryPointArn, region);
         recoveryStore.delete(recoveryPointArn);
         decrementVaultCount(vaultName, region);
+    }
+
+    public Map<String, Object> getRecoveryPointRestoreMetadata(String vaultName, String arn, String region) {
+        RecoveryPoint point = describeRecoveryPoint(vaultName, arn, region);
+        if (point.getRestoreMetadata() == null) {
+            throw new AwsException("InvalidRequestException", "Restore metadata is unavailable for this recovery point", 400);
+        }
+        return Map.of("BackupVaultArn", point.getBackupVaultArn(), "RecoveryPointArn", arn,
+                "ResourceType", point.getResourceType(), "RestoreMetadata", point.getRestoreMetadata());
+    }
+
+    public List<Map<String, Object>> listRecoveryPointsByResource(String resourceArn, String region) {
+        return regionalRecoveryPoints(region).stream()
+                .filter(point -> resourceArn.equals(point.getResourceArn()))
+                .map(point -> {
+                    Map<String, Object> result = asMap(point);
+                    Object size = result.remove("BackupSizeInBytes");
+                    if (size != null) {
+                        result.put("BackupSizeBytes", size);
+                    }
+                    result.remove("RestoreMetadata");
+                    return result;
+                }).toList();
+    }
+
+    public List<Map<String, Object>> listProtectedResources(String region) {
+        Map<String, RecoveryPoint> latest = new LinkedHashMap<>();
+        for (RecoveryPoint point : regionalRecoveryPoints(region)) {
+            if (!"COMPLETED".equals(point.getStatus()) || point.getResourceArn() == null) {
+                continue;
+            }
+            latest.merge(point.getResourceArn(), point,
+                    (left, right) -> left.getCreationDate() >= right.getCreationDate() ? left : right);
+        }
+        return latest.values().stream().map(point -> {
+            Map<String, Object> resource = new LinkedHashMap<>();
+            resource.put("ResourceArn", point.getResourceArn());
+            resource.put("ResourceType", point.getResourceType());
+            resource.put("LastBackupTime", point.getCreationDate());
+            resource.put("LastBackupVaultArn", point.getBackupVaultArn());
+            resource.put("LastRecoveryPointArn", point.getRecoveryPointArn());
+            return resource;
+        }).toList();
+    }
+
+    public Map<String, Object> describeProtectedResource(String resourceArn, String region) {
+        return listProtectedResources(region).stream()
+                .filter(resource -> resourceArn.equals(resource.get("ResourceArn"))).findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Protected resource not found: " + resourceArn, 400));
+    }
+
+    private List<RecoveryPoint> regionalRecoveryPoints(String region) {
+        return recoveryStore.scan(k -> true).stream()
+                .filter(point -> inRegion(point.getBackupVaultArn(), region)).toList();
+    }
+
+    public Map<String, Object> describeRestoreJob(String id, String region) {
+        return restoreJobStore.get(id).filter(job -> jobInRegion(job, region))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Restore job not found: " + id, 400));
+    }
+
+    public Map<String, Object> describeCopyJob(String id, String region) {
+        return copyJobStore.get(id).filter(job -> jobInRegion(job, region))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Copy job not found: " + id, 400));
+    }
+
+    public List<Map<String, Object>> listRestoreJobs(String region) {
+        return restoreJobStore.scan(k -> true).stream().filter(job -> jobInRegion(job, region)).toList();
+    }
+
+    public List<Map<String, Object>> listCopyJobs(String region) {
+        return copyJobStore.scan(k -> true).stream().filter(job -> jobInRegion(job, region)).toList();
+    }
+
+    public Map<String, Object> getRestoreJobMetadata(String id, String region) {
+        Map<String, Object> job = describeRestoreJob(id, region);
+        if (!job.containsKey("Metadata")) {
+            throw new AwsException("InvalidRequestException", "Restore job metadata is unavailable", 400);
+        }
+        return Map.of("RestoreJobId", id, "Metadata", job.get("Metadata"));
+    }
+
+    public void putRestoreValidationResult(String id, String status, String message, String region) {
+        Map<String, Object> job = new LinkedHashMap<>(describeRestoreJob(id, region));
+        if (!List.of("SUCCESSFUL", "FAILED", "TIMED_OUT", "VALIDATING").contains(status == null ? "" : status)) {
+            throw new AwsException("InvalidParameterValueException", "Invalid validation status", 400);
+        }
+        JsonNode creator = objectMapper.valueToTree(job.get("CreatedBy"));
+        if (creator == null || !creator.hasNonNull("RestoreTestingPlanArn") || !"COMPLETED".equals(job.get("Status"))) {
+            throw new AwsException("InvalidRequestException", "Only completed restore testing jobs accept validation results", 400);
+        }
+        job.put("ValidationStatus", status);
+        if (message != null) {
+            job.put("ValidationStatusMessage", message);
+        }
+        restoreJobStore.put(id, job);
+    }
+
+    public Map<String, Object> startRestoreJob(String recoveryPointArn, String region) {
+        if (recoveryPointArn == null || recoveryPointArn.isBlank()) {
+            throw new AwsException("MissingParameterValueException", "RecoveryPointArn is required", 400);
+        }
+        recoveryStore.get(recoveryPointArn).filter(point -> inRegion(point.getBackupVaultArn(), region))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Recovery point not found: " + recoveryPointArn, 400));
+        throw new AwsException("InvalidRequestException", "Restore execution is not supported by this emulator", 400);
+    }
+
+    public Map<String, Object> startCopyJob(String vaultName, String recoveryPointArn, String region) {
+        describeRecoveryPoint(vaultName, recoveryPointArn, region);
+        throw new AwsException("InvalidRequestException", "Copy execution is not supported by this emulator", 400);
+    }
+
+    private boolean jobInRegion(Map<String, Object> job, String region) {
+        for (String field : List.of("BackupVaultArn", "SourceBackupVaultArn", "RecoveryPointArn")) {
+            if (job.get(field) instanceof String arn) {
+                return inRegion(arn, region);
+            }
+        }
+        return region.equals(job.get("Region"));
+    }
+
+    private static boolean inRegion(String arn, String region) {
+        return arn != null && arn.startsWith("arn:") && arn.split(":", 6).length == 6
+                && region.equals(arn.split(":", 6)[3]);
+    }
+
+    public Map<String, Object> asMap(Object value) {
+        return objectMapper.convertValue(value, new TypeReference<>() {});
+    }
+
+    public Map<String, Object> page(String listName, List<?> values, Map<String, String> query, String region) {
+        List<Map<String, Object>> filtered = values.stream().map(this::asMap)
+                .filter(value -> matches(value, query))
+                .sorted(Comparator.comparing(value -> objectMapper.valueToTree(value).toString())).toList();
+        int size = 1000;
+        int offset = 0;
+        String scope = regionResolver.getAccountId() + ":" + region + ":" + listName + ":";
+        try {
+            if (query.containsKey("maxResults")) {
+                size = Integer.parseInt(query.get("maxResults"));
+            }
+            if (query.containsKey("nextToken")) {
+                String decoded = new String(Base64.getUrlDecoder().decode(query.get("nextToken")), StandardCharsets.UTF_8);
+                if (!decoded.startsWith(scope)) {
+                    throw new IllegalArgumentException("Invalid token scope");
+                }
+                offset = Integer.parseInt(decoded.substring(scope.length()));
+            }
+            if (size < 1 || size > 1000 || offset < 0 || offset > filtered.size()) {
+                throw new IllegalArgumentException("Invalid page bounds");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidParameterValueException", "Invalid maxResults or nextToken", 400);
+        }
+        int end = Math.min(filtered.size(), offset + size);
+        Map<String, Object> result = new LinkedHashMap<>();
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (Map<String, Object> value : filtered.subList(offset, end)) {
+            Map<String, Object> item = new LinkedHashMap<>(value);
+            item.remove("Metadata");
+            item.remove("RestoreMetadata");
+            item.remove("Region");
+            items.add(item);
+        }
+        result.put(listName, items);
+        if (end < filtered.size()) {
+            result.put("NextToken", Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString((scope + end).getBytes(StandardCharsets.UTF_8)));
+        }
+        return result;
+    }
+
+    private boolean matches(Map<String, Object> value, Map<String, String> query) {
+        for (Map.Entry<String, String> entry : query.entrySet()) {
+            String key = entry.getKey();
+            if (List.of("maxResults", "nextToken", "managedByAWSBackupOnly").contains(key)) {
+                continue;
+            }
+            if (key.endsWith("Before") || key.endsWith("After")) {
+                String dateField = key.startsWith("created") ? "CreationDate" : "CompletionDate";
+                Object actual = value.get(dateField);
+                double bound;
+                try {
+                    bound = Double.parseDouble(entry.getValue());
+                } catch (NumberFormatException e) {
+                    throw new AwsException("InvalidParameterValueException", "Invalid timestamp filter", 400);
+                }
+                if (!(actual instanceof Number number) || (key.endsWith("Before")
+                        ? number.doubleValue() >= bound : number.doubleValue() <= bound)) {
+                    return false;
+                }
+                continue;
+            }
+            String field = switch (key) {
+                case "destinationVaultArn" -> "DestinationBackupVaultArn";
+                case "backupVaultAccountId" -> "AccountId";
+                default -> Character.toUpperCase(key.charAt(0)) + key.substring(1);
+            };
+            Object actual = "backupVaultAccountId".equals(key) ? regionResolver.getAccountId() : value.get(field);
+            if ("backupPlanId".equals(key) || "restoreTestingPlanArn".equals(key)) {
+                JsonNode createdBy = objectMapper.valueToTree(value.get("CreatedBy"));
+                actual = createdBy == null ? null : createdBy.path(field).asText(null);
+            }
+            if ("accountId".equals(key) && "*".equals(entry.getValue())) {
+                continue;
+            }
+            if (!entry.getValue().equals(actual == null ? null : actual.toString())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public void saveSelection(BackupSelection selection) {
+        selectionStore.put(selection.getSelectionId(), selection);
     }
 
     // ── Tags ───────────────────────────────────────────────────────────────────
@@ -295,69 +576,6 @@ public class BackupService {
 
     // ── Private helpers ────────────────────────────────────────────────────────
 
-    private void transitionJob(String jobId, String vaultName, String region) {
-        jobStore.get(jobId).ifPresent(job -> {
-            if ("CREATED".equals(job.getState())) {
-                job.setState("RUNNING");
-                job.setPercentDone("50.0");
-                jobStore.put(jobId, job);
-            }
-        });
-    }
-
-    private void completeJob(String jobId, String vaultName, String region) {
-        jobStore.get(jobId).ifPresent(job -> {
-            if ("RUNNING".equals(job.getState())) {
-                long now = Instant.now().getEpochSecond();
-                String rpArn = regionResolver.buildArn("backup", region,
-                        "recovery-point:" + UUID.randomUUID());
-
-                job.setState("COMPLETED");
-                job.setPercentDone("100.0");
-                job.setCompletionDate(now);
-                job.setRecoveryPointArn(rpArn);
-                job.setBackupSizeInBytes(0L);
-                job.setBytesTransferred(0L);
-                jobStore.put(jobId, job);
-
-                RecoveryPoint rp = new RecoveryPoint();
-                rp.setRecoveryPointArn(rpArn);
-                rp.setBackupVaultName(vaultName);
-                rp.setBackupVaultArn(job.getBackupVaultArn());
-                rp.setResourceArn(job.getResourceArn());
-                rp.setResourceType(job.getResourceType());
-                rp.setIamRoleArn(job.getIamRoleArn());
-                rp.setStatus("COMPLETED");
-                rp.setCreationDate(job.getCreationDate());
-                rp.setCompletionDate(now);
-                rp.setBackupSizeInBytes(0L);
-                rp.setStorageClass("WARM");
-                rp.setEncrypted(false);
-                recoveryStore.put(rpArn, rp);
-
-                incrementVaultCount(vaultName, region);
-                LOG.infov("Backup job {0} completed, recovery point: {1}", jobId, rpArn);
-            }
-        });
-    }
-
-    private void abortJob(String jobId) {
-        jobStore.get(jobId).ifPresent(job -> {
-            if ("ABORTING".equals(job.getState())) {
-                job.setState("ABORTED");
-                job.setCompletionDate(Instant.now().getEpochSecond());
-                jobStore.put(jobId, job);
-            }
-        });
-    }
-
-    private void incrementVaultCount(String vaultName, String region) {
-        vaultStore.get(vaultKey(region, vaultName)).ifPresent(vault -> {
-            vault.setNumberOfRecoveryPoints(vault.getNumberOfRecoveryPoints() + 1);
-            vaultStore.put(vaultKey(region, vaultName), vault);
-        });
-    }
-
     private void decrementVaultCount(String vaultName, String region) {
         vaultStore.get(vaultKey(region, vaultName)).ifPresent(vault -> {
             vault.setNumberOfRecoveryPoints(Math.max(0, vault.getNumberOfRecoveryPoints() - 1));
@@ -376,7 +594,7 @@ public class BackupService {
                 .filter(p -> arn.equals(p.getBackupPlanArn()))
                 .findFirst();
         if (plan.isPresent()) {
-            return new HashMap<>();
+            return plan.get().getTags();
         }
         throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
     }
@@ -391,6 +609,14 @@ public class BackupService {
             vaultStore.put(vaultKey(vault), vault);
             return;
         }
+        Optional<BackupPlan> planOpt = planStore.scan(k -> true).stream()
+                .filter(p -> arn.equals(p.getBackupPlanArn())).findFirst();
+        if (planOpt.isPresent()) {
+            BackupPlan plan = planOpt.get();
+            plan.getTags().putAll(newTags);
+            planStore.put(plan.getBackupPlanId(), plan);
+            return;
+        }
         throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
     }
 
@@ -402,6 +628,14 @@ public class BackupService {
             BackupVault vault = vaultOpt.get();
             tagKeys.forEach(vault.getTags()::remove);
             vaultStore.put(vaultKey(vault), vault);
+            return;
+        }
+        Optional<BackupPlan> planOpt = planStore.scan(k -> true).stream()
+                .filter(p -> arn.equals(p.getBackupPlanArn())).findFirst();
+        if (planOpt.isPresent()) {
+            BackupPlan plan = planOpt.get();
+            tagKeys.forEach(plan.getTags()::remove);
+            planStore.put(plan.getBackupPlanId(), plan);
             return;
         }
         throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);

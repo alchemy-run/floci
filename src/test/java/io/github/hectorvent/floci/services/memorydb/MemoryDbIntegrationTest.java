@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.memorydb;
 
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.Snapshot;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
@@ -23,7 +25,9 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end MemoryDB test: JSON 1.1 control plane (CreateCluster/DescribeClusters/
@@ -48,6 +52,9 @@ class MemoryDbIntegrationTest {
 
     private static int openPort;
     private static int authPort;
+
+    @Inject
+    MemoryDbService service;
 
     @BeforeAll
     static void setup() {
@@ -219,6 +226,48 @@ class MemoryDbIntegrationTest {
         assertEquals(openPort, reusedPort);
 
         deleteCluster(OPEN_CLUSTER + "-reused").then().statusCode(200);
+    }
+
+    @Test
+    @Order(11)
+    void snapshotsCaptureRealRdbDataAndCopiesSurviveSourceDeletion() throws Exception {
+        try (Socket socket = openSocket(authPort)) {
+            write(socket, respArray("AUTH", AUTH_USER, AUTH_PASSWORD));
+            assertEquals("+OK\r\n", readLine(socket));
+            write(socket, respArray("SET", "snapshot-key", "snapshot-value"));
+            assertEquals("+OK\r\n", readLine(socket));
+        }
+        try {
+            memorydb("CreateSnapshot", "{\"ClusterName\":\"" + AUTH_CLUSTER
+                    + "\",\"SnapshotName\":\"it-mdb-snapshot\"}")
+                    .then().statusCode(200).body("Snapshot.Status", equalTo("available"));
+            Snapshot source = service.getSnapshot("it-mdb-snapshot", "us-east-1");
+            String dump = new String(source.data(), StandardCharsets.ISO_8859_1);
+            assertTrue(dump.startsWith("REDIS"));
+            assertTrue(dump.contains("snapshot-key"));
+            assertTrue(dump.contains("snapshot-value"));
+            for (String[] scope : new String[][]{{"eu-west-1", "test"}, {"us-east-1", "222222222222"}}) {
+                given().contentType(CONTENT_TYPE)
+                        .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + scope[1]
+                                + "/20260921/" + scope[0] + "/memorydb/aws4_request")
+                        .header("X-Amz-Target", "AmazonMemoryDB.CopySnapshot")
+                        .body("{\"SourceSnapshotName\":\"it-mdb-snapshot\",\"TargetSnapshotName\":\"it-mdb-copy\"}")
+                        .post("/").then().statusCode(400).body("__type", equalTo("SnapshotNotFoundFault"));
+            }
+            memorydb("CopySnapshot", "{\"SourceSnapshotName\":\"it-mdb-snapshot\","
+                    + "\"TargetSnapshotName\":\"it-mdb-copy\"}")
+                    .then().statusCode(200).body("Snapshot.Name", equalTo("it-mdb-copy"));
+            memorydb("DeleteSnapshot", "{\"SnapshotName\":\"it-mdb-snapshot\"}")
+                    .then().statusCode(200);
+            assertArrayEquals(source.data(), service.getSnapshot("it-mdb-copy", "us-east-1").data());
+            memorydb("DescribeSnapshots", "{\"SnapshotName\":\"it-mdb-copy\"}")
+                    .then().statusCode(200).body("Snapshots[0].ClusterConfiguration.Name", equalTo(AUTH_CLUSTER));
+        } finally {
+            memorydb("DeleteSnapshot", "{\"SnapshotName\":\"it-mdb-snapshot\"}");
+            memorydb("DeleteSnapshot", "{\"SnapshotName\":\"it-mdb-copy\"}");
+        }
+        memorydb("DescribeSnapshots", "{\"SnapshotName\":\"it-mdb-copy\"}")
+                .then().statusCode(400).body("__type", equalTo("SnapshotNotFoundFault"));
     }
 
     // ──────────────────────────── Helpers ────────────────────────────

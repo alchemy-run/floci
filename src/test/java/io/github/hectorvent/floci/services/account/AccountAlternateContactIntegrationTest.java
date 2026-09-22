@@ -21,6 +21,23 @@ class AccountAlternateContactIntegrationTest {
         get().statusCode(200).body("AlternateContact.EmailAddress", equalTo("security@example.com"));
         put("security-updated@example.com").statusCode(200);
         get().statusCode(200).body("AlternateContact.EmailAddress", equalTo("security-updated@example.com"));
+        given().contentType("application/json").header("Authorization", AUTH)
+                .body("{\"AlternateContactType\":\"SECURITY\"}")
+                .post("/deleteAlternateContact").then().statusCode(200);
+        get().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+        given().contentType("application/json").header("Authorization", AUTH)
+                .body("{\"AlternateContactType\":\"SECURITY\"}")
+                .post("/deleteAlternateContact").then().statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void alternateContactDeleteRejectsUnauthorizedAccountSelection() {
+        given().contentType("application/json")
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=222222222222/20260921/us-east-1/account/aws4_request")
+                .body("{\"AccountId\":\"333333333333\",\"AlternateContactType\":\"OPERATIONS\"}")
+                .post("/deleteAlternateContact").then().statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"));
     }
 
     @Test

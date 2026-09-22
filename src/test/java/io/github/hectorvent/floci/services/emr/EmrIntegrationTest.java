@@ -41,6 +41,20 @@ class EmrIntegrationTest {
     }
 
     @Test
+    void missingJobFlowsAndSecurityConfigurationsReturnAwsErrors() {
+        call("TerminateJobFlows", "{\"JobFlowIds\":[\"j-NOTFOUND123456\"]}")
+                .then().statusCode(400)
+                .body("__type", equalTo("ValidationException"))
+                .body("message", equalTo("Specified job flow ID not valid: j-NOTFOUND123456"));
+        for (String operation : new String[] {"DescribeSecurityConfiguration", "DeleteSecurityConfiguration"}) {
+            call(operation, "{\"Name\":\"missing-security-config-contract\"}")
+                    .then().statusCode(400)
+                    .body("__type", equalTo("InvalidRequestException"))
+                    .body("message", equalTo("Security configuration with name missing-security-config-contract does not exist"));
+        }
+    }
+
+    @Test
     @Order(1)
     void runJobFlow() {
         Response resp = call("RunJobFlow",

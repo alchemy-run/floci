@@ -172,11 +172,11 @@ class CloudTrailIntegrationTest {
     }
 
     @Test
-    void lookupEventsReturnsEmptyEventPage() {
+    void lookupEventsReturnsEmptyPageForAnUnknownEventId() {
         invokeCloudTrail("LookupEvents", """
                 {
                     "LookupAttributes": [
-                        {"AttributeKey": "EventName", "AttributeValue": "CreateBucket"}
+                        {"AttributeKey": "EventId", "AttributeValue": "00000000-0000-0000-0000-000000000000"}
                     ],
                     "MaxResults": 10
                 }

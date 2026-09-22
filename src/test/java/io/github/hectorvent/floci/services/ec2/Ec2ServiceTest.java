@@ -60,6 +60,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -75,6 +78,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -2591,6 +2595,537 @@ class Ec2ServiceTest {
         perm.setFromPort(port);
         perm.setToPort(port);
         return perm;
+    }
+
+    @Test
+    void permissionRevocationSynchronizesEverySourceAndPreservesSiblingIdsAndTags() {
+        for (boolean egress : List.of(false, true)) {
+            Ec2Service service = prefixListService();
+            String groupId = service.createSecurityGroup("us-east-1", "revoke-sources", "rules", null).getGroupId();
+            String prefixId = service.createManagedPrefixList("us-east-1", "revoke-list", "IPv4", 5,
+                    List.of(), List.of()).getPrefixListId();
+            IpPermission permission = tcpPermission(443);
+            permission.getIpRanges().add(new IpRange("10.1.0.0/16", "keep"));
+            permission.getIpRanges().add(new IpRange("10.2.0.0/16", "remove"));
+            permission.getIpv6Ranges().add(new Ipv6Range("2001:db8::/64", "remove"));
+            permission.getPrefixListIds().add(new PrefixListId(prefixId, "remove"));
+            UserIdGroupPair peer = new UserIdGroupPair();
+            peer.setGroupId(groupId);
+            permission.getUserIdGroupPairs().add(peer);
+            List<SecurityGroupRule> rules = egress
+                    ? service.authorizeSecurityGroupEgress("us-east-1", groupId, List.of(permission))
+                    : service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission));
+            service.createTags("us-east-1", rules.stream().map(SecurityGroupRule::getSecurityGroupRuleId).toList(),
+                    List.of(new Tag("alchemy::id", "CopiedOwner")));
+            IpPermission otherPort = tcpPermission(8443);
+            otherPort.getIpRanges().add(new IpRange("10.2.0.0/16"));
+            String otherId = onlyRuleId(service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(otherPort)));
+            IpPermission opposite = tcpPermission(443);
+            opposite.getIpRanges().add(new IpRange("10.2.0.0/16"));
+            String oppositeId = onlyRuleId(egress
+                    ? service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(opposite))
+                    : service.authorizeSecurityGroupEgress("us-east-1", groupId, List.of(opposite)));
+
+            IpPermission removal = tcpPermission(443);
+            removal.getIpRanges().add(new IpRange("10.2.0.7/16"));
+            removal.getIpv6Ranges().add(new Ipv6Range("2001:db8::5/64"));
+            removal.getPrefixListIds().add(new PrefixListId(prefixId, null));
+            UserIdGroupPair removedPeer = new UserIdGroupPair();
+            removedPeer.setGroupId(groupId);
+            removal.getUserIdGroupPairs().add(removedPeer);
+            if (egress) {
+                service.revokeSecurityGroupEgress("us-east-1", groupId, List.of(removal));
+            } else {
+                service.revokeSecurityGroupIngress("us-east-1", groupId, List.of(removal));
+            }
+            for (SecurityGroupRule removed : rules.subList(1, rules.size())) {
+                assertEquals("InvalidSecurityGroupRuleId.NotFound", assertThrows(AwsException.class, () ->
+                        service.describeSecurityGroupRules("us-east-1", List.of(groupId),
+                                List.of(removed.getSecurityGroupRuleId()))).getErrorCode());
+                assertTrue(service.resourceTags(removed.getSecurityGroupRuleId()).isEmpty());
+            }
+            String retainedId = rules.getFirst().getSecurityGroupRuleId();
+            SecurityGroupRule retained = service.describeSecurityGroupRules("us-east-1", List.of(groupId),
+                    List.of(retainedId)).getFirst();
+            assertEquals("CopiedOwner", retained.getTags().getFirst().getValue());
+            assertEquals(2, service.describeSecurityGroupRules("us-east-1", List.of(groupId),
+                    List.of(otherId, oppositeId)).size());
+            SecurityGroup group = service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                    .getFirst();
+            List<IpPermission> remaining = egress ? group.getIpPermissionsEgress() : group.getIpPermissions();
+            IpPermission kept = remaining.stream().filter(value -> Integer.valueOf(443).equals(value.getFromPort()))
+                    .findFirst().orElseThrow();
+            assertEquals(List.of("10.1.0.0/16"), kept.getIpRanges().stream().map(IpRange::getCidrIp).toList());
+            assertTrue(kept.getIpv6Ranges().isEmpty());
+            assertTrue(kept.getPrefixListIds().isEmpty());
+            assertTrue(kept.getUserIdGroupPairs().isEmpty());
+        }
+    }
+
+    @Test
+    void revokingStoredPermissionDoesNotTurnIntoASourcelessSiblingRevoke() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "aliased-revoke", "rules", null).getGroupId();
+        IpPermission first = tcpPermission(443);
+        first.getIpRanges().add(new IpRange("10.1.0.0/16"));
+        IpPermission second = tcpPermission(443);
+        second.getIpRanges().add(new IpRange("10.2.0.0/16"));
+        List<SecurityGroupRule> rules = service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(first, second));
+        service.revokeSecurityGroupIngress("us-east-1", groupId, List.of(first));
+        assertEquals(List.of(rules.get(1).getSecurityGroupRuleId()), ingressRuleIds(service, groupId));
+        assertEquals("10.2.0.0/16", service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().getFirst().getIpRanges().getFirst().getCidrIp());
+    }
+
+    @Test
+    void nameOnlyAndCrossAccountGroupSourcesAreMatchedExactly() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "group-source-identity", "rules", null).getGroupId();
+        IpPermission permission = tcpPermission(443);
+        for (String name : List.of("unresolved-one", "unresolved-two")) {
+            UserIdGroupPair pair = new UserIdGroupPair();
+            pair.setGroupName(name);
+            permission.getUserIdGroupPairs().add(pair);
+        }
+        for (String account : List.of("111111111111", "222222222222")) {
+            UserIdGroupPair pair = new UserIdGroupPair();
+            pair.setGroupId("sg-peer");
+            pair.setUserId(account);
+            permission.getUserIdGroupPairs().add(pair);
+        }
+        List<SecurityGroupRule> rules = service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission));
+        IpPermission removal = tcpPermission(443);
+        UserIdGroupPair byName = new UserIdGroupPair();
+        byName.setGroupName("unresolved-one");
+        removal.getUserIdGroupPairs().add(byName);
+        service.revokeSecurityGroupIngress("us-east-1", groupId, List.of(removal));
+        service.deleteSecurityGroupRule("us-east-1", rules.get(2).getSecurityGroupRuleId());
+        List<String> retained = ingressRuleIds(service, groupId);
+        assertEquals(2, retained.size());
+        assertTrue(retained.contains(rules.get(1).getSecurityGroupRuleId()));
+        assertTrue(retained.contains(rules.get(3).getSecurityGroupRuleId()));
+        List<UserIdGroupPair> pairs = service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().getFirst().getUserIdGroupPairs();
+        assertEquals(2, pairs.size());
+        assertEquals("unresolved-two", pairs.getFirst().getGroupName());
+        assertEquals("222222222222", pairs.get(1).getUserId());
+    }
+
+    @Test
+    void deletingRulesByIdKeepsPrefixListSiblingsUntilTheirOwnDeletion() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "delete-prefix", "rules", null).getGroupId();
+        String prefixId = service.createManagedPrefixList("us-east-1", "delete-prefix", "IPv4", 5,
+                List.of(), List.of()).getPrefixListId();
+        IpPermission permission = tcpPermission(443);
+        permission.getIpRanges().add(new IpRange("10.1.0.0/16"));
+        permission.getPrefixListIds().add(new PrefixListId(prefixId, null));
+        List<SecurityGroupRule> rules = service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission));
+        service.createTags("us-east-1", List.of(rules.get(1).getSecurityGroupRuleId()), List.of(new Tag("owner", "test")));
+        assertTrue(service.deleteSecurityGroupRule("us-east-1", rules.getFirst().getSecurityGroupRuleId()));
+        assertEquals(prefixId, service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().getFirst().getPrefixListIds().getFirst().getPrefixListId());
+        assertTrue(service.deleteSecurityGroupRule("us-east-1", rules.get(1).getSecurityGroupRuleId()));
+        assertFalse(service.deleteSecurityGroupRule("us-east-1", rules.get(1).getSecurityGroupRuleId()));
+        assertTrue(service.resourceTags(rules.get(1).getSecurityGroupRuleId()).isEmpty());
+        assertTrue(service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().isEmpty());
+    }
+
+    @Test
+    void deletingVpcCascadesDefaultSecurityGroupRulesAndTheirTags() {
+        Ec2Service service = prefixListService();
+        String vpcId = service.createVpc("us-east-1", "10.0.0.0/16", false).getVpcId();
+        String groupId = service.describeSecurityGroups("us-east-1", List.of(), List.of("default"),
+                Map.of("vpc-id", List.of(vpcId))).getFirst().getGroupId();
+        List<String> ruleIds = service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of())
+                .stream().map(SecurityGroupRule::getSecurityGroupRuleId).toList();
+        service.createTags("us-east-1", ruleIds, List.of(new Tag("owner", "test")));
+        service.deleteVpc("us-east-1", vpcId);
+        assertTrue(service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of()).isEmpty());
+        for (String ruleId : ruleIds) {
+            assertTrue(service.resourceTags(ruleId).isEmpty());
+            assertEquals("InvalidSecurityGroupRuleId.NotFound", assertThrows(AwsException.class, () ->
+                    service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of(ruleId))).getErrorCode());
+        }
+    }
+
+    @Test
+    void idRevocationValidatesEntireBatchAndDirectionBeforeMutation() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "id-validation", "rules", null).getGroupId();
+        String foreignId = service.createSecurityGroup("us-east-1", "foreign-id", "rules", null).getGroupId();
+        IpPermission permission = tcpPermission(443);
+        permission.getIpRanges().add(new IpRange("10.1.0.0/16"));
+        String ruleId = onlyRuleId(service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission)));
+        String egressId = service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of()).stream()
+                .filter(SecurityGroupRule::isEgress).findFirst().orElseThrow().getSecurityGroupRuleId();
+        String foreignRuleId = service.describeSecurityGroupRules("us-east-1", List.of(foreignId), List.of())
+                .getFirst().getSecurityGroupRuleId();
+        for (String invalid : List.of("sgr-missing", egressId, foreignRuleId)) {
+            assertEquals("InvalidSecurityGroupRuleId.NotFound", assertThrows(AwsException.class, () ->
+                    service.revokeSecurityGroupIngress("us-east-1", groupId, List.of(), List.of(ruleId, invalid)))
+                    .getErrorCode());
+            assertEquals(1, ingressRuleIds(service, groupId).size());
+            assertEquals(1, service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                    .getFirst().getIpPermissions().size());
+        }
+    }
+
+    @Test
+    void modifyingRuleTargetsPreservesIdentityTagsDirectionAndMixedSourceSiblings() {
+        for (boolean egress : List.of(false, true)) {
+            Ec2Service service = prefixListService();
+            String groupId = service.createSecurityGroup("us-east-1", "target-update", "rules", null).getGroupId();
+            String prefixId = service.createManagedPrefixList("us-east-1", "target-update", "IPv4", 5,
+                    List.of(), List.of()).getPrefixListId();
+            IpPermission permission = tcpPermission(443);
+            permission.getIpRanges().add(new IpRange("10.1.0.0/16", "target"));
+            permission.getIpv6Ranges().add(new Ipv6Range("2001:db8:1::/64", "sibling"));
+            List<SecurityGroupRule> rules = egress
+                    ? service.authorizeSecurityGroupEgress("us-east-1", groupId, List.of(permission))
+                    : service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission));
+            String ruleId = rules.getFirst().getSecurityGroupRuleId();
+            service.createTags("us-east-1", List.of(ruleId), List.of(new Tag("owner", "managed")));
+            for (Map<String, String> source : List.of(Map.of("CidrIpv6", "2001:db8:2::/64"),
+                    Map.of("PrefixListId", prefixId), Map.of("ReferencedGroupId", groupId),
+                    Map.of("CidrIpv4", "10.2.0.0/16"))) {
+                Map<String, String> update = new HashMap<>(source);
+                update.putAll(Map.of("SecurityGroupRuleId", ruleId, "IpProtocol", "17", "FromPort", "53",
+                        "ToPort", "54", "Description", "changed"));
+                service.modifySecurityGroupRules("us-east-1", groupId, List.of(update));
+                SecurityGroupRule saved = service.describeSecurityGroupRules("us-east-1", List.of(groupId),
+                        List.of(ruleId)).getFirst();
+                assertEquals(ruleId, saved.getSecurityGroupRuleId());
+                assertEquals(egress, saved.isEgress());
+                assertEquals("managed", saved.getTags().getFirst().getValue());
+                assertEquals("udp", saved.getIpProtocol());
+                assertEquals(53, saved.getFromPort());
+                assertEquals(54, saved.getToPort());
+                assertEquals("changed", saved.getDescription());
+                assertEquals(source.get("CidrIpv4"), saved.getCidrIpv4());
+                assertEquals(source.get("CidrIpv6"), saved.getCidrIpv6());
+                assertEquals(source.get("PrefixListId"), saved.getPrefixListId());
+                assertEquals(source.get("ReferencedGroupId"), saved.getReferencedGroupInfo() == null
+                        ? null : saved.getReferencedGroupInfo().getGroupId());
+                SecurityGroupRule sibling = service.describeSecurityGroupRules("us-east-1", List.of(groupId),
+                        List.of(rules.get(1).getSecurityGroupRuleId())).getFirst();
+                assertEquals("tcp", sibling.getIpProtocol());
+                assertEquals(443, sibling.getFromPort());
+                assertEquals("sibling", sibling.getDescription());
+                SecurityGroup group = service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                        .getFirst();
+                List<IpPermission> permissions = egress ? group.getIpPermissionsEgress() : group.getIpPermissions();
+                assertEquals(1, permissions.stream().filter(p -> Integer.valueOf(53).equals(p.getFromPort())).count());
+                IpPermission unchanged = permissions.stream().filter(p -> Integer.valueOf(443).equals(p.getFromPort()))
+                        .findFirst().orElseThrow();
+                assertTrue(unchanged.getIpRanges().isEmpty());
+                assertEquals("sibling", unchanged.getIpv6Ranges().getFirst().getDescription());
+            }
+            service.createTags("us-east-1", List.of(groupId), List.of(new Tag("owner", "managed")));
+            service.deleteSecurityGroup("us-east-1", groupId);
+            assertTrue(service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of()).isEmpty());
+            assertTrue(service.resourceTags(groupId).isEmpty());
+            assertTrue(service.resourceTags(ruleId).isEmpty());
+            assertEquals("InvalidSecurityGroupRuleId.NotFound", assertThrows(AwsException.class, () ->
+                    service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of(ruleId))).getErrorCode());
+        }
+    }
+
+    @Test
+    void modifyingABatchCanSwapSourcesWithoutRemovingTheReplacement() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "swap-sources", "rules", null).getGroupId();
+        IpPermission permission = tcpPermission(443);
+        permission.getIpRanges().add(new IpRange("10.1.0.0/16", "first"));
+        permission.getIpRanges().add(new IpRange("10.2.0.0/16", "second"));
+        List<SecurityGroupRule> rules = service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission));
+        service.modifySecurityGroupRules("us-east-1", groupId, List.of(
+                Map.of("SecurityGroupRuleId", rules.getFirst().getSecurityGroupRuleId(), "CidrIpv4", "10.2.0.0/16"),
+                Map.of("SecurityGroupRuleId", rules.get(1).getSecurityGroupRuleId(), "CidrIpv4", "10.1.0.0/16")));
+        List<IpRange> ranges = service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().stream().flatMap(p -> p.getIpRanges().stream()).toList();
+        assertEquals(2, ranges.size());
+        assertEquals("first", ranges.stream().filter(range -> "10.2.0.0/16".equals(range.getCidrIp()))
+                .findFirst().orElseThrow().getDescription());
+        assertEquals("second", ranges.stream().filter(range -> "10.1.0.0/16".equals(range.getCidrIp()))
+                .findFirst().orElseThrow().getDescription());
+    }
+
+    @Test
+    void modifyRuleBatchRejectsInvalidFieldsBeforeWritingEitherRepresentation() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "invalid-modify", "rules", null).getGroupId();
+        IpPermission permission = tcpPermission(443);
+        permission.getIpRanges().add(new IpRange("10.1.0.0/16", "original"));
+        permission.getIpRanges().add(new IpRange("10.2.0.0/16", "original"));
+        List<SecurityGroupRule> rules = service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission));
+        List<Map<String, String>> invalidUpdates = List.of(
+                Map.of("CidrIpv4", "10.0.0.7/16"),
+                Map.of("CidrIpv6", "2001:db8::5/64"),
+                Map.of("CidrIpv4", "2001:db8::/64"),
+                Map.of("CidrIpv4", "10.1.0.0/16", "CidrIpv6", "2001:db8::/64"),
+                Map.of("PrefixListId", "pl-missing"),
+                Map.of("IpProtocol", "not-a-protocol"),
+                Map.of("FromPort", "invalid"),
+                Map.of("FromPort", "65536"),
+                Map.of("FromPort", "444", "ToPort", "443"),
+                Map.of("ReferencedGroupId", ""));
+        for (Map<String, String> fields : invalidUpdates) {
+            Map<String, String> invalid = new HashMap<>(fields);
+            invalid.put("SecurityGroupRuleId", rules.get(1).getSecurityGroupRuleId());
+            assertThrows(AwsException.class, () -> service.modifySecurityGroupRules("us-east-1", groupId, List.of(
+                    Map.of("SecurityGroupRuleId", rules.getFirst().getSecurityGroupRuleId(),
+                            "IpProtocol", "udp", "FromPort", "53", "ToPort", "53", "Description", "must-not-write"),
+                    invalid)));
+            List<SecurityGroupRule> observed = service.describeSecurityGroupRules("us-east-1", List.of(groupId),
+                    rules.stream().map(SecurityGroupRule::getSecurityGroupRuleId).toList());
+            assertTrue(observed.stream().allMatch(rule -> "tcp".equals(rule.getIpProtocol())
+                    && Integer.valueOf(443).equals(rule.getFromPort()) && "original".equals(rule.getDescription())));
+            IpPermission stored = service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                    .getFirst().getIpPermissions().getFirst();
+            assertEquals("tcp", stored.getIpProtocol());
+            assertEquals(2, stored.getIpRanges().size());
+            assertTrue(stored.getIpRanges().stream().allMatch(range -> "original".equals(range.getDescription())));
+        }
+    }
+
+    @Test
+    void protocolNormalizationUsesAwsPortSemanticsAndValidatesWholeAuthorization() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "normalized", "rules", null).getGroupId();
+        for (String protocol : List.of("-1", "47", "58", "1")) {
+            IpPermission permission = new IpPermission();
+            permission.setIpProtocol(protocol);
+            permission.getIpv6Ranges().add(new Ipv6Range("2001:0db8:0:0:0:0:0:5/64"));
+            SecurityGroupRule rule = service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(permission))
+                    .getFirst();
+            assertEquals("2001:db8::/64", rule.getCidrIpv6());
+            if ("58".equals(protocol) || "1".equals(protocol)) {
+                assertEquals("58".equals(protocol) ? "icmpv6" : "icmp", rule.getIpProtocol());
+                assertEquals(-1, rule.getFromPort());
+                assertEquals(-1, rule.getToPort());
+            } else {
+                assertNull(rule.getFromPort());
+                assertNull(rule.getToPort());
+            }
+        }
+        IpPermission good = tcpPermission(443);
+        good.getIpRanges().add(new IpRange("10.0.0.7/16"));
+        IpPermission bad = tcpPermission(443);
+        bad.getIpRanges().add(new IpRange("invalid"));
+        assertThrows(AwsException.class, () -> service.authorizeSecurityGroupIngress("us-east-1", groupId,
+                List.of(good, bad)));
+        assertEquals(4, ingressRuleIds(service, groupId).size());
+        assertEquals(4, service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().size());
+    }
+
+    @Test
+    void modifyRuleDescriptionsUpdatesEverySourceWithoutChangingSiblings() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "descriptions", "descriptions", null).getGroupId();
+        String sourceId = service.createSecurityGroup("us-east-1", "source", "source", null).getGroupId();
+        ManagedPrefixList list = service.createManagedPrefixList("us-east-1", "sources", "IPv4", 5,
+                List.of(), List.of());
+        IpPermission permission = tcpPermission(443);
+        permission.getIpRanges().add(new IpRange("10.1.0.0/16", "original"));
+        permission.getIpRanges().add(new IpRange("10.2.0.0/16", "original"));
+        permission.getIpv6Ranges().add(new Ipv6Range("2001:db8::/32", "original"));
+        permission.getPrefixListIds().add(new PrefixListId(list.getPrefixListId(), "original"));
+        UserIdGroupPair source = new UserIdGroupPair();
+        source.setGroupId(sourceId);
+        source.setDescription("original");
+        permission.getUserIdGroupPairs().add(source);
+        List<SecurityGroupRule> rules = service.authorizeSecurityGroupIngress("us-east-1", groupId,
+                List.of(permission));
+        IpPermission otherPort = tcpPermission(8443);
+        otherPort.getIpRanges().add(new IpRange("10.1.0.0/16", "other-port"));
+        service.authorizeSecurityGroupIngress("us-east-1", groupId, List.of(otherPort));
+        IpPermission egress = tcpPermission(443);
+        egress.getIpRanges().add(new IpRange("10.1.0.0/16", "original"));
+        service.authorizeSecurityGroupEgress("us-east-1", groupId, List.of(egress));
+
+        for (SecurityGroupRule rule : rules) {
+            String ruleId = rule.getSecurityGroupRuleId();
+            service.createTags("us-east-1", List.of(ruleId), List.of(new Tag("owner", "test")));
+            service.modifySecurityGroupRules("us-east-1", groupId, List.of(
+                    Map.of("SecurityGroupRuleId", ruleId, "Description", ruleId)));
+        }
+
+        IpPermission observed = service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().getFirst();
+        assertEquals(rules.get(0).getSecurityGroupRuleId(), observed.getIpRanges().get(0).getDescription());
+        assertEquals(rules.get(1).getSecurityGroupRuleId(), observed.getIpRanges().get(1).getDescription());
+        assertEquals(rules.get(2).getSecurityGroupRuleId(), observed.getIpv6Ranges().getFirst().getDescription());
+        assertEquals(rules.get(3).getSecurityGroupRuleId(), observed.getUserIdGroupPairs().getFirst().getDescription());
+        assertEquals(rules.get(4).getSecurityGroupRuleId(), observed.getPrefixListIds().getFirst().getDescription());
+        SecurityGroup group = service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst();
+        assertEquals("other-port", group.getIpPermissions().get(1).getIpRanges().getFirst().getDescription());
+        assertEquals("original", group.getIpPermissionsEgress().get(1).getIpRanges().getFirst().getDescription());
+        for (SecurityGroupRule rule : rules) {
+            SecurityGroupRule saved = service.describeSecurityGroupRules("us-east-1", List.of(groupId),
+                    List.of(rule.getSecurityGroupRuleId())).getFirst();
+            assertEquals(rule.getSecurityGroupRuleId(), saved.getDescription());
+            assertEquals("test", saved.getTags().getFirst().getValue());
+        }
+    }
+
+    @Test
+    void deleteSecurityGroupRacingRuleModificationDoesNotResurrectGroup() throws Exception {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "modify-delete", "modify-delete", null)
+                .getGroupId();
+        String ruleId = service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of())
+                .getFirst().getSecurityGroupRuleId();
+        CountDownLatch groupRead = new CountDownLatch(1);
+        CountDownLatch resumeModification = new CountDownLatch(1);
+        Map<String, String> update = spy(new HashMap<>(
+                Map.of("SecurityGroupRuleId", ruleId, "Description", "updated")));
+        when(update.get("Description")).thenAnswer(invocation -> {
+            // Description is read after the group lookup, while the modifier holds its lock.
+            groupRead.countDown();
+            assertTrue(resumeModification.await(10, TimeUnit.SECONDS), "modifier was not released");
+            return invocation.callRealMethod();
+        });
+        FutureTask<Void> modification = new FutureTask<>(() -> {
+            service.modifySecurityGroupRules("us-east-1", groupId, List.of(update));
+            return null;
+        });
+        FutureTask<Void> deletion = new FutureTask<>(() -> {
+            service.deleteSecurityGroup("us-east-1", groupId);
+            return null;
+        });
+        Thread modifier = new Thread(modification, "security-group-modifier");
+        Thread deleter = new Thread(deletion, "security-group-deleter");
+        modifier.setDaemon(true);
+        deleter.setDaemon(true);
+        modifier.start();
+        try {
+            assertTrue(groupRead.await(10, TimeUnit.SECONDS), "modifier never read the group");
+            deleter.start();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            // Without the shared lock, deletion finishes before the modifier writes the group back.
+            while (!deletion.isDone()) {
+                StackTraceElement[] stack = deleter.getStackTrace();
+                if (deleter.getState() == Thread.State.BLOCKED && stack.length > 0
+                        && Ec2Service.class.getName().equals(stack[0].getClassName())
+                        && "deleteSecurityGroup".equals(stack[0].getMethodName())) {
+                    break;
+                }
+                assertTrue(System.nanoTime() - deadline < 0, "delete never reached the group lock");
+                Thread.onSpinWait();
+            }
+        } finally {
+            resumeModification.countDown();
+            modifier.join(10_000);
+            deleter.join(10_000);
+        }
+        modification.get(10, TimeUnit.SECONDS);
+        deletion.get(10, TimeUnit.SECONDS);
+
+        AwsException missing = assertThrows(AwsException.class, () ->
+                service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of()));
+        assertEquals("InvalidGroup.NotFound", missing.getErrorCode());
+        assertTrue(service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of()).isEmpty());
+        assertTrue(service.resourceTags(ruleId).isEmpty());
+    }
+
+    @Test
+    void ruleDeletionWaitsForModificationBeforeRemovingEitherRepresentation() throws Exception {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "rule-delete-race", "rules", null).getGroupId();
+        String ruleId = service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of())
+                .getFirst().getSecurityGroupRuleId();
+        service.createTags("us-east-1", List.of(ruleId), List.of(new Tag("owner", "test")));
+        CountDownLatch modifying = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        Map<String, String> update = new HashMap<>(Map.of("SecurityGroupRuleId", ruleId,
+                "CidrIpv4", "10.0.0.0/16", "Description", "changed")) {
+            @Override
+            public String get(Object key) {
+                if ("Description".equals(key)) {
+                    modifying.countDown();
+                    try {
+                        assertTrue(resume.await(10, TimeUnit.SECONDS));
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(e);
+                    }
+                }
+                return super.get(key);
+            }
+        };
+        FutureTask<Void> modification = new FutureTask<>(() -> {
+            service.modifySecurityGroupRules("us-east-1", groupId, List.of(update));
+            return null;
+        }) {
+            @Override
+            protected void done() {
+                modifying.countDown();
+            }
+        };
+        FutureTask<Boolean> deletion = new FutureTask<>(() -> service.deleteSecurityGroupRule("us-east-1", ruleId));
+        Thread modifier = new Thread(modification, "rule-modifier");
+        Thread deleter = new Thread(deletion, "rule-deleter");
+        modifier.setDaemon(true);
+        deleter.setDaemon(true);
+        modifier.start();
+        try {
+            assertTrue(modifying.await(10, TimeUnit.SECONDS), "modifier never reached the locked update");
+            if (modification.isDone()) {
+                modification.get(10, TimeUnit.SECONDS);
+                throw new AssertionError("modifier completed without reaching the locked update");
+            }
+            deleter.start();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (!deletion.isDone()) {
+                StackTraceElement[] stack = deleter.getStackTrace();
+                if (deleter.getState() == Thread.State.BLOCKED && stack.length > 0
+                        && "deleteSecurityGroupRule".equals(stack[0].getMethodName())) {
+                    break;
+                }
+                assertTrue(System.nanoTime() - deadline < 0, "delete never reached the group lock");
+                Thread.onSpinWait();
+            }
+            assertFalse(deletion.isDone());
+            assertEquals(1, service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of(ruleId)).size());
+        } finally {
+            resume.countDown();
+            modifier.join(10_000);
+            deleter.join(10_000);
+        }
+        modification.get(10, TimeUnit.SECONDS);
+        assertTrue(deletion.get(10, TimeUnit.SECONDS));
+        assertTrue(service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of()).isEmpty());
+        assertTrue(service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissionsEgress().isEmpty());
+        assertTrue(service.resourceTags(ruleId).isEmpty());
+    }
+
+    @Test
+    void modifyRuleDescriptionsValidatesEntireBatchBeforeWriting() {
+        Ec2Service service = prefixListService();
+        String groupId = service.createSecurityGroup("us-east-1", "target", "target", null).getGroupId();
+        String foreignId = service.createSecurityGroup("us-east-1", "foreign", "foreign", null).getGroupId();
+        String ruleId = service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of())
+                .getFirst().getSecurityGroupRuleId();
+        String foreignRuleId = service.describeSecurityGroupRules("us-east-1", List.of(foreignId), List.of())
+                .getFirst().getSecurityGroupRuleId();
+        for (String invalidId : List.of("sgr-00000000000000000", foreignRuleId)) {
+            AwsException error = assertThrows(AwsException.class, () ->
+                    service.modifySecurityGroupRules("us-east-1", groupId, List.of(
+                            Map.of("SecurityGroupRuleId", ruleId, "Description", "must-not-write"),
+                            Map.of("SecurityGroupRuleId", invalidId, "Description", "must-not-write"))));
+            assertEquals("InvalidSecurityGroupRuleId.NotFound", error.getErrorCode());
+            assertNull(service.describeSecurityGroupRules("us-east-1", List.of(groupId), List.of(ruleId))
+                    .getFirst().getDescription());
+            assertNull(service.describeSecurityGroups("us-east-1", List.of(groupId), List.of(), Map.of())
+                    .getFirst().getIpPermissionsEgress().getFirst().getIpRanges().getFirst().getDescription());
+        }
+        assertNull(service.describeSecurityGroupRules("us-east-1", List.of(foreignId), List.of(foreignRuleId))
+                .getFirst().getDescription());
     }
 
     @Test

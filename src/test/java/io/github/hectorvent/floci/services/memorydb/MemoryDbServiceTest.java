@@ -6,7 +6,11 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.elasticache.proxy.SigV4Validator;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.ParameterGroup;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.SubnetGroup;
 import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerHandle;
 import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerManager;
 import io.github.hectorvent.floci.services.memorydb.model.Acl;
@@ -48,6 +52,7 @@ class MemoryDbServiceTest {
     private MemoryDbProxyManager proxyManager;
     private SigV4Validator sigV4Validator;
     private EmulatorConfig.MemoryDbServiceConfig mdbConfig;
+    private Ec2Service ec2Service;
 
     @BeforeEach
     void setUp() {
@@ -76,8 +81,9 @@ class MemoryDbServiceTest {
                 .thenReturn(new MemoryDbContainerHandle("cid", "cluster", "localhost", 6379));
         doNothing().when(proxyManager).startProxy(anyString(), anyBoolean(), anyInt(), anyString(), anyInt(), any());
 
+        ec2Service = mock(Ec2Service.class);
         service = new MemoryDbService(containerManager, proxyManager, sigV4Validator,
-                storageFactory, config, regionResolver);
+                storageFactory, config, regionResolver, ec2Service);
     }
 
     @Test
@@ -490,6 +496,89 @@ class MemoryDbServiceTest {
         assertEquals("arn:aws:memorydb:eu-west-1:000000000000:cluster/shared-cluster",
                 service.getCluster("shared-cluster", "eu-west-1").getArn());
         assertThrows(AwsException.class, () -> service.getCluster("shared-cluster", "ap-southeast-1"));
+    }
+
+    @Test
+    void parameterUpdatesValidateAtomicallyAndResetAllToDefaults() {
+        ParameterGroup group = service.createParameterGroup("params", "memorydb_valkey7", "test", Map.of(), "us-east-1");
+        service.updateParameterGroup(group.name(), Map.of("maxmemory-policy", "allkeys-lru", "timeout", "10"), "us-east-1");
+        assertEquals("allkeys-lru", service.getParameterGroup("params", "us-east-1").parameters().get("maxmemory-policy"));
+        assertThrows(AwsException.class, () -> service.updateParameterGroup("params",
+                Map.of("maxmemory-policy", "volatile-lru", "unknown-parameter", "value"), "us-east-1"));
+        assertEquals("allkeys-lru", service.getParameterGroup("params", "us-east-1").parameters().get("maxmemory-policy"));
+        service.resetParameterGroup("params", true, List.of(), "us-east-1");
+        assertTrue(service.getParameterGroup("params", "us-east-1").parameters().isEmpty());
+        assertEquals("noeviction", service.describeParameters("params", "us-east-1").stream()
+                .filter(parameter -> parameter.name().equals("maxmemory-policy")).findFirst().orElseThrow().value());
+        assertEquals("InvalidParameterGroupStateFault", assertThrows(AwsException.class,
+                () -> service.deleteParameterGroup("default.memorydb-valkey7", "us-east-1")).jsonType());
+    }
+
+    @Test
+    void groupDeletionRejectsAttachedClusters() {
+        when(mdbConfig.mock()).thenReturn(true);
+        service.createParameterGroup("attached-params", "memorydb_valkey7", null, Map.of(), "us-east-1");
+        Subnet subnet = new Subnet();
+        subnet.setSubnetId("subnet-one");
+        subnet.setVpcId("vpc-one");
+        subnet.setAvailabilityZone("us-east-1a");
+        subnet.setRegion("us-east-1");
+        subnet.setOwnerId("000000000000");
+        when(ec2Service.requireSubnet("us-east-1", "subnet-one")).thenReturn(subnet);
+        SubnetGroup group = service.createSubnetGroup("attached-subnets", "test", List.of("subnet-one"), Map.of(), "us-east-1");
+        assertEquals("vpc-one", group.vpcId());
+        Cluster spec = cluster("attached-cluster", "open-access");
+        spec.setParameterGroupName("attached-params");
+        spec.setSubnetGroupName("attached-subnets");
+        service.createCluster(spec, "us-east-1");
+        assertEquals("InvalidParameterGroupStateFault", assertThrows(AwsException.class,
+                () -> service.deleteParameterGroup("attached-params", "us-east-1")).jsonType());
+        assertEquals("SubnetGroupInUseFault", assertThrows(AwsException.class,
+                () -> service.deleteSubnetGroup("attached-subnets", "us-east-1")).jsonType());
+        service.deleteCluster("attached-cluster", "us-east-1");
+        service.deleteParameterGroup("attached-params", "us-east-1");
+        service.deleteSubnetGroup("attached-subnets", "us-east-1");
+    }
+
+    @Test
+    void snapshotsRequireRealBackendAndDoNotCreateRecordsOnFailure() {
+        when(mdbConfig.mock()).thenReturn(true);
+        service.createCluster(cluster("metadata-only", "open-access"), "us-east-1");
+        assertEquals("InvalidClusterStateFault", assertThrows(AwsException.class,
+                () -> service.createSnapshot("metadata-only", "not-created", Map.of(), "us-east-1")).jsonType());
+        assertTrue(service.describeSnapshots(null, null, null, "us-east-1").isEmpty());
+        assertEquals("InvalidClusterStateFault", assertThrows(AwsException.class,
+                () -> service.deleteCluster("metadata-only", "us-east-1", "final-snapshot")).jsonType());
+        assertEquals(ClusterStatus.AVAILABLE, service.getCluster("metadata-only", "us-east-1").getStatus());
+        verify(containerManager, never()).captureSnapshot(any());
+        assertEquals("SnapshotNotFoundFault", assertThrows(AwsException.class,
+                () -> service.copySnapshot("missing", "copy", null, "us-east-1")).jsonType());
+    }
+
+    @Test
+    void userAuthenticationUpdateIsObservableAndRetainsTags() {
+        User spec = passwordUser("mutable-user", "initial-password");
+        spec.setTags(Map.of("owner", "initial"));
+        User user = service.createUser(spec, "us-east-1");
+        service.updateUser(user.getName(), "on ~app:* +@read", AuthMode.IAM, List.of(), "us-east-1");
+        User updated = service.describeUsers(user.getName(), "us-east-1").iterator().next();
+        assertEquals(AuthMode.IAM, updated.getAuthMode());
+        assertTrue(updated.getPasswords().isEmpty());
+        assertEquals("on ~app:* +@read", updated.getAccessString());
+        assertEquals(Map.of("owner", "initial"), service.listTags(user.getArn(), "us-east-1"));
+        assertEquals("UserNotFoundFault", assertThrows(AwsException.class,
+                () -> service.tagResource(user.getArn(), Map.of("owner", "other"), "eu-west-1")).jsonType());
+        assertEquals(Map.of("owner", "initial"), service.listTags(user.getArn(), "us-east-1"));
+    }
+
+    @Test
+    void eventsReflectLifecycleAndFilterBySourceRegionAndTime() {
+        service.createParameterGroup("event-params", "memorydb_valkey7", null, Map.of(), "us-east-1");
+        service.updateParameterGroup("event-params", Map.of("timeout", "10"), "us-east-1");
+        service.deleteParameterGroup("event-params", "us-east-1");
+        assertEquals(3, service.describeEvents("event-params", "parametergroup", null, null, null, "us-east-1").size());
+        assertTrue(service.describeEvents(null, "parametergroup", null, null, null, "eu-west-1").isEmpty());
+        assertTrue(service.describeEvents("event-params", "parametergroup", 0.0, 1.0, null, "us-east-1").isEmpty());
     }
 
     private User passwordUser(String name, String password) {

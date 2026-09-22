@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.kinesisanalytics.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
@@ -99,6 +101,66 @@ public class FlinkApplication {
     // only ever returned via CreateApplicationSnapshot/DescribeApplicationSnapshot/
     // ListApplicationSnapshots, never embedded in ApplicationDetail.
     private Map<String, Snapshot> snapshots = new LinkedHashMap<>();
+
+    private ObjectNode flinkConfiguration = JsonNodeFactory.instance.objectNode();
+    private Map<String, String> cloudWatchLoggingOptions = new LinkedHashMap<>();
+    private String maintenanceWindowStartTime;
+    private String conditionalToken;
+    private Map<Long, FlinkApplication> versions = new LinkedHashMap<>();
+    private Map<String, ObjectNode> operations = new LinkedHashMap<>();
+
+    public ObjectNode getFlinkConfiguration() { return flinkConfiguration; }
+    public void setFlinkConfiguration(ObjectNode value) { flinkConfiguration = value; }
+    public Map<String, String> getCloudWatchLoggingOptions() { return cloudWatchLoggingOptions; }
+    public void setCloudWatchLoggingOptions(Map<String, String> value) { cloudWatchLoggingOptions = value; }
+    public String getMaintenanceWindowStartTime() { return maintenanceWindowStartTime; }
+    public void setMaintenanceWindowStartTime(String value) { maintenanceWindowStartTime = value; }
+    public String getConditionalToken() { return conditionalToken; }
+    public void setConditionalToken(String value) { conditionalToken = value; }
+    public Map<Long, FlinkApplication> getVersions() { return versions; }
+    public void setVersions(Map<Long, FlinkApplication> value) { versions = value; }
+    public Map<String, ObjectNode> getOperations() { return operations; }
+    public void setOperations(Map<String, ObjectNode> value) { operations = value; }
+
+    public FlinkApplication versionSnapshot() {
+        FlinkApplication copy = new FlinkApplication();
+        copy.applicationName = applicationName;
+        copy.applicationArn = applicationArn;
+        copy.applicationDescription = applicationDescription;
+        copy.runtimeEnvironment = runtimeEnvironment;
+        copy.serviceExecutionRole = serviceExecutionRole;
+        copy.applicationStatus = applicationStatus;
+        copy.applicationVersionId = applicationVersionId;
+        copy.applicationMode = applicationMode;
+        copy.createTimestamp = createTimestamp;
+        copy.lastUpdateTimestamp = lastUpdateTimestamp;
+        copy.accountId = accountId;
+        copy.codeS3Bucket = codeS3Bucket;
+        copy.codeS3Key = codeS3Key;
+        copy.codeS3ObjectVersion = codeS3ObjectVersion;
+        copy.parallelism = parallelism;
+        copy.snapshotsEnabled = snapshotsEnabled;
+        environmentProperties.forEach((key, value) ->
+                copy.environmentProperties.put(key, new LinkedHashMap<>(value)));
+        copy.flinkConfiguration = flinkConfiguration.deepCopy();
+        copy.cloudWatchLoggingOptions = new LinkedHashMap<>(cloudWatchLoggingOptions);
+        copy.maintenanceWindowStartTime = maintenanceWindowStartTime;
+        copy.conditionalToken = conditionalToken;
+        return copy;
+    }
+
+    public FlinkApplication mutableCopy() {
+        FlinkApplication copy = versionSnapshot();
+        copy.containerId = containerId;
+        copy.restEndpoint = restEndpoint;
+        copy.taskManagerContainerId = taskManagerContainerId;
+        copy.flinkJobId = flinkJobId;
+        copy.tags = new LinkedHashMap<>(tags);
+        copy.snapshots = new LinkedHashMap<>(snapshots);
+        copy.versions = new LinkedHashMap<>(versions);
+        copy.operations = new LinkedHashMap<>(operations);
+        return copy;
+    }
 
     public FlinkApplication() {}
 

@@ -256,14 +256,44 @@ class AppSyncServiceTest {
     }
 
     @Test
-    void defaultGraphqlApiUriUsesLambdaReachableAwsHost() {
+    void defaultGraphqlApiUriUsesConfiguredHttpListener() {
         GraphqlApi api = service.createGraphqlApi(
-                Map.of("name", "lambda-url", "authenticationType", "API_KEY"), "us-west-2");
-        String host = api.getApiId() + ".appsync-api.us-west-2.amazonaws.com";
+                Map.of("name", "listener-url", "authenticationType", "API_KEY"), "us-west-2");
+        String host = api.getApiId() + ".appsync-api.us-west-2.localhost.floci.io:4566";
+        Map<String, String> expectedUris = Map.of(
+                "GRAPHQL", "http://" + host + "/graphql",
+                "REALTIME", "ws://" + host + "/graphql/realtime");
+
+        assertEquals(expectedUris, api.getUris());
+        assertEquals(expectedUris, service.getGraphqlApi(api.getApiId()).getUris());
+        assertEquals(expectedUris, service.listGraphqlApis(null, null).items().getFirst().getUris());
+    }
+
+    @Test
+    void persistedAwsHostUriIsRepairedForHttpListener() {
+        GraphqlApi api = service.createGraphqlApi(
+                Map.of("name", "stale-listener", "authenticationType", "AWS_IAM"), "us-east-1");
+        String host = api.getApiId() + ".appsync-api.us-east-1.localhost.floci.io:4566";
+        Map<String, String> expectedUris = Map.of(
+                "GRAPHQL", "http://" + host + "/graphql",
+                "REALTIME", "ws://" + host + "/graphql/realtime");
+        api.setUris(Map.of("GRAPHQL", "https://" + api.getApiId()
+                + ".appsync-api.us-east-1.amazonaws.com/graphql"));
+
+        assertEquals(expectedUris, service.getGraphqlApi(api.getApiId()).getUris());
+        assertEquals(expectedUris, service.listGraphqlApis(null, null).items().getFirst().getUris());
+    }
+
+    @Test
+    void loopbackGraphqlApiUriPreservesSchemeAndNonDefaultPort() {
+        AppSyncService configuredService = newService(
+                Clock.fixed(NOW, ZoneOffset.UTC), "https://127.0.0.1:8443");
+        GraphqlApi api = configuredService.createGraphqlApi(
+                Map.of("name", "secure-loopback", "authenticationType", "AWS_IAM"), "eu-west-1");
+        String host = api.getApiId() + ".appsync-api.eu-west-1.localhost.floci.io:8443";
 
         assertEquals("https://" + host + "/graphql", api.getUris().get("GRAPHQL"));
         assertEquals("wss://" + host + "/graphql/realtime", api.getUris().get("REALTIME"));
-        assertEquals(api.getUris(), service.getGraphqlApi(api.getApiId()).getUris());
     }
 
     @Test

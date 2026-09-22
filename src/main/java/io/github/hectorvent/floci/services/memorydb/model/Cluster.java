@@ -21,6 +21,8 @@ public class Cluster {
     private String engine;
     private String engineVersion;
     private String aclName;
+    private String parameterGroupName;
+    private String subnetGroupName;
     private boolean tlsEnabled;
     private Endpoint clusterEndpoint;
     private String arn;
@@ -61,6 +63,12 @@ public class Cluster {
 
     public String getEngineVersion() { return engineVersion; }
     public void setEngineVersion(String engineVersion) { this.engineVersion = engineVersion; }
+
+    public String getParameterGroupName() { return parameterGroupName; }
+    public void setParameterGroupName(String parameterGroupName) { this.parameterGroupName = parameterGroupName; }
+
+    public String getSubnetGroupName() { return subnetGroupName; }
+    public void setSubnetGroupName(String subnetGroupName) { this.subnetGroupName = subnetGroupName; }
 
     public String getAclName() { return aclName; }
     public void setAclName(String aclName) { this.aclName = aclName; }

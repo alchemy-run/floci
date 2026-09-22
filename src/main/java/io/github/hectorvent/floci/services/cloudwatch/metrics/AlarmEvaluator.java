@@ -47,6 +47,8 @@ public class AlarmEvaluator {
 
     private final CloudWatchMetricsService metricsService;
     private final Instance<AlarmActionHandler> handlers;
+    @Inject
+    CloudWatchMetadataService metadataService;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
             r -> new Thread(r, "alarm-evaluator"));
 
@@ -182,9 +184,15 @@ public class AlarmEvaluator {
 
         if (!newState.equals(alarm.getStateValue())) {
             metricsService.setAlarmState(alarm.getAlarmName(), newState, reason, null, region);
+            if (metadataService != null) {
+                metadataService.history(alarm.getAlarmName(), "MetricAlarm", "StateUpdate", reason,
+                        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
+                                .put("StateValue", newState).put("StateReason", reason), region);
+            }
         }
 
-        if ("ALARM".equals(newState) && alarm.isActionsEnabled()) {
+        if ("ALARM".equals(newState) && alarm.isActionsEnabled()
+                && (metadataService == null || !metadataService.muted(alarm.getAlarmName(), region))) {
             dispatch(alarm, latestValue, region);
         }
     }

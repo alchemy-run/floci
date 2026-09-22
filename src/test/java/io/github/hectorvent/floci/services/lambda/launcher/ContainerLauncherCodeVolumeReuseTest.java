@@ -4,6 +4,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
@@ -57,7 +58,7 @@ class ContainerLauncherCodeVolumeReuseTest {
         RecordingLauncher(ContainerLifecycleManager lifecycleManager, EmulatorConfig config) {
             super(mock(ContainerBuilder.class), lifecycleManager, mock(ContainerLogStreamer.class),
                     mock(ImageResolver.class), mock(RuntimeApiServerFactory.class),
-                    mock(DockerHostResolver.class), config, mock(EcrRegistryManager.class),
+                    mock(DockerHostResolver.class), mock(ContainerDetector.class), config, mock(EcrRegistryManager.class),
                     mock(LambdaLayerService.class), mock(LaunchedContainerAwsEnv.class),
                     mock(LambdaExecutionRoleCredentials.class));
         }

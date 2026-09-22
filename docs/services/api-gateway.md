@@ -79,6 +79,12 @@ duplicate override IDs.
 
 `CreateRestApi` / `UpdateRestApi` persist `binaryMediaTypes` (JSON Pointer `/binaryMediaTypes/{type}`). Usage plans persist `throttle` and `quota`. `GetResources` / `GetResource` return `resourceMethods` (empty objects, or full method snapshots when `embed=methods`). `UpdateUsage` is `BadRequestException` when the plan has no quota. Flush-cache operations are no-ops after the stage is confirmed to exist.
 
+### Authorizer defaults
+
+Floci accepts `remove /authorizerResultTtlInSeconds` as an idempotent reset to the
+300-second default. This local compatibility extension supports reconcilers that remove
+omitted optional settings; AWS documents this particular remove operation as unsupported.
+
 ### Execute-API virtual host {#execute-api-virtual-host}
 
 Alchemy tests (and real AWS clients) invoke deployed APIs at

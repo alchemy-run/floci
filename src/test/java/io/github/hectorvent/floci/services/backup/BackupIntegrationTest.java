@@ -1,6 +1,16 @@
 package io.github.hectorvent.floci.services.backup;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.backup.model.BackupVault;
+import io.github.hectorvent.floci.services.backup.model.RecoveryPoint;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -25,6 +35,9 @@ class BackupIntegrationTest {
     private static String selectionId;
     private static String jobId;
     private static String recoveryPointArn;
+
+    @Inject
+    StorageFactory storageFactory;
 
     // ── Vault ──────────────────────────────────────────────────────────────────
 
@@ -85,8 +98,6 @@ class BackupIntegrationTest {
     @Test
     @Order(14)
     void getBackupVaultNotificationsReturnsResourceNotFound() {
-        // Notifications are never configured in the emulator; the AWS Backup API returns
-        // ResourceNotFoundException (HTTP 400) in that case, which clients branch on.
         given()
             .header("Authorization", AUTH)
         .when()
@@ -99,8 +110,6 @@ class BackupIntegrationTest {
     @Test
     @Order(15)
     void getBackupVaultAccessPolicyReturnsResourceNotFound() {
-        // Access policy is never configured in the emulator; the AWS Backup API returns
-        // ResourceNotFoundException (HTTP 400) in that case, which clients branch on.
         given()
             .header("Authorization", AUTH)
         .when()
@@ -108,6 +117,118 @@ class BackupIntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(16)
+    void vaultPolicyAndNotificationsRoundTripAndDelete() {
+        String base = "/backup-vaults/" + VAULT_NAME;
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"backup:DeleteRecoveryPoint\",\"Resource\":\"*\"}]}";
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("Policy", policy)).put(base + "/access-policy").then().statusCode(200);
+        given().header("Authorization", AUTH).get(base + "/access-policy").then().statusCode(200)
+                .body("Policy", equalTo(policy)).body("BackupVaultName", equalTo(VAULT_NAME));
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("Policy", "not json")).put(base + "/access-policy").then().statusCode(400)
+                .body("__type", equalTo("InvalidParameterValueException"));
+        given().header("Authorization", AUTH).get(base + "/access-policy").then().body("Policy", equalTo(policy));
+        for (int i = 0; i < 2; i++) {
+            given().header("Authorization", AUTH).delete(base + "/access-policy").then().statusCode(200);
+        }
+        given().header("Authorization", AUTH).get(base + "/access-policy").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+
+        String topic = "arn:aws:sns:us-east-1:000000000000:backup-events";
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("SNSTopicArn", topic, "BackupVaultEvents", List.of("BACKUP_JOB_FAILED")))
+                .put(base + "/notification-configuration").then().statusCode(200);
+        given().header("Authorization", AUTH).get(base + "/notification-configuration").then().statusCode(200)
+                .body("SNSTopicArn", equalTo(topic)).body("BackupVaultEvents", contains("BACKUP_JOB_FAILED"));
+        given().header("Authorization", AUTH).delete(base + "/notification-configuration").then().statusCode(200);
+        given().header("Authorization", AUTH).get(base + "/notification-configuration").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(17)
+    void missingJobRoutesReturnBackupJsonErrors() {
+        for (String path : List.of("/restore-jobs/missing", "/restore-jobs/missing/metadata", "/copy-jobs/missing",
+                "/resources/arn:aws:dynamodb:us-east-1:000000000000:table/missing",
+                "/backup-vaults/" + VAULT_NAME + "/recovery-points/arn:aws:ec2:us-east-1::snapshot/missing/restore-metadata")) {
+            given().header("Authorization", AUTH).get(path).then().statusCode(anyOf(is(400), is(404)))
+                    .contentType("application/json").body("__type", equalTo("ResourceNotFoundException"));
+        }
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("ValidationStatus", "SUCCESSFUL"))
+                .put("/restore-jobs/missing/validations").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("RecoveryPointArn", "arn:aws:ec2:us-east-1::snapshot/missing", "Metadata", Map.of(), "IamRoleArn", IAM_ROLE))
+                .put("/restore-jobs").then().statusCode(400).body("__type", equalTo("ResourceNotFoundException"));
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("SourceBackupVaultName", VAULT_NAME, "RecoveryPointArn", "arn:aws:ec2:us-east-1::snapshot/missing",
+                        "DestinationBackupVaultArn", "arn:aws:backup:us-east-1:000000000000:backup-vault:destination", "IamRoleArn", IAM_ROLE))
+                .put("/copy-jobs").then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+        for (String path : List.of("/restore-jobs", "/copy-jobs", "/resources")) {
+            given().header("Authorization", AUTH).queryParam("maxResults", 25).get(path).then().statusCode(200)
+                    .contentType("application/json");
+            given().header("Authorization", AUTH).queryParam("maxResults", 0).get(path).then().statusCode(400)
+                    .body("__type", equalTo("InvalidParameterValueException"));
+        }
+    }
+
+    @Test
+    @Order(18)
+    void storedRestoreAndCopyJobsAreFilteredPagedAndValidated() {
+        StorageBackend<String, Map<String, Object>> restores = storageFactory.create("backup", "backup-restore-jobs.json", new TypeReference<>() {});
+        StorageBackend<String, Map<String, Object>> copies = storageFactory.create("backup", "backup-copy-jobs.json", new TypeReference<>() {});
+        String vaultArn = "arn:aws:backup:us-east-1:000000000000:backup-vault:" + VAULT_NAME;
+        try {
+            for (int i = 0; i < 2; i++) {
+                Map<String, Object> job = new LinkedHashMap<>();
+                job.put("RestoreJobId", "stored-restore-" + i);
+                job.put("BackupVaultArn", vaultArn);
+                job.put("Status", "COMPLETED");
+                job.put("ResourceType", "DynamoDB");
+                job.put("CreationDate", 100 + i);
+                job.put("CreatedBy", Map.of("RestoreTestingPlanArn", "arn:aws:backup:us-east-1:000000000000:restore-testing-plan:query"));
+                job.put("Metadata", Map.of("targetTableName", "restored-table"));
+                restores.put("stored-restore-" + i, job);
+            }
+            copies.put("stored-copy", Map.of("CopyJobId", "stored-copy", "SourceBackupVaultArn", vaultArn,
+                    "DestinationBackupVaultArn", vaultArn, "ResourceArn", RESOURCE_ARN, "State", "FAILED", "CreationDate", 100));
+            String next = given().header("Authorization", AUTH).queryParam("status", "COMPLETED")
+                    .queryParam("maxResults", 1).get("/restore-jobs").then().statusCode(200)
+                    .body("RestoreJobs", hasSize(1)).body("RestoreJobs[0].Metadata", nullValue())
+                    .extract().path("NextToken");
+            given().header("Authorization", AUTH).queryParam("status", "COMPLETED")
+                    .queryParam("maxResults", 1).queryParam("nextToken", next).get("/restore-jobs").then().statusCode(200)
+                    .body("RestoreJobs", hasSize(1)).body("NextToken", nullValue());
+            given().header("Authorization", AUTH).queryParam("status", "FAILED").get("/restore-jobs").then()
+                    .statusCode(200).body("RestoreJobs", empty());
+            given().header("Authorization", AUTH).get("/restore-jobs/stored-restore-0/metadata").then().statusCode(200)
+                    .body("RestoreJobId", equalTo("stored-restore-0")).body("Metadata.targetTableName", equalTo("restored-table"));
+            given().header("Authorization", AUTH).contentType("application/json")
+                    .body(Map.of("ValidationStatus", "SUCCESSFUL", "ValidationStatusMessage", "verified"))
+                    .put("/restore-jobs/stored-restore-0/validations").then().statusCode(200);
+            given().header("Authorization", AUTH).get("/restore-jobs/stored-restore-0").then().statusCode(200)
+                    .body("ValidationStatus", equalTo("SUCCESSFUL"));
+            given().header("Authorization", AUTH).get("/copy-jobs/stored-copy").then().statusCode(200)
+                    .body("CopyJob.CopyJobId", equalTo("stored-copy"));
+            given().header("Authorization", AUTH).queryParam("state", "FAILED").queryParam("resourceArn", RESOURCE_ARN)
+                    .get("/copy-jobs").then().statusCode(200).body("CopyJobs.CopyJobId", contains("stored-copy"));
+            given().header("Authorization", AUTH).queryParam("createdAfter", 101).get("/copy-jobs").then()
+                    .statusCode(200).body("CopyJobs", empty());
+            given().header("Authorization", AUTH.replace("us-east-1", "eu-west-1"))
+                    .get("/restore-jobs/stored-restore-0").then().statusCode(400)
+                    .body("__type", equalTo("ResourceNotFoundException"));
+            given().header("Authorization", AUTH.replace("us-east-1", "eu-west-1"))
+                    .get("/copy-jobs").then().statusCode(200).body("CopyJobs", empty());
+        } finally {
+            restores.delete("stored-restore-0");
+            restores.delete("stored-restore-1");
+            copies.delete("stored-copy");
+        }
     }
 
     // ── Plan ───────────────────────────────────────────────────────────────────
@@ -120,6 +241,7 @@ class BackupIntegrationTest {
             .contentType("application/json")
             .body("""
                 {
+                  "BackupPlanTags": {"env": "test"},
                   "BackupPlan": {
                     "BackupPlanName": "daily-backup",
                     "Rules": [{
@@ -196,6 +318,21 @@ class BackupIntegrationTest {
             .body("BackupPlansList[0].BackupPlanId", notNullValue());
     }
 
+    @Test
+    @Order(24)
+    void planTagsPersistAndSupportUpdatesAndRemovals() {
+        String arn = given().header("Authorization", AUTH).get("/backup/plans/" + planId)
+                .then().statusCode(200).extract().path("BackupPlanArn");
+        given().header("Authorization", AUTH).get("/tags/" + arn).then().statusCode(200)
+                .body("Tags.env", equalTo("test"));
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("Tags", Map.of("phase", "two"))).post("/tags/" + arn).then().statusCode(204);
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("TagKeyList", List.of("env"))).post("/untag/" + arn).then().statusCode(204);
+        given().header("Authorization", AUTH).get("/tags/" + arn).then().statusCode(200)
+                .body("Tags.phase", equalTo("two")).body("Tags.env", nullValue());
+    }
+
     // ── Selection ──────────────────────────────────────────────────────────────
 
     @Test
@@ -209,6 +346,8 @@ class BackupIntegrationTest {
                   "BackupSelection": {
                     "SelectionName": "my-selection",
                     "IamRoleArn": "%s",
+                    "ListOfTags": [{"ConditionType":"STRINGEQUALS","ConditionKey":"aws:ResourceTag/backup","ConditionValue":"daily"}],
+                    "Conditions": {"StringEquals":[{"ConditionKey":"aws:ResourceTag/env","ConditionValue":"test"}]},
                     "Resources": ["%s"]
                   }
                 }
@@ -233,7 +372,9 @@ class BackupIntegrationTest {
             .statusCode(200)
             .body("SelectionId", equalTo(selectionId))
             .body("BackupSelection.SelectionName", equalTo("my-selection"))
-            .body("BackupSelection.IamRoleArn", equalTo(IAM_ROLE));
+            .body("BackupSelection.IamRoleArn", equalTo(IAM_ROLE))
+            .body("BackupSelection.ListOfTags[0].ConditionKey", equalTo("aws:ResourceTag/backup"))
+            .body("BackupSelection.Conditions.StringEquals[0].ConditionValue", equalTo("test"));
     }
 
     @Test
@@ -286,7 +427,7 @@ class BackupIntegrationTest {
 
     @Test
     @Order(41)
-    void describeBackupJobCreated() {
+    void describeBackupJobReportsUnsupportedExecution() {
         given()
             .header("Authorization", AUTH)
         .when()
@@ -294,30 +435,21 @@ class BackupIntegrationTest {
         .then()
             .statusCode(200)
             .body("BackupJobId", equalTo(jobId))
-            .body("State", oneOf("CREATED", "RUNNING", "COMPLETED"))
+            .body("State", equalTo("FAILED"))
             .body("BackupVaultName", equalTo(VAULT_NAME));
     }
 
     @Test
     @Order(42)
-    void describeBackupJobCompleted() throws InterruptedException {
-        Thread.sleep(2000); // job-completion-delay-seconds=1 in test config
-        given()
-            .header("Authorization", AUTH)
-        .when()
-            .get("/backup-jobs/" + jobId)
-        .then()
-            .statusCode(200)
-            .body("State", equalTo("COMPLETED"))
-            .body("RecoveryPointArn", containsString("recovery-point:"))
-            .body("CompletionDate", notNullValue());
-
-        recoveryPointArn = given()
-            .header("Authorization", AUTH)
-        .when()
-            .get("/backup-jobs/" + jobId)
-        .then()
-            .extract().path("RecoveryPointArn");
+    void failedBackupDoesNotFabricateRecoveryPoint() {
+        given().header("Authorization", AUTH)
+                .get("/backup-jobs/" + jobId).then().statusCode(200)
+                .body("State", equalTo("FAILED"))
+                .body("StatusMessage", containsString("not supported"))
+                .body("RecoveryPointArn", nullValue());
+        given().header("Authorization", AUTH)
+                .get("/backup-vaults/" + VAULT_NAME + "/recovery-points").then().statusCode(200)
+                .body("RecoveryPoints", empty());
     }
 
     @Test
@@ -326,7 +458,7 @@ class BackupIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .get("/backup-jobs/?byBackupVaultName=" + VAULT_NAME)
+            .get("/backup-jobs/?backupVaultName=" + VAULT_NAME)
         .then()
             .statusCode(200)
             .body("BackupJobs", hasSize(greaterThanOrEqualTo(1)))
@@ -339,10 +471,34 @@ class BackupIntegrationTest {
         given()
             .header("Authorization", AUTH)
         .when()
-            .get("/backup-jobs/?byState=COMPLETED")
+            .get("/backup-jobs/?state=FAILED")
         .then()
             .statusCode(200)
             .body("BackupJobs", hasSize(greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    @Order(49)
+    void loadRecoveryPointMetadataForQueryLifecycle() {
+        // Existing persisted metadata remains queryable without claiming a backup was executed.
+        StorageBackend<String, BackupVault> vaults = storageFactory.create("backup", "backup-vaults.json", new TypeReference<>() {});
+        StorageBackend<String, RecoveryPoint> points = storageFactory.create("backup", "backup-recovery-points.json", new TypeReference<>() {});
+        BackupVault vault = vaults.get("us-east-1:" + VAULT_NAME).orElseThrow();
+        recoveryPointArn = "arn:aws:ec2:us-east-1::snapshot/snap-backup-query";
+        RecoveryPoint point = new RecoveryPoint();
+        point.setRecoveryPointArn(recoveryPointArn);
+        point.setBackupVaultArn(vault.getBackupVaultArn());
+        point.setBackupVaultName(VAULT_NAME);
+        point.setResourceArn(RESOURCE_ARN);
+        point.setResourceType("DynamoDB");
+        point.setStatus("COMPLETED");
+        point.setCreationDate(100);
+        point.setCompletionDate(101L);
+        point.setBackupSizeInBytes(128L);
+        point.setRestoreMetadata(Map.of("targetTableName", "restored-table"));
+        points.put(recoveryPointArn, point);
+        vault.setNumberOfRecoveryPoints(1);
+        vaults.put("us-east-1:" + VAULT_NAME, vault);
     }
 
     // ── Recovery Point ─────────────────────────────────────────────────────────
@@ -375,8 +531,32 @@ class BackupIntegrationTest {
     }
 
     @Test
+    @Order(51)
+    void recoveryMetadataAndProtectedResourceQueriesUseStoredPoints() {
+        String path = "/backup-vaults/" + VAULT_NAME + "/recovery-points/" + recoveryPointArn;
+        given().header("Authorization", AUTH).get(path + "/restore-metadata").then().statusCode(200)
+                .body("RecoveryPointArn", equalTo(recoveryPointArn))
+                .body("RestoreMetadata.targetTableName", equalTo("restored-table"));
+        given().header("Authorization", AUTH).get("/resources/" + RESOURCE_ARN).then().statusCode(200)
+                .body("ResourceArn", equalTo(RESOURCE_ARN)).body("LastRecoveryPointArn", equalTo(recoveryPointArn));
+        given().header("Authorization", AUTH).get("/resources/" + RESOURCE_ARN + "/recovery-points").then().statusCode(200)
+                .body("RecoveryPoints[0].BackupSizeBytes", equalTo(128));
+        given().header("Authorization", AUTH).get("/resources").then().statusCode(200)
+                .body("Results.ResourceArn", hasItem(RESOURCE_ARN));
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("RecoveryPointArn", recoveryPointArn, "Metadata", Map.of(), "IamRoleArn", IAM_ROLE))
+                .put("/restore-jobs").then().statusCode(400)
+                .body("__type", equalTo("InvalidRequestException")).body("message", containsString("not supported"));
+        given().header("Authorization", AUTH).contentType("application/json")
+                .body(Map.of("RecoveryPointArn", recoveryPointArn, "SourceBackupVaultName", VAULT_NAME,
+                        "DestinationBackupVaultArn", "arn:aws:backup:us-east-1:000000000000:backup-vault:destination", "IamRoleArn", IAM_ROLE))
+                .put("/copy-jobs").then().statusCode(400)
+                .body("__type", equalTo("InvalidRequestException")).body("message", containsString("not supported"));
+    }
+
+    @Test
     @Order(52)
-    void vaultCountIncrementedAfterJob() {
+    void vaultCountReflectsStoredRecoveryPoints() {
         given()
             .header("Authorization", AUTH)
         .when()

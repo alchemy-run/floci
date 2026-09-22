@@ -1,16 +1,28 @@
 package io.github.hectorvent.floci.services.route53resolver;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
@@ -39,18 +51,75 @@ class Route53ResolverCustomResourcesConsumerTest {
         RestAssuredJsonUtils.configureAwsContentTypes();
     }
 
-    private static Response call(String action, String body) {
+    @Inject
+    Ec2Service ec2;
+
+    @Inject
+    Route53ResolverService resolver;
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final Map<String, List<Subnet>> networks = new HashMap<>();
+    private final Map<String, String> endpoints = new HashMap<>();
+
+    private Response call(String action, String body) {
         return callAs(AUTH_HEADER, action, body);
     }
 
-    private static Response callAs(String authHeader, String action, String body) {
-        return given()
+    private Response callAs(String authHeader, String action, String body) {
+        String region = authHeader.contains("us-west-2") ? "us-west-2" : "us-east-1";
+        ObjectNode request = assertDoesNotThrow(() -> (ObjectNode) mapper.readTree(body));
+        if ("CreateResolverEndpoint".equals(action) && request.path("IpAddresses").isArray()) {
+            List<Subnet> subnets = networks.computeIfAbsent(region, this::createNetwork);
+            Map<String, String> subnetIds = Map.of(
+                    "subnet-abc", subnets.get(0).getSubnetId(),
+                    "subnet-aaa", subnets.get(0).getSubnetId(),
+                    "subnet-bbb", subnets.get(1).getSubnetId(),
+                    "subnet-ccc", subnets.get(2).getSubnetId(),
+                    "subnet-ddd", subnets.get(3).getSubnetId(),
+                    "subnet-zzz", subnets.get(2).getSubnetId());
+            request.path("IpAddresses").forEach(address -> {
+                String subnetId = address.path("SubnetId").asText();
+                if (subnetIds.containsKey(subnetId)) {
+                    ((ObjectNode) address).put("SubnetId", subnetIds.get(subnetId));
+                }
+            });
+            String groupId = ec2.describeSecurityGroups(region, List.of(), List.of(),
+                    Map.of("vpc-id", List.of(subnets.getFirst().getVpcId()))).getFirst().getGroupId();
+            request.putArray("SecurityGroupIds").add(groupId);
+        }
+        Response response = given()
                 .contentType(CONTENT_TYPE)
                 .header("X-Amz-Target", "Route53Resolver." + action)
                 .header("Authorization", authHeader)
-                .body(body)
+                .body(request.toString())
             .when()
                 .post("/");
+        if ("CreateResolverEndpoint".equals(action) && response.statusCode() == 200) {
+            endpoints.put(response.path("ResolverEndpoint.Id"), region);
+        }
+        if ("DeleteResolverEndpoint".equals(action) && response.statusCode() == 200) {
+            endpoints.remove(request.path("ResolverEndpointId").asText());
+        }
+        return response;
+    }
+
+    private List<Subnet> createNetwork(String region) {
+        String vpcId = ec2.createVpc(region, "10.0.0.0/16", false).getVpcId();
+        List<Subnet> subnets = new ArrayList<>();
+        for (int index = 0; index < 4; index++) {
+            subnets.add(ec2.createSubnet(region, vpcId, "10.0." + index + ".0/24",
+                    region + (index % 2 == 0 ? "a" : "b")));
+        }
+        return subnets;
+    }
+
+    @AfterEach
+    void releaseEndpointNetworks() {
+        endpoints.keySet().forEach(resolver::deleteResolverEndpoint);
+        networks.forEach((region, subnets) -> {
+            subnets.forEach(subnet -> ec2.deleteSubnet(region, subnet.getSubnetId()));
+            ec2.deleteVpc(region, subnets.getFirst().getVpcId());
+        });
     }
 
     // ---------- CreateFirewallDomainList / DeleteFirewallDomainList ----------
@@ -138,7 +207,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_replayedCreatorRequestId_returnsOriginalEndpoint() {
         String body = "{\"Name\":\"ab-idem-endpoint\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"tok-idem-endpoint\"}";
 
         String first = call("CreateResolverEndpoint", body)
@@ -157,8 +226,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_withoutCreatorRequestId_createsDistinctEndpoints() {
         String body = "{\"Name\":\"ab-noidem-endpoint\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
-                + "\"Ip\":\"10.0.0.5\"}]}";
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\"}]}";
 
         String first = call("CreateResolverEndpoint", body)
                 .then().statusCode(200).extract().path("ResolverEndpoint.Id");
@@ -171,7 +239,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_replayedCreatorRequestIdWithInvalidBody_stillValidates() {
         String valid = "{\"Name\":\"ab-idem-validate\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"tok-idem-validate\"}";
         call("CreateResolverEndpoint", valid).then().statusCode(200);
 
@@ -184,7 +252,7 @@ class Route53ResolverCustomResourcesConsumerTest {
 
         // ... including an unrecognised Direction.
         call("CreateResolverEndpoint", "{\"Name\":\"ab-idem-validate\",\"Direction\":\"SIDEWAYS\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"tok-idem-validate\"}")
         .then()
             .statusCode(400)
@@ -230,14 +298,14 @@ class Route53ResolverCustomResourcesConsumerTest {
     void createResolverEndpoint_replayedCreatorRequestIdWithDifferentParameters_returnsResourceExists() {
         String token = "tok-conflict-endpoint";
         call("CreateResolverEndpoint", "{\"Name\":\"ab-conflict-endpoint\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"" + token + "\"}")
         .then().statusCode(200);
 
         // Same token, same region, different (but individually valid) Name: AWS models
         // ResourceExistsException for this rather than silently returning the original.
         call("CreateResolverEndpoint", "{\"Name\":\"ab-conflict-endpoint-renamed\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"" + token + "\"}")
         .then()
             .statusCode(400)
@@ -248,7 +316,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     void createResolverEndpoint_replayedCreatorRequestIdWithDifferentIpValues_returnsResourceExists() {
         String token = "tok-conflict-endpoint-ips";
         call("CreateResolverEndpoint", "{\"Name\":\"ab-conflict-ips\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":["
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":["
                 + "{\"SubnetId\":\"subnet-aaa\",\"Ip\":\"10.0.0.5\"},"
                 + "{\"SubnetId\":\"subnet-bbb\",\"Ip\":\"10.0.1.5\"}],"
                 + "\"CreatorRequestId\":\"" + token + "\"}")
@@ -257,7 +325,7 @@ class Route53ResolverCustomResourcesConsumerTest {
         // Same COUNT of IP requests, different subnet and IP values. Comparing counts alone
         // would read this as an equivalent replay and silently return the original endpoint.
         call("CreateResolverEndpoint", "{\"Name\":\"ab-conflict-ips\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":["
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":["
                 + "{\"SubnetId\":\"subnet-ccc\",\"Ip\":\"10.0.2.5\"},"
                 + "{\"SubnetId\":\"subnet-ddd\",\"Ip\":\"10.0.3.5\"}],"
                 + "\"CreatorRequestId\":\"" + token + "\"}")
@@ -270,7 +338,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     void createResolverEndpoint_replayedCreatorRequestIdWithIdenticalIps_returnsTheOriginal() {
         String token = "tok-replay-endpoint-ips";
         String body = "{\"Name\":\"ab-replay-ips\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":["
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":["
                 + "{\"SubnetId\":\"subnet-aaa\",\"Ip\":\"10.0.0.5\"},"
                 + "{\"SubnetId\":\"subnet-bbb\",\"Ip\":\"10.0.1.5\"}],"
                 + "\"CreatorRequestId\":\"" + token + "\"}";
@@ -290,18 +358,16 @@ class Route53ResolverCustomResourcesConsumerTest {
     void createResolverEndpoint_replayedWithReorderedFieldsWithinIpRequests_returnsTheOriginal() {
         // Same two IP requests, but the members are written in a different order inside each
         // object. JSON object member order is not significant, so this is the same request.
-        // The pair is chosen so that ordering the entries by their serialised form flips:
-        // by SubnetId, subnet-aaa sorts first; by Ip, 10.0.0.1 sorts first — opposite entries.
         String token = "tok-field-order";
         String subnetFirst = "{\"Name\":\"ab-field-order\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":["
-                + "{\"SubnetId\":\"subnet-zzz\",\"Ip\":\"10.0.0.1\"},"
-                + "{\"SubnetId\":\"subnet-aaa\",\"Ip\":\"10.9.9.9\"}],"
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":["
+                + "{\"SubnetId\":\"subnet-zzz\",\"Ip\":\"10.0.2.5\"},"
+                + "{\"SubnetId\":\"subnet-aaa\",\"Ip\":\"10.0.0.9\"}],"
                 + "\"CreatorRequestId\":\"" + token + "\"}";
         String ipFirst = "{\"Name\":\"ab-field-order\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":["
-                + "{\"Ip\":\"10.0.0.1\",\"SubnetId\":\"subnet-zzz\"},"
-                + "{\"Ip\":\"10.9.9.9\",\"SubnetId\":\"subnet-aaa\"}],"
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":["
+                + "{\"Ip\":\"10.0.2.5\",\"SubnetId\":\"subnet-zzz\"},"
+                + "{\"Ip\":\"10.0.0.9\",\"SubnetId\":\"subnet-aaa\"}],"
                 + "\"CreatorRequestId\":\"" + token + "\"}";
 
         String first = call("CreateResolverEndpoint", subnetFirst)
@@ -317,7 +383,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     void createResolverEndpoint_replayResponseOmitsInternalIpFingerprint() {
         String token = "tok-replay-endpoint-nofingerprint";
         call("CreateResolverEndpoint", "{\"Name\":\"ab-nofingerprint\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-aaa\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-aaa\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"" + token + "\"}")
         .then()
             .statusCode(200)
@@ -325,7 +391,8 @@ class Route53ResolverCustomResourcesConsumerTest {
             // detect a changed IP set must not reach the wire.
             .body("ResolverEndpoint.IpAddressCount", equalTo(1))
             .body("ResolverEndpoint.any { it.key == 'IpAddressRequests' }", equalTo(false))
-            .body("ResolverEndpoint.any { it.key == 'IpAddresses' }", equalTo(false));
+            .body("ResolverEndpoint.any { it.key == 'IpAddresses' }", equalTo(false))
+            .body("ResolverEndpoint.any { it.key == '_Tags' }", equalTo(false));
     }
 
     @Test
@@ -388,7 +455,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_sameCreatorRequestIdInAnotherRegion_createsRegionalEndpoint() {
         String body = "{\"Name\":\"ab-xregion-endpoint\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"tok-xregion-endpoint\"}";
 
         String east = callAs(AUTH_HEADER, "CreateResolverEndpoint", body)
@@ -436,9 +503,9 @@ class Route53ResolverCustomResourcesConsumerTest {
 
     // ---------- Resolver endpoints ----------
 
-    private static String createEndpoint(String name) {
+    private String createEndpoint(String name) {
         return call("CreateResolverEndpoint", "{\"Name\":\"" + name + "\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"tok-" + name + "\"}")
         .then().statusCode(200)
         .extract().path("ResolverEndpoint.Id");
@@ -447,7 +514,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_returnsOperationalEndpoint() {
         call("CreateResolverEndpoint", "{\"Name\":\"ab-endpoint-create\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"tok-endpoint-create\"}")
         .then()
             .statusCode(200)
@@ -460,7 +527,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_inboundGetsInboundIdPrefix() {
         call("CreateResolverEndpoint", "{\"Name\":\"ab-endpoint-inbound\",\"Direction\":\"INBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.5\"}],\"CreatorRequestId\":\"tok-endpoint-inbound\"}")
         .then()
             .statusCode(200)
@@ -471,7 +538,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_outboundGetsOutboundIdPrefix() {
         call("CreateResolverEndpoint", "{\"Name\":\"ab-endpoint-outbound\",\"Direction\":\"OUTBOUND\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.6\"}],\"CreatorRequestId\":\"tok-endpoint-outbound\"}")
         .then()
             .statusCode(200)
@@ -482,7 +549,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     @Test
     void createResolverEndpoint_unknownDirection_returnsInvalidParameters() {
         call("CreateResolverEndpoint", "{\"Name\":\"ab-endpoint-sideways\",\"Direction\":\"SIDEWAYS\","
-                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddressRequests\":[{\"SubnetId\":\"subnet-abc\","
+                + "\"SecurityGroupIds\":[\"sg-abc123\"],\"IpAddresses\":[{\"SubnetId\":\"subnet-abc\","
                 + "\"Ip\":\"10.0.0.7\"}],\"CreatorRequestId\":\"tok-endpoint-sideways\"}")
         .then()
             .statusCode(400)
@@ -490,7 +557,7 @@ class Route53ResolverCustomResourcesConsumerTest {
     }
 
     @Test
-    void createResolverEndpoint_missingIpAddressRequests_returnsInvalidParameters() {
+    void createResolverEndpoint_missingIpAddresses_returnsInvalidParameters() {
         call("CreateResolverEndpoint", "{\"Name\":\"ab-endpoint-noip\",\"Direction\":\"INBOUND\","
                 + "\"SecurityGroupIds\":[\"sg-abc123\"],\"CreatorRequestId\":\"tok-noip\"}")
         .then()
@@ -553,7 +620,7 @@ class Route53ResolverCustomResourcesConsumerTest {
         call("GetResolverEndpoint", "{\"ResolverEndpointId\":\"" + id + "\"}")
         .then()
             .statusCode(200)
-            .body("ResolverEndpoint.ResolverEndpointType", equalTo(null));
+            .body("ResolverEndpoint.ResolverEndpointType", equalTo("IPV4"));
     }
 
     @Test
@@ -573,7 +640,7 @@ class Route53ResolverCustomResourcesConsumerTest {
 
     // ---------- Resolver rules ----------
 
-    private static String createRule(String name, String domain) {
+    private String createRule(String name, String domain) {
         return call("CreateResolverRule", "{\"Name\":\"" + name + "\",\"RuleType\":\"FORWARD\","
                 + "\"DomainName\":\"" + domain + "\",\"TargetIps\":[{\"Ip\":\"10.0.0.1\",\"Port\":53}],"
                 + "\"CreatorRequestId\":\"tok-" + name + "\"}")
@@ -740,6 +807,166 @@ class Route53ResolverCustomResourcesConsumerTest {
             .statusCode(200)
             .body("ResolverRuleAssociations.findAll { it.ResolverRuleId == '" + ruleId + "' }.size()",
                     equalTo(0));
+    }
+
+    @Test
+    void endpointUsesAwsIpAddressesAndPersistsProtocolsAndTagsWithoutLeakingMetadata() {
+        Response created = call("CreateResolverEndpoint", """
+                {"Name":"resolver-wire","CreatorRequestId":"resolver-wire","Direction":"INBOUND",
+                 "IpAddresses":[{"SubnetId":"subnet-aaa"},{"SubnetId":"subnet-bbb"}],
+                 "Tags":[{"Key":"owner","Value":"initial"}],"Protocols":["Do53"]}
+                """);
+        String id = created.then().statusCode(200)
+                .body("ResolverEndpoint.IpAddressCount", equalTo(2))
+                .body("ResolverEndpoint.ResolverEndpointType", equalTo("IPV4"))
+                .body("ResolverEndpoint.HostVPCId", equalTo(networks.get("us-east-1").getFirst().getVpcId()))
+                .body("ResolverEndpoint.containsKey('_Tags')", equalTo(false))
+                .extract().path("ResolverEndpoint.Id");
+        String arn = created.path("ResolverEndpoint.Arn");
+        String resource = "{\"ResourceArn\":\"" + arn + "\"}";
+        call("ListTagsForResource", resource).then().statusCode(200)
+                .body("Tags", equalTo(List.of(Map.of("Key", "owner", "Value", "initial"))));
+        call("TagResource", "{\"ResourceArn\":\"" + arn
+                + "\",\"Tags\":[{\"Key\":\"owner\",\"Value\":\"updated\"},"
+                + "{\"Key\":\"team\",\"Value\":\"dns\"}]}").then().statusCode(200);
+        call("UntagResource", "{\"ResourceArn\":\"" + arn + "\",\"TagKeys\":[\"owner\",\"absent\"]}")
+                .then().statusCode(200);
+        call("ListTagsForResource", resource).then().statusCode(200)
+                .body("Tags", equalTo(List.of(Map.of("Key", "team", "Value", "dns"))));
+        call("UpdateResolverEndpoint", "{\"ResolverEndpointId\":\"" + id
+                + "\",\"Protocols\":[\"Do53\",\"DoH\"]}").then().statusCode(200)
+                .body("ResolverEndpoint.Protocols", equalTo(List.of("Do53", "DoH")));
+        call("GetResolverEndpoint", "{\"ResolverEndpointId\":\"" + id + "\"}").then().statusCode(200)
+                .body("ResolverEndpoint.Protocols", equalTo(List.of("Do53", "DoH")));
+        Response firstPage = call("ListResolverEndpointIpAddresses", "{\"ResolverEndpointId\":\"" + id
+                + "\",\"MaxResults\":1}");
+        String nextToken = firstPage.then().statusCode(200).body("IpAddresses.size()", equalTo(1))
+                .body("IpAddresses[0].Status", equalTo("ATTACHED"))
+                .body("IpAddresses[0].containsKey('_NetworkInterfaceId')", equalTo(false))
+                .extract().path("NextToken");
+        String firstIp = firstPage.path("IpAddresses[0].Ip");
+        call("ListResolverEndpointIpAddresses", "{\"ResolverEndpointId\":\"" + id
+                + "\",\"MaxResults\":1,\"NextToken\":\"" + nextToken + "\"}")
+                .then().statusCode(200).body("IpAddresses.size()", equalTo(1))
+                .body("IpAddresses[0].Ip", not(equalTo(firstIp)))
+                .body("containsKey('NextToken')", equalTo(false));
+        call("ListResolverEndpoints", "{\"Filters\":[{\"Name\":\"CreatorRequestId\","
+                + "\"Values\":[\"resolver-wire\"]}]}").then().statusCode(200)
+                .body("ResolverEndpoints.Id", equalTo(List.of(id)));
+        call("ListResolverEndpoints", "{\"Filters\":[{\"Name\":\"CreatorRequestId\","
+                + "\"Values\":[\"resolver-wire-absent\"]}]}").then().statusCode(200)
+                .body("ResolverEndpoints", equalTo(List.of()));
+        callAs(AUTH_HEADER_WEST, "GetResolverEndpoint", "{\"ResolverEndpointId\":\"" + id + "\"}")
+                .then().statusCode(400).body("__type", equalTo("ResourceNotFoundException"));
+        callAs(AUTH_HEADER_WEST, "ListTagsForResource", resource).then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        call("DeleteResolverEndpoint", "{\"ResolverEndpointId\":\"" + id + "\"}").then().statusCode(200);
+        call("ListTagsForResource", resource).then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void endpointAllocationFailureRollsBackInterfacesAndDoesNotCreateAResource() {
+        call("CreateResolverEndpoint", """
+                {"Name":"duplicate-ip","CreatorRequestId":"duplicate-ip","Direction":"INBOUND",
+                 "IpAddresses":[{"SubnetId":"subnet-aaa","Ip":"10.0.0.20"},
+                                {"SubnetId":"subnet-aaa","Ip":"10.0.0.20"}]}
+                """).then().statusCode(400).body("__type", equalTo("InvalidParameterException"));
+        call("ListResolverEndpoints", """
+                {"Filters":[{"Name":"CreatorRequestId","Values":["duplicate-ip"]}]}
+                """).then().statusCode(200).body("ResolverEndpoints", equalTo(List.of()));
+        String vpcId = networks.get("us-east-1").getFirst().getVpcId();
+        assertEquals(List.of(), ec2.describeNetworkInterfaces("us-east-1", List.of(),
+                Map.of("vpc-id", List.of(vpcId)), 0, null).networkInterfaces());
+    }
+
+    @Test
+    void associationFiltersIntersectAndDeleteLeavesOtherRulesAssociationsIntact() {
+        String firstRule = createRule("filtered-rule-a", "filtered-a.example.");
+        String secondRule = createRule("filtered-rule-b", "filtered-b.example.");
+        String firstAssociation = call("AssociateResolverRule", "{\"ResolverRuleId\":\"" + firstRule
+                + "\",\"VPCId\":\"vpc-filter-a\"}").then().statusCode(200)
+                .extract().path("ResolverRuleAssociation.Id");
+        call("AssociateResolverRule", "{\"ResolverRuleId\":\"" + firstRule
+                + "\",\"VPCId\":\"vpc-filter-b\"}").then().statusCode(200);
+        String otherAssociation = call("AssociateResolverRule", "{\"ResolverRuleId\":\"" + secondRule
+                + "\",\"VPCId\":\"vpc-filter-a\"}").then().statusCode(200)
+                .extract().path("ResolverRuleAssociation.Id");
+        String filter = "{\"Filters\":[{\"Name\":\"ResolverRuleId\",\"Values\":[\"" + firstRule
+                + "\"]},{\"Name\":\"VPCId\",\"Values\":[\"vpc-filter-a\"]}]}";
+        call("ListResolverRuleAssociations", filter).then().statusCode(200)
+                .body("ResolverRuleAssociations.Id", equalTo(List.of(firstAssociation)));
+        callAs(AUTH_HEADER_WEST, "ListResolverRuleAssociations", filter).then().statusCode(200)
+                .body("ResolverRuleAssociations", equalTo(List.of()));
+        callAs(AUTH_HEADER_WEST, "GetResolverRuleAssociation", "{\"ResolverRuleAssociationId\":\""
+                + firstAssociation + "\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        callAs(AUTH_HEADER_WEST, "DisassociateResolverRule", "{\"ResolverRuleId\":\"" + firstRule
+                + "\",\"VPCId\":\"vpc-filter-a\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        call("AssociateResolverRule", "{\"ResolverRuleId\":\"" + firstRule
+                + "\",\"VPCId\":\"vpc-filter-a\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceExistsException"));
+        call("DeleteResolverRule", "{\"ResolverRuleId\":\"" + firstRule + "\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceInUseException"));
+        call("DisassociateResolverRule", "{\"ResolverRuleId\":\"" + firstRule
+                + "\",\"VPCId\":\"vpc-filter-a\"}").then().statusCode(200);
+        call("ListResolverRuleAssociations", filter).then().statusCode(200)
+                .body("ResolverRuleAssociations", equalTo(List.of()));
+        call("GetResolverRuleAssociation", "{\"ResolverRuleAssociationId\":\"" + otherAssociation + "\"}")
+                .then().statusCode(200).body("ResolverRuleAssociation.ResolverRuleId", equalTo(secondRule));
+        call("DisassociateResolverRule", "{\"ResolverRuleId\":\"" + firstRule
+                + "\",\"VPCId\":\"vpc-filter-b\"}").then().statusCode(200);
+        call("DeleteResolverRule", "{\"ResolverRuleId\":\"" + firstRule + "\"}").then().statusCode(200);
+        call("DisassociateResolverRule", "{\"ResolverRuleId\":\"" + secondRule
+                + "\",\"VPCId\":\"vpc-filter-a\"}").then().statusCode(200);
+        call("DeleteResolverRule", "{\"ResolverRuleId\":\"" + secondRule + "\"}").then().statusCode(200);
+    }
+
+    @Test
+    void ruleTagsFiltersPaginationAndRegionalAccountIsolationUseActualStoredResources() {
+        String name = "regional-tagged-rule";
+        String body = "{\"Name\":\"" + name + "\",\"CreatorRequestId\":\"" + name
+                + "\",\"RuleType\":\"SYSTEM\",\"DomainName\":\"Corp.Example\","
+                + "\"Tags\":[{\"Key\":\"owner\",\"Value\":\"a\"},{\"Key\":\"team\",\"Value\":\"dns\"}]}";
+        Response created = call("CreateResolverRule", body);
+        String id = created.then().statusCode(200).body("ResolverRule.DomainName", equalTo("corp.example."))
+                .body("ResolverRule.containsKey('_Tags')", equalTo(false)).extract().path("ResolverRule.Id");
+        String arn = created.path("ResolverRule.Arn");
+        call("CreateResolverRule", body).then().statusCode(200).body("ResolverRule.Id", equalTo(id));
+        Response tagsPage = call("ListTagsForResource", "{\"ResourceArn\":\"" + arn + "\",\"MaxResults\":1}");
+        String token = tagsPage.then().statusCode(200).body("Tags.size()", equalTo(1))
+                .extract().path("NextToken");
+        call("ListTagsForResource", "{\"ResourceArn\":\"" + arn + "\",\"MaxResults\":1,\"NextToken\":\""
+                + token + "\"}").then().statusCode(200).body("Tags[0].Key", equalTo("team"))
+                .body("containsKey('NextToken')", equalTo(false));
+        call("ListResolverRules", "{\"Filters\":[{\"Name\":\"CreatorRequestId\",\"Values\":[\"" + name
+                + "\"]},{\"Name\":\"DomainName\",\"Values\":[\"CORP.EXAMPLE\"]}]}").then().statusCode(200)
+                .body("ResolverRules.Id", equalTo(List.of(id)));
+        call("ListResolverRules", "{\"Filters\":[{\"Name\":\"CreatorRequestId\",\"Values\":[]}]}")
+                .then().statusCode(400).body("__type", equalTo("InvalidParameterException"));
+        call("ListResolverRules", "{\"NextToken\":\"not-a-token\"}").then().statusCode(400)
+                .body("__type", equalTo("InvalidNextTokenException"));
+        String foreignAccount = AUTH_HEADER.replace("AKID", "111122223333");
+        for (String auth : List.of(AUTH_HEADER_WEST, foreignAccount)) {
+            callAs(auth, "ListResolverRules", "{\"Filters\":[{\"Name\":\"Id\",\"Values\":[\"" + id + "\"]}]}")
+                    .then().statusCode(200).body("ResolverRules", equalTo(List.of()));
+            callAs(auth, "GetResolverRule", "{\"ResolverRuleId\":\"" + id + "\"}").then().statusCode(400)
+                    .body("__type", equalTo("ResourceNotFoundException"));
+            callAs(auth, "DeleteResolverRule", "{\"ResolverRuleId\":\"" + id + "\"}").then().statusCode(400)
+                    .body("__type", equalTo("ResourceNotFoundException"));
+            callAs(auth, "TagResource", "{\"ResourceArn\":\"" + arn
+                    + "\",\"Tags\":[{\"Key\":\"owner\",\"Value\":\"foreign\"}]}").then().statusCode(400)
+                    .body("__type", equalTo("ResourceNotFoundException"));
+        }
+        call("ListTagsForResource", "{\"ResourceArn\":\"" + arn + "\"}").then().statusCode(200)
+                .body("Tags.find { it.Key == 'owner' }.Value", equalTo("a"));
+        call("UpdateResolverRule", "{\"ResolverRuleId\":\"" + id
+                + "\",\"Config\":{\"Name\":\"should-not-persist\",\"TargetIps\":[]}}")
+                .then().statusCode(400).body("__type", equalTo("InvalidParameterException"));
+        call("GetResolverRule", "{\"ResolverRuleId\":\"" + id + "\"}").then().statusCode(200)
+                .body("ResolverRule.Name", equalTo(name));
+        call("DeleteResolverRule", "{\"ResolverRuleId\":\"" + id + "\"}").then().statusCode(200);
     }
 
     @Test

@@ -6,13 +6,15 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
-import io.github.hectorvent.floci.services.cloudfront.CloudFrontService;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontRequestRouter;
+import io.github.hectorvent.floci.services.cloudfront.CloudFrontResolvedOrigin;
+import io.github.hectorvent.floci.services.cloudfront.CloudFrontService;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontServingController;
 import io.github.hectorvent.floci.services.cloudfront.model.CacheBehavior;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontFunction;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import io.github.hectorvent.floci.services.cloudfront.model.Origin;
+import io.github.hectorvent.floci.services.cloudfront.model.OriginAccessControl;
 import io.quarkus.vertx.http.HttpServer;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
@@ -229,15 +231,21 @@ public class CloudFrontEdgeController {
         }
 
         JsonNode request = event.path("request");
-        Origin origin = resolveOrigin(distribution, behavior,
-                execution != null ? execution.origin() : null,
-                execution != null ? execution.originId() : null);
-        if (origin == null) {
+        CloudFrontResolvedOrigin resolved;
+        try {
+            resolved = resolveOrigin(distribution, behavior,
+                    execution != null ? execution.origin() : null,
+                    execution != null ? execution.originId() : null);
+        } catch (IllegalArgumentException | AwsException e) {
+            return edgeError(502, "Invalid CloudFront origin settings: " + e.getMessage());
+        }
+        if (resolved == null) {
             return edgeError(502, "No origin is configured for this cache behavior.");
         }
+        Origin origin = resolved.origin();
 
         try {
-            Response response = forward(distribution, method, request, origin, body,
+            Response response = forward(distribution, method, request, resolved, body,
                     uriInfo.getRequestUri().getScheme());
             response = servingController.applyEdgeResponse(distribution, uri, method, headers,
                     uriInfo.getRequestUri().getScheme(), response, true);
@@ -425,42 +433,28 @@ public class CloudFrontEdgeController {
         }
     }
 
-    private Origin resolveOrigin(Distribution distribution, CacheBehaviorView behavior,
-                                 JsonNode override, String selectedOriginId) {
-        if (override != null && override.hasNonNull("domainName")) {
-            Origin origin = new Origin();
-            origin.setDomainName(override.path("domainName").asText());
-            JsonNode custom = override.get("customOriginConfig");
-            if (custom != null && !custom.isNull()) {
-                Map<String, Object> customConfig = new LinkedHashMap<>();
-                if (custom.hasNonNull("protocol")) {
-                    customConfig.put("OriginProtocolPolicy", custom.path("protocol").asText() + "-only");
-                }
-                if (custom.hasNonNull("port")) {
-                    customConfig.put("HTTPSPort", String.valueOf(custom.path("port").asInt()));
-                    customConfig.put("HTTPPort", String.valueOf(custom.path("port").asInt()));
-                }
-                origin.setCustomOriginConfig(customConfig);
-            }
-            return origin;
+    private CloudFrontResolvedOrigin resolveOrigin(Distribution distribution, CacheBehaviorView behavior,
+                                                    JsonNode override, String selectedOriginId) {
+        String wanted = selectedOriginId != null ? selectedOriginId : behavior.targetOriginId();
+        Origin assigned = CloudFrontRequestRouter.findOrigin(distribution.getConfig(), wanted);
+        if (assigned == null && distribution.getConfig().getOrigins() != null
+                && !distribution.getConfig().getOrigins().isEmpty()) {
+            assigned = distribution.getConfig().getOrigins().getFirst();
         }
-        var config = distribution.getConfig();
-        if (config == null || config.getOrigins() == null) {
+        if (assigned == null) {
             return null;
         }
-        String wanted = selectedOriginId != null ? selectedOriginId : behavior.targetOriginId();
-        for (Origin origin : config.getOrigins()) {
-            if (origin.getId() != null && origin.getId().equals(wanted)) {
-                return origin;
-            }
-        }
-        return config.getOrigins().isEmpty() ? null : config.getOrigins().get(0);
+        String controlId = assigned.getOriginAccessControlId();
+        OriginAccessControl control = controlId == null || controlId.isBlank()
+                ? null : service.getOriginAccessControl(controlId);
+        return CloudFrontResolvedOrigin.resolve(assigned, override, control);
     }
 
     // ── Origin forwarding ─────────────────────────────────────────────────────
 
-    private Response forward(Distribution distribution, String method, JsonNode request, Origin origin, byte[] body,
-                             String viewerScheme) throws Exception {
+    private Response forward(Distribution distribution, String method, JsonNode request,
+                             CloudFrontResolvedOrigin resolved, byte[] body, String viewerScheme) throws Exception {
+        Origin origin = resolved.origin();
         String domain = origin.getDomainName();
         String host = domain;
         int embeddedPort = -1;
@@ -489,7 +483,7 @@ public class CloudFrontEdgeController {
             outboundHeaders.put("cookie", cookie);
         }
         if (CloudFrontRequestRouter.isS3Origin(origin) && List.of("GET", "HEAD", "OPTIONS").contains(method)) {
-            return servingController.serveEdgeS3Origin(distribution, origin, uri, method, outboundHeaders);
+            return servingController.serveEdgeS3Origin(distribution, resolved, uri, method, outboundHeaders);
         }
         if (origin.getCustomHeaders() != null) {
             for (Map<String, String> header : origin.getCustomHeaders()) {
@@ -515,6 +509,9 @@ public class CloudFrontEdgeController {
             URI target = CloudFrontServingController.buildCustomOriginUri(
                     scheme, targetHost, targetPort, forwardUri, query.isEmpty() ? null : query.substring(1));
             outboundHeaders.put("host", domain);
+            if (CloudFrontServingController.isLocalDevOrigin(domain)) {
+                return servingController.forwardEdgeLocalDevOrigin(domain, target, method, outboundHeaders, body);
+            }
             return servingController.forwardEdgeCustomOrigin(target, method, outboundHeaders, body);
         }
 
@@ -592,7 +589,8 @@ public class CloudFrontEdgeController {
      * developer's machine, not the container.
      */
     private String reachableHost(String host) {
-        if (!host.equals("localhost") && !host.equals("127.0.0.1") && !host.equals("::1")) {
+        if (!host.equalsIgnoreCase("localhost") && !host.equals("127.0.0.1")
+                && !host.equals("::1") && !host.equals("[::1]")) {
             return host;
         }
         if (!containerDetector.isRunningInContainer()) {

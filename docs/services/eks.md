@@ -28,6 +28,55 @@ EKS uses a standard REST API with JSON bodies — not the JSON 1.1 (`X-Amz-Targe
 | `TagResource` | Add tags to a cluster |
 | `UntagResource` | Remove tags from a cluster |
 | `ListTagsForResource` | List tags on a cluster |
+| `ListAccessPolicies` | Paginate the built-in AWS access-policy catalog |
+| `DescribeClusterVersions` | Filter and paginate the built-in Kubernetes release catalog |
+| `DescribeAddonVersions` | Read the built-in add-on version and compatibility catalog |
+| `DescribeAddonConfiguration` | Read a cataloged add-on version's JSON configuration schema |
+| `ListAddons` | Validate the cluster and return its empty managed-installation list |
+
+## Read-only catalogs
+
+Catalog reads do not require a cluster, Docker, or an installed workload. They use the
+normal EKS REST-JSON routes and request handling. Catalog metadata is shared across
+accounts; it does not expose another account's clusters or installations.
+
+The built-in data is a **bounded, static snapshot**, not a live AWS catalog:
+
+- Access policies include `AmazonEKSAdminPolicy`, `AmazonEKSClusterAdminPolicy`,
+  `AmazonEKSEditPolicy`, and `AmazonEKSViewPolicy`. Their AWS-managed ARNs have no
+  region or customer account and use the requesting region's partition. Listing a
+  policy does not associate it with an access entry or enforce it in Kubernetes.
+- Cluster versions cover `1.30`–`1.34`, with release/support dates and support statuses
+  pinned to September 22, 2026. `1.34` is this snapshot's default, not a promise about
+  AWS's current default or the configured k3s image. `includeAll=true` includes the
+  unsupported `1.30` entry. `clusterType`, `clusterVersions`, `defaultOnly`, `status`,
+  and `versionStatus` filter the snapshot. Timestamps are numeric Unix seconds.
+- The add-on snapshot contains the historical `vpc-cni` version
+  `v1.12.0-eksbuild.1`, with `amd64`/`arm64` architecture metadata and a bounded
+  `1.23`/`1.24` Kubernetes compatibility list. `addonName`, `kubernetesVersion`,
+  `types`, `publishers`, and `owners` filter the catalog; an unmatched filter returns
+  an empty list. This historical entry is not advertised as compatible with the
+  newer cluster-version snapshot.
+- Configuration discovery returns a JSON Schema **string** for that exact add-on
+  name/version pair. It describes the documented environment and resource settings,
+  including prefix delegation and warm ENI/prefix targets. Missing required query
+  parameters return `InvalidParameterException`; uncataloged pairs return
+  `ResourceNotFoundException`, rather than an invented permissive schema.
+
+All three list/catalog operations accept `maxResults` from 1 to 100 and opaque
+`nextToken` cursors. The snapshots follow the AWS
+[access-policy catalog](https://docs.aws.amazon.com/eks/latest/userguide/access-policy-permissions.html),
+[Kubernetes release calendar](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html),
+and historical [advanced add-on configuration example](https://aws.amazon.com/blogs/containers/amazon-eks-add-ons-advanced-configuration/).
+They are not automatically refreshed or a complete regional/marketplace inventory.
+
+!!! warning "Catalog presence is not installation"
+    Floci does not install EKS managed add-ons. `CreateAddon` still fails explicitly;
+    `DescribeAddon`, `UpdateAddon`, and `DeleteAddon` report an absent installation.
+    These operations and `ListAddons` first validate the cluster in the requesting
+    account/region. No add-on is marked `ACTIVE`, and k3s-bundled components are not
+    misreported as EKS managed installations. The pre-existing-cluster Alchemy
+    add-on deployment test remains unsupported; the catalog reads are independent.
 
 ## Access-entry management
 
@@ -479,7 +528,7 @@ eks.deleteCluster(r -> r.name("my-cluster"));
 The following EKS features are not yet supported:
 
 - `UpdateClusterConfig` / `UpdateClusterVersion`
-- Add-ons (`CreateAddon`, `DescribeAddon`, `ListAddons`)
+- Managed add-on installation and mutation (`CreateAddon`, `UpdateAddon`, `DeleteAddon`); catalog reads and empty-installation discovery are supported
 - Identity provider configs
-- Access entries and policies
+- Access-entry updates, access-policy association, and Kubernetes access-policy enforcement
 - Encryption config

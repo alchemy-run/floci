@@ -77,6 +77,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 import static io.github.hectorvent.floci.core.common.ReservedTags.rejectUnknownReservedTags;
@@ -1329,6 +1330,12 @@ public class CognitoService implements ResourceProvider {
      */
     public UserPoolDomain createUserPoolDomain(String domain, String userPoolId,
             Map<String, Object> customDomainConfig, Integer managedLoginVersion) {
+        return createUserPoolDomain(domain, userPoolId, customDomainConfig, managedLoginVersion, created -> {});
+    }
+
+    /** Records the candidate identity before mutation, including a create whose TLS setup fails. */
+    public UserPoolDomain createUserPoolDomain(String domain, String userPoolId,
+            Map<String, Object> customDomainConfig, Integer managedLoginVersion, Consumer<UserPoolDomain> beforeCreate) {
         describeUserPool(userPoolId);
         if (domain == null || domain.isBlank()) {
             throw new AwsException("InvalidParameterException", "Domain is required", 400);
@@ -1357,8 +1364,9 @@ public class CognitoService implements ResourceProvider {
             userPoolDomain.setCertificateArn(certificateArn);
             Object securityPolicy = customDomainConfig.get("SecurityPolicy");
             userPoolDomain.setSecurityPolicy(securityPolicy != null ? securityPolicy.toString() : "TLS_V1_2_2021");
-            userPoolDomain.setCloudFrontDistribution(generateCloudFrontDomain());
         }
+        // Describe returns a distribution for both domain types; Create only returns it for custom domains.
+        userPoolDomain.setCloudFrontDistribution(generateCloudFrontDomain());
 
         // Check and write as one step: two accounts racing for one name write to different
         // account-prefixed keys, so without the lock both would succeed and the name would be
@@ -1373,6 +1381,7 @@ public class CognitoService implements ResourceProvider {
                 throw new AwsException("InvalidParameterException",
                         "User pool already has a domain of this type", 400);
             }
+            beforeCreate.accept(userPoolDomain);
             if (userPoolDomain.isCustomDomain()) {
                 registerCertificateUse(userPoolDomain.getCertificateArn(), userPoolDomain);
             }
@@ -1450,8 +1459,15 @@ public class CognitoService implements ResourceProvider {
      */
     public UserPoolDomain updateUserPoolDomain(String domain, String userPoolId,
             Map<String, Object> customDomainConfig, Integer managedLoginVersion) {
+        synchronized (domainLock) {
+            return updateUserPoolDomainLocked(domain, userPoolId, customDomainConfig, managedLoginVersion);
+        }
+    }
+
+    private UserPoolDomain updateUserPoolDomainLocked(String domain, String userPoolId,
+            Map<String, Object> customDomainConfig, Integer managedLoginVersion) {
         describeUserPool(userPoolId);
-        UserPoolDomain userPoolDomain = describeUserPoolDomain(domain);
+        UserPoolDomain userPoolDomain = MAPPER.convertValue(describeUserPoolDomain(domain), UserPoolDomain.class);
         if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
             throw new AwsException("ResourceNotFoundException", "Domain does not exist", 404);
         }
@@ -1496,16 +1512,78 @@ public class CognitoService implements ResourceProvider {
     }
 
     public void deleteUserPoolDomain(String domain, String userPoolId) {
-        UserPoolDomain userPoolDomain = describeUserPoolDomain(domain);
-        if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
-            throw new AwsException("ResourceNotFoundException", "Domain does not exist", 404);
-        }
-        domainStore.delete(domain);
-        if (userPoolDomain.isCustomDomain()) {
-            acmService.removeInUseBy(userPoolDomain.getCertificateArn(),
-                    cloudFrontDistributionArn(userPoolDomain), CERTIFICATE_REGION);
+        synchronized (domainLock) {
+            UserPoolDomain userPoolDomain = describeUserPoolDomain(domain);
+            if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
+                throw new AwsException("ResourceNotFoundException", "Domain does not exist", 404);
+            }
+            domainStore.delete(domain);
+            if (userPoolDomain.isCustomDomain()) {
+                acmService.removeInUseBy(userPoolDomain.getCertificateArn(),
+                        cloudFrontDistributionArn(userPoolDomain), CERTIFICATE_REGION);
+            }
         }
         LOG.infov("Deleted User Pool Domain: {0} for pool {1}", domain, userPoolId);
+    }
+
+    /** Internal CloudFormation cleanup: never delete a different incarnation holding the name. */
+    public void deleteUserPoolDomain(UserPoolDomain expected) {
+        synchronized (domainLock) {
+            requireDomainSnapshotAccount(expected);
+            List<UserPoolDomain> matches = findDomains(expected.getDomain());
+            if (matches.stream().anyMatch(current -> !sameDomainIdentity(current, expected))) {
+                throw new AwsException("InvalidParameterException", "Domain identity changed during cleanup", 400);
+            }
+            UserPoolDomain observed = matches.isEmpty() ? expected : matches.getFirst();
+            if (observed.isCustomDomain()) {
+                // Keep the live record until release succeeds so retries retain its current certificate.
+                acmService.removeInUseBy(observed.getCertificateArn(),
+                        cloudFrontDistributionArn(observed), CERTIFICATE_REGION);
+            }
+            domainStore.delete(expected.getDomain());
+        }
+    }
+
+    /** Restores a deleted CloudFormation predecessor without allocating a new distribution. */
+    public void restoreUserPoolDomain(UserPoolDomain snapshot) {
+        UserPoolDomain restored = MAPPER.convertValue(snapshot, UserPoolDomain.class);
+        requireDomainSnapshotAccount(restored);
+        describeUserPool(restored.getUserPoolId());
+        synchronized (domainLock) {
+            List<UserPoolDomain> matches = findDomains(restored.getDomain());
+            if (matches.stream().anyMatch(current -> !sameDomainIdentity(current, restored))
+                    || listUserPoolDomains(restored.getUserPoolId()).stream().anyMatch(current ->
+                    current.isCustomDomain() == restored.isCustomDomain() && !sameDomainIdentity(current, restored))) {
+                throw new AwsException("InvalidParameterException", "Domain identity is occupied during restoration", 400);
+            }
+            if (restored.isCustomDomain()) {
+                requireUsableCertificate(restored.getCertificateArn());
+                registerCertificateUse(restored.getCertificateArn(), restored);
+            }
+            for (UserPoolDomain observed : matches) {
+                if (observed.isCustomDomain() && !Objects.equals(observed.getCertificateArn(), restored.getCertificateArn())) {
+                    acmService.removeInUseBy(observed.getCertificateArn(),
+                            cloudFrontDistributionArn(observed), CERTIFICATE_REGION);
+                }
+            }
+            domainStore.put(restored.getDomain(), restored);
+        }
+        if (restored.isCustomDomain() && certificateManager != null) {
+            certificateManager.ensureHost(restored.getDomain());
+        }
+    }
+
+    private void requireDomainSnapshotAccount(UserPoolDomain snapshot) {
+        if (!Objects.equals(regionResolver.getAccountId(), snapshot.getAwsAccountId())) {
+            throw new AwsException("InvalidParameterException", "Domain snapshot belongs to another account", 400);
+        }
+    }
+
+    private static boolean sameDomainIdentity(UserPoolDomain current, UserPoolDomain expected) {
+        return Objects.equals(current.getDomain(), expected.getDomain())
+                && Objects.equals(current.getUserPoolId(), expected.getUserPoolId())
+                && Objects.equals(current.getAwsAccountId(), expected.getAwsAccountId())
+                && Objects.equals(current.getCloudFrontDistribution(), expected.getCloudFrontDistribution());
     }
 
     /**

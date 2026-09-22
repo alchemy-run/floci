@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -44,6 +45,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -1518,11 +1520,15 @@ public class AppSyncService {
     }
 
     private Map<String, String> graphqlApiUris(String apiId, String region) {
-        // The default loopback endpoint is unreachable inside Lambda containers; their DNS/TLS routes AWS hosts.
-        if ("http://localhost:4566".equals(baseUrl)) {
-            String host = apiId + ".appsync-api." + region + ".amazonaws.com";
-            return Map.of("GRAPHQL", "https://" + host + "/graphql",
-                    "REALTIME", "wss://" + host + "/graphql/realtime");
+        URI endpoint = URI.create(baseUrl);
+        if (List.of("localhost", "127.0.0.1", "[::1]").contains(endpoint.getHost())
+                && (endpoint.getPath().isEmpty() || "/".equals(endpoint.getPath()))) {
+            // Use Floci's wildcard DNS without assuming a TLS listener on port 443.
+            String host = apiId + ".appsync-api." + region + "." + EmbeddedDnsServer.DEFAULT_SUFFIX;
+            String port = endpoint.getPort() < 0 ? "" : ":" + endpoint.getPort();
+            String graphqlUrl = endpoint.getScheme() + "://" + host + port + "/graphql";
+            return Map.of("GRAPHQL", graphqlUrl,
+                    "REALTIME", toWebSocketBaseUrl(graphqlUrl) + "/realtime");
         }
         String graphqlPath = "/v1/apis/" + apiId + "/graphql";
         Map<String, String> uris = new HashMap<>();

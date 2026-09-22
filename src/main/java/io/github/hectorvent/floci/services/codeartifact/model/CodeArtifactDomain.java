@@ -19,6 +19,15 @@ public class CodeArtifactDomain {
     private Map<String, String> tags = new LinkedHashMap<>();
     private String policyDocument;
     private String policyRevision;
+    private Map<String, Long> authorizationTokens = new LinkedHashMap<>();
+
+    public Map<String, Long> getAuthorizationTokens() {
+        return Collections.unmodifiableMap(authorizationTokens);
+    }
+
+    public void setAuthorizationTokens(Map<String, Long> authorizationTokens) {
+        this.authorizationTokens = authorizationTokens;
+    }
 
     public String getName() {
         return name;

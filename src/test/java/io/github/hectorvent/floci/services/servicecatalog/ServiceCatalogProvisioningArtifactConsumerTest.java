@@ -1,14 +1,18 @@
 package io.github.hectorvent.floci.services.servicecatalog;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Wire-level tests for {@code CreateProvisioningArtifact},
@@ -24,6 +28,28 @@ import static org.hamcrest.Matchers.hasItem;
  */
 @QuarkusTest
 class ServiceCatalogProvisioningArtifactConsumerTest {
+
+    @Inject
+    ServiceCatalogService service;
+
+    @Inject
+    ObjectMapper objectMapper;
+
+    @Test
+    void legacyArtifactStorageRetainsIdentityAndTemplateMetadata() throws Exception {
+        ObjectNode product = (ObjectNode) objectMapper.readTree("""
+                {"Id":"prod-existing","CreatedTime":123,
+                 "ProvisioningArtifactIds":["pa-existing"],"ProvisioningArtifactNames":["renamed-version"],
+                 "ProvisioningArtifactParameters":{"Name":"initial-version","Description":"existing description",
+                   "Info":{"LoadTemplateFromURL":"https://templates.s3.amazonaws.com/existing.json"}}}
+                """);
+        ObjectNode artifact = service.provisioningArtifacts(product).getFirst();
+        assertEquals("pa-existing", artifact.path("Id").asText());
+        assertEquals("renamed-version", artifact.path("Name").asText());
+        assertEquals("existing description", artifact.path("Description").asText());
+        assertEquals("https://templates.s3.amazonaws.com/existing.json", artifact.path("Info").path("LoadTemplateFromURL").asText());
+        assertEquals(123, artifact.path("CreatedTime").asInt());
+    }
 
     private static final String CONTENT_TYPE = "application/x-amz-json-1.1";
     private static final String AUTH_HEADER =
@@ -103,6 +129,44 @@ class ServiceCatalogProvisioningArtifactConsumerTest {
         .then()
             .statusCode(200)
             .body("ProvisioningArtifactDetails.Name", hasItem("v1-renamed"));
+    }
+
+    @Test
+    void artifactMetadataPersistsAcrossDescribeListAndPartialUpdates() {
+        String productId = createProduct("artifact-metadata-lifecycle");
+        String artifactId = call("CreateProvisioningArtifact", """
+                {"ProductId":"%s","IdempotencyToken":"artifact-metadata-lifecycle",
+                 "Parameters":{"Name":"release-2","Description":"second version",
+                   "Type":"CLOUD_FORMATION_TEMPLATE","Info":{"LoadTemplateFromURL":"https://templates.s3.amazonaws.com/v2.json"}}}
+                """.formatted(productId)).then().statusCode(200)
+                .extract().path("ProvisioningArtifactDetail.Id");
+        String selector = "\"ProductId\":\"" + productId + "\",\"ProvisioningArtifactId\":\"" + artifactId + "\"";
+        call("UpdateProvisioningArtifact", "{" + selector
+                + ",\"Description\":\"revised\",\"Active\":false,\"Guidance\":\"DEPRECATED\"}")
+                .then().statusCode(200)
+                .body("ProvisioningArtifactDetail.Description", equalTo("revised"));
+        call("UpdateProvisioningArtifact", "{" + selector + ",\"Name\":\"release-renamed\"}")
+                .then().statusCode(200);
+        call("DescribeProvisioningArtifact", "{" + selector + "}")
+                .then().statusCode(200)
+                .body("ProvisioningArtifactDetail.Name", equalTo("release-renamed"))
+                .body("ProvisioningArtifactDetail.Description", equalTo("revised"))
+                .body("ProvisioningArtifactDetail.Active", equalTo(false))
+                .body("ProvisioningArtifactDetail.Guidance", equalTo("DEPRECATED"))
+                .body("Info.LoadTemplateFromURL", equalTo("https://templates.s3.amazonaws.com/v2.json"));
+        call("ListProvisioningArtifacts", "{\"ProductId\":\"" + productId + "\"}")
+                .then().statusCode(200)
+                .body("ProvisioningArtifactDetails.find { it.Id == '" + artifactId + "' }.Description", equalTo("revised"))
+                .body("ProvisioningArtifactDetails.find { it.Id == '" + artifactId + "' }.Active", equalTo(false));
+        call("UpdateProvisioningArtifact", "{" + selector + ",\"Description\":\"\"}")
+                .then().statusCode(200);
+        call("DescribeProductAsAdmin", "{\"Id\":\"" + productId + "\"}")
+                .then().statusCode(200)
+                .body("ProvisioningArtifactSummaries.find { it.Id == '" + artifactId + "' }.Description", equalTo(""));
+        call("DeleteProvisioningArtifact", "{" + selector + "}").then().statusCode(200);
+        call("DescribeProvisioningArtifact", "{" + selector + "}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        call("DeleteProduct", "{\"Id\":\"" + productId + "\"}").then().statusCode(200);
     }
 
     // ---------- DeleteProvisioningArtifact ----------

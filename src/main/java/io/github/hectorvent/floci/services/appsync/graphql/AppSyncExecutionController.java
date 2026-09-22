@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.appsync.graphql;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import graphql.GraphQL;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.services.appsync.AppSyncService;
@@ -10,6 +11,7 @@ import io.github.hectorvent.floci.services.appsync.graphql.auth.AppSyncAuthConte
 import io.github.hectorvent.floci.services.appsync.graphql.auth.AuthMiddleware;
 import io.github.hectorvent.floci.services.appsync.graphql.auth.AuthRequestInfo;
 import io.github.hectorvent.floci.services.appsync.model.GraphqlApi;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -26,6 +28,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -46,6 +49,7 @@ public class AppSyncExecutionController {
     private final ObjectMapper objectMapper;
     private final AuthMiddleware authMiddleware;
     private final RequestContext requestContext;
+    private final CurrentVertxRequest currentVertxRequest;
 
     @Inject
     public AppSyncExecutionController(AppSyncService appSyncService,
@@ -54,7 +58,8 @@ public class AppSyncExecutionController {
                                       AppSyncErrorFormatter errorFormatter,
                                       ObjectMapper objectMapper,
                                       AuthMiddleware authMiddleware,
-                                      RequestContext requestContext) {
+                                      RequestContext requestContext,
+                                      CurrentVertxRequest currentVertxRequest) {
         this.appSyncService = appSyncService;
         this.schemaRegistry = schemaRegistry;
         this.queryExecutor = queryExecutor;
@@ -62,6 +67,7 @@ public class AppSyncExecutionController {
         this.objectMapper = objectMapper;
         this.authMiddleware = authMiddleware;
         this.requestContext = requestContext;
+        this.currentVertxRequest = currentVertxRequest;
     }
 
     @POST
@@ -102,7 +108,7 @@ public class AppSyncExecutionController {
                 return graphqlError(e.getHttpStatus(), e.getErrorType(), e.getMessage());
             }
 
-            var graphQLOpt = schemaRegistry.getGraphQL(apiId);
+            Optional<GraphQL> graphQLOpt = schemaRegistry.getGraphQL(apiId);
             if (graphQLOpt.isEmpty()) {
                 return graphqlError(502, "GraphQLSchemaException",
                         AppSyncErrorFormatter.MSG_NO_SCHEMA);
@@ -220,7 +226,8 @@ public class AppSyncExecutionController {
                 accountId,
                 region,
                 headerMap(headers),
-                rawBody);
+                rawBody,
+                currentVertxRequest.getCurrent().request().path());
     }
 
     private static List<String> sourceIp(HttpHeaders headers) {

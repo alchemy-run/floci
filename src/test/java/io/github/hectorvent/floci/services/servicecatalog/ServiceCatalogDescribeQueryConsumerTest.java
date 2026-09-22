@@ -53,7 +53,7 @@ class ServiceCatalogDescribeQueryConsumerTest {
     private static String describeProductAsAdminArn(String productId) {
         return call("DescribeProductAsAdmin", "{\"Id\":\"" + productId + "\"}")
                 .then().statusCode(200)
-                .extract().path("ProductViewDetail.ProductViewSummary.ARN");
+                .extract().path("ProductViewDetail.ProductARN");
     }
 
     // ---------- DescribeCopyProductStatus ----------
@@ -100,15 +100,31 @@ class ServiceCatalogDescribeQueryConsumerTest {
 
     @Test
     void describeProvisioningParameters_returnsParameterKeys() {
-        String productId = call("CreateProduct", "{\"Name\":\"ab-provisioning-params\",\"Owner\":\""
-                + "floci-test\",\"ProvisioningArtifactParameters\":[{\"Name\":\"v1\",\"Info\":{"
-                + "\"LoadTemplateFromURL\":\"https://example.com/template.json\"}}]}")
-                .then().statusCode(200)
-                .extract().path("ProductViewDetail.ProductViewSummary.Id");
+        String bucket = "sc-parameter-template";
+        String s3Auth = "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/s3/aws4_request";
+        given().header("Authorization", s3Auth).put("/" + bucket).then().statusCode(200);
+        given().header("Authorization", s3Auth).contentType("application/json").body("""
+                {"Parameters":{"Environment":{"Type":"String","Default":"dev","Description":"Deployment environment"},
+                               "Password":{"Type":"String","NoEcho":true}},
+                 "Resources":{"Handle":{"Type":"AWS::CloudFormation::WaitConditionHandle"}}}
+                """).put("/" + bucket + "/template.json").then().statusCode(200);
+        String productId = call("CreateProduct", """
+                {"Name":"ab-provisioning-params","Owner":"floci-test",
+                 "ProvisioningArtifactParameters":{"Name":"v1","Type":"CLOUD_FORMATION_TEMPLATE",
+                   "Info":{"LoadTemplateFromURL":"https://%s.s3.us-east-1.amazonaws.com/template.json"}}}
+                """.formatted(bucket)).then().statusCode(200)
+                .extract().path("ProductViewDetail.ProductViewSummary.ProductId");
 
         call("DescribeProvisioningParameters", "{\"ProductId\":\"" + productId + "\"}")
-        .then()
-            .statusCode(200);
+                .then().statusCode(200)
+                .body("ProvisioningArtifactParameters.size()", equalTo(2))
+                .body("ProvisioningArtifactParameters.find { it.ParameterKey == 'Environment' }.DefaultValue", equalTo("dev"))
+                .body("ProvisioningArtifactParameters.find { it.ParameterKey == 'Environment' }.Description", equalTo("Deployment environment"))
+                .body("ProvisioningArtifactParameters.find { it.ParameterKey == 'Password' }.ParameterType", equalTo("String"))
+                .body("ProvisioningArtifactParameters.find { it.ParameterKey == 'Password' }.IsNoEcho", equalTo(true));
+        call("DeleteProduct", "{\"Id\":\"" + productId + "\"}").then().statusCode(200);
+        given().header("Authorization", s3Auth).delete("/" + bucket + "/template.json").then().statusCode(204);
+        given().header("Authorization", s3Auth).delete("/" + bucket).then().statusCode(204);
     }
 
     @Test

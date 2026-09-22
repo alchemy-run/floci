@@ -17,9 +17,19 @@ Floci implements the REST JSON Detective organization and behavior-graph operati
 | `StartMonitoringMember` | Starts data contribution for an accepted but disabled member account. |
 <!-- floci:actions:end -->
 
-For organization behavior graphs, member accounts can be created without an email address. Duplicate member requests are returned through `UnprocessedAccounts`, while successfully processed accounts are returned through `Members`. `ListMembers` accepts the AWS-documented `MaxResults` range of 1 through 200.
+For organization behavior graphs, member accounts can be created without an email address. They remain `ACCEPTED_BUT_DISABLED`; cross-account member ingestion is not implemented. Other members require an email address and remain `INVITED`. Duplicate member requests are returned through `UnprocessedAccounts`, while successfully processed accounts are returned through `Members`. `ListMembers` accepts the AWS-documented `MaxResults` range of 1 through 200.
 
-Organization configuration accepts an optional `AutoEnable` field and requires the behavior graph ARN. Successful `EnableOrganizationAdminAccount`, `UpdateOrganizationConfiguration`, and `StartMonitoringMember` operations return an empty HTTP 200 response body, matching the AWS API contract.
+Organization configuration accepts an optional `AutoEnable` field and requires the behavior graph ARN. Successful `EnableOrganizationAdminAccount` and `UpdateOrganizationConfiguration` operations return an empty HTTP 200 response body, matching the AWS API contract. `StartMonitoringMember` validates the member's state but rejects unsupported member ingestion without changing it.
+
+## Core datasource collection
+
+`ListDatasourcePackages` returns the graph's `DETECTIVE_CORE` ingest state and persisted `LastIngestStateChange` timestamps. With local CloudTrail enabled, it collects actual management events from Floci's CloudTrail event history into the graph and reports `STARTED`. An empty history is valid: it does not produce synthetic events. With CloudTrail disabled, it reports `DISABLED` and does not read or invent event data.
+
+Collection is materialized on datasource reads, not by a background worker. It follows CloudTrail pagination, deduplicates event IDs, and only accepts management events for the graph owner's account and Region since graph creation. Legacy graphs without a creation timestamp begin collection at their first datasource read. Event records and ingest-state changes use the existing Detective storage backend and survive persistence reloads. Deleting the graph removes its collected events; a replacement never inherits its predecessor's data. A failed collection returns an error without committing a partial batch or reporting a new successful ingest state.
+
+This is a limited local core datasource: it consumes the management events captured by Floci's CloudTrail implementation, not VPC flow logs or GuardDuty findings. It does not perform AWS behavioral analytics. EKS audit and Security Hub datasource ingestion, datasource updates, cross-account member collection, and investigation execution remain unsupported and are rejected explicitly. Listing investigations on a fresh graph remains empty; collecting management events does not fabricate investigations or indicators.
+
+The datasource listing accepts `MaxResults` from 1 through 200. Only the local core package is exposed, so there is no continuation token; supplied `NextToken` values are rejected. Missing, deleted, foreign-account, and wrong-Region graph ARNs are rejected before reading any source events.
 
 Invalid graph, account, member, and pagination data returns modeled `ValidationException` or `ResourceNotFoundException` responses. Incompatible member transitions return `ConflictException`, and the 1,200-member behavior-graph quota is enforced with `ServiceQuotaExceededException`. Provider-side internal and throttling errors are not injected artificially.
 

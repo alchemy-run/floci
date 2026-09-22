@@ -468,6 +468,40 @@ class CognitoFeaturesTest {
         cognito.adminDeleteUser(b -> b.userPoolId(poolId).username(tempUser));
     }
 
+    @Test
+    @DisplayName("Prefix domain describes a stable distribution through update and delete")
+    void prefixDomainDistributionLifecycle() {
+        String domain = "sdk-prefix-" + UUID.randomUUID().toString().substring(0, 8);
+        String owner = cognito.createUserPool(b -> b.poolName("sdk prefix domain")).userPool().id();
+        try {
+            CreateUserPoolDomainResponse created = cognito.createUserPoolDomain(b -> b
+                    .userPoolId(owner).domain(domain).managedLoginVersion(1));
+            assertThat(created.cloudFrontDomain()).isNull();
+            try {
+                DomainDescriptionType original = cognito.describeUserPoolDomain(b -> b.domain(domain))
+                        .domainDescription();
+                assertThat(original.domain()).isEqualTo(domain);
+                assertThat(original.userPoolId()).isEqualTo(owner);
+                assertThat(original.statusAsString()).isEqualTo("ACTIVE");
+                assertThat(original.cloudFrontDistribution()).isNotBlank().endsWith(".cloudfront.net");
+                assertThat(original.customDomainConfig()).isNull();
+
+                cognito.updateUserPoolDomain(b -> b.userPoolId(owner).domain(domain).managedLoginVersion(2));
+                DomainDescriptionType updated = cognito.describeUserPoolDomain(b -> b.domain(domain))
+                        .domainDescription();
+                assertThat(updated.cloudFrontDistribution()).isEqualTo(original.cloudFrontDistribution());
+                assertThat(updated.managedLoginVersion()).isEqualTo(2);
+                assertThat(updated.userPoolId()).isEqualTo(owner);
+            } finally {
+                cognito.deleteUserPoolDomain(b -> b.userPoolId(owner).domain(domain));
+            }
+            assertThat(cognito.describeUserPoolDomain(b -> b.domain(domain)).domainDescription().userPoolId())
+                    .isNull();
+        } finally {
+            cognito.deleteUserPool(b -> b.userPoolId(owner));
+        }
+    }
+
     // ── Issue #234 note ───────────────────────────────────────────────────────
     // GetTokensFromRefreshToken is tested in sdk-test-node/tests/cognito-features.test.ts
     // because GetTokensFromRefreshTokenCommand is not available in Java SDK 2.31.8.

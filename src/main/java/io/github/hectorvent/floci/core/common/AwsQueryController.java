@@ -515,7 +515,13 @@ public class AwsQueryController {
             "ListTagsForResource", "TagResource", "UntagResource",
             "PutDashboard", "GetDashboard", "ListDashboards", "DeleteDashboards",
             "PutMetricStream", "GetMetricStream", "ListMetricStreams", "DeleteMetricStream",
-            "StartMetricStreams", "StopMetricStreams"
+            "StartMetricStreams", "StopMetricStreams",
+            "PutCompositeAlarm", "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector",
+            "PutAlarmMuteRule", "GetAlarmMuteRule", "ListAlarmMuteRules", "DeleteAlarmMuteRule",
+            "DescribeAlarmsForMetric", "DescribeAlarmHistory", "DescribeAlarmContributors",
+            "EnableAlarmActions", "DisableAlarmActions", "GetMetricWidgetImage",
+            "PutInsightRule", "DescribeInsightRules", "DeleteInsightRules", "EnableInsightRules",
+            "DisableInsightRules", "GetInsightRuleReport", "ListManagedInsightRules"
     );
 
     private static final Set<String> ELASTIC_BEANSTALK_ACTIONS = Set.of(
@@ -528,7 +534,7 @@ public class AwsQueryController {
     private static final Set<String> RDS_ACTIONS = Set.of(
             "CreateDBInstance", "DescribeDBInstances", "DeleteDBInstance",
             "ModifyDBInstance", "RebootDBInstance",
-            "DescribeOrderableDBInstanceOptions",
+            "DescribeDBEngineVersions", "DescribeOrderableDBInstanceOptions",
             "CreateDBSubnetGroup", "DescribeDBSubnetGroups", "ModifyDBSubnetGroup", "DeleteDBSubnetGroup",
             "AddTagsToResource", "ListTagsForResource", "RemoveTagsFromResource",
             "CreateDBCluster", "DescribeDBClusters", "DeleteDBCluster", "ModifyDBCluster",
@@ -551,7 +557,8 @@ public class AwsQueryController {
             "ListStacks", "ListExports", "GetTemplate", "GetTemplateSummary", "ValidateTemplate",
             "CreateChangeSet", "DeleteChangeSet", "DescribeChangeSet", "ExecuteChangeSet", "ListChangeSets",
             "DescribeStackEvents", "DescribeStackResources", "ListStackResources", "DescribeStackResource",
-            "SetStackPolicy", "GetStackPolicy",
+            "SetStackPolicy", "GetStackPolicy", "SignalResource", "DetectStackDrift",
+            "DescribeStackDriftDetectionStatus", "DescribeStackResourceDrifts",
             "ListStackSets", "DescribeStackSet", "CreateStackSet", "UpdateStackSet", "DeleteStackSet",
             "CreateStackInstances", "ListStackInstances", "DescribeStackInstance", "DeleteStackInstances",
             "ListStackSetOperations", "DescribeStackSetOperation"

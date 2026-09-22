@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -52,6 +53,30 @@ class RedshiftQueryHandlerTest {
         c.setMasterPassword("SecretPass1");
         c.setClusterStatus("available");
         return c;
+    }
+
+    @Test
+    void resizeDistinguishesMissingClustersFromAbsentResizeOperations() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "existing");
+        when(service.describeClusters("existing")).thenReturn(List.of(availableCluster("existing")));
+        assertEquals("ResizeNotFound", assertThrows(AwsException.class,
+                () -> handler.handle("DescribeResize", params)).getErrorCode());
+        params.putSingle("ClusterIdentifier", "missing");
+        when(service.describeClusters("missing")).thenThrow(new AwsException("ClusterNotFound", "Missing cluster", 404));
+        assertEquals("ClusterNotFound", assertThrows(AwsException.class,
+                () -> handler.handle("DescribeResize", params)).getErrorCode());
+    }
+
+    @Test
+    void databaseRevisionXmlOmitsUnobservedAwsRevisionAndTerminalMarker() {
+        when(service.describeClusterDbRevisions(null, null, null))
+                .thenReturn(new RedshiftService.Page<>(List.of(availableCluster("existing")), null));
+        String xml = (String) handler.handle("DescribeClusterDbRevisions", new MultivaluedHashMap<>()).getEntity();
+        assertTrue(xml.contains("<ClusterDbRevisions><ClusterDbRevision><ClusterIdentifier>existing</ClusterIdentifier>"));
+        assertFalse(xml.contains("<CurrentDatabaseRevision>"));
+        assertFalse(xml.contains("<DatabaseRevisionReleaseDate>"));
+        assertFalse(xml.contains("<Marker>"));
     }
 
     @Test

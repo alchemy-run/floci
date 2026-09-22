@@ -15,6 +15,9 @@ import io.github.hectorvent.floci.services.cloudformation.model.Stack;
 import io.github.hectorvent.floci.services.cloudformation.model.StackEvent;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.cloudformation.model.TemplateSummary;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.ResourceDrift;
+import io.github.hectorvent.floci.services.cloudformation.model.StackDriftDetection.PropertyDifference;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.CfnDynamicReferences;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.CfnRollback;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.UpdateCleanupResult;
@@ -283,6 +286,8 @@ public class CloudFormationService implements ResourceProvider {
                                       Map<String, String> tags, String region, String accountId,
                                       boolean attachToReviewInProgressStack) {
         String resolvedTemplate = resolveTemplate(templateBody, templateUrl);
+        String canonicalName = stackName != null && stackName.startsWith("arn:")
+                ? getStackOrThrow(stackName, region, accountId).getStackName() : stackName;
 
         // Real CloudFormation runs a declared macro (here, only AWS::Serverless-2016-10-31)
         // before it ever evaluates the template's own resources or conditions. On real AWS,
@@ -330,7 +335,7 @@ public class CloudFormationService implements ResourceProvider {
         // remapping function does short, non-blocking work.
         boolean isCreateType = changeSetType == null || "CREATE".equalsIgnoreCase(changeSetType);
         ChangeSet[] created = new ChangeSet[1];
-        Stack stack = stacks.compute(stackKey(accountId, stackName, region), (k, existing) -> {
+        Stack stack = stacks.compute(stackKey(accountId, canonicalName, region), (k, existing) -> {
             Stack target;
             if (existing == null) {
                 if (!isCreateType) {
@@ -369,12 +374,13 @@ public class CloudFormationService implements ResourceProvider {
             ChangeSet cs = new ChangeSet();
             cs.setChangeSetId(AwsArnUtils.Arn.of("cloudformation", region, accountId, "changeSet/" + changeSetName + "/" + UUID.randomUUID()).toString());
             cs.setChangeSetName(changeSetName);
-            cs.setStackName(stackName);
+            cs.setStackName(target.getStackName());
             cs.setStackId(target.getStackId());
             cs.setChangeSetType(changeSetType != null ? changeSetType : "CREATE");
             cs.setTemplateBody(resolvedTemplate);
             cs.setParameters(parameters);
             cs.setCapabilities(capabilities);
+            cs.setTags(tags == null ? null : new LinkedHashMap<>(tags));
             if (samTransformFailureReason != null) {
                 cs.setStatus("FAILED");
                 cs.setExecutionStatus("UNAVAILABLE");
@@ -707,6 +713,10 @@ public class CloudFormationService implements ResourceProvider {
         return executor.submit(() -> runUnderAccount(accountId, () -> {
             executeTemplate(stack, templateBody, params, isCreate, region, accountId);
             String status = stack.getStatus();
+            if ("CREATE_COMPLETE".equals(status) || "UPDATE_COMPLETE".equals(status)) {
+                if (cs.getTags() != null) stack.setTags(new LinkedHashMap<>(cs.getTags()));
+                if (cs.getCapabilities() != null) stack.setCapabilities(new ArrayList<>(cs.getCapabilities()));
+            }
             cs.setExecutionStatus(status != null && (status.contains("ROLLBACK") || status.endsWith("_FAILED"))
                     ? "EXECUTE_FAILED" : "EXECUTE_COMPLETE");
             persistStack(stack);
@@ -896,6 +906,159 @@ public class CloudFormationService implements ResourceProvider {
             throw new AwsException("ValidationError", "Template format error: " + e.getMessage(), 400);
         }
         return buildTemplateSummary(template);
+    }
+
+    public TemplateSummary validateTemplate(String body, String url) {
+        String resolved = resolveTemplateBody(body, url);
+        if (resolved == null) throw new AwsException("ValidationError", "TemplateBody or TemplateURL is required.", 400);
+        try {
+            JsonNode template = parseTemplate(resolved);
+            if (template == null || !template.isObject() || !template.path("Resources").isObject()
+                    || template.path("Resources").isEmpty()) {
+                throw new AwsException("ValidationError", "Template format error: At least one Resources member must be defined.", 400);
+            }
+            for (JsonNode resource : template.path("Resources")) {
+                if (!resource.isObject() || !resource.path("Type").isTextual()
+                        || resource.path("Type").asText().isBlank()
+                        || (resource.has("Properties") && !resource.path("Properties").isObject())) {
+                    throw new AwsException("ValidationError", "Template format error: Invalid resource declaration.", 400);
+                }
+            }
+            if (template.has("Parameters")) {
+                if (!template.path("Parameters").isObject()) {
+                    throw new AwsException("ValidationError", "Template format error: Parameters must be an object.", 400);
+                }
+                for (JsonNode parameter : template.path("Parameters")) {
+                    if (!parameter.isObject() || !parameter.path("Type").isTextual()) {
+                        throw new AwsException("ValidationError", "Template format error: Invalid parameter declaration.", 400);
+                    }
+                }
+            }
+            return buildTemplateSummary(template);
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AwsException("ValidationError", "Template format error: " + e.getMessage(), 400);
+        }
+    }
+
+    public void signalResource(String stackName, String logicalId, String uniqueId, String status, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        if (logicalId == null || !stack.getResources().containsKey(logicalId)) {
+            throw new AwsException("ValidationError", "Resource " + logicalId + " does not exist in stack " + stackName, 400);
+        }
+        if (uniqueId == null || uniqueId.isBlank() || !("SUCCESS".equals(status) || "FAILURE".equals(status))) {
+            throw new AwsException("ValidationError", "UniqueId and a SUCCESS or FAILURE Status are required.", 400);
+        }
+        synchronized (stack) {
+            stack.getResourceSignals().computeIfAbsent(logicalId, ignored -> new LinkedHashMap<>()).put(uniqueId, status);
+            persistStack(stack);
+        }
+    }
+
+    public StackDriftDetection detectStackDrift(String stackName, List<String> logicalIds, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        if (!stack.getResources().keySet().containsAll(logicalIds)) {
+            throw new AwsException("ValidationError", "A LogicalResourceId does not exist in the stack.", 400);
+        }
+        List<ResourceDrift> results = new ArrayList<>();
+        Instant timestamp = now();
+        String failure = null;
+        SsmResourceBackend backend = new SsmResourceBackend(ssmService, objectMapper);
+        for (StackResource resource : stack.getResources().values()) {
+            if (!logicalIds.isEmpty() && !logicalIds.contains(resource.getLogicalId())) continue;
+            String status = "NOT_CHECKED";
+            JsonNode expected = resource.getExpectedProperties();
+            JsonNode actual = null;
+            List<PropertyDifference> differences = new ArrayList<>();
+            if (SsmResourceBackend.TYPE.equals(resource.getResourceType())) {
+                try {
+                    if (expected == null) expected = expectedProperties(stack, resource, region);
+                    actual = backend.read(resource.getPhysicalId(), region);
+                    if (actual == null) status = "DELETED";
+                    else {
+                        compareProperties("", expected, actual, differences);
+                        status = differences.isEmpty() ? "IN_SYNC" : "MODIFIED";
+                    }
+                } catch (Exception e) {
+                    failure = e.getMessage();
+                }
+            }
+            results.add(new ResourceDrift(resource.getLogicalId(), resource.getPhysicalId(), resource.getResourceType(),
+                    status, expected == null ? null : expected.toString(), actual == null ? null : actual.toString(),
+                    timestamp, differences));
+        }
+        int drifted = (int) results.stream().filter(r -> Set.of("MODIFIED", "DELETED").contains(r.status())).count();
+        boolean checked = results.stream().anyMatch(r -> !"NOT_CHECKED".equals(r.status()));
+        StackDriftDetection detection = new StackDriftDetection(UUID.randomUUID().toString(), stack.getStackId(),
+                failure == null ? "DETECTION_COMPLETE" : "DETECTION_FAILED",
+                drifted > 0 ? "DRIFTED" : failure != null || !checked ? "UNKNOWN" : "IN_SYNC",
+                drifted, timestamp, failure, List.copyOf(results));
+        synchronized (stack) {
+            stack.getDriftDetections().put(detection.detectionId(), detection);
+            persistStack(stack);
+        }
+        return detection;
+    }
+
+    private JsonNode expectedProperties(Stack stack, StackResource resource, String region) throws Exception {
+        JsonNode template = parseTemplate(stack.getTemplateBody());
+        Map<String, String> ids = new LinkedHashMap<>();
+        Map<String, Map<String, String>> attributes = new LinkedHashMap<>();
+        stack.getResources().forEach((id, value) -> {
+            ids.put(id, value.getPhysicalId());
+            attributes.put(id, value.getAttributes());
+        });
+        Map<String, JsonNode> mappings = new LinkedHashMap<>();
+        template.path("Mappings").fields().forEachRemaining(entry -> mappings.put(entry.getKey(), entry.getValue()));
+        Map<String, String> parameters = stack.getResolvedParameters().isEmpty()
+                ? stack.getParameters() : stack.getResolvedParameters();
+        CloudFormationTemplateEngine engine = new CloudFormationTemplateEngine(ownerAccount(stack), region,
+                stack.getStackName(), stack.getStackId(), parameters, ids, attributes,
+                resolveConditions(template, parameters, stack, region, ownerAccount(stack)), mappings, objectMapper,
+                name -> exports.get(accountExportKey(ownerAccount(stack), exportKey(region, name))), value -> value);
+        return engine.resolveNode(template.path("Resources").path(resource.getLogicalId()).path("Properties"));
+    }
+
+    private void compareProperties(String path, JsonNode expected, JsonNode actual, List<PropertyDifference> differences) {
+        if (expected != null && expected.isObject() && actual != null && actual.isObject()) {
+            expected.fields().forEachRemaining(entry -> compareProperties(path + "/"
+                            + entry.getKey().replace("~", "~0").replace("/", "~1"), entry.getValue(),
+                    actual.get(entry.getKey()), differences));
+            if (!path.isEmpty()) {
+                actual.fields().forEachRemaining(entry -> {
+                    if (!expected.has(entry.getKey())) {
+                        differences.add(new PropertyDifference(path + "/"
+                                + entry.getKey().replace("~", "~0").replace("/", "~1"), "null",
+                                entry.getValue().toString(), "ADD"));
+                    }
+                });
+            }
+        } else if (!Objects.equals(expected, actual)) {
+            differences.add(new PropertyDifference(path, expected == null ? "null" : expected.toString(),
+                    actual == null ? "null" : actual.toString(), actual == null ? "REMOVE" : "NOT_EQUAL"));
+        }
+    }
+
+    public StackDriftDetection describeStackDriftDetection(String detectionId, String region) {
+        if (detectionId != null) {
+            for (Stack stack : listStacks(region)) {
+                StackDriftDetection detection = stack.getDriftDetections().get(detectionId);
+                if (detection != null) return detection;
+            }
+        }
+        throw new AwsException("ValidationError", "Stack drift detection " + detectionId + " does not exist.", 400);
+    }
+
+    public List<ResourceDrift> describeStackResourceDrifts(String stackName, List<String> statuses, String region) {
+        Stack stack = getStackOrThrow(stackName, region);
+        Map<String, ResourceDrift> latest = new LinkedHashMap<>();
+        synchronized (stack) {
+            for (StackDriftDetection detection : stack.getDriftDetections().values()) {
+                for (ResourceDrift resource : detection.resources()) latest.put(resource.logicalId(), resource);
+            }
+        }
+        return latest.values().stream().filter(r -> statuses.isEmpty() || statuses.contains(r.status())).toList();
     }
 
     private TemplateSummary buildTemplateSummary(JsonNode template) {
@@ -1212,7 +1375,11 @@ public class CloudFormationService implements ResourceProvider {
                                 engine, region, accountId, stack.getStackName(),
                                 resource.getPhysicalId(), resource.getAttributes(),
                                 event -> addEvent(stack, logicalId, event.getPhysicalResourceId(), type,
-                                        event.getResourceStatus(), event.getResourceStatusReason()));
+                                        event.getResourceStatus(), event.getResourceStatusReason()),
+                                resDef.path("UpdateReplacePolicy").asText(null));
+                    }
+                    if ("CREATE_COMPLETE".equals(resource.getStatus())) {
+                        resource.setExpectedProperties(engine.resolveNode(props));
                     }
                     resource.setUpdateReplacePolicy(
                             resDef.path("UpdateReplacePolicy").asText(null));
@@ -1770,6 +1937,7 @@ public class CloudFormationService implements ResourceProvider {
         copy.setUpdateReplacePolicy(source.getUpdateReplacePolicy());
         copy.setTimestamp(source.getTimestamp());
         copy.setAttributes(new HashMap<>(source.getAttributes()));
+        copy.setExpectedProperties(source.getExpectedProperties() == null ? null : source.getExpectedProperties().deepCopy());
         return copy;
     }
 
@@ -2470,7 +2638,7 @@ public class CloudFormationService implements ResourceProvider {
             String extractedName = extractStackNameFromArn(stackNameOrArn);
             if (extractedName != null) {
                 stack = stacks.get(stackKey(accountId, extractedName, region));
-                if (stack != null) {
+                if (stack != null && stackNameOrArn.equals(stack.getStackId())) {
                     return stack;
                 }
             }

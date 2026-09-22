@@ -8,6 +8,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -15,8 +18,15 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -73,30 +83,26 @@ public class Route53ResolverService {
     private final StorageBackend<String, ObjectNode> endpointStore;
     private final StorageBackend<String, ObjectNode> ruleStore;
     private final StorageBackend<String, ObjectNode> ruleAssociationStore;
-    /**
-     * The {@code IpAddressRequests} each endpoint was created with, keyed by endpoint id.
-     * Kept beside the endpoint rather than on it: the modeled {@code ResolverEndpoint} shape
-     * carries {@code IpAddressCount} and no IP list, and the handlers return the stored node
-     * verbatim, so holding the addresses on the resource would put an unmodeled member on the
-     * wire. Only the CreatorRequestId conflict check reads this.
-     */
+    /** Original IP requests, assigned addresses, and EC2 interface IDs, keyed by endpoint ID. */
     private final StorageBackend<String, ObjectNode> endpointIpRequestStore;
     private final ObjectMapper objectMapper;
+    private final Ec2Service ec2;
 
     @Inject
-    public Route53ResolverService(StorageFactory storageFactory, ObjectMapper objectMapper) {
+    public Route53ResolverService(StorageFactory storageFactory, ObjectMapper objectMapper, Ec2Service ec2) {
         this.domainListStore = storageFactory.create("route53resolver", "route53resolver-domain-lists.json",
-                new TypeReference<java.util.Map<String, ObjectNode>>() {});
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.endpointStore = storageFactory.create("route53resolver", "route53resolver-endpoints.json",
-                new TypeReference<java.util.Map<String, ObjectNode>>() {});
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.ruleStore = storageFactory.create("route53resolver", "route53resolver-rules.json",
-                new TypeReference<java.util.Map<String, ObjectNode>>() {});
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.ruleAssociationStore = storageFactory.create("route53resolver",
-                "route53resolver-rule-associations.json", new TypeReference<java.util.Map<String, ObjectNode>>() {});
+                "route53resolver-rule-associations.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.endpointIpRequestStore = storageFactory.create("route53resolver",
                 "route53resolver-endpoint-ip-requests.json",
-                new TypeReference<java.util.Map<String, ObjectNode>>() {});
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.objectMapper = objectMapper;
+        this.ec2 = ec2;
     }
 
     // Package-private for hermetic tests: pass in-memory StorageBackends directly, so a test
@@ -107,13 +113,14 @@ public class Route53ResolverService {
                            StorageBackend<String, ObjectNode> ruleStore,
                            StorageBackend<String, ObjectNode> ruleAssociationStore,
                            StorageBackend<String, ObjectNode> endpointIpRequestStore,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper, Ec2Service ec2) {
         this.domainListStore = domainListStore;
         this.endpointStore = endpointStore;
         this.ruleStore = ruleStore;
         this.ruleAssociationStore = ruleAssociationStore;
         this.endpointIpRequestStore = endpointIpRequestStore;
         this.objectMapper = objectMapper;
+        this.ec2 = ec2;
     }
 
     public List<FirewallDomainList> listFirewallDomainLists(String region) {
@@ -135,7 +142,7 @@ public class Route53ResolverService {
 
     public synchronized ObjectNode createFirewallDomainList(JsonNode request, String region, String accountId) {
         String name = requireText(request, "Name", VALIDATION);
-        java.util.Optional<ObjectNode> replay = replayOf(domainListStore, request, region);
+        Optional<ObjectNode> replay = replayOf(domainListStore, request, region);
         if (replay.isPresent()) {
             return replay.get();
         }
@@ -150,24 +157,26 @@ public class Route53ResolverService {
         list.put("ManagedOwnerName", (String) null);
         list.put("CreationTime", Instant.now().toString());
         list.put("ModificationTime", Instant.now().toString());
+        list.set("_Tags", parseTags(request.path("Tags")));
         domainListStore.put(id, list);
-        return list.deepCopy();
+        return resourceView(list);
     }
 
     public ObjectNode deleteFirewallDomainList(String id) {
         ObjectNode list = require(domainListStore, id, "firewall domain list");
         domainListStore.delete(id);
-        ObjectNode result = list.deepCopy();
+        ObjectNode result = resourceView(list);
         result.put("Status", "DELETING");
         return result;
     }
 
-    public List<ObjectNode> listCustomFirewallDomainLists() {
-        return domainListStore.scan(key -> true).stream().map(ObjectNode::deepCopy).toList();
+    public List<ObjectNode> listCustomFirewallDomainLists(String region) {
+        return domainListStore.scan(key -> true).stream()
+                .filter(list -> region.equals(regionOf(list))).map(this::resourceView).toList();
     }
 
-    public java.util.Optional<ObjectNode> getCustomFirewallDomainList(String id) {
-        return domainListStore.get(id).map(ObjectNode::deepCopy);
+    public Optional<ObjectNode> getCustomFirewallDomainList(String id) {
+        return domainListStore.get(id).map(this::resourceView);
     }
 
     // ---------- Resolver endpoints ----------
@@ -176,14 +185,20 @@ public class Route53ResolverService {
         requireText(request, "Name", INVALID_PARAMETER);
         String direction = requireText(request, "Direction", INVALID_PARAMETER);
         String idPrefix = endpointIdPrefix(direction);
-        JsonNode ipAddresses = request.path("IpAddressRequests");
+        JsonNode ipAddresses = request.path("IpAddresses");
         if (!ipAddresses.isArray() || ipAddresses.isEmpty()) {
-            throw new AwsException(INVALID_PARAMETER, "IpAddressRequests is required", 400);
+            throw new AwsException(INVALID_PARAMETER, "IpAddresses is required", 400);
         }
-        java.util.Optional<ObjectNode> replay = replayOf(endpointStore, request, region);
+        if (!request.path("SecurityGroupIds").isArray() || request.path("SecurityGroupIds").isEmpty()) {
+            throw new AwsException(INVALID_PARAMETER, "SecurityGroupIds is required", 400);
+        }
+        validateEndpointOptions(request);
+        ObjectNode tags = parseTags(request.path("Tags"));
+        Optional<ObjectNode> replay = replayOf(endpointStore, request, region);
         if (replay.isPresent()) {
             ObjectNode existing = replay.get();
-            requireReplayMatches(existing, request, "Name", "Direction", "SecurityGroupIds");
+            requireReplayMatches(existing, request, "Name", "Direction", "SecurityGroupIds",
+                    "ResolverEndpointType", "Protocols");
             requireSameIpRequests(existing, request, ipAddresses);
             return existing;
         }
@@ -195,44 +210,149 @@ public class Route53ResolverService {
         endpoint.put("Direction", direction);
         endpoint.set("SecurityGroupIds", request.path("SecurityGroupIds").deepCopy());
         endpoint.put("IpAddressCount", ipAddresses.size());
-        endpoint.put("HostVPCId", "vpc-" + deterministicHex(id, 8));
-        endpoint.put("Status", "OPERATIONAL");
+        endpoint.put("ResolverEndpointType", request.path("ResolverEndpointType").asText("IPV4"));
+        endpoint.set("Protocols", request.has("Protocols") ? request.get("Protocols").deepCopy()
+                : objectMapper.createArrayNode().add("Do53"));
+        endpoint.set("_Tags", tags);
         endpoint.put("CreatorRequestId", text(request, "CreatorRequestId"));
         endpoint.put("CreationTime", Instant.now().toString());
         endpoint.put("ModificationTime", Instant.now().toString());
+        ArrayNode addresses = allocateAddresses(endpoint, ipAddresses, region);
+        endpoint.put("Status", "OPERATIONAL");
+        ObjectNode record = objectMapper.createObjectNode();
+        record.set("IpAddressRequests", normalizedIpRequests(ipAddresses));
+        record.set("IpAddresses", addresses);
+        endpointIpRequestStore.put(id, record);
         endpointStore.put(id, endpoint);
-        endpointIpRequestStore.put(id,
-                objectMapper.createObjectNode().set("IpAddressRequests", normalizedIpRequests(ipAddresses)));
-        return endpoint.deepCopy();
+        return resourceView(endpoint);
     }
 
-    public ObjectNode deleteResolverEndpoint(String id) {
+    public synchronized ObjectNode deleteResolverEndpoint(String id) {
         ObjectNode endpoint = require(endpointStore, id, "resolver endpoint");
+        if (ruleStore.scan(key -> true).stream().anyMatch(rule -> id.equals(text(rule, "ResolverEndpointId")))) {
+            throw new AwsException("InvalidRequestException", "Resolver endpoint is referenced by a rule", 400);
+        }
+        endpointIpRequestStore.get(id).ifPresent(record -> releaseAddresses(
+                record.path("IpAddresses"), regionOf(endpoint)));
         endpointStore.delete(id);
         endpointIpRequestStore.delete(id);
-        ObjectNode result = endpoint.deepCopy();
+        ObjectNode result = resourceView(endpoint);
         result.put("Status", "DELETING");
         return result;
     }
 
     public ObjectNode getResolverEndpoint(String id) {
-        return require(endpointStore, id, "resolver endpoint").deepCopy();
+        return resourceView(require(endpointStore, id, "resolver endpoint"));
     }
 
     public List<ObjectNode> listResolverEndpoints() {
-        return endpointStore.scan(key -> true).stream().map(ObjectNode::deepCopy).toList();
+        return endpointStore.scan(key -> true).stream().map(this::resourceView).toList();
     }
 
-    public ObjectNode updateResolverEndpoint(String id, JsonNode request) {
-        ObjectNode endpoint = require(endpointStore, id, "resolver endpoint");
+    public synchronized ObjectNode updateResolverEndpoint(String id, JsonNode request) {
+        ObjectNode endpoint = require(endpointStore, id, "resolver endpoint").deepCopy();
+        validateEndpointOptions(request);
+        if (request.hasNonNull("ResolverEndpointType")
+                && !"IPV4".equals(text(request, "ResolverEndpointType"))) {
+            throw new AwsException(INVALID_PARAMETER,
+                    "IPv6 resolver network interfaces are not supported by this emulator", 400);
+        }
+        if (request.has("UpdateIpAddresses")) {
+            throw new AwsException(INVALID_PARAMETER,
+                    "IPv6 resolver IP address updates are not supported by this emulator", 400);
+        }
+        copyIfPresent(request, endpoint, "Name", "ResolverEndpointType", "Protocols");
+        endpoint.put("ModificationTime", Instant.now().toString());
+        endpointStore.put(id, endpoint);
+        return resourceView(endpoint);
+    }
+
+    public ObjectNode listResolverEndpointIpAddresses(JsonNode request, String region) {
+        String id = requireText(request, "ResolverEndpointId", INVALID_PARAMETER);
+        requireRegion(getResolverEndpoint(id), region);
+        ObjectNode record = require(endpointIpRequestStore, id, "resolver endpoint addresses");
+        if (!record.path("IpAddresses").isArray()) {
+            throw new AwsException("InternalServiceErrorException",
+                    "Resolver endpoint has no persisted network interface addresses", 500);
+        }
+        List<ObjectNode> addresses = new ArrayList<>();
+        for (JsonNode address : record.path("IpAddresses")) {
+            ObjectNode view = ((ObjectNode) address).deepCopy();
+            view.remove("_NetworkInterfaceId");
+            addresses.add(view);
+        }
+        return page(addresses, request, "IpAddresses", region + ":" + id);
+    }
+
+    private void validateEndpointOptions(JsonNode request) {
         String endpointType = text(request, "ResolverEndpointType");
         if (endpointType != null) {
             requireEnum(endpointType, "ResolverEndpointType", ENDPOINT_TYPES, INVALID_PARAMETER);
         }
-        copyIfPresent(request, endpoint, "Name", "ResolverEndpointType");
-        endpoint.put("ModificationTime", Instant.now().toString());
-        endpointStore.put(id, endpoint);
-        return endpoint.deepCopy();
+        if (request.has("Protocols")) {
+            JsonNode protocols = request.path("Protocols");
+            if (!protocols.isArray() || protocols.isEmpty()) {
+                throw new AwsException(INVALID_PARAMETER, "Protocols must not be empty", 400);
+            }
+            for (JsonNode protocol : protocols) {
+                requireEnum(protocol.asText(), "Protocols", List.of("Do53", "DoH", "DoH-FIPS"), INVALID_PARAMETER);
+            }
+        }
+    }
+
+    private ArrayNode allocateAddresses(ObjectNode endpoint, JsonNode requests, String region) {
+        List<String> subnetIds = new ArrayList<>();
+        for (JsonNode request : requests) {
+            subnetIds.add(requireText(request, "SubnetId", INVALID_PARAMETER));
+            if (request.hasNonNull("Ipv6") || !"IPV4".equals(endpoint.path("ResolverEndpointType").asText())) {
+                throw new AwsException(INVALID_PARAMETER,
+                        "IPv6 resolver network interfaces are not supported by this emulator", 400);
+            }
+        }
+        ArrayNode addresses = objectMapper.createArrayNode();
+        try {
+            List<Subnet> subnets = ec2.describeSubnets(region, subnetIds, Map.of());
+            String vpcId = subnets.getFirst().getVpcId();
+            if (subnets.stream().anyMatch(subnet -> !vpcId.equals(subnet.getVpcId()))) {
+                throw new AwsException(INVALID_PARAMETER, "All endpoint subnets must belong to the same VPC", 400);
+            }
+            endpoint.put("HostVPCId", vpcId);
+            List<String> groups = new ArrayList<>();
+            endpoint.path("SecurityGroupIds").forEach(group -> groups.add(group.asText()));
+            for (JsonNode request : requests) {
+                NetworkInterface networkInterface = ec2.createNetworkInterface(region, text(request, "SubnetId"),
+                        "Route 53 Resolver endpoint " + text(endpoint, "Id"), text(request, "Ip"),
+                        List.of(), groups, List.of());
+                ObjectNode address = addresses.addObject();
+                address.put("IpId", id("rni"));
+                address.put("SubnetId", networkInterface.getSubnetId());
+                address.put("Ip", networkInterface.getPrivateIpAddress());
+                address.put("Status", "ATTACHED");
+                address.put("CreationTime", Instant.now().toString());
+                address.put("ModificationTime", Instant.now().toString());
+                address.put("_NetworkInterfaceId", networkInterface.getNetworkInterfaceId());
+            }
+            return addresses;
+        } catch (AwsException error) {
+            releaseAddresses(addresses, region);
+            throw new AwsException(INVALID_PARAMETER, error.getMessage(), 400);
+        }
+    }
+
+    private void releaseAddresses(JsonNode addresses, String region) {
+        for (JsonNode address : addresses) {
+            String networkInterfaceId = text(address, "_NetworkInterfaceId");
+            if (networkInterfaceId != null) {
+                try {
+                    ec2.deleteNetworkInterface(region, networkInterfaceId);
+                } catch (AwsException expected) {
+                    if (!"InvalidNetworkInterfaceID.NotFound".equals(expected.getErrorCode())) {
+                        throw expected;
+                    }
+                    // An interface removed out of band is already released.
+                }
+            }
+        }
     }
 
     // ---------- Resolver rules ----------
@@ -247,8 +367,12 @@ public class Route53ResolverService {
             throw new AwsException(INVALID_PARAMETER,
                     "TargetIps must contain at least one target address.", 400);
         }
-        String domainName = text(request, "DomainName");
-        java.util.Optional<ObjectNode> replay = replayOf(ruleStore, request, region);
+        String domainName = normalizeDomain(requireText(request, "DomainName", INVALID_PARAMETER));
+        ObjectNode tags = parseTags(request.path("Tags"));
+        if (request.hasNonNull("ResolverEndpointId")) {
+            validateRuleEndpoint(text(request, "ResolverEndpointId"), region);
+        }
+        Optional<ObjectNode> replay = replayOf(ruleStore, request, region);
         if (replay.isPresent()) {
             requireReplayMatches(replay.get(), request,
                     "Name", "RuleType", "DomainName", "TargetIps", "ResolverEndpointId");
@@ -261,48 +385,73 @@ public class Route53ResolverService {
         rule.put("DomainName", domainName);
         rule.put("Status", "COMPLETE");
         rule.put("RuleType", text(request, "RuleType"));
-        rule.put("Name", text(request, "Name"));
-        rule.set("TargetIps", request.path("TargetIps").deepCopy());
-        rule.put("ResolverEndpointId", text(request, "ResolverEndpointId"));
+        copyIfPresent(request, rule, "Name", "TargetIps", "ResolverEndpointId");
         rule.put("OwnerId", accountId);
         rule.put("ShareStatus", "NOT_SHARED");
         rule.put("CreatorRequestId", text(request, "CreatorRequestId"));
         rule.put("CreationTime", Instant.now().toString());
         rule.put("ModificationTime", Instant.now().toString());
+        rule.set("_Tags", tags);
         ruleStore.put(id, rule);
-        return rule.deepCopy();
+        return resourceView(rule);
     }
 
-    public ObjectNode deleteResolverRule(String id) {
+    public synchronized ObjectNode deleteResolverRule(String id) {
         ObjectNode rule = require(ruleStore, id, "resolver rule");
+        if (ruleAssociationStore.scan(key -> true).stream()
+                .anyMatch(association -> id.equals(text(association, "ResolverRuleId")))) {
+            throw new AwsException("ResourceInUseException", "Resolver rule is associated with a VPC", 400);
+        }
         ruleStore.delete(id);
-        ObjectNode result = rule.deepCopy();
+        ObjectNode result = resourceView(rule);
         result.put("Status", "DELETING");
         return result;
     }
 
     public ObjectNode getResolverRule(String id) {
-        return require(ruleStore, id, "resolver rule").deepCopy();
+        return resourceView(require(ruleStore, id, "resolver rule"));
     }
 
     public List<ObjectNode> listResolverRules() {
-        return ruleStore.scan(key -> true).stream().map(ObjectNode::deepCopy).toList();
+        return ruleStore.scan(key -> true).stream().map(this::resourceView).toList();
     }
 
-    public ObjectNode updateResolverRule(String id, JsonNode config) {
-        ObjectNode rule = require(ruleStore, id, "resolver rule");
+    public synchronized ObjectNode updateResolverRule(String id, JsonNode config) {
+        ObjectNode rule = require(ruleStore, id, "resolver rule").deepCopy();
+        if (!config.isObject()) {
+            throw new AwsException(INVALID_PARAMETER, "Config is required", 400);
+        }
+        if (config.has("TargetIps") && (!config.path("TargetIps").isArray()
+                || config.path("TargetIps").isEmpty())) {
+            throw new AwsException(INVALID_PARAMETER, "TargetIps must contain at least one target address", 400);
+        }
+        if (config.hasNonNull("ResolverEndpointId")) {
+            validateRuleEndpoint(text(config, "ResolverEndpointId"), regionOf(rule));
+        }
         copyIfPresent(config, rule, "Name", "TargetIps", "ResolverEndpointId");
         rule.put("ModificationTime", Instant.now().toString());
         ruleStore.put(id, rule);
-        return rule.deepCopy();
+        return resourceView(rule);
+    }
+
+    private void validateRuleEndpoint(String id, String region) {
+        ObjectNode endpoint = require(endpointStore, id, "resolver endpoint");
+        requireRegion(endpoint, region);
+        if (!"OUTBOUND".equals(text(endpoint, "Direction"))) {
+            throw new AwsException(INVALID_PARAMETER, "Resolver rules require an OUTBOUND endpoint", 400);
+        }
     }
 
     // ---------- Resolver rule associations ----------
 
-    public ObjectNode associateResolverRule(JsonNode request) {
+    public synchronized ObjectNode associateResolverRule(JsonNode request) {
         String ruleId = requireText(request, "ResolverRuleId", INVALID_PARAMETER);
         String vpcId = requireText(request, "VPCId", INVALID_PARAMETER);
         require(ruleStore, ruleId, "resolver rule");
+        if (ruleAssociationStore.scan(key -> true).stream().anyMatch(association ->
+                ruleId.equals(text(association, "ResolverRuleId")) && vpcId.equals(text(association, "VPCId")))) {
+            throw new AwsException("ResourceExistsException", "Resolver rule is already associated with this VPC", 400);
+        }
         String id = id("rslvr-rrassoc");
         ObjectNode association = objectMapper.createObjectNode();
         association.put("Id", id);
@@ -314,7 +463,7 @@ public class Route53ResolverService {
         return association.deepCopy();
     }
 
-    public ObjectNode disassociateResolverRule(JsonNode request) {
+    public synchronized ObjectNode disassociateResolverRule(JsonNode request) {
         String ruleId = requireText(request, "ResolverRuleId", INVALID_PARAMETER);
         String vpcId = requireText(request, "VPCId", INVALID_PARAMETER);
         ObjectNode association = ruleAssociationStore.scan(key -> true).stream()
@@ -351,6 +500,249 @@ public class Route53ResolverService {
         };
     }
 
+    // ---------- Tags and regional listings ----------
+
+    public void validateRequestRegion(JsonNode request, String region) {
+        if (request.hasNonNull("ResolverEndpointId")) {
+            requireRegion(require(endpointStore, text(request, "ResolverEndpointId"), "resolver endpoint"), region);
+        }
+        if (request.path("Config").hasNonNull("ResolverEndpointId")) {
+            requireRegion(require(endpointStore, text(request.path("Config"), "ResolverEndpointId"),
+                    "resolver endpoint"), region);
+        }
+        if (request.hasNonNull("ResolverRuleId")) {
+            requireRegion(require(ruleStore, text(request, "ResolverRuleId"), "resolver rule"), region);
+        }
+        if (request.hasNonNull("ResolverRuleAssociationId")) {
+            ObjectNode association = require(ruleAssociationStore,
+                    text(request, "ResolverRuleAssociationId"), "resolver rule association");
+            requireRegion(require(ruleStore, text(association, "ResolverRuleId"), "resolver rule"), region);
+        }
+        if (request.hasNonNull("FirewallDomainListId")) {
+            domainListStore.get(text(request, "FirewallDomainListId"))
+                    .ifPresent(list -> requireRegion(list, region));
+        }
+    }
+
+    public ObjectNode listResources(String kind, JsonNode request, String region, String accountId) {
+        List<ObjectNode> resources = switch (kind) {
+            case "ResolverEndpoints" -> listResolverEndpoints();
+            case "ResolverRules" -> listResolverRules();
+            case "ResolverRuleAssociations" -> listResolverRuleAssociations();
+            default -> throw new IllegalArgumentException("Unknown resolver collection: " + kind);
+        };
+        List<String> fields = switch (kind) {
+            case "ResolverEndpoints" -> List.of("Id", "CreatorRequestId", "Name", "Direction", "HostVPCId",
+                    "Status", "SecurityGroupIds", "IpAddressCount", "ResolverEndpointType", "Protocols");
+            case "ResolverRules" -> List.of("Id", "CreatorRequestId", "Name", "DomainName", "RuleType",
+                    "ResolverEndpointId", "Status", "OwnerId", "ShareStatus");
+            default -> List.of("Id", "Name", "ResolverRuleId", "VPCId", "Status");
+        };
+        JsonNode filters = request.path("Filters");
+        validateFilters(filters, fields);
+        List<ObjectNode> filtered = resources.stream()
+                .filter(resource -> {
+                    ObjectNode regionalResource = resource;
+                    if ("ResolverRuleAssociations".equals(kind)) {
+                        regionalResource = ruleStore.get(text(resource, "ResolverRuleId")).orElse(null);
+                    }
+                    return regionalResource != null && region.equals(regionOf(regionalResource));
+                })
+                .filter(resource -> matchesFilters(resource, filters))
+                .sorted(Comparator.comparing(resource -> text(resource, "Id")))
+                .toList();
+        return page(filtered, request, kind, accountId + ":" + region + ":" + canonicalKey(filters));
+    }
+
+    private void validateFilters(JsonNode filters, List<String> fields) {
+        if (filters.isMissingNode()) {
+            return;
+        }
+        if (!filters.isArray()) {
+            throw new AwsException(INVALID_PARAMETER, "Filters must be an array", 400);
+        }
+        for (JsonNode filter : filters) {
+            String name = requireText(filter, "Name", INVALID_PARAMETER);
+            JsonNode values = filter.path("Values");
+            if (!fields.contains(name) || !values.isArray() || values.isEmpty()) {
+                throw new AwsException(INVALID_PARAMETER, "Invalid filter: " + name, 400);
+            }
+            for (JsonNode value : values) {
+                if (!value.isTextual()) {
+                    throw new AwsException(INVALID_PARAMETER, "Filter values must be strings", 400);
+                }
+            }
+        }
+    }
+
+    private boolean matchesFilters(ObjectNode resource, JsonNode filters) {
+        for (JsonNode filter : filters) {
+            String field = text(filter, "Name");
+            JsonNode actual = resource.path(field);
+            boolean matched = false;
+            for (JsonNode value : filter.path("Values")) {
+                if (actual.isArray()) {
+                    for (JsonNode member : actual) {
+                        matched |= member.asText().equals(value.asText());
+                    }
+                } else if ("DomainName".equals(field)) {
+                    matched |= normalizeDomain(actual.asText()).equals(normalizeDomain(value.asText()));
+                } else {
+                    matched |= !actual.isMissingNode() && !actual.isNull() && actual.asText().equals(value.asText());
+                }
+            }
+            if (!matched) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private ObjectNode page(List<ObjectNode> resources, JsonNode request, String field, String scope) {
+        int maximum = request.path("MaxResults").asInt(100);
+        if (maximum < 1 || maximum > 100 || (request.has("MaxResults")
+                && !request.path("MaxResults").isIntegralNumber())) {
+            throw new AwsException(INVALID_PARAMETER, "MaxResults must be between 1 and 100", 400);
+        }
+        String prefix = deterministicHex(field + ":" + scope, 24) + ":";
+        String nextToken = text(request, "NextToken");
+        int offset = 0;
+        if (nextToken != null) {
+            try {
+                String decoded = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
+                if (!decoded.startsWith(prefix)) {
+                    throw new IllegalArgumentException("Wrong token scope");
+                }
+                offset = Integer.parseInt(decoded.substring(prefix.length()));
+                if (offset < 0 || offset > resources.size()) {
+                    throw new IllegalArgumentException("Token outside result set");
+                }
+            } catch (IllegalArgumentException error) {
+                throw new AwsException("InvalidNextTokenException", "Invalid NextToken", 400);
+            }
+        }
+        int end = Math.min(resources.size(), offset + maximum);
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode items = result.putArray(field);
+        resources.subList(offset, end).forEach(items::add);
+        if (!"Tags".equals(field)) {
+            result.put("MaxResults", maximum);
+        }
+        if (end < resources.size()) {
+            result.put("NextToken", Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString((prefix + end).getBytes(StandardCharsets.UTF_8)));
+        }
+        return result;
+    }
+
+    public ObjectNode listTagsForResource(JsonNode request, String region) {
+        String arn = requireText(request, "ResourceArn", INVALID_PARAMETER);
+        ObjectNode resource = taggedResource(arn, region);
+        List<ObjectNode> tags = new ArrayList<>();
+        resource.path("_Tags").fields().forEachRemaining(entry -> tags.add(objectMapper.createObjectNode()
+                .put("Key", entry.getKey()).put("Value", entry.getValue().asText())));
+        tags.sort(Comparator.comparing(tag -> tag.path("Key").asText()));
+        return page(tags, request, "Tags", arn);
+    }
+
+    public synchronized void tagResource(JsonNode request, String region) {
+        String arn = requireText(request, "ResourceArn", INVALID_PARAMETER);
+        ObjectNode resource = taggedResource(arn, region).deepCopy();
+        if (!request.path("Tags").isArray() || request.path("Tags").isEmpty()) {
+            throw new AwsException(INVALID_PARAMETER, "Tags is required", 400);
+        }
+        ObjectNode tags = resource.withObject("/_Tags");
+        tags.setAll(parseTags(request.path("Tags")));
+        if (tags.size() > 200) {
+            throw new AwsException("LimitExceededException", "Too many tags", 400);
+        }
+        resourceStore(arn).put(text(resource, "Id"), resource);
+    }
+
+    public synchronized void untagResource(JsonNode request, String region) {
+        String arn = requireText(request, "ResourceArn", INVALID_PARAMETER);
+        ObjectNode resource = taggedResource(arn, region).deepCopy();
+        JsonNode keys = request.path("TagKeys");
+        if (!keys.isArray() || keys.isEmpty()) {
+            throw new AwsException(INVALID_PARAMETER, "TagKeys is required", 400);
+        }
+        ObjectNode tags = resource.withObject("/_Tags");
+        for (JsonNode key : keys) {
+            if (!key.isTextual() || key.asText().isBlank()) {
+                throw new AwsException(INVALID_PARAMETER, "Tag keys must not be empty", 400);
+            }
+            tags.remove(key.asText());
+        }
+        resourceStore(arn).put(text(resource, "Id"), resource);
+    }
+
+    private ObjectNode parseTags(JsonNode input) {
+        ObjectNode tags = objectMapper.createObjectNode();
+        if (input.isMissingNode()) {
+            return tags;
+        }
+        if (!input.isArray()) {
+            throw new AwsException(INVALID_PARAMETER, "Tags must be an array", 400);
+        }
+        for (JsonNode tag : input) {
+            String key = requireText(tag, "Key", INVALID_PARAMETER);
+            JsonNode value = tag.path("Value");
+            if (key.length() > 128 || !value.isTextual() || value.asText().length() > 256) {
+                throw new AwsException(INVALID_PARAMETER, "Invalid tag key or value", 400);
+            }
+            tags.put(key, value.asText());
+        }
+        if (tags.size() > 200) {
+            throw new AwsException("LimitExceededException", "Too many tags", 400);
+        }
+        return tags;
+    }
+
+    private ObjectNode taggedResource(String arn, String region) {
+        StorageBackend<String, ObjectNode> store = resourceStore(arn);
+        ObjectNode resource = require(store, arn.substring(arn.lastIndexOf('/') + 1), "resource");
+        if (!arn.equals(text(resource, "Arn"))) {
+            throw new AwsException("ResourceNotFoundException", "Unknown resource: " + arn, 400);
+        }
+        requireRegion(resource, region);
+        return resource;
+    }
+
+    private StorageBackend<String, ObjectNode> resourceStore(String arn) {
+        String[] components = arn.split(":", 6);
+        if (components.length != 6 || !"arn".equals(components[0]) || !"route53resolver".equals(components[2])) {
+            throw new AwsException(INVALID_PARAMETER, "Invalid resolver resource ARN", 400);
+        }
+        String resourceType = components[5].split("/", 2)[0];
+        return switch (resourceType) {
+            case "resolver-endpoint" -> endpointStore;
+            case "resolver-rule" -> ruleStore;
+            case "firewall-domain-list" -> domainListStore;
+            default -> throw new AwsException(INVALID_PARAMETER, "Unsupported resolver resource ARN", 400);
+        };
+    }
+
+    private ObjectNode resourceView(ObjectNode resource) {
+        ObjectNode view = resource.deepCopy();
+        view.remove("_Tags");
+        return view;
+    }
+
+    private String regionOf(ObjectNode resource) {
+        return resource.path("Arn").asText().split(":", 6)[3];
+    }
+
+    private void requireRegion(ObjectNode resource, String region) {
+        if (!region.equals(regionOf(resource))) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found in region " + region, 400);
+        }
+    }
+
+    private String normalizeDomain(String domain) {
+        String normalized = domain.toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".") ? normalized : normalized + ".";
+    }
+
     // ---------- Shared helpers ----------
 
     /**
@@ -371,11 +763,11 @@ public class Route53ResolverService {
      * shapes have no field for. Same intent as {@code FisService.idempotencyKey} and
      * {@code BedrockAgentCoreControlService.tokenKey}, which fold the region into the key.</p>
      */
-    private java.util.Optional<ObjectNode> replayOf(StorageBackend<String, ObjectNode> store, JsonNode request,
+    private Optional<ObjectNode> replayOf(StorageBackend<String, ObjectNode> store, JsonNode request,
                                                     String region) {
         String creatorRequestId = text(request, "CreatorRequestId");
         if (creatorRequestId == null || creatorRequestId.isBlank()) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         String regionPrefix = "arn:aws:route53resolver:" + region + ":";
         return store.scan(key -> true).stream()
@@ -385,7 +777,7 @@ public class Route53ResolverService {
                     return arn != null && arn.startsWith(regionPrefix);
                 })
                 .findFirst()
-                .map(ObjectNode::deepCopy);
+                .map(this::resourceView);
     }
 
     /**
@@ -411,6 +803,10 @@ public class Route53ResolverService {
                 continue;
             }
             JsonNode stored = existing.get(field);
+            if ("DomainName".equals(field) && stored != null
+                    && normalizeDomain(stored.asText()).equals(normalizeDomain(requested.asText()))) {
+                continue;
+            }
             if (stored == null || !stored.equals(requested)) {
                 throw replayConflict(request, existing, field);
             }
@@ -459,9 +855,9 @@ public class Route53ResolverService {
      * key must not depend on it.</p>
      */
     private ArrayNode normalizedIpRequests(JsonNode ipAddresses) {
-        List<JsonNode> entries = new java.util.ArrayList<>();
+        List<JsonNode> entries = new ArrayList<>();
         ipAddresses.forEach(entries::add);
-        entries.sort(java.util.Comparator.comparing(Route53ResolverService::canonicalKey));
+        entries.sort(Comparator.comparing(Route53ResolverService::canonicalKey));
         ArrayNode normalized = objectMapper.createArrayNode();
         entries.forEach(normalized::add);
         return normalized;
@@ -470,9 +866,9 @@ public class Route53ResolverService {
     /** A node's contents as a string that does not depend on the order its members were written in. */
     private static String canonicalKey(JsonNode node) {
         if (node.isObject()) {
-            List<String> names = new java.util.ArrayList<>();
+            List<String> names = new ArrayList<>();
             node.fieldNames().forEachRemaining(names::add);
-            java.util.Collections.sort(names);
+            Collections.sort(names);
             StringBuilder key = new StringBuilder("{");
             for (String name : names) {
                 key.append(name).append('=').append(canonicalKey(node.get(name))).append(';');
@@ -494,6 +890,9 @@ public class Route53ResolverService {
     }
 
     private ObjectNode require(StorageBackend<String, ObjectNode> store, String id, String type) {
+        if (id == null || id.isBlank()) {
+            throw new AwsException(INVALID_PARAMETER, "Missing " + type + " identifier", 400);
+        }
         return store.get(id).orElseThrow(() -> new AwsException("ResourceNotFoundException",
                 "Unknown " + type + ": " + id, 400));
     }

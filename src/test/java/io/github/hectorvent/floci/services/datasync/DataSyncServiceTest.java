@@ -2,20 +2,26 @@ package io.github.hectorvent.floci.services.datasync;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncAgent;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncLocation;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncLocationType;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncTask;
+import io.github.hectorvent.floci.services.s3.S3Service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,15 +40,23 @@ class DataSyncServiceTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private DataSyncService service;
+    private StorageFactory storageFactory;
+    private final List<Runnable> jobs = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
-        StorageFactory storageFactory = Mockito.mock(StorageFactory.class);
-        // A fresh backend per call: agents, locations and tasks are three separate stores,
-        // and sharing one would let a location ARN resolve out of the agent store.
+        storageFactory = Mockito.mock(StorageFactory.class);
+        Map<String, AccountAwareStorageBackend<?>> stores = new HashMap<>();
         when(storageFactory.create(Mockito.anyString(), Mockito.anyString(), Mockito.any()))
-                .thenAnswer(invocation -> AccountAwareStorageBackend.inMemory("000000000000"));
-        service = new DataSyncService(storageFactory, new RegionResolver(REGION, "000000000000"), mapper);
+                .thenAnswer(invocation -> stores.computeIfAbsent(invocation.getArgument(1),
+                        key -> AccountAwareStorageBackend.inMemory("000000000000")));
+        ExecutorService executor = Mockito.mock(ExecutorService.class);
+        Mockito.doAnswer(invocation -> {
+            jobs.add(invocation.getArgument(0));
+            return null;
+        }).when(executor).execute(Mockito.any(Runnable.class));
+        service = new DataSyncService(storageFactory, new RegionResolver(REGION, "000000000000"), mapper,
+                Mockito.mock(S3Service.class), executor, new RequestContext());
     }
 
     private JsonNode json(String body) {
@@ -434,6 +448,109 @@ class DataSyncServiceTest {
                 "arn:aws:datasync:us-east-1:000000000000:task/task-00000000000000000"));
 
         assertEquals("InvalidRequestException", error.getErrorCode());
+    }
+
+    @Test
+    void executionLifecycleQueuesUpdatesCancelsAndCleansUp() {
+        DataSyncTask task = service.createTask(taskRequest(""), REGION);
+        ObjectNode first = service.startTaskExecution(json("""
+                {"TaskArn":"%s", "OverrideOptions":{"BytesPerSecond":1024}}
+                """.formatted(task.getTaskArn())), REGION);
+        String arn = first.path("TaskExecutionArn").asText();
+        assertTrue(arn.startsWith(task.getTaskArn() + "/execution/exec-"));
+        assertEquals("LAUNCHING", first.path("Status").asText());
+        assertEquals("RUNNING", service.getTask(task.getTaskArn()).getStatus());
+        assertEquals(-1, task.getOptions().path("BytesPerSecond").asLong());
+
+        ObjectNode second = service.startTaskExecution(json("""
+                {"TaskArn":"%s"}
+                """.formatted(task.getTaskArn())), REGION);
+        assertEquals("QUEUED", second.path("Status").asText());
+        assertEquals(1, jobs.size());
+        DataSyncService.Page<ObjectNode> page = service.listTaskExecutions(task.getTaskArn(), null, 1, REGION);
+        assertEquals(1, page.items().size());
+        assertEquals(1, service.listTaskExecutions(task.getTaskArn(), page.nextToken(), 1, REGION).items().size());
+
+        service.updateTaskExecution(json("""
+                {"TaskExecutionArn":"%s", "Options":{"BytesPerSecond":2048}}
+                """.formatted(arn)), REGION);
+        assertEquals(2048, service.describeTaskExecution(arn, REGION).path("Options").path("BytesPerSecond").asLong());
+        service.cancelTaskExecution(arn, REGION);
+        assertEquals("ERROR", service.describeTaskExecution(arn, REGION).path("Status").asText());
+        assertEquals("Cancelled", service.describeTaskExecution(arn, REGION).path("Result").path("ErrorCode").asText());
+        assertEquals("LAUNCHING", service.describeTaskExecution(second.path("TaskExecutionArn").asText(), REGION)
+                .path("Status").asText());
+        assertThrows(AwsException.class, () -> service.cancelTaskExecution(arn, REGION));
+        assertThrows(AwsException.class, () -> service.updateTaskExecution(json("""
+                {"TaskExecutionArn":"%s", "Options":{"BytesPerSecond":4096}}
+                """.formatted(arn)), REGION));
+
+        service.deleteTask(task.getTaskArn());
+        jobs.forEach(Runnable::run);
+        assertThrows(AwsException.class, () -> service.describeTaskExecution(arn, REGION));
+        assertThrows(AwsException.class, () -> service.listTaskExecutions(task.getTaskArn(), null, 0, REGION));
+    }
+
+    @Test
+    void interruptedExecutionsAreRecoveredAsErrorsAndResetCancelsQueuedWork() {
+        DataSyncTask task = service.createTask(taskRequest(""), REGION);
+        JsonNode start = json("""
+                {"TaskArn":"%s"}
+                """.formatted(task.getTaskArn()));
+        String running = service.startTaskExecution(start, REGION).path("TaskExecutionArn").asText();
+        String queued = service.startTaskExecution(start, REGION).path("TaskExecutionArn").asText();
+        DataSyncService recovered = new DataSyncService(storageFactory, new RegionResolver(REGION, "000000000000"),
+                mapper, Mockito.mock(S3Service.class), Mockito.mock(ExecutorService.class), new RequestContext());
+        for (String arn : List.of(running, queued)) {
+            ObjectNode execution = recovered.describeTaskExecution(arn, REGION);
+            assertEquals("ERROR", execution.path("Status").asText());
+            assertEquals("Interrupted", execution.path("Result").path("ErrorCode").asText());
+        }
+        assertEquals("AVAILABLE", recovered.getTask(task.getTaskArn()).getStatus());
+        recovered.stopExecutions();
+        service.beforeReset();
+        service.clear();
+        service.afterReset();
+        jobs.forEach(Runnable::run);
+        assertTrue(service.listTaskExecutions(null, null, 0, REGION).items().isEmpty());
+        assertTrue(service.listTasks(null, null, 0).items().isEmpty());
+    }
+
+    @Test
+    void unsupportedBackendProducesAnExecutionErrorInsteadOfSuccess() {
+        DataSyncTask task = service.createTask(taskRequest(""), REGION);
+        String arn = service.startTaskExecution(json("""
+                {"TaskArn":"%s"}
+                """.formatted(task.getTaskArn())), REGION).path("TaskExecutionArn").asText();
+        jobs.getFirst().run();
+        ObjectNode execution = service.describeTaskExecution(arn, REGION);
+        assertEquals("ERROR", execution.path("Status").asText());
+        assertEquals("UnsupportedBackend", execution.path("Result").path("ErrorCode").asText());
+        assertEquals(0, execution.path("BytesTransferred").asLong());
+        assertEquals("AVAILABLE", service.getTask(task.getTaskArn()).getStatus());
+    }
+
+    @Test
+    void executionOperationsRejectForeignRegionsAndInvalidUpdates() {
+        DataSyncTask task = service.createTask(taskRequest(""), REGION);
+        JsonNode start = json("""
+                {"TaskArn":"%s"}
+                """.formatted(task.getTaskArn()));
+        assertThrows(AwsException.class, () -> service.startTaskExecution(start, "us-west-2"));
+        String arn = service.startTaskExecution(start, REGION).path("TaskExecutionArn").asText();
+        assertThrows(AwsException.class, () -> service.describeTaskExecution(arn, "us-west-2"));
+        assertThrows(AwsException.class, () -> service.cancelTaskExecution(arn, "us-west-2"));
+        assertThrows(AwsException.class, () -> service.listTaskExecutions(task.getTaskArn(), null, 1, "us-west-2"));
+        assertThrows(AwsException.class, () -> service.updateTaskExecution(json("""
+                {"TaskExecutionArn":"%s", "Options":{"BytesPerSecond":0}}
+                """.formatted(arn)), REGION));
+        assertThrows(AwsException.class, () -> service.updateTaskExecution(json("""
+                {"TaskExecutionArn":"%s", "Options":{"VerifyMode":"NONE"}}
+                """.formatted(arn)), REGION));
+        assertThrows(AwsException.class, () -> service.startTaskExecution(json("""
+                {"TaskArn":"%s", "OverrideOptions":{"TaskQueueing":"DISABLED"}}
+                """.formatted(task.getTaskArn())), REGION));
+        assertEquals(1, service.listTaskExecutions(task.getTaskArn(), null, 0, REGION).items().size());
     }
 
     @Test

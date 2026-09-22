@@ -71,6 +71,40 @@ class CognitoIdentityServiceTest {
     }
 
     @Test
+    void emptyRolesDetachWithoutDeletingThePoolOrItsIdentities() {
+        IdentityPool pool = createPool(true);
+        String poolId = pool.getIdentityPoolId();
+        service.setIdentityPoolRoles(poolId, Map.of("unauthenticated", ROLE), null, REGION);
+        String identityId = service.getId(poolId, Map.of(), REGION).getIdentityId();
+        service.getCredentialsForIdentity(identityId, Map.of(), REGION);
+
+        service.setIdentityPoolRoles(poolId, Map.of(), null, REGION);
+        service.setIdentityPoolRoles(poolId, Map.of(), null, REGION);
+        assertTrue(service.getIdentityPoolRoles(poolId, REGION).getRoles().isEmpty());
+        assertEquals(poolId, service.describeIdentityPool(poolId, REGION).getIdentityPoolId());
+        assertEquals(identityId, service.describeIdentity(identityId, REGION).getIdentityId());
+        assertEquals("InvalidIdentityPoolConfigurationException", assertThrows(AwsException.class,
+                () -> service.getCredentialsForIdentity(identityId, Map.of(), REGION)).getErrorCode());
+
+        service.setIdentityPoolRoles(poolId, Map.of("unauthenticated", ROLE), null, REGION);
+        assertEquals(identityId, service.getCredentialsForIdentity(identityId, Map.of(), REGION).get("IdentityId"));
+        service.deleteIdentityPool(poolId, REGION);
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.setIdentityPoolRoles(poolId, Map.of(), null, REGION)).getErrorCode());
+    }
+
+    @Test
+    void missingRolesAreRejectedWithoutClearingExistingRoles() {
+        IdentityPool pool = createPool(true);
+        String poolId = pool.getIdentityPoolId();
+        service.setIdentityPoolRoles(poolId, Map.of("unauthenticated", ROLE), null, REGION);
+
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> service.setIdentityPoolRoles(poolId, null, null, REGION)).getErrorCode());
+        assertEquals(Map.of("unauthenticated", ROLE), service.getIdentityPoolRoles(poolId, REGION).getRoles());
+    }
+
+    @Test
     void disablingGuestAccessAppliesToExistingIdentityCredentials() {
         IdentityPool pool = createPool(true);
         service.setIdentityPoolRoles(pool.getIdentityPoolId(), Map.of("unauthenticated", ROLE), null, REGION);

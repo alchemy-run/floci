@@ -219,6 +219,14 @@ floci:
         flush-interval-ms: 5000
 
   dns:
+    # Opt-in source-mode Docker DNS/HTTPS bridge; no privileged or non-loopback host listeners.
+    # Requires FLOCI_TLS_ENABLED=true and FLOCI_TLS_AWS_HTTPS_PORT=0.
+    # Docker Desktop must reach host loopback through host-gateway. Use the same Docker
+    # network for the helper and workloads (Lambda network override, then global network).
+    source-enabled: false                       # FLOCI_DNS_SOURCE_ENABLED
+    source-port: 0                              # FLOCI_DNS_SOURCE_PORT; 0 = ephemeral loopback UDP port
+    source-helper-image: floci/source-network-helper:local # FLOCI_DNS_SOURCE_HELPER_IMAGE; bundled recipe built on demand
+    # Source containers use only Floci DNS; unrelated domains are forwarded upstream.
     # Extra hostname suffixes resolved to Floci's container IP by the embedded DNS server.
     # Useful when migrating from LocalStack — add localhost.localstack.cloud to avoid
     # changing Lambda endpoint environment variables.

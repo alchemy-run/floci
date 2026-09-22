@@ -5,8 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * a spurious {@code ResourceExistsException} is loud and recoverable, while a wrong
  * success is silent.</p>
  */
+@QuarkusTest
 class Route53ResolverReplayFallbackTest {
 
     private static final String REGION = "us-east-1";
@@ -31,12 +40,32 @@ class Route53ResolverReplayFallbackTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private InMemoryStorage<String, ObjectNode> endpointIpRequests;
     private Route53ResolverService service;
+    private String vpcId;
+    private String subnetId;
+    private String groupId;
+
+    @Inject
+    Ec2Service ec2;
 
     @BeforeEach
     void setUp() {
         endpointIpRequests = new InMemoryStorage<>();
         service = new Route53ResolverService(new InMemoryStorage<>(), new InMemoryStorage<>(),
-                new InMemoryStorage<>(), new InMemoryStorage<>(), endpointIpRequests, objectMapper);
+                new InMemoryStorage<>(), new InMemoryStorage<>(), endpointIpRequests, objectMapper, ec2);
+        vpcId = ec2.createVpc(REGION, "10.0.0.0/16", false).getVpcId();
+        subnetId = ec2.createSubnet(REGION, vpcId, "10.0.0.0/24", REGION + "a").getSubnetId();
+        groupId = ec2.describeSecurityGroups(REGION, List.of(), List.of(),
+                Map.of("vpc-id", List.of(vpcId))).getFirst().getGroupId();
+    }
+
+    @AfterEach
+    void releaseNetwork() {
+        for (NetworkInterface networkInterface : ec2.describeNetworkInterfaces(REGION, List.of(),
+                Map.of("vpc-id", List.of(vpcId)), 0, null).networkInterfaces()) {
+            ec2.deleteNetworkInterface(REGION, networkInterface.getNetworkInterfaceId());
+        }
+        ec2.deleteSubnet(REGION, subnetId);
+        ec2.deleteVpc(REGION, vpcId);
     }
 
     private JsonNode createRequest(String token, String ip) {
@@ -44,9 +73,9 @@ class Route53ResolverReplayFallbackTest {
         request.put("Name", "ab-fallback");
         request.put("Direction", "INBOUND");
         request.put("CreatorRequestId", token);
-        request.putArray("SecurityGroupIds").add("sg-abc123");
-        ObjectNode ipRequest = request.putArray("IpAddressRequests").addObject();
-        ipRequest.put("SubnetId", "subnet-aaa");
+        request.putArray("SecurityGroupIds").add(groupId);
+        ObjectNode ipRequest = request.putArray("IpAddresses").addObject();
+        ipRequest.put("SubnetId", subnetId);
         ipRequest.put("Ip", ip);
         return request;
     }

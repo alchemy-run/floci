@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerReachableEndpoint;
@@ -248,7 +249,7 @@ class LambdaImageConfigTest {
                     new ContainerReachableEndpoint(config, dockerHostResolver, embeddedDnsServer);
             LaunchedContainerAwsEnv awsEnv = new LaunchedContainerAwsEnv(reachableEndpoint);
             launcher = new ContainerLauncher(containerBuilder, lifecycleManager, logStreamer, imageResolver,
-                    runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
+                    runtimeApiServerFactory, dockerHostResolver, mock(ContainerDetector.class), config, ecrRegistryManager,
                     mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv,
                     mock(io.github.hectorvent.floci.services.lambda.launcher.LambdaExecutionRoleCredentials.class));
 

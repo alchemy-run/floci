@@ -25,8 +25,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
 
 /**
- * Gives every VPC a real Docker network, so an EC2 instance's private address is an address
- * something can actually connect to rather than a number invented to look plausible.
+ * Gives every VPC a collision-free Docker transport network. EC2 logical addresses remain in
+ * the declared subnet; per-instance network namespaces translate them to these transport leases.
  *
  * <h2>One network per VPC, not per subnet</h2>
  *
@@ -50,9 +50,8 @@ import java.util.function.BiPredicate;
  * claimed by another Docker network, including one of Floci's own, which is what a second
  * VPC declaring the same CIDR looks like (legal in AWS, impossible on one Docker daemon).
  * Then, and only then, an equivalent block is allocated out of a configured private pool and
- * the substitution is logged at WARN. It is never silent: a reported private IP that does not
- * mean what the caller declared is exactly the class of quiet lie this whole change exists to
- * remove, so it is either true or it is in the log.
+ * the substitution is logged at WARN. Only Docker transport changes: EC2, ENI, and metadata
+ * responses continue to identify the address allocated from the declared AWS subnet.
  *
  * <h2>What this does not do</h2>
  *
@@ -91,6 +90,7 @@ public class VpcNetworkManager {
     public static final String COMPONENT_VALUE = "ec2-vpc";
     public static final String LABEL_VPC_ID = "floci_vpc_id";
     public static final String LABEL_VPC_REGION = "floci_vpc_region";
+    public static final String LABEL_DECLARED_CIDR = "floci_vpc_declared_cidr";
     /**
      * The API port of the Floci process that created the network. Several Floci instances
      * routinely share one Docker daemon, and reconciliation deletes things; scoping it by
@@ -196,8 +196,38 @@ public class VpcNetworkManager {
         }
     }
 
+    private Optional<Cidr4> retainedVpcCidr(String region, String vpcId, Cidr4 declared) {
+        try {
+            for (Network network : dockerClient.listNetworksCmd().exec()) {
+                Map<String, String> labels = network.getLabels() == null ? Map.of() : network.getLabels();
+                if (networkName(region, vpcId).equals(network.getName())
+                        && COMPONENT_VALUE.equals(labels.get(LABEL_COMPONENT))
+                        && vpcId.equals(labels.get(LABEL_VPC_ID))
+                        && region.equals(labels.get(LABEL_VPC_REGION))
+                        && String.valueOf(config.port()).equals(labels.get(LABEL_OWNER_PORT))) {
+                    String recorded = labels.get(LABEL_DECLARED_CIDR);
+                    return ipamSubnets(network).stream().filter(actual -> actual.isRfc1918()
+                            && (recorded != null ? recorded.equals(String.valueOf(declared))
+                            : actual.equals(declared) || Cidr4.parse(config.services().ec2().vpcNetworks().fallbackPool())
+                                    .map(pool -> pool.contains(actual)).orElse(false))).findFirst();
+                }
+            }
+        } catch (Exception e) {
+            LOG.debugv("Could not discover retained network for VPC {0}: {1}", vpcId, e.getMessage());
+        }
+        return Optional.empty();
+    }
+
     private VpcBinding planVpc(String region, String vpcId, String declaredCidr) {
         Optional<Cidr4> declared = Cidr4.parse(declaredCidr);
+        Optional<Cidr4> retained = retainedVpcCidr(region, vpcId, declared.orElse(null));
+        if (retained.isPresent()) {
+            Cidr4 effective = retained.get();
+            VpcBinding binding = new VpcBinding(region, vpcId, declared.orElse(null), effective,
+                    !effective.equals(declared.orElse(null)), networkName(region, vpcId));
+            binding.created = true;
+            return binding;
+        }
         String rejection = rejectionReason(vpcId, declared, declaredCidr, List.of());
         Cidr4 effective;
         if (rejection == null) {
@@ -214,8 +244,7 @@ public class VpcNetworkManager {
             }
             else {
                 LOG.warnv("VPC {0} in {1}: declared CIDR {2} is unusable ({3}). Substituting {4} from the "
-                                + "fallback pool. Reported private IPs for this VPC will NOT match the "
-                                + "declared CIDR.",
+                                + "fallback pool for Docker transport; logical private IPs remain in the declared CIDR.",
                         vpcId, region, String.valueOf(declaredCidr), rejection, effective);
             }
         }
@@ -277,7 +306,17 @@ public class VpcNetworkManager {
         }
 
         int desiredPrefix = declared.map(Cidr4::prefix).orElse(24);
-        Cidr4 slice = allocateSubBlock(vpc.effective, desiredPrefix, siblings);
+        Cidr4 slice = null;
+        if (declared.isPresent() && vpc.declared != null && vpc.declared.contains(declared.get())) {
+            Cidr4 translated = new Cidr4(vpc.effective.network()
+                    + declared.get().network() - vpc.declared.network(), desiredPrefix);
+            if (vpc.effective.contains(translated) && siblings.stream().noneMatch(s -> s.overlaps(translated))) {
+                slice = translated;
+            }
+        }
+        if (slice == null) {
+            slice = allocateSubBlock(vpc.effective, desiredPrefix, siblings);
+        }
         if (slice == null) {
             LOG.warnv("Subnet {0} in VPC {1}: no free /{2} slice remains inside {3}; instances in this "
                             + "subnet fall back to synthesised private addresses.",
@@ -285,7 +324,7 @@ public class VpcNetworkManager {
             return new SubnetBinding(subnetId, declared.orElse(null), null, true);
         }
         LOG.warnv("Subnet {0} in VPC {1}: declared CIDR {2} cannot be used ({3}). Substituting {4}: "
-                        + "reported private IPs for this subnet will NOT match the declared CIDR.",
+                        + "only Docker transport addresses use the substituted CIDR.",
                 subnetId, vpc.vpcId, String.valueOf(declaredCidr),
                 vpc.substituted ? "its VPC's CIDR was itself substituted for " + vpc.effective
                         : "it does not sit inside the VPC range " + vpc.effective + " or collides with a sibling subnet",
@@ -472,9 +511,91 @@ public class VpcNetworkManager {
     public void releasePrivateIp(String region, String subnetId, String address) {
         SubnetBinding subnet = subnetBinding(region, subnetId);
         if (subnet != null && address != null) {
-            subnet.leased.remove(address);
+            synchronized (subnet) {
+                if (subnet.transportLeases.values().stream().noneMatch(lease -> lease.transportAddress().equals(address))) {
+                    subnet.leased.remove(address);
+                }
+            }
         }
     }
+
+    /** Leases Docker transport without changing the ENI's declared-subnet identity. */
+    public Optional<String> allocateTransportPrivateIp(String region, String subnetId, String logicalAddress,
+                                                     String ownerId) {
+        SubnetBinding subnet = subnetBinding(region, subnetId);
+        if (!enabled() || subnet == null || subnet.effective == null) {
+            return Optional.empty();
+        }
+        Cidr4 logical = Cidr4.parse(logicalAddress + "/32").orElseThrow(() ->
+                new IllegalArgumentException("Invalid logical private address"));
+        if (ownerId == null || subnet.declared == null || !subnet.declared.contains(logical)
+                || logical.network() - subnet.declared.network() < 4
+                || logical.network() == subnet.declared.broadcast()) {
+            throw new IllegalArgumentException("Transport lease needs an owner and a usable address in the declared subnet");
+        }
+        synchronized (subnet) {
+            TransportLease existing = subnet.transportLeases.get(ownerId);
+            if (existing != null) {
+                if (!existing.logicalAddress().equals(logicalAddress)) {
+                    throw new IllegalStateException("Transport owner already holds a different logical address");
+                }
+                return Optional.of(existing.transportAddress());
+            }
+            if (subnet.transportLeases.values().stream().anyMatch(lease -> lease.logicalAddress().equals(logicalAddress))) {
+                throw new IllegalStateException("Logical private address already has a transport owner");
+            }
+            long offset = logical.network() - subnet.declared.network();
+            Optional<String> preferred = offset >= 4 && offset < subnet.effective.size() - 1
+                    ? subnet.effective.addressAt(offset) : Optional.empty();
+            String transport = preferred.filter(address -> !subnet.leased.contains(address)).orElse(null);
+            if (transport != null) {
+                subnet.leased.add(transport);
+            } else {
+                transport = allocatePrivateIp(region, subnetId).orElse(null);
+            }
+            if (transport == null) {
+                return Optional.empty();
+            }
+            subnet.transportLeases.put(ownerId, new TransportLease(logicalAddress, transport));
+            return Optional.of(transport);
+        }
+    }
+
+    /** Restores the exact transport retained by a running or stopped container. */
+    public boolean reserveTransportPrivateIp(String region, String subnetId, String logicalAddress,
+                                           String transportAddress, String ownerId) {
+        SubnetBinding subnet = subnetBinding(region, subnetId);
+        if (!enabled() || subnet == null || ownerId == null || logicalAddress == null || transportAddress == null) {
+            return false;
+        }
+        synchronized (subnet) {
+            TransportLease lease = new TransportLease(logicalAddress, transportAddress);
+            if (subnet.transportLeases.containsKey(ownerId)) {
+                return lease.equals(subnet.transportLeases.get(ownerId));
+            }
+            if (subnet.transportLeases.values().stream().anyMatch(existing -> existing.logicalAddress().equals(logicalAddress))
+                    || !reservePrivateIp(region, subnetId, transportAddress)) {
+                return false;
+            }
+            subnet.transportLeases.put(ownerId, lease);
+            return true;
+        }
+    }
+
+    /** A delayed cleanup from an old instance cannot free its successor's transport. */
+    public void releaseTransportPrivateIp(String region, String subnetId, String ownerId) {
+        SubnetBinding subnet = subnetBinding(region, subnetId);
+        if (subnet != null && ownerId != null) {
+            synchronized (subnet) {
+                TransportLease removed = subnet.transportLeases.remove(ownerId);
+                if (removed != null) {
+                    subnet.leased.remove(removed.transportAddress());
+                }
+            }
+        }
+    }
+
+    private record TransportLease(String logicalAddress, String transportAddress) {}
 
     // ─── Materialisation: attaching a container ──────────────────────────────
 
@@ -663,6 +784,7 @@ public class VpcNetworkManager {
         labels.put(LABEL_COMPONENT, COMPONENT_VALUE);
         labels.put(LABEL_VPC_ID, vpc.vpcId);
         labels.put(LABEL_VPC_REGION, vpc.region);
+        labels.put(LABEL_DECLARED_CIDR, String.valueOf(vpc.declared));
         labels.put(LABEL_OWNER_PORT, String.valueOf(config.port()));
         return labels;
     }
@@ -894,6 +1016,7 @@ public class VpcNetworkManager {
         final Cidr4 effective;
         final boolean substituted;
         final Set<String> leased = ConcurrentHashMap.newKeySet();
+        final Map<String, TransportLease> transportLeases = new LinkedHashMap<>();
         /** Scaled to the block: a /29 cannot spare the ten addresses a /24 hands over freely. */
         final long firstOffset;
         long nextOffset;

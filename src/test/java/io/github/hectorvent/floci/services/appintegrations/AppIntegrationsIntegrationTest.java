@@ -1,10 +1,17 @@
 package io.github.hectorvent.floci.services.appintegrations;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -22,6 +29,163 @@ class AppIntegrationsIntegrationTest {
     private static String eventIntegrationArn;
     private static String dataIntegrationId;
     private static String dataIntegrationArn;
+
+    @Test
+    @Order(20)
+    void signedApplicationLifecycleUsesTheAwsPathsAndSharedTags() {
+        String request = applicationRequest("com.example.http", UUID.randomUUID().toString());
+        ExtractableResponse<Response> created = signed("123456789012", "us-east-1").body(request)
+                .post("/applications").then().statusCode(200)
+                .body("Id", notNullValue()).body("Arn", containsString(":application/")).extract();
+        String id = created.path("Id");
+        String arn = created.path("Arn");
+        String encoded = URLEncoder.encode(arn, StandardCharsets.UTF_8);
+        try {
+            signed("123456789012", "us-east-1").body(request).post("/applications")
+                    .then().statusCode(200).body("Id", equalTo(id));
+            signed("123456789012", "us-east-1").urlEncodingEnabled(false)
+                    .get("/applications/" + encoded).then().statusCode(200)
+                    .body("Id", equalTo(id)).body("Namespace", equalTo("com.example.http"))
+                    .body("ApplicationSourceConfig.ExternalUrlConfig.AccessUrl", equalTo("https://example.com"))
+                    .body("CreatedTime", notNullValue());
+            signed("123456789012", "us-east-1").body("""
+                    {"Description":"updated","Permissions":["User.Details.View"],
+                     "ApplicationSourceConfig":{"ExternalUrlConfig":{"AccessUrl":"https://updated.example.com"}}}
+                    """).patch("/applications/" + id).then().statusCode(200);
+            signed("123456789012", "us-east-1").get("/applications/" + id).then().statusCode(200)
+                    .body("Arn", equalTo(arn)).body("Description", equalTo("updated"))
+                    .body("Permissions[0]", equalTo("User.Details.View"));
+            signed("123456789012", "us-east-1").get("/applications/" + id + "/associations")
+                    .then().statusCode(200).body("ApplicationAssociations.size()", equalTo(0));
+            signed("123456789012", "us-east-1").body("{\"tags\":{\"env\":\"test\"}}")
+                    .post("/tags/" + arn).then().statusCode(200);
+            signed("123456789012", "us-east-1").get("/tags/" + arn)
+                    .then().statusCode(200).body("tags.env", equalTo("test"));
+            signed("123456789012", "us-east-1").queryParam("tagKeys", "env")
+                    .delete("/tags/" + arn).then().statusCode(200);
+            signed("123456789012", "us-east-1").get("/applications/" + id)
+                    .then().statusCode(200).body("Tags.env", nullValue());
+            signed("123456789012", "us-east-1").get("/applications")
+                    .then().statusCode(200).body("Applications.Id", hasItem(id));
+        } finally {
+            signed("123456789012", "us-east-1").delete("/applications/" + id).then().statusCode(200);
+        }
+        signed("123456789012", "us-east-1").get("/applications/" + id)
+                .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+        signed("123456789012", "us-east-1").get("/applications/" + id + "/associations")
+                .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(21)
+    void applicationsAreAccountAndRegionScopedAndAppConfigKeepsItsRoute() {
+        String request = applicationRequest("com.example.isolation", UUID.randomUUID().toString());
+        String id = signed("123456789012", "us-east-1").body(request).post("/applications")
+                .then().statusCode(200).extract().path("Id");
+        try {
+            signed("999999999999", "us-east-1").get("/applications/" + id)
+                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+            signed("123456789012", "us-west-2").get("/applications/" + id)
+                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+            String other = signed("999999999999", "us-east-1").body(request).post("/applications")
+                    .then().statusCode(200).body("Arn", containsString(":999999999999:"))
+                    .extract().path("Id");
+            signed("999999999999", "us-east-1").delete("/applications/" + other).then().statusCode(200);
+            String forged = "arn:aws:app-integrations:us-west-2:123456789012:application/" + id;
+            signed("123456789012", "us-east-1").urlEncodingEnabled(false)
+                    .get("/applications/" + URLEncoder.encode(forged, StandardCharsets.UTF_8))
+                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+        } finally {
+            signed("123456789012", "us-east-1").delete("/applications/" + id).then().statusCode(200);
+        }
+        String appConfigId = given().contentType("application/json")
+                .header("Authorization", authorization("123456789012", "us-east-1", "appconfig"))
+                .body("{\"Name\":\"appintegrations-route-regression\"}").post("/applications")
+                .then().statusCode(201).extract().path("Id");
+        given().header("Authorization", authorization("123456789012", "us-east-1", "appconfig"))
+                .delete("/applications/" + appConfigId).then().statusCode(204);
+        signed("123456789012", "us-east-1").get("/_appintegrations/applications")
+                .then().statusCode(404).body("__type", equalTo("UnknownOperationException"));
+    }
+
+    @Test
+    @Order(22)
+    void applicationPaginationPreservesQueriesThroughSignedRouting() {
+        String first = signed("222222222222", "us-east-1")
+                .body(applicationRequest("com.example.page.one", UUID.randomUUID().toString()))
+                .post("/applications").then().statusCode(200).extract().path("Id");
+        String second = signed("222222222222", "us-east-1")
+                .body(applicationRequest("com.example.page.two", UUID.randomUUID().toString()))
+                .post("/applications").then().statusCode(200).extract().path("Id");
+        try {
+            String next = signed("222222222222", "us-east-1").queryParam("maxResults", 1)
+                    .queryParam("applicationType", "STANDARD").get("/applications")
+                    .then().statusCode(200).body("Applications.size()", equalTo(1))
+                    .body("NextToken", notNullValue()).extract().path("NextToken");
+            signed("222222222222", "us-east-1").queryParam("maxResults", 1).queryParam("nextToken", next)
+                    .get("/applications").then().statusCode(200).body("Applications.size()", equalTo(1))
+                    .body("NextToken", nullValue());
+            for (String invalid : new String[]{"0", "51", "not-a-number"}) {
+                signed("222222222222", "us-east-1").queryParam("maxResults", invalid)
+                        .get("/applications").then().statusCode(400).body("__type", equalTo("InvalidRequestException"));
+            }
+            signed("222222222222", "us-east-1").queryParam("nextToken", "%%%")
+                    .get("/applications").then().statusCode(400).body("__type", equalTo("InvalidRequestException"));
+        } finally {
+            signed("222222222222", "us-east-1").delete("/applications/" + first).then().statusCode(200);
+            signed("222222222222", "us-east-1").delete("/applications/" + second).then().statusCode(200);
+        }
+    }
+
+    @Test
+    @Order(23)
+    void dataAssociationWritesDenyOrdinaryCallersWithoutCreatingExecutionState() {
+        String request = """
+                {"Name":"association-contract","KmsKey":"key/abc","SourceURI":"s3://source","ClientToken":"%s"}
+                """.formatted(UUID.randomUUID());
+        ExtractableResponse<Response> created = signed("333333333333", "us-east-1").body(request)
+                .post("/dataIntegrations").then().statusCode(200).extract();
+        String id = created.path("Id");
+        String arn = created.path("Arn");
+        try {
+            signed("333333333333", "us-east-1").body(request).post("/dataIntegrations")
+                    .then().statusCode(200).body("Id", equalTo(id));
+            signed("333333333333", "us-east-1").get("/dataIntegrations/" + id + "/associations")
+                    .then().statusCode(200).body("DataIntegrationAssociations.size()", equalTo(0));
+            signed("333333333333", "us-east-1").body("{\"ClientId\":\"client\"}")
+                    .post("/dataIntegrations/" + id + "/associations")
+                    .then().statusCode(403).body("__type", equalTo("AccessDeniedException"))
+                    .body("message", containsString("app-integrations:CreateDataIntegrationAssociation on resource: " + arn))
+                    .body("message", containsString("explicit deny in a resource-based policy"));
+            signed("333333333333", "us-east-1")
+                    .body("{\"ExecutionConfiguration\":{\"ExecutionMode\":\"ON_DEMAND\"}}")
+                    .patch("/dataIntegrations/" + id + "/associations/00000000-0000-0000-0000-000000000001")
+                    .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+            signed("333333333333", "us-east-1").get("/dataIntegrations/" + id + "/associations")
+                    .then().statusCode(200).body("DataIntegrationAssociations.size()", equalTo(0));
+            signed("444444444444", "us-east-1").get("/dataIntegrations/" + id + "/associations")
+                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+        } finally {
+            signed("333333333333", "us-east-1").delete("/dataIntegrations/" + id).then().statusCode(200);
+        }
+    }
+
+    private static RequestSpecification signed(String account, String region) {
+        return given().contentType("application/json")
+                .header("Authorization", authorization(account, region, "app-integrations"));
+    }
+
+    private static String authorization(String account, String region, String service) {
+        return "AWS4-HMAC-SHA256 Credential=" + account + "/20260921/" + region + "/" + service
+                + "/aws4_request, SignedHeaders=host;x-amz-date, Signature=test";
+    }
+
+    private static String applicationRequest(String namespace, String token) {
+        return """
+                {"Name":"workspace","Namespace":"%s","ClientToken":"%s",
+                 "ApplicationSourceConfig":{"ExternalUrlConfig":{"AccessUrl":"https://example.com"}}}
+                """.formatted(namespace, token);
+    }
 
     @Test
     @Order(1)
@@ -220,7 +384,7 @@ class AppIntegrationsIntegrationTest {
     @Test
     @Order(11)
     void createDataIntegration() {
-        var response = given()
+        ExtractableResponse<Response> response = given()
             .contentType("application/json")
             .body("""
                 {
@@ -263,8 +427,7 @@ class AppIntegrationsIntegrationTest {
             .body("Description", equalTo("salesforce pull"))
             .body("ScheduleConfiguration.FirstExecutionFrom", equalTo("1439788800000"));
 
-        String encodedArn = java.net.URLEncoder.encode(dataIntegrationArn,
-                java.nio.charset.StandardCharsets.UTF_8);
+        String encodedArn = URLEncoder.encode(dataIntegrationArn, StandardCharsets.UTF_8);
         given()
             .urlEncodingEnabled(false)
         .when()

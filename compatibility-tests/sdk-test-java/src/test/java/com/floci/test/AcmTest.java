@@ -13,6 +13,10 @@ import software.amazon.awssdk.core.retry.backoff.FixedDelayBackoffStrategy;
 import software.amazon.awssdk.core.waiters.WaiterResponse;
 import software.amazon.awssdk.services.acm.AcmClient;
 import software.amazon.awssdk.services.acm.model.*;
+import software.amazon.awssdk.services.route53.Route53Client;
+import software.amazon.awssdk.services.route53.model.Change;
+import software.amazon.awssdk.services.route53.model.ChangeAction;
+import software.amazon.awssdk.services.route53.model.ResourceRecordSet;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -130,17 +134,65 @@ class AcmTest {
         Assumptions.assumeTrue(requestedCertArn != null, "RequestCertificate must succeed first");
         Assumptions.assumeFalse(TestFixtures.isRealAws(), "real ACM waits for DNS validation");
 
-        // The waiter polls DomainValidationOptions[].ValidationStatus, as the CDK
-        // DnsValidatedCertificate handler does, and never returns while any domain is pending.
-        WaiterResponse<DescribeCertificateResponse> waited = acm.waiter().waitUntilCertificateValidated(
-                b -> b.certificateArn(requestedCertArn),
-                o -> o.maxAttempts(3).backoffStrategy(FixedDelayBackoffStrategy.create(Duration.ofSeconds(1))));
+        CertificateDetail pending = acm.describeCertificate(b -> b.certificateArn(requestedCertArn)).certificate();
+        assertThat(pending.status()).isEqualTo(CertificateStatus.PENDING_VALIDATION);
+        try (Route53Client dns = TestFixtures.route53Client()) {
+            String zoneId = dns.createHostedZone(b -> b.name(pending.domainName())
+                    .callerReference(TestFixtures.uniqueName("acm-validation"))).hostedZone().id();
+            List<ResourceRecordSet> records = pending.domainValidationOptions().stream()
+                    .map(DomainValidation::resourceRecord)
+                    .map(record -> ResourceRecordSet.builder().name(record.name()).type(record.typeAsString())
+                            .ttl(60L).resourceRecords(value -> value.value(record.value())).build())
+                    .toList();
+            boolean published = false;
+            try {
+                dns.changeResourceRecordSets(b -> b.hostedZoneId(zoneId).changeBatch(batch -> batch.changes(
+                        records.stream().map(record -> Change.builder().action(ChangeAction.UPSERT)
+                                .resourceRecordSet(record).build()).toList())));
+                published = true;
+                WaiterResponse<DescribeCertificateResponse> waited = acm.waiter().waitUntilCertificateValidated(
+                        b -> b.certificateArn(requestedCertArn),
+                        o -> o.maxAttempts(3).backoffStrategy(FixedDelayBackoffStrategy.create(Duration.ofSeconds(1))));
 
-        CertificateDetail detail = waited.matched().response().orElseThrow().certificate();
-        assertThat(detail.status()).isEqualTo(CertificateStatus.ISSUED);
-        assertThat(detail.domainValidationOptions()).isNotEmpty();
-        assertThat(detail.domainValidationOptions())
-                .allSatisfy(v -> assertThat(v.validationStatus()).isEqualTo(DomainStatus.SUCCESS));
+                CertificateDetail detail = waited.matched().response().orElseThrow().certificate();
+                assertThat(detail.status()).isEqualTo(CertificateStatus.ISSUED);
+                assertThat(detail.domainValidationOptions()).isNotEmpty();
+                assertThat(detail.domainValidationOptions())
+                        .allSatisfy(v -> assertThat(v.validationStatus()).isEqualTo(DomainStatus.SUCCESS));
+                assertThat(acm.getCertificate(b -> b.certificateArn(requestedCertArn)).certificate())
+                        .contains("BEGIN CERTIFICATE");
+            } finally {
+                if (published) {
+                    dns.changeResourceRecordSets(b -> b.hostedZoneId(zoneId).changeBatch(batch -> batch.changes(
+                            records.stream().map(record -> Change.builder().action(ChangeAction.DELETE)
+                                    .resourceRecordSet(record).build()).toList())));
+                }
+                dns.deleteHostedZone(b -> b.id(zoneId));
+            }
+        }
+        assertThat(acm.describeCertificate(b -> b.certificateArn(requestedCertArn)).certificate().status())
+                .isEqualTo(CertificateStatus.ISSUED);
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Unvalidated DNS requests remain pending and return a typed retrieval error")
+    void unvalidatedDnsCertificateReturnsRequestInProgress() {
+        String arn = acm.requestCertificate(b -> b
+                .domainName(TestFixtures.uniqueName("unvalidated") + ".example.com")
+                .validationMethod(ValidationMethod.DNS)).certificateArn();
+        arnsToCleanup.add(arn);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            CertificateDetail detail = acm.describeCertificate(b -> b.certificateArn(arn)).certificate();
+            assertThat(detail.status()).isEqualTo(CertificateStatus.PENDING_VALIDATION);
+            assertThat(detail.issuedAt()).isNull();
+            assertThat(detail.domainValidationOptions())
+                    .allSatisfy(v -> assertThat(v.validationStatus()).isEqualTo(DomainStatus.PENDING_VALIDATION));
+            assertThatThrownBy(() -> acm.getCertificate(b -> b.certificateArn(arn)))
+                    .isInstanceOf(RequestInProgressException.class);
+        }
+        assertThat(acm.listCertificates(b -> b.certificateStatuses(CertificateStatus.PENDING_VALIDATION))
+                .certificateSummaryList()).anyMatch(summary -> arn.equals(summary.certificateArn()));
     }
 
     @Test

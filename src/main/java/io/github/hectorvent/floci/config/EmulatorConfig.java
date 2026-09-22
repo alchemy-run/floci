@@ -145,6 +145,32 @@ public interface EmulatorConfig {
 
     interface DnsConfig {
         /**
+         * Opts source mode into a Floci-owned Docker DNS/HTTPS bridge on the Lambda
+         * Docker network. The helper publishes no host ports; Java DNS stays on loopback.
+         * Requires TLS on the main gateway, aws-https-port=0, and Docker host-gateway
+         * access to host loopback (Docker Desktop). Ignored when Floci runs in Docker.
+         * Env: FLOCI_DNS_SOURCE_ENABLED
+         */
+        @WithDefault("false")
+        boolean sourceEnabled();
+
+        /**
+         * Source-mode loopback UDP port. Zero allocates an ephemeral port; nonzero ports
+         * must be unprivileged. Containers use the helper's UDP/53, not this port.
+         * Env: FLOCI_DNS_SOURCE_PORT
+         */
+        @WithDefault("0")
+        int sourcePort();
+
+        /**
+         * Image for the source-mode bridge. The default is built on demand from Floci's
+         * bundled network-helper recipe; overrides must provide sh, socat and ss.
+         * Env: FLOCI_DNS_SOURCE_HELPER_IMAGE
+         */
+        @WithDefault("floci/source-network-helper:local")
+        String sourceHelperImage();
+
+        /**
          * Additional hostname suffixes the embedded DNS server will resolve to Floci's
          * container IP, alongside the primary {@code floci.hostname}.
          *
@@ -843,6 +869,9 @@ public interface EmulatorConfig {
     interface AccountServiceConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /** Initial ContactInformation JSON for the default account; never overwrites a stored contact. */
+        Optional<String> bootstrapContactInformation();
     }
 
     interface AccessAnalyzerServiceConfig {
@@ -1757,7 +1786,7 @@ public interface EmulatorConfig {
         @WithDefault("true")
         boolean enabled();
 
-        /** Seconds to wait before transitioning from PENDING_VALIDATION to ISSUED (0 = immediate) */
+        /** Simulated email-validation delay (0 = immediate, negative = pending); DNS requires public Route 53 records. */
         @WithDefault("0")
         int validationWaitSeconds();
     }
@@ -2949,6 +2978,7 @@ public interface EmulatorConfig {
          */
         @WithDefault("443")
         int awsHttpsPort();
+
     }
 
     /**

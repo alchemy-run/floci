@@ -146,6 +146,18 @@ class RedshiftClusterCfnIntegrationTest {
         String template = """
             {
               "Resources": {
+                "Vpc": {
+                  "Type": "AWS::EC2::VPC",
+                  "Properties": {"CidrBlock": "10.87.0.0/16"}
+                },
+                "SubnetA": {
+                  "Type": "AWS::EC2::Subnet",
+                  "Properties": {"VpcId": {"Ref": "Vpc"}, "CidrBlock": "10.87.1.0/24", "AvailabilityZone": "us-east-1a"}
+                },
+                "SubnetB": {
+                  "Type": "AWS::EC2::Subnet",
+                  "Properties": {"VpcId": {"Ref": "Vpc"}, "CidrBlock": "10.87.2.0/24", "AvailabilityZone": "us-east-1b"}
+                },
                 "ParamGroup": {
                   "Type": "AWS::Redshift::ClusterParameterGroup",
                   "Properties": {
@@ -159,7 +171,7 @@ class RedshiftClusterCfnIntegrationTest {
                   "Properties": {
                     "ClusterSubnetGroupName": "%s",
                     "Description": "Test subnet group for CFN integration",
-                    "SubnetIds": ["subnet-12345678", "subnet-87654321"]
+                    "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}]
                   }
                 },
                 "SecurityGroup": {
@@ -304,7 +316,7 @@ class RedshiftClusterCfnIntegrationTest {
             .formParam("ClusterSubnetGroupName", sgName)
         .when().post("/").then()
             .statusCode(404)
-            .body(containsString("<Code>ClusterSubnetGroupNotFound</Code>"));
+            .body(containsString("<Code>ClusterSubnetGroupNotFoundFault</Code>"));
     }
 
     private static String outputValue(String xml, String key) {

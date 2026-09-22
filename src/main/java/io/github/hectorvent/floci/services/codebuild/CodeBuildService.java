@@ -1,6 +1,10 @@
 package io.github.hectorvent.floci.services.codebuild;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -20,6 +24,8 @@ import jakarta.inject.Inject;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -49,12 +55,18 @@ public class CodeBuildService {
     private final CodeBuildRunner runner;
     private final EmulatorConfig config;
     private final StorageFactory storageFactory;
+    private final ObjectMapper mapper;
+    private Map<String, String> resourcePolicies = new ConcurrentHashMap<>();
+    private Map<String, JsonNode> buildBatches = new ConcurrentHashMap<>();
+    private Map<String, JsonNode> reports = new ConcurrentHashMap<>();
 
     @Inject
-    public CodeBuildService(CodeBuildRunner runner, EmulatorConfig config, StorageFactory storageFactory) {
+    public CodeBuildService(CodeBuildRunner runner, EmulatorConfig config, StorageFactory storageFactory,
+                            ObjectMapper mapper) {
         this.runner = runner;
         this.config = config;
         this.storageFactory = storageFactory;
+        this.mapper = mapper;
     }
 
     @PostConstruct
@@ -70,6 +82,12 @@ public class CodeBuildService {
                 new TypeReference<Map<String, Map<String, SourceCredential>>>() {});
         this.persistedBuildCounters = storageBacked("codebuild-build-counters.json",
                 new TypeReference<Map<String, Long>>() {});
+        this.resourcePolicies = storageBacked("codebuild-resource-policies.json",
+                new TypeReference<Map<String, String>>() {});
+        this.buildBatches = storageBacked("codebuild-build-batches.json",
+                new TypeReference<Map<String, JsonNode>>() {});
+        this.reports = storageBacked("codebuild-reports.json",
+                new TypeReference<Map<String, JsonNode>>() {});
         normalizeRegionMaps(projects);
         normalizeRegionMaps(reportGroups);
         normalizeRegionMaps(sourceCredentials);
@@ -220,12 +238,15 @@ public class CodeBuildService {
         return project;
     }
 
-    public void deleteProject(String region, String name) {
+    public synchronized void deleteProject(String region, String name) {
+        validateProjectName(name);
         Map<String, Project> store = projectsFor(region);
-        if (store.remove(name) == null) {
-            throw new AwsException("ResourceNotFoundException", "Project not found: " + name, 400);
+        Project project = store.get(name);
+        if (project != null) {
+            resourcePolicies.remove(project.getArn());
+            store.remove(name);
+            persistRegion(projects, region);
         }
-        persistRegion(projects, region);
     }
 
     public List<Project> batchGetProjects(String region, List<String> names) {
@@ -300,11 +321,26 @@ public class CodeBuildService {
     }
 
     public void deleteReportGroup(String region, String arn) {
-        Map<String, ReportGroup> store = reportGroupsFor(region);
-        if (store.remove(arn) == null) {
-            throw new AwsException("ResourceNotFoundException", "Report group not found: " + arn, 400);
+        deleteReportGroup(region, arn, false);
+    }
+
+    public synchronized void deleteReportGroup(String region, String arn, boolean deleteReports) {
+        if (arn == null || arn.isBlank()) {
+            throw new AwsException("InvalidInputException", "arn is required", 400);
         }
-        persistRegion(reportGroups, region);
+        Map<String, ReportGroup> store = reportGroupsFor(region);
+        if (store.containsKey(arn)) {
+            List<String> reportArns = reports.entrySet().stream()
+                    .filter(entry -> arn.equals(entry.getValue().path("reportGroupArn").asText()))
+                    .map(Map.Entry::getKey).toList();
+            if (!deleteReports && !reportArns.isEmpty()) {
+                throw new AwsException("InvalidInputException", "Report group contains reports", 400);
+            }
+            reportArns.forEach(reports::remove);
+            resourcePolicies.remove(arn);
+            store.remove(arn);
+            persistRegion(reportGroups, region);
+        }
     }
 
     public List<ReportGroup> batchGetReportGroups(String region, List<String> arns) {
@@ -317,6 +353,294 @@ public class CodeBuildService {
 
     public List<String> listReportGroups(String region) {
         return new ArrayList<>(reportGroupsFor(region).keySet());
+    }
+
+    // ---- Resource Policies ----
+
+    public synchronized String getResourcePolicy(String region, String account, String resourceArn) {
+        requirePolicyResource(region, account, resourceArn);
+        return resourcePolicies.get(resourceArn);
+    }
+
+    public synchronized void putResourcePolicy(String region, String account, String resourceArn, String policy) {
+        requirePolicyResource(region, account, resourceArn);
+        validateResourcePolicy(policy);
+        resourcePolicies.put(resourceArn, policy);
+    }
+
+    public synchronized void deleteResourcePolicy(String region, String account, String resourceArn) {
+        validatePolicyResourceArn(region, account, resourceArn);
+        resourcePolicies.remove(resourceArn);
+    }
+
+    private AwsArnUtils.Arn validatePolicyResourceArn(String region, String account, String resourceArn) {
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(resourceArn);
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidInputException", "Invalid resourceArn", 400);
+        }
+        boolean supportedResource = arn.resource().matches("(?:project|report-group)/[A-Za-z0-9][A-Za-z0-9_-]*");
+        String expectedArn = AwsArnUtils.Arn.of("codebuild", region, account, arn.resource()).toString();
+        if (!supportedResource || !expectedArn.equals(resourceArn)) {
+            throw new AwsException("InvalidInputException",
+                    "resourceArn must identify a CodeBuild project or report group owned by this account in this region", 400);
+        }
+        return arn;
+    }
+
+    private void requirePolicyResource(String region, String account, String resourceArn) {
+        AwsArnUtils.Arn arn = validatePolicyResourceArn(region, account, resourceArn);
+        boolean exists;
+        if (arn.resource().startsWith("project/")) {
+            Project project = projectsFor(region).get(arn.resource().substring("project/".length()));
+            exists = project != null && resourceArn.equals(project.getArn());
+        } else {
+            exists = reportGroupsFor(region).containsKey(resourceArn);
+        }
+        if (!exists) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 400);
+        }
+    }
+
+    private void validateResourcePolicy(String policy) {
+        if (policy == null || policy.isBlank()) {
+            throw new AwsException("InvalidInputException", "policy is required", 400);
+        }
+        JsonNode document;
+        try {
+            document = mapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(policy);
+        } catch (JsonProcessingException e) {
+            throw new AwsException("InvalidInputException", "policy must be a valid JSON policy document", 400);
+        }
+        if (document == null || !document.isObject()) {
+            throw new AwsException("InvalidInputException", "policy must be a JSON object", 400);
+        }
+        JsonNode statements = document.path("Statement");
+        if (statements.isObject()) {
+            validatePolicyStatement(statements);
+        } else if (statements.isArray() && !statements.isEmpty()) {
+            for (JsonNode statement : statements) {
+                validatePolicyStatement(statement);
+            }
+        } else {
+            throw new AwsException("InvalidInputException", "policy must contain a Statement", 400);
+        }
+    }
+
+    private void validatePolicyStatement(JsonNode statement) {
+        String effect = statement.path("Effect").asText();
+        if (!statement.isObject() || !("Allow".equals(effect) || "Deny".equals(effect))
+                || !(statement.hasNonNull("Principal") || statement.hasNonNull("NotPrincipal"))
+                || !(statement.hasNonNull("Action") || statement.hasNonNull("NotAction"))
+                || !(statement.hasNonNull("Resource") || statement.hasNonNull("NotResource"))) {
+            throw new AwsException("InvalidInputException", "Invalid resource policy statement", 400);
+        }
+    }
+
+    // ---- Batch Builds and Reports ----
+
+    void configureBuildBatch(String region, String name, Map<String, Object> batchConfig) {
+        Project project = projectsFor(region).get(name);
+        project.setBuildBatchConfig(batchConfig);
+        persistRegion(projects, region);
+    }
+
+    void startBuildBatch(String region, String account, JsonNode request) {
+        Project project = requireProject(region, account, request.path("projectName").asText(null));
+        if (project.getBuildBatchConfig() == null && !request.hasNonNull("buildBatchConfigOverride")) {
+            throw new AwsException("InvalidInputException", "Project has no build batch configuration", 400);
+        }
+        throw unsupportedExecution("Batch build execution");
+    }
+
+    private Project requireProject(String region, String account, String name) {
+        if (name == null || name.isBlank()) {
+            throw new AwsException("InvalidInputException", "projectName is required", 400);
+        }
+        Project project = projectsFor(region).get(name);
+        String arn = AwsArnUtils.Arn.of("codebuild", region, account, "project/" + name).toString();
+        if (project == null || !arn.equals(project.getArn())) {
+            throw new AwsException("ResourceNotFoundException", "Project not found: " + name, 400);
+        }
+        return project;
+    }
+
+    static AwsException unsupportedExecution(String operation) {
+        return new AwsException("InvalidInputException", operation + " is not supported by Floci", 400);
+    }
+
+    Map<String, Object> batchGetBuildBatches(String region, String account, List<String> ids) {
+        return batchGetRecords(buildBatches, region, account, "build-batch", ids,
+                "buildBatches", "buildBatchesNotFound");
+    }
+
+    Map<String, Object> listBuildBatchesForProject(String region, String account, JsonNode request) {
+        Project project = requireProject(region, account, request.path("projectName").asText(null));
+        List<JsonNode> records = scopedRecords(buildBatches, region, account, "build-batch").stream()
+                .filter(batch -> project.getName().equals(batch.path("projectName").asText()))
+                .toList();
+        return listRecords(records, request, "startTime", "id", "ids");
+    }
+
+    void stopOrRetryBuildBatch(String region, String account, String id) {
+        String arn = recordArn(region, account, "build-batch", id);
+        if (!buildBatches.containsKey(arn)) {
+            throw new AwsException("ResourceNotFoundException", "Build batch not found: " + id, 400);
+        }
+        throw unsupportedExecution("Batch build execution");
+    }
+
+    Map<String, Object> deleteBuildBatch(String region, String account, String id) {
+        String arn = recordArn(region, account, "build-batch", id);
+        JsonNode batch = buildBatches.get(arn);
+        if (batch != null && !batch.path("complete").asBoolean()) {
+            throw new AwsException("InvalidInputException", "Cannot delete an incomplete build batch", 400);
+        }
+        if (batch != null && !batch.path("buildGroups").isEmpty()) {
+            throw unsupportedExecution("Deleting batch member builds");
+        }
+        buildBatches.remove(arn);
+        return Map.of("statusCode", batch == null ? "RESOURCE_NOT_FOUND" : "SUCCEEDED",
+                "buildsDeleted", List.of(), "buildsNotDeleted", List.of());
+    }
+
+    Map<String, Object> listReportsForReportGroup(String region, String account, JsonNode request) {
+        String arn = request.path("reportGroupArn").asText(null);
+        requireReportGroup(region, account, arn);
+        List<JsonNode> records = scopedRecords(reports, region, account, "report").stream()
+                .filter(report -> arn.equals(report.path("reportGroupArn").asText())).toList();
+        return listRecords(records, request, "created", "arn", "reports");
+    }
+
+    Map<String, Object> batchGetReports(String region, String account, List<String> arns) {
+        return batchGetRecords(reports, region, account, "report", arns, "reports", "reportsNotFound");
+    }
+
+    Map<String, Object> describeReport(String region, String account, JsonNode request, String field) {
+        String arn = recordArn(region, account, "report", request.path("reportArn").asText(null));
+        JsonNode report = reports.get(arn);
+        if (report == null) {
+            String error = "testCases".equals(field) ? "ResourceNotFoundException" : "InvalidInputException";
+            throw new AwsException(error, "Report not found: " + arn, 400);
+        }
+        if (request.hasNonNull("filter") || request.hasNonNull("sortBy") || request.hasNonNull("sortOrder")) {
+            throw unsupportedExecution("Filtered or sorted report detail queries");
+        }
+        List<JsonNode> details = new ArrayList<>();
+        report.path(field).forEach(details::add);
+        return page(details, request, field);
+    }
+
+    Map<String, Object> getReportGroupTrend(String region, String account, JsonNode request) {
+        String arn = request.path("reportGroupArn").asText(null);
+        requireReportGroup(region, account, arn);
+        String field = request.path("trendField").asText();
+        if (!List.of("DURATION", "PASS_RATE", "TOTAL", "LINE_COVERAGE", "LINES_COVERED", "LINES_MISSED",
+                "BRANCH_COVERAGE", "BRANCHES_COVERED", "BRANCHES_MISSED").contains(field)) {
+            throw new AwsException("InvalidInputException", "Invalid trendField", 400);
+        }
+        int count = request.path("numOfReports").asInt(10);
+        if (count < 1 || count > 100) {
+            throw new AwsException("InvalidInputException", "numOfReports must be between 1 and 100", 400);
+        }
+        List<JsonNode> selected = scopedRecords(reports, region, account, "report").stream()
+                .filter(report -> arn.equals(report.path("reportGroupArn").asText()))
+                .sorted(Comparator.comparingDouble((JsonNode report) -> report.path("created").asDouble()).reversed())
+                .limit(count).toList();
+        if (!selected.isEmpty()) {
+            throw unsupportedExecution("Report trend aggregation");
+        }
+        return Map.of("rawData", List.of());
+    }
+
+    void deleteReport(String region, String account, String arn) {
+        reports.remove(recordArn(region, account, "report", arn));
+    }
+
+    private void requireReportGroup(String region, String account, String arn) {
+        String validated = recordArn(region, account, "report-group", arn);
+        if (!reportGroupsFor(region).containsKey(validated)) {
+            throw new AwsException("ResourceNotFoundException", "Report group not found: " + arn, 400);
+        }
+    }
+
+    private String recordArn(String region, String account, String type, String id) {
+        if (id == null || id.isBlank()) {
+            throw new AwsException("InvalidInputException", "Resource identifier is required", 400);
+        }
+        String prefix = AwsArnUtils.Arn.of("codebuild", region, account, type + "/").toString();
+        if (id.startsWith("arn:")) {
+            if (!id.startsWith(prefix) || id.length() == prefix.length()) {
+                throw new AwsException("InvalidInputException", "Invalid CodeBuild resource ARN: " + id, 400);
+            }
+            return id;
+        }
+        if (!"build-batch".equals(type) || !id.contains(":")) {
+            throw new AwsException("InvalidInputException", "Invalid CodeBuild resource identifier: " + id, 400);
+        }
+        return prefix + id;
+    }
+
+    private List<JsonNode> scopedRecords(Map<String, JsonNode> store, String region, String account, String type) {
+        String prefix = AwsArnUtils.Arn.of("codebuild", region, account, type + "/").toString();
+        return store.entrySet().stream().filter(entry -> entry.getKey().startsWith(prefix))
+                .map(Map.Entry::getValue).toList();
+    }
+
+    private Map<String, Object> batchGetRecords(Map<String, JsonNode> store, String region, String account,
+                                               String type, List<String> ids, String foundKey, String missingKey) {
+        if (ids == null || ids.isEmpty() || ids.size() > 100) {
+            throw new AwsException("InvalidInputException", "Specify between 1 and 100 identifiers", 400);
+        }
+        List<JsonNode> found = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        for (String id : ids) {
+            JsonNode record = store.get(recordArn(region, account, type, id));
+            if (record == null) {
+                missing.add(id);
+            } else {
+                found.add(record);
+            }
+        }
+        return Map.of(foundKey, found, missingKey, missing);
+    }
+
+    private Map<String, Object> listRecords(List<JsonNode> records, JsonNode request,
+                                           String timestamp, String identifier, String responseKey) {
+        String order = request.path("sortOrder").asText("DESCENDING");
+        if (!List.of("ASCENDING", "DESCENDING").contains(order)) {
+            throw new AwsException("InvalidInputException", "Invalid sortOrder", 400);
+        }
+        String status = request.path("filter").path("status").asText(null);
+        Comparator<JsonNode> comparator = Comparator.comparingDouble((JsonNode record) -> record.path(timestamp).asDouble())
+                .thenComparing(record -> record.path(identifier).asText());
+        List<String> ids = records.stream()
+                .filter(record -> status == null || status.equals(record.path("status").asText())
+                        || status.equals(record.path("buildBatchStatus").asText()))
+                .sorted("ASCENDING".equals(order) ? comparator : comparator.reversed())
+                .map(record -> record.path(identifier).asText()).toList();
+        return page(ids, request, responseKey);
+    }
+
+    private <T> Map<String, Object> page(List<T> records, JsonNode request, String field) {
+        int maxResults = request.path("maxResults").asInt(100);
+        int offset;
+        try {
+            offset = Integer.parseInt(request.path("nextToken").asText("0"));
+        } catch (NumberFormatException e) {
+            throw new AwsException("InvalidInputException", "Invalid nextToken", 400);
+        }
+        if (maxResults < 1 || maxResults > 100 || offset < 0 || offset > records.size()) {
+            throw new AwsException("InvalidInputException", "Invalid pagination parameters", 400);
+        }
+        int end = (int) Math.min((long) offset + maxResults, records.size());
+        Map<String, Object> response = new HashMap<>();
+        response.put(field, records.subList(offset, end));
+        if (end < records.size()) {
+            response.put("nextToken", String.valueOf(end));
+        }
+        return response;
     }
 
     // ---- Source Credentials ----
@@ -469,6 +793,7 @@ public class CodeBuildService {
         }
 
         build.setPhases(new CopyOnWriteArrayList<>());
+        runner.validateExecution(build, project);
 
         buildsFor(account, region).put(buildId, build);
         if (buildspecOverride != null && !buildspecOverride.isBlank()) {
@@ -495,6 +820,31 @@ public class CodeBuildService {
                 .map(store::get)
                 .filter(b -> b != null)
                 .collect(Collectors.toList());
+    }
+
+    public Map<String, List<?>> batchDeleteBuilds(String region, String account, List<String> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id.isBlank())) {
+            throw new AwsException("InvalidInputException", "ids must contain between 1 and 100 build IDs", 400);
+        }
+        List<String> deleted = new ArrayList<>();
+        List<Map<String, String>> notDeleted = new ArrayList<>();
+        Map<String, Build> store = buildsFor(account, region);
+        for (String id : ids) {
+            Build build = store.get(id);
+            if (build == null && AwsArnUtils.isArnFor(id, "codebuild")) {
+                build = store.values().stream().filter(candidate -> id.equals(candidate.getArn())).findFirst().orElse(null);
+            }
+            if (build == null) {
+                notDeleted.add(Map.of("id", id, "statusCode", "RESOURCE_NOT_FOUND"));
+            } else if (!Boolean.TRUE.equals(build.getBuildComplete())) {
+                notDeleted.add(Map.of("id", id, "statusCode", "BUILD_IN_PROGRESS"));
+            } else {
+                store.remove(build.getId());
+                buildspecOverridesFor(account, region).remove(build.getId());
+                deleted.add(id);
+            }
+        }
+        return Map.of("buildsDeleted", deleted, "buildsNotDeleted", notDeleted);
     }
 
     public List<String> listBuilds(String region, String account) {

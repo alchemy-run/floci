@@ -2,11 +2,14 @@ package io.github.hectorvent.floci.services.memorydb;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.elasticache.proxy.SigV4Validator;
 import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerHandle;
 import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerManager;
@@ -15,19 +18,35 @@ import io.github.hectorvent.floci.services.memorydb.model.AuthMode;
 import io.github.hectorvent.floci.services.memorydb.model.Cluster;
 import io.github.hectorvent.floci.services.memorydb.model.ClusterStatus;
 import io.github.hectorvent.floci.services.memorydb.model.Endpoint;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.EngineVersion;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.Event;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.Parameter;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.ParameterGroup;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.Snapshot;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.SubnetGroup;
 import io.github.hectorvent.floci.services.memorydb.model.User;
 import io.github.hectorvent.floci.services.memorydb.proxy.MemoryDbProxyManager;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Core MemoryDB business logic — clusters, ACLs and users.
@@ -54,12 +73,17 @@ public class MemoryDbService {
 
     // Per the MemoryDB API: a user name must start with a letter and contain only
     // letters, digits and hyphens.
-    private static final java.util.regex.Pattern USER_NAME_PATTERN =
-            java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9\\-]*");
+    private static final Pattern USER_NAME_PATTERN =
+            Pattern.compile("[a-zA-Z][a-zA-Z0-9\\-]*");
 
     private final StorageBackend<String, Cluster> clusters;
     private final StorageBackend<String, User> users;
     private final StorageBackend<String, Acl> acls;
+    private final StorageBackend<String, ParameterGroup> parameterGroups;
+    private final StorageBackend<String, SubnetGroup> subnetGroups;
+    private final StorageBackend<String, Snapshot> snapshots;
+    private final StorageBackend<String, Event> events;
+    private final Ec2Service ec2Service;
     private final MemoryDbContainerManager containerManager;
     private final MemoryDbProxyManager proxyManager;
     private final SigV4Validator sigV4Validator;
@@ -74,7 +98,9 @@ public class MemoryDbService {
                            SigV4Validator sigV4Validator,
                            StorageFactory storageFactory,
                            EmulatorConfig config,
-                           RegionResolver regionResolver) {
+                           RegionResolver regionResolver,
+                           Ec2Service ec2Service) {
+        this.ec2Service = ec2Service;
         this.containerManager = containerManager;
         this.proxyManager = proxyManager;
         this.sigV4Validator = sigV4Validator;
@@ -86,6 +112,14 @@ public class MemoryDbService {
                 new TypeReference<Map<String, User>>() {});
         this.acls = storageFactory.create("memorydb", "memorydb-acls.json",
                 new TypeReference<Map<String, Acl>>() {});
+        this.parameterGroups = storageFactory.create("memorydb", "memorydb-parameter-groups.json",
+                new TypeReference<Map<String, ParameterGroup>>() {});
+        this.subnetGroups = storageFactory.create("memorydb", "memorydb-subnet-groups.json",
+                new TypeReference<Map<String, SubnetGroup>>() {});
+        this.snapshots = storageFactory.create("memorydb", "memorydb-snapshots.json",
+                new TypeReference<Map<String, Snapshot>>() {});
+        this.events = storageFactory.create("memorydb", "memorydb-events.json",
+                new TypeReference<Map<String, Event>>() {});
     }
 
     // ──────────────────────────── Clusters ────────────────────────────
@@ -113,6 +147,12 @@ public class MemoryDbService {
                 throw new AwsException("InvalidParameterValueException", "ACLName is required.", 400);
             }
             requireAclExists(aclName, region);
+            if (spec.getParameterGroupName() != null) {
+                getParameterGroup(spec.getParameterGroupName(), region);
+            }
+            if (spec.getSubnetGroupName() != null) {
+                getSubnetGroup(spec.getSubnetGroupName(), region);
+            }
             boolean authRequired = isAuthRequired(aclName, region);
 
             Cluster cluster = new Cluster();
@@ -126,6 +166,8 @@ public class MemoryDbService {
             cluster.setEngine(spec.getEngine() != null ? spec.getEngine() : DEFAULT_ENGINE);
             cluster.setEngineVersion(spec.getEngineVersion() != null ? spec.getEngineVersion() : DEFAULT_ENGINE_VERSION);
             cluster.setAclName(aclName);
+            cluster.setParameterGroupName(spec.getParameterGroupName());
+            cluster.setSubnetGroupName(spec.getSubnetGroupName());
             cluster.setTlsEnabled(spec.isTlsEnabled());
             cluster.setArn(buildArn(region, "cluster", name));
             cluster.setCreatedAt(Instant.now());
@@ -139,6 +181,7 @@ public class MemoryDbService {
             }
 
             clusters.put(resourceKey, cluster);
+            recordEvent(name, "cluster", "Cluster created", region);
             LOG.infov("MemoryDB cluster {0} created (acl={1}, authRequired={2}), endpoint={3}:{4}",
                     name, aclName, String.valueOf(authRequired), cluster.getClusterEndpoint().address(),
                     String.valueOf(cluster.getClusterEndpoint().port()));
@@ -182,11 +225,19 @@ public class MemoryDbService {
             cluster.setDescription(description);
         }
         clusters.put(key(region, name), cluster);
+        recordEvent(name, "cluster", "Cluster updated", region);
         return cluster;
     }
 
     public Cluster deleteCluster(String name) {
         return deleteCluster(name, currentRegion());
+    }
+
+    public Cluster deleteCluster(String name, String region, String finalSnapshotName) {
+        if (finalSnapshotName != null) {
+            createSnapshot(name, finalSnapshotName, Map.of(), region);
+        }
+        return deleteCluster(name, region);
     }
 
     public Cluster deleteCluster(String name, String region) {
@@ -203,6 +254,7 @@ public class MemoryDbService {
 
         releaseProxyPort(cluster.getProxyPort());
         clusters.delete(key(region, name));
+        recordEvent(name, "cluster", "Cluster deleted", region);
         LOG.infov("MemoryDB cluster {0} deleted", name);
         return cluster;
     }
@@ -255,8 +307,10 @@ public class MemoryDbService {
         user.setMinimumEngineVersion(DEFAULT_ENGINE_VERSION);
         user.setArn(buildArn(region, "user", name));
         user.setCreatedAt(Instant.now());
+        user.setTags(spec.getTags());
 
         users.put(resourceKey, user);
+        recordEvent(name, "user", "User created", region);
         LOG.infov("MemoryDB user {0} created with authMode={1}", name, user.getAuthMode());
         return user;
     }
@@ -266,8 +320,8 @@ public class MemoryDbService {
             return resourceGet(users, filterName, region)
                     .map(List::of)
                     .or(() -> DEFAULT_USER.equals(filterName)
-                            ? java.util.Optional.of(List.of(builtinDefaultUser(region)))
-                            : java.util.Optional.empty())
+                            ? Optional.of(List.of(builtinDefaultUser(region)))
+                            : Optional.empty())
                     .orElseThrow(() -> new AwsException("UserNotFoundFault", "User not found.", 404));
         }
         migrateLegacyUsers(region);
@@ -275,6 +329,28 @@ public class MemoryDbService {
         all.add(builtinDefaultUser(region));
         all.addAll(users.scan(k -> k.startsWith(region + ":")));
         return all;
+    }
+
+    public synchronized User updateUser(String name, String accessString, AuthMode authMode,
+                                        List<String> passwords, String region) {
+        requireText(name, "UserName");
+        User user = resourceGet(users, name, region).orElseThrow(() -> fault("UserNotFoundFault", "User not found."));
+        if (accessString != null && accessString.isBlank()) {
+            throw invalid("AccessString must not be empty.");
+        }
+        if (authMode == AuthMode.NO_PASSWORD || (authMode == AuthMode.PASSWORD && passwords.isEmpty())) {
+            throw invalid("Authentication requires IAM or at least one password.");
+        }
+        if (accessString != null) {
+            user.setAccessString(accessString);
+        }
+        if (authMode != null) {
+            user.setAuthMode(authMode);
+            user.setPasswords(authMode == AuthMode.IAM ? List.of() : new ArrayList<>(passwords));
+        }
+        users.put(key(region, name), user);
+        recordEvent(name, "user", "User updated", region);
+        return user;
     }
 
     public User deleteUser(String name) {
@@ -288,7 +364,11 @@ public class MemoryDbService {
         }
         User user = resourceGet(users, name, region).orElseThrow(() ->
                 new AwsException("UserNotFoundFault", "User not found.", 404));
+        if (!aclNamesForUser(name, region).isEmpty()) {
+            throw fault("InvalidUserStateFault", "User is associated with an ACL.");
+        }
         users.delete(key(region, name));
+        recordEvent(name, "user", "User deleted", region);
         LOG.infov("MemoryDB user {0} deleted", name);
         return user;
     }
@@ -310,7 +390,7 @@ public class MemoryDbService {
             throw new AwsException("DefaultUserRequired",
                     "A default user is required and must be specified.", 400);
         }
-        java.util.Set<String> seen = new java.util.HashSet<>();
+        Set<String> seen = new HashSet<>();
         for (String userName : spec.getUserNames()) {
             if (!seen.add(userName)) {
                 throw new AwsException("DuplicateUserNameFault",
@@ -330,8 +410,10 @@ public class MemoryDbService {
         acl.setMinimumEngineVersion(DEFAULT_ENGINE_VERSION);
         acl.setArn(buildArn(region, "acl", name));
         acl.setCreatedAt(Instant.now());
+        acl.setTags(spec.getTags());
 
         acls.put(resourceKey, acl);
+        recordEvent(name, "acl", "ACL created", region);
         LOG.infov("MemoryDB ACL {0} created with users={1}", name, acl.getUserNames());
         return acl;
     }
@@ -341,8 +423,8 @@ public class MemoryDbService {
             return resourceGet(acls, filterName, region)
                     .map(List::of)
                     .or(() -> DEFAULT_ACL.equals(filterName)
-                            ? java.util.Optional.of(List.of(builtinOpenAccessAcl(region)))
-                            : java.util.Optional.empty())
+                            ? Optional.of(List.of(builtinOpenAccessAcl(region)))
+                            : Optional.empty())
                     .orElseThrow(() -> new AwsException("ACLNotFoundFault", "ACL not found.", 404));
         }
         migrateLegacyAcls(region);
@@ -368,6 +450,7 @@ public class MemoryDbService {
                     "ACL " + name + " is associated with one or more clusters.", 400);
         }
         acls.delete(key(region, name));
+        recordEvent(name, "acl", "ACL deleted", region);
         LOG.infov("MemoryDB ACL {0} deleted", name);
         return acl;
     }
@@ -406,21 +489,449 @@ public class MemoryDbService {
     // ──────────────────────────── Tags ────────────────────────────
 
     public Map<String, String> listTags(String resourceArn) {
-        return clusterByArn(resourceArn).getTags();
+        return listTags(resourceArn, currentRegion());
+    }
+
+    public synchronized Map<String, String> listTags(String resourceArn, String region) {
+        return new LinkedHashMap<>(tagTarget(resourceArn, region).tags());
     }
 
     public Map<String, String> tagResource(String resourceArn, Map<String, String> tags) {
-        Cluster cluster = clusterByArn(resourceArn);
-        cluster.getTags().putAll(tags);
-        clusters.put(key(cluster.getRegion(), cluster.getName()), cluster);
-        return cluster.getTags();
+        return tagResource(resourceArn, tags, currentRegion());
+    }
+
+    public synchronized Map<String, String> tagResource(String resourceArn, Map<String, String> tags, String region) {
+        TagTarget target = tagTarget(resourceArn, region);
+        target.tags().putAll(tags);
+        target.persist().run();
+        return new LinkedHashMap<>(target.tags());
     }
 
     public Map<String, String> untagResource(String resourceArn, List<String> tagKeys) {
-        Cluster cluster = clusterByArn(resourceArn);
-        tagKeys.forEach(cluster.getTags()::remove);
-        clusters.put(key(cluster.getRegion(), cluster.getName()), cluster);
-        return cluster.getTags();
+        return untagResource(resourceArn, tagKeys, currentRegion());
+    }
+
+    public synchronized Map<String, String> untagResource(String resourceArn, List<String> tagKeys, String region) {
+        TagTarget target = tagTarget(resourceArn, region);
+        tagKeys.forEach(target.tags()::remove);
+        target.persist().run();
+        return new LinkedHashMap<>(target.tags());
+    }
+
+    private static final List<EngineVersion> ENGINE_VERSIONS = List.of(
+            new EngineVersion("redis", "7.1", "memorydb_redis7"),
+            new EngineVersion("valkey", "7.2", "memorydb_valkey7"),
+            new EngineVersion("valkey", "8.0", "memorydb_valkey8"));
+    private static final Map<String, String> PARAMETER_DEFAULTS = Map.of(
+            "maxmemory-policy", "noeviction", "maxmemory-samples", "3",
+            "timeout", "0", "tcp-keepalive", "300", "activedefrag", "no");
+    private static final String EVICTION_POLICIES =
+            "volatile-lru,allkeys-lru,volatile-lfu,allkeys-lfu,volatile-random,allkeys-random,volatile-ttl,noeviction";
+
+    public synchronized ParameterGroup createParameterGroup(String name, String family, String description,
+                                                            Map<String, String> tags, String region) {
+        validateGroupName(name);
+        if (ENGINE_VERSIONS.stream().noneMatch(version -> version.family().equals(family))) {
+            throw invalid("Unknown parameter group family: " + family);
+        }
+        if (parameterGroups.get(key(region, name)).isPresent()) {
+            throw fault("ParameterGroupAlreadyExistsFault", "Parameter group already exists.");
+        }
+        ParameterGroup group = new ParameterGroup(name, family, description,
+                buildArn(region, "parametergroup", name), new LinkedHashMap<>(), new LinkedHashMap<>(tags));
+        parameterGroups.put(key(region, name), group);
+        recordEvent(name, "parametergroup", "Parameter group created", region);
+        return group;
+    }
+
+    public ParameterGroup getParameterGroup(String name, String region) {
+        requireText(name, "ParameterGroupName");
+        if (name.startsWith("default.")) {
+            for (EngineVersion version : ENGINE_VERSIONS) {
+                if (name.equals("default." + version.family().replace('_', '-'))) {
+                    return new ParameterGroup(name, version.family(), "Default parameter group",
+                            buildArn(region, "parametergroup", name), new LinkedHashMap<>(), new LinkedHashMap<>());
+                }
+            }
+        }
+        return parameterGroups.get(key(region, name)).orElseThrow(() ->
+                fault("ParameterGroupNotFoundFault", "Parameter group not found."));
+    }
+
+    public List<ParameterGroup> describeParameterGroups(String name, String region) {
+        if (name != null) {
+            return List.of(getParameterGroup(name, region));
+        }
+        List<ParameterGroup> groups = new ArrayList<>(parameterGroups.scan(k -> k.startsWith(region + ":")));
+        for (EngineVersion version : ENGINE_VERSIONS) {
+            groups.add(getParameterGroup("default." + version.family().replace('_', '-'), region));
+        }
+        return groups.stream().sorted(Comparator.comparing(ParameterGroup::name)).toList();
+    }
+
+    public List<Parameter> describeParameters(String name, String region) {
+        ParameterGroup group = getParameterGroup(name, region);
+        return PARAMETER_DEFAULTS.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .map(entry -> new Parameter(entry.getKey(),
+                        group.parameters().getOrDefault(entry.getKey(), entry.getValue()),
+                        Set.of("maxmemory-policy", "activedefrag").contains(entry.getKey()) ? "string" : "integer",
+                        allowedValues(entry.getKey())))
+                .toList();
+    }
+
+    public synchronized void updateParameterGroup(String name, Map<String, String> values, String region) {
+        ParameterGroup group = mutableParameterGroup(name, region);
+        if (values.isEmpty() || values.size() > 20) {
+            throw invalid("Between 1 and 20 parameter values are required.");
+        }
+        values.forEach(this::validateParameter);
+        Map<String, String> overrides = new LinkedHashMap<>(group.parameters());
+        overrides.putAll(values);
+        parameterGroups.put(key(region, name), new ParameterGroup(group.name(), group.family(),
+                group.description(), group.arn(), overrides, group.tags()));
+        recordEvent(name, "parametergroup", "Parameter group updated", region);
+    }
+
+    public synchronized void resetParameterGroup(String name, boolean all, List<String> names, String region) {
+        ParameterGroup group = mutableParameterGroup(name, region);
+        if ((all && !names.isEmpty()) || (!all && names.isEmpty())) {
+            throw fault("InvalidParameterCombinationException", "Specify AllParameters or ParameterNames.");
+        }
+        for (String parameter : names) {
+            if (!PARAMETER_DEFAULTS.containsKey(parameter)) {
+                throw invalid("Unknown parameter: " + parameter);
+            }
+        }
+        Map<String, String> overrides = new LinkedHashMap<>(group.parameters());
+        if (all) {
+            overrides.clear();
+        } else {
+            names.forEach(overrides::remove);
+        }
+        parameterGroups.put(key(region, name), new ParameterGroup(group.name(), group.family(),
+                group.description(), group.arn(), overrides, group.tags()));
+        recordEvent(name, "parametergroup", "Parameter group reset", region);
+    }
+
+    public synchronized ParameterGroup deleteParameterGroup(String name, String region) {
+        ParameterGroup group = mutableParameterGroup(name, region);
+        if (describeClusters(null, region).stream().anyMatch(cluster -> name.equals(cluster.getParameterGroupName()))) {
+            throw fault("InvalidParameterGroupStateFault", "Parameter group is in use.");
+        }
+        parameterGroups.delete(key(region, name));
+        recordEvent(name, "parametergroup", "Parameter group deleted", region);
+        return group;
+    }
+
+    private ParameterGroup mutableParameterGroup(String name, String region) {
+        ParameterGroup group = getParameterGroup(name, region);
+        if (name.startsWith("default.")) {
+            throw fault("InvalidParameterGroupStateFault", "Default parameter groups cannot be modified.");
+        }
+        return group;
+    }
+
+    private String allowedValues(String name) {
+        return switch (name) {
+            case "maxmemory-policy" -> EVICTION_POLICIES;
+            case "activedefrag" -> "yes,no";
+            case "maxmemory-samples" -> "1-10";
+            case "timeout", "tcp-keepalive" -> "0-2147483647";
+            default -> throw invalid("Unknown parameter: " + name);
+        };
+    }
+
+    private void validateParameter(String name, String value) {
+        if (name == null || !PARAMETER_DEFAULTS.containsKey(name) || value == null) {
+            throw invalid("Unknown parameter or missing value: " + name);
+        }
+        boolean valid;
+        if (name.equals("maxmemory-policy") || name.equals("activedefrag")) {
+            valid = List.of(allowedValues(name).split(",")).contains(value);
+        } else {
+            try {
+                int number = Integer.parseInt(value);
+                valid = name.equals("maxmemory-samples") ? number >= 1 && number <= 10 : number >= 0;
+            } catch (NumberFormatException exception) {
+                valid = false;
+            }
+        }
+        if (!valid) {
+            throw invalid("Invalid value for parameter " + name);
+        }
+    }
+
+    public synchronized SubnetGroup createSubnetGroup(String name, String description, List<String> subnetIds,
+                                                      Map<String, String> tags, String region) {
+        validateGroupName(name);
+        if (subnetGroups.get(key(region, name)).isPresent()) {
+            throw fault("SubnetGroupAlreadyExistsFault", "Subnet group already exists.");
+        }
+        List<Subnet> subnets = resolveSubnets(subnetIds, region);
+        SubnetGroup group = new SubnetGroup(name, description, subnets.getFirst().getVpcId(),
+                buildArn(region, "subnetgroup", name), subnetMetadata(subnets), new LinkedHashMap<>(tags));
+        subnetGroups.put(key(region, name), group);
+        recordEvent(name, "subnetgroup", "Subnet group created", region);
+        return group;
+    }
+
+    public SubnetGroup getSubnetGroup(String name, String region) {
+        requireText(name, "SubnetGroupName");
+        return subnetGroups.get(key(region, name)).orElseThrow(() ->
+                fault("SubnetGroupNotFoundFault", "Subnet group not found."));
+    }
+
+    public List<SubnetGroup> describeSubnetGroups(String name, String region) {
+        return name != null ? List.of(getSubnetGroup(name, region))
+                : subnetGroups.scan(k -> k.startsWith(region + ":")).stream()
+                .sorted(Comparator.comparing(SubnetGroup::name)).toList();
+    }
+
+    public synchronized SubnetGroup updateSubnetGroup(String name, String description,
+                                                      List<String> subnetIds, String region) {
+        SubnetGroup old = getSubnetGroup(name, region);
+        List<Subnet> subnets = subnetIds == null ? null : resolveSubnets(subnetIds, region);
+        if (subnets != null && !old.vpcId().equals(subnets.getFirst().getVpcId())) {
+            throw fault("InvalidSubnet", "Subnets must belong to the existing VPC.");
+        }
+        boolean inUse = describeClusters(null, region).stream()
+                .anyMatch(cluster -> name.equals(cluster.getSubnetGroupName()));
+        if (inUse && subnetIds != null && old.subnets().stream()
+                .anyMatch(subnet -> !subnetIds.contains(subnet.identifier()))) {
+            throw fault("SubnetInUse", "Cannot remove a subnet from an attached subnet group.");
+        }
+        SubnetGroup updated = new SubnetGroup(name, description == null ? old.description() : description,
+                old.vpcId(), old.arn(), subnets == null ? old.subnets() : subnetMetadata(subnets), old.tags());
+        subnetGroups.put(key(region, name), updated);
+        recordEvent(name, "subnetgroup", "Subnet group updated", region);
+        return updated;
+    }
+
+    public synchronized SubnetGroup deleteSubnetGroup(String name, String region) {
+        SubnetGroup group = getSubnetGroup(name, region);
+        if (describeClusters(null, region).stream().anyMatch(cluster -> name.equals(cluster.getSubnetGroupName()))) {
+            throw fault("SubnetGroupInUseFault", "Subnet group is in use.");
+        }
+        subnetGroups.delete(key(region, name));
+        recordEvent(name, "subnetgroup", "Subnet group deleted", region);
+        return group;
+    }
+
+    private List<Subnet> resolveSubnets(List<String> ids, String region) {
+        if (ids == null || ids.isEmpty()) {
+            throw invalid("SubnetIds must not be empty.");
+        }
+        List<Subnet> result = new ArrayList<>();
+        for (String id : ids.stream().distinct().toList()) {
+            Subnet subnet;
+            try {
+                subnet = ec2Service.requireSubnet(region, id);
+            } catch (AwsException exception) {
+                if (!"InvalidSubnetID.NotFound".equals(exception.jsonType())) {
+                    throw exception;
+                }
+                throw fault("InvalidSubnet", "Subnet " + id + " does not exist in this account and region.");
+            }
+            if (!region.equals(subnet.getRegion()) || !regionResolver.getAccountId().equals(subnet.getOwnerId())) {
+                throw fault("InvalidSubnet", "Subnet is outside the request scope.");
+            }
+            if (!result.isEmpty() && !result.getFirst().getVpcId().equals(subnet.getVpcId())) {
+                throw fault("InvalidSubnet", "All subnets must belong to one VPC.");
+            }
+            result.add(subnet);
+        }
+        return result;
+    }
+
+    private List<MemoryDbMetadata.Subnet> subnetMetadata(List<Subnet> subnets) {
+        return subnets.stream().map(subnet -> new MemoryDbMetadata.Subnet(
+                subnet.getSubnetId(), subnet.getAvailabilityZone())).toList();
+    }
+
+    public synchronized Snapshot createSnapshot(String clusterName, String name, Map<String, String> tags,
+                                                 String region) {
+        requireText(name, "SnapshotName");
+        Cluster cluster = getCluster(clusterName, region);
+        if (snapshots.get(key(region, name)).isPresent()) {
+            throw fault("SnapshotAlreadyExistsFault", "Snapshot already exists.");
+        }
+        if (cluster.getStatus() != ClusterStatus.AVAILABLE || cluster.getContainerId() == null) {
+            throw fault("InvalidClusterStateFault", "A running cluster backend is required to take a snapshot.");
+        }
+        if (cluster.getNumberOfShards() != 1) {
+            throw invalid("Snapshots require a single-shard local cluster.");
+        }
+        byte[] data = containerManager.captureSnapshot(new MemoryDbContainerHandle(cluster.getContainerId(),
+                identityName(cluster.getAccountId(), region, clusterName),
+                cluster.getContainerHost(), cluster.getContainerPort()));
+        if (data == null || data.length < 9
+                || !new String(data, 0, 5, StandardCharsets.US_ASCII).equals("REDIS")) {
+            throw fault("InvalidClusterStateFault", "The backend did not produce a valid RDB snapshot.");
+        }
+        Snapshot snapshot = new Snapshot(name, buildArn(region, "snapshot", name), clusterName,
+                cluster.getNodeType(), cluster.getEngine(), cluster.getEngineVersion(),
+                cluster.getNumberOfShards(), Instant.now().toEpochMilli() / 1000.0,
+                data.clone(), new LinkedHashMap<>(tags));
+        snapshots.put(key(region, name), snapshot);
+        recordEvent(clusterName, "cluster", "Snapshot " + name + " created", region);
+        return snapshot;
+    }
+
+    public Snapshot getSnapshot(String name, String region) {
+        requireText(name, "SnapshotName");
+        return snapshots.get(key(region, name)).orElseThrow(() ->
+                fault("SnapshotNotFoundFault", "Snapshot not found."));
+    }
+
+    public List<Snapshot> describeSnapshots(String name, String clusterName, String source, String region) {
+        if (source != null && !Set.of("manual", "automated").contains(source)) {
+            throw invalid("Source must be manual or automated.");
+        }
+        Collection<Snapshot> values = name == null ? snapshots.scan(k -> k.startsWith(region + ":"))
+                : List.of(getSnapshot(name, region));
+        return values.stream().filter(snapshot -> clusterName == null || clusterName.equals(snapshot.clusterName()))
+                .filter(snapshot -> source == null || source.equals("manual"))
+                .sorted(Comparator.comparing(Snapshot::name)).toList();
+    }
+
+    public synchronized Snapshot copySnapshot(String sourceName, String targetName, Map<String, String> tags,
+                                               String region) {
+        Snapshot source = getSnapshot(sourceName, region);
+        requireText(targetName, "TargetSnapshotName");
+        if (snapshots.get(key(region, targetName)).isPresent()) {
+            throw fault("SnapshotAlreadyExistsFault", "Snapshot already exists.");
+        }
+        if (source.data() == null || source.data().length == 0) {
+            throw fault("InvalidSnapshotStateFault", "Snapshot data is unavailable.");
+        }
+        Snapshot copy = new Snapshot(targetName, buildArn(region, "snapshot", targetName), source.clusterName(),
+                source.nodeType(), source.engine(), source.engineVersion(), source.numShards(), source.createdAt(),
+                source.data().clone(), new LinkedHashMap<>(tags == null ? source.tags() : tags));
+        snapshots.put(key(region, targetName), copy);
+        return copy;
+    }
+
+    public synchronized Snapshot deleteSnapshot(String name, String region) {
+        Snapshot snapshot = getSnapshot(name, region);
+        snapshots.delete(key(region, name));
+        return snapshot;
+    }
+
+    public List<EngineVersion> describeEngineVersions(String engine, String version, String family,
+                                                     boolean defaultOnly) {
+        List<EngineVersion> values = ENGINE_VERSIONS.stream()
+                .filter(item -> engine == null || engine.equals(item.engine()))
+                .filter(item -> version == null || version.equals(item.version()))
+                .filter(item -> family == null || family.equals(item.family())).toList();
+        if (!defaultOnly) {
+            return values;
+        }
+        Map<String, EngineVersion> defaults = new LinkedHashMap<>();
+        values.forEach(item -> defaults.put(item.engine(), item));
+        return List.copyOf(defaults.values());
+    }
+
+    public List<Event> describeEvents(String name, String type, Double start, Double end,
+                                      Integer duration, String region) {
+        if (type != null && !Set.of("cluster", "parametergroup", "subnetgroup", "user", "acl").contains(type)) {
+            throw invalid("Invalid SourceType.");
+        }
+        if (name != null && type == null) {
+            throw fault("InvalidParameterCombinationException", "SourceType is required with SourceName.");
+        }
+        if (start != null && duration != null) {
+            throw fault("InvalidParameterCombinationException", "StartTime and Duration cannot be combined.");
+        }
+        if (duration != null && (duration < 0 || duration > 20160)) {
+            throw invalid("Duration must be between 0 and 20160 minutes.");
+        }
+        double until = end == null ? Instant.now().toEpochMilli() / 1000.0 : end;
+        double from = start == null ? until - (duration == null ? 60 : duration) * 60.0 : start;
+        if (from > until) {
+            throw invalid("StartTime must precede EndTime.");
+        }
+        return events.scan(k -> k.startsWith(region + ":")).stream()
+                .filter(event -> name == null || name.equals(event.sourceName()))
+                .filter(event -> type == null || type.equals(event.sourceType()))
+                .filter(event -> event.date() >= from && event.date() <= until)
+                .sorted(Comparator.comparingDouble(Event::date).thenComparing(Event::sourceName)).toList();
+    }
+
+    public List<String> describeServiceUpdates(List<String> clusterNames, String updateName, List<String> statuses) {
+        if (clusterNames.size() > 20) {
+            throw invalid("At most 20 cluster names may be specified.");
+        }
+        if (statuses.stream().anyMatch(status -> !Set.of("available", "in-progress", "complete", "scheduled")
+                .contains(status))) {
+            throw invalid("Invalid service update status.");
+        }
+        // Floci has no managed service-update releases to apply to its local engines.
+        return List.of();
+    }
+
+    public void batchUpdateCluster(List<String> names, String updateName) {
+        if (names.isEmpty() || names.size() > 20) {
+            throw invalid("Between 1 and 20 cluster names are required.");
+        }
+        if (updateName == null || updateName.isBlank()) {
+            throw fault("InvalidParameterCombinationException", "No modifications were requested.");
+        }
+        throw fault("ServiceUpdateNotFoundFault", "Service update " + updateName + " not found.");
+    }
+
+    private void recordEvent(String name, String type, String message, String region) {
+        events.put(key(region, UUID.randomUUID().toString()),
+                new Event(name, type, message, Instant.now().toEpochMilli() / 1000.0));
+    }
+
+    public record Page<T>(List<T> values, String nextToken) {}
+
+    public <T> Page<T> page(List<T> values, String scope, String region, Integer maxResults, String token) {
+        int limit = maxResults == null ? 100 : maxResults;
+        if (limit < 1 || limit > 100) {
+            throw invalid("MaxResults must be between 1 and 100.");
+        }
+        String prefix = regionResolver.getAccountId() + ":" + region + ":" + scope + ":";
+        int offset = 0;
+        if (token != null) {
+            try {
+                String decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+                if (!decoded.startsWith(prefix)) {
+                    throw new IllegalArgumentException("Token scope mismatch");
+                }
+                offset = Integer.parseInt(decoded.substring(prefix.length()));
+                if (offset < 0 || offset > values.size()) {
+                    throw new IllegalArgumentException("Invalid token offset");
+                }
+            } catch (IllegalArgumentException exception) {
+                throw invalid("Invalid NextToken.");
+            }
+        }
+        int to = Math.min(values.size(), offset + limit);
+        String next = to < values.size() ? Base64.getUrlEncoder().withoutPadding().encodeToString(
+                (prefix + to).getBytes(StandardCharsets.UTF_8)) : null;
+        return new Page<>(values.subList(offset, to), next);
+    }
+
+    private void validateGroupName(String name) {
+        requireText(name, "Name");
+        if (!name.matches("[a-zA-Z][a-zA-Z0-9-]{0,39}") || name.endsWith("-") || name.contains("--")) {
+            throw invalid("Name must start with a letter and contain up to 40 letters, digits or hyphens.");
+        }
+    }
+
+    private void requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw invalid(field + " is required.");
+        }
+    }
+
+    private AwsException invalid(String message) {
+        return fault("InvalidParameterValueException", message);
+    }
+
+    private AwsException fault(String type, String message) {
+        return new AwsException(type, message, 400);
     }
 
     // ──────────────────────────── Authentication ────────────────────────────
@@ -475,7 +986,7 @@ public class MemoryDbService {
         }
         return acl.getUserNames().stream()
                 .map(name -> resolveUser(name, region))
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .anyMatch(u -> u.getAuthMode() != AuthMode.NO_PASSWORD);
     }
 
@@ -497,6 +1008,8 @@ public class MemoryDbService {
     private User builtinDefaultUser(String region) {
         User user = new User();
         user.setName(DEFAULT_USER);
+        user.setAccountId(regionResolver.getAccountId());
+        user.setRegion(region);
         user.setStatus(ACTIVE);
         user.setAuthMode(AuthMode.NO_PASSWORD);
         user.setAccessString("on ~* &* +@all");
@@ -510,6 +1023,8 @@ public class MemoryDbService {
     private Acl builtinOpenAccessAcl(String region) {
         Acl acl = new Acl();
         acl.setName(DEFAULT_ACL);
+        acl.setAccountId(regionResolver.getAccountId());
+        acl.setRegion(region);
         acl.setStatus(ACTIVE);
         acl.setUserNames(new ArrayList<>(List.of(DEFAULT_USER)));
         acl.setMinimumEngineVersion(DEFAULT_ENGINE_VERSION);
@@ -521,24 +1036,65 @@ public class MemoryDbService {
 
     // ──────────────────────────── Internals ────────────────────────────
 
-    private Cluster clusterByArn(String resourceArn) {
-        if (resourceArn == null) {
-            throw new AwsException("InvalidParameterValueException", "ResourceArn is required.", 400);
-        }
+    private record TagTarget(Map<String, String> tags, Runnable persist) {}
+
+    private TagTarget tagTarget(String resourceArn, String region) {
+        requireText(resourceArn, "ResourceArn");
+        AwsArnUtils.Arn arn;
         try {
-            var arn = io.github.hectorvent.floci.core.common.AwsArnUtils.parse(resourceArn);
-            if (!"memorydb".equals(arn.service()) || !currentRegion().equals(arn.region())
-                    || !regionResolver.getAccountId().equals(arn.accountId())) {
-                throw new IllegalArgumentException("ARN owner mismatch");
-            }
-        } catch (IllegalArgumentException e) {
-            throw new AwsException("ClusterNotFoundFault", "Cluster not found.", 404);
+            arn = AwsArnUtils.parse(resourceArn);
+        } catch (IllegalArgumentException exception) {
+            throw invalid("Invalid ResourceArn.");
         }
-        migrateLegacyClusters(currentRegion());
-        return clusters.scan(k -> k.startsWith(currentRegion() + ":")).stream()
-                .filter(c -> resourceArn.equals(c.getArn()))
-                .findFirst()
-                .orElseThrow(() -> new AwsException("ClusterNotFoundFault", "Cluster not found.", 404));
+        String[] resource = arn.resource().split("/", 2);
+        if (!"memorydb".equals(arn.service()) || resource.length != 2 || resource[1].isBlank()) {
+            throw invalid("Invalid MemoryDB ResourceArn.");
+        }
+        String type = resource[0];
+        String name = resource[1];
+        String notFound = switch (type) {
+            case "cluster" -> "ClusterNotFoundFault";
+            case "user" -> "UserNotFoundFault";
+            case "acl" -> "ACLNotFoundFault";
+            case "parametergroup" -> "ParameterGroupNotFoundFault";
+            case "subnetgroup" -> "SubnetGroupNotFoundFault";
+            case "snapshot" -> "SnapshotNotFoundFault";
+            default -> throw invalid("Unsupported MemoryDB resource type.");
+        };
+        if (!resourceArn.equals(buildArn(region, type, name))) {
+            throw fault(notFound, "Resource not found in this account and region.");
+        }
+        String resourceKey = key(region, name);
+        return switch (type) {
+            case "cluster" -> {
+                Cluster cluster = resourceGet(clusters, name, region).orElseThrow(() -> fault(notFound, "Cluster not found."));
+                yield new TagTarget(cluster.getTags(), () -> clusters.put(resourceKey, cluster));
+            }
+            case "user" -> {
+                User user = resourceGet(users, name, region).orElseThrow(() -> fault(notFound, "User not found."));
+                yield new TagTarget(user.getTags(), () -> users.put(resourceKey, user));
+            }
+            case "acl" -> {
+                Acl acl = resourceGet(acls, name, region).orElseThrow(() -> fault(notFound, "ACL not found."));
+                yield new TagTarget(acl.getTags(), () -> acls.put(resourceKey, acl));
+            }
+            case "parametergroup" -> {
+                ParameterGroup group = getParameterGroup(name, region);
+                yield new TagTarget(group.tags(), () -> {
+                    mutableParameterGroup(name, region);
+                    parameterGroups.put(resourceKey, group);
+                });
+            }
+            case "subnetgroup" -> {
+                SubnetGroup group = getSubnetGroup(name, region);
+                yield new TagTarget(group.tags(), () -> subnetGroups.put(resourceKey, group));
+            }
+            case "snapshot" -> {
+                Snapshot snapshot = getSnapshot(name, region);
+                yield new TagTarget(snapshot.tags(), () -> snapshots.put(resourceKey, snapshot));
+            }
+            default -> throw invalid("Unsupported MemoryDB resource type.");
+        };
     }
 
     private void startBackend(Cluster cluster, boolean authRequired) {
@@ -629,29 +1185,29 @@ public class MemoryDbService {
     private String identityName(String accountId, String region, String name) {
         String defaultAccount = regionResolver.getDefaultAccountId();
         String defaultRegion = regionResolver.getDefaultRegion();
-        if ((defaultAccount == null || java.util.Objects.equals(defaultAccount, accountId))
-                && (defaultRegion == null || java.util.Objects.equals(defaultRegion, region))) {
+        if ((defaultAccount == null || Objects.equals(defaultAccount, accountId))
+                && (defaultRegion == null || Objects.equals(defaultRegion, region))) {
             return name;
         }
         return accountId + "-" + region + "-" + name;
     }
 
-    private <V> java.util.Optional<V> legacyGet(StorageBackend<String, V> store, String name, String region) {
+    private <V> Optional<V> legacyGet(StorageBackend<String, V> store, String name, String region) {
         String defaultAccount = regionResolver.getDefaultAccountId();
         String defaultRegion = regionResolver.getDefaultRegion();
-        if ((defaultAccount != null && !java.util.Objects.equals(defaultAccount, regionResolver.getAccountId()))
-                || (defaultRegion != null && !java.util.Objects.equals(defaultRegion, region))) {
-            return java.util.Optional.empty();
+        if ((defaultAccount != null && !Objects.equals(defaultAccount, regionResolver.getAccountId()))
+                || (defaultRegion != null && !Objects.equals(defaultRegion, region))) {
+            return Optional.empty();
         }
         return store.get(name);
     }
 
-    private <V> java.util.Optional<V> resourceGet(StorageBackend<String, V> store, String name, String region) {
-        var result = store.get(key(region, name));
+    private <V> Optional<V> resourceGet(StorageBackend<String, V> store, String name, String region) {
+        Optional<V> result = store.get(key(region, name));
         if (result.isPresent()) {
             return result;
         }
-        var legacy = legacyGet(store, name, region);
+        Optional<V> legacy = legacyGet(store, name, region);
         if (legacy.isPresent()) {
             setOwner(legacy.get(), region);
             store.put(key(region, name), legacy.get());
@@ -721,8 +1277,8 @@ public class MemoryDbService {
     private boolean isDefaultOwner(String region) {
         String defaultAccount = regionResolver.getDefaultAccountId();
         String defaultRegion = regionResolver.getDefaultRegion();
-        return (defaultAccount == null || java.util.Objects.equals(defaultAccount, regionResolver.getAccountId()))
-                && (defaultRegion == null || java.util.Objects.equals(defaultRegion, region));
+        return (defaultAccount == null || Objects.equals(defaultAccount, regionResolver.getAccountId()))
+                && (defaultRegion == null || Objects.equals(defaultRegion, region));
     }
 
     private void setOwner(Object resource, String region) {

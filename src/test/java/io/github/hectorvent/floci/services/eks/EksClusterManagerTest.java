@@ -661,6 +661,9 @@ class EksClusterManagerTest {
             when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
 
             metadataServer = Mockito.mock(Ec2MetadataServer.class);
+            when(metadataServer.registerProxy(any())).thenReturn("test-proxy-capability");
+            CopyArchiveToContainerCmd copy = Mockito.mock(CopyArchiveToContainerCmd.class, Mockito.RETURNS_SELF);
+            when(dockerClient.copyArchiveToContainerCmd(anyString())).thenReturn(copy);
             dockerHostResolver = Mockito.mock(DockerHostResolver.class);
             when(dockerHostResolver.resolve()).thenReturn("floci-host");
 
@@ -754,15 +757,15 @@ class EksClusterManagerTest {
 
             manager.configureLinkLocalMetadataEndpoint(cluster, "container-42");
 
-            verify(metadataServer).reconcileContainerAddresses(any(), any());
+            verify(metadataServer).registerProxy(any());
+            verify(metadataServer, never()).reconcileContainerAddresses(any(), any());
             assertEquals(2, capturedCmds.size());
-            // First command: install probe
-            assertTrue(capturedCmds.get(0)[2].contains("command -v socat"));
-            // Second command: start command with 169.254.169.254
+            assertTrue(capturedCmds.get(0)[2].contains("command -v python3"));
             assertTrue(capturedCmds.get(1)[2].contains("169.254.169.254"));
-            assertTrue(capturedCmds.get(1)[2].contains("TCP:floci-host:9169"));
+            assertTrue(capturedCmds.get(1)[2].contains("python3 /var/lib/floci-imds-proxy.py"));
+            assertFalse(capturedCmds.get(1)[2].contains("test-proxy-capability"));
 
-            assertNotNull(manager.getRegisteredClusterNodeInstance(cluster));
+            assertEquals("container-42", manager.getRegisteredClusterNodeInstance(cluster).getDockerContainerId());
         }
 
         @Test
@@ -788,6 +791,20 @@ class EksClusterManagerTest {
 
             // Failure to wire proxy should log warning and continue without throwing
             manager.configureLinkLocalMetadataEndpoint(cluster, "container-42");
+        }
+
+        @Test
+        void failedProxyStartupRevokesItsIdentity() {
+            InspectExecResponse response = Mockito.mock(InspectExecResponse.class);
+            when(response.getExitCodeLong()).thenReturn(0L, 1L);
+            when(dockerClient.inspectExecCmd(anyString()).exec()).thenReturn(response);
+            Cluster cluster = new Cluster();
+            cluster.setName("failed-proxy-cluster");
+
+            manager.configureLinkLocalMetadataEndpoint(cluster, "container-failed");
+
+            verify(metadataServer).unregisterProxy(any(), Mockito.eq("test-proxy-capability"));
+            assertNull(manager.getRegisteredClusterNodeInstance(cluster));
         }
 
         @Test

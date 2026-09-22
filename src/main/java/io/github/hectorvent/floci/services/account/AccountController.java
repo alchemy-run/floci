@@ -47,6 +47,79 @@ public class AccountController {
         return Response.ok(response).build();
     }
 
+    @POST
+    @Path("/deleteAlternateContact")
+    public Response deleteAlternateContact(String body) {
+        accountService.deleteAlternateContact(requestContext.getAccountId(), readTree(body));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/getAccountInformation")
+    public Response getAccountInformation(String body) {
+        return Response.ok(objectMapper.valueToTree(
+                accountService.getAccountInformation(requestContext.getAccountId(), readObject(body)))).build();
+    }
+
+    @POST
+    @Path("/putAccountName")
+    public Response putAccountName(String body) {
+        accountService.putAccountName(requestContext.getAccountId(), readObject(body));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/getContactInformation")
+    public Response getContactInformation(String body) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ContactInformation", objectMapper.valueToTree(
+                accountService.getContactInformation(requestContext.getAccountId(), readObject(body))));
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/putContactInformation")
+    public Response putContactInformation(String body) {
+        accountService.putContactInformation(requestContext.getAccountId(), readObject(body));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/listRegions")
+    public Response listRegions(String body) {
+        return Response.ok(objectMapper.valueToTree(
+                accountService.listRegions(requestContext.getAccountId(), readObject(body)))).build();
+    }
+
+    @POST
+    @Path("/getRegionOptStatus")
+    public Response getRegionOptStatus(String body) {
+        return Response.ok(objectMapper.valueToTree(
+                accountService.getRegionOptStatus(requestContext.getAccountId(), readObject(body)))).build();
+    }
+
+    @POST
+    @Path("/enableRegion")
+    public Response enableRegion(String body) {
+        accountService.rejectRegionChange(requestContext.getAccountId(), readObject(body));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/disableRegion")
+    public Response disableRegion(String body) {
+        accountService.rejectRegionChange(requestContext.getAccountId(), readObject(body));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private JsonNode readObject(String body) {
+        JsonNode request = readTree(body);
+        if (request == null || !request.isObject()) {
+            throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
+        }
+        return request;
+    }
+
     private JsonNode readTree(String body) {
         try {
             return objectMapper.reader()

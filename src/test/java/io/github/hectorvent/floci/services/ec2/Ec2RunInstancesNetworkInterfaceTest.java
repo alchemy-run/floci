@@ -44,6 +44,30 @@ class Ec2RunInstancesNetworkInterfaceTest {
     }
 
     @Test
+    void primaryAddressAndExistingInterfaceFollowDeviceIndexNotWireIndex() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("NetworkInterface.1.DeviceIndex", "1");
+        params.putSingle("NetworkInterface.1.PrivateIpAddress", "10.0.2.88");
+        params.putSingle("NetworkInterface.2.DeviceIndex", "0");
+        params.putSingle("NetworkInterface.2.NetworkInterfaceId", "eni-primary");
+        params.putSingle("NetworkInterface.2.PrivateIpAddresses.1.PrivateIpAddress", "10.0.1.78");
+        params.putSingle("NetworkInterface.2.PrivateIpAddresses.1.Primary", "false");
+        params.putSingle("NetworkInterface.2.PrivateIpAddresses.2.PrivateIpAddress", "10.0.1.77");
+        params.putSingle("NetworkInterface.2.PrivateIpAddresses.2.Primary", "true");
+        Ec2QueryHandler.PrimaryNetworkInterface parsed = Ec2QueryHandler.parsePrimaryNetworkInterface(params);
+        assertEquals("10.0.1.77", parsed.privateIpAddress());
+        assertEquals("eni-primary", parsed.networkInterfaceId());
+        assertEquals(0, parsed.deviceIndex());
+    }
+
+    @Test
+    void primaryPrivateAddressDoesNotRequireOtherInterfaceFields() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("NetworkInterface.1.PrivateIpAddress", "10.0.1.77");
+        assertEquals("10.0.1.77", Ec2QueryHandler.parsePrimaryNetworkInterface(params).privateIpAddress());
+    }
+
+    @Test
     void systemctlShimInstallsOnlyWhenSystemctlIsMissing() {
         String script = String.join(" ", Ec2ContainerManager.systemctlShimInstallCommand());
         assertTrue(script.contains("mkdir -p /etc/systemd/system"));

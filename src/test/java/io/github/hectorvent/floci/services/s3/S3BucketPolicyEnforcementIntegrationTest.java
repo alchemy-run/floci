@@ -329,6 +329,124 @@ class S3BucketPolicyEnforcementIntegrationTest {
     }
 
     @Test
+    void listDenialDoesNotGrantOrDenyLocationAndExpectedOwnerIsStillEnforced() {
+        String bucket = "deny-location-" + UUID.randomUUID().toString().substring(0, 8);
+        createBucket(bucket);
+        putBucketPolicy(bucket, denyBucketAction(bucket, "s3:ListBucket"));
+        given().filter(ROOT_SIGNER).get("/" + bucket + "?list-type=2").then().statusCode(403)
+                .body(containsString("<Code>AccessDenied</Code>"));
+        given().filter(ROOT_SIGNER).head("/" + bucket).then().statusCode(403);
+        given().filter(ROOT_SIGNER).header("x-amz-expected-bucket-owner", "000000000000")
+                .get("/" + bucket + "?location").then().statusCode(200);
+        given().filter(ROOT_SIGNER).header("x-amz-expected-bucket-owner", ACCOUNT_A)
+                .get("/" + bucket + "?location").then().statusCode(403)
+                .body(containsString("<Code>AccessDenied</Code>"));
+        putBucketPolicy(bucket, denyBucketAction(bucket, "s3:GetBucketLocation"));
+        given().filter(ROOT_SIGNER).get("/" + bucket + "?list-type=2").then().statusCode(200);
+        given().filter(ROOT_SIGNER).header("x-amz-expected-bucket-owner", "000000000000")
+                .get("/" + bucket + "?location").then().statusCode(403)
+                .body(containsString("<Code>AccessDenied</Code>"));
+        given().filter(ROOT_SIGNER).delete("/" + bucket + "?policy").then().statusCode(204);
+        given().filter(ROOT_SIGNER).get("/" + bucket + "?location").then().statusCode(200);
+        given().filter(ROOT_SIGNER).delete("/" + bucket).then().statusCode(204);
+    }
+
+    @Test
+    void deniedConfigurationReadsDoNotBlockAllowedWrites() {
+        for (String aspect : new String[]{"tagging", "encryption"}) {
+            String bucket = "deny-read-" + aspect + "-" + UUID.randomUUID().toString().substring(0, 8);
+            createBucket(bucket);
+            String action = "tagging".equals(aspect) ? "s3:GetBucketTagging" : "s3:GetEncryptionConfiguration";
+            String body = "tagging".equals(aspect)
+                    ? "<Tagging><TagSet><Tag><Key>revision</Key><Value>after</Value></Tag></TagSet></Tagging>"
+                    : encryptionConfiguration("NONE", false);
+            putBucketPolicy(bucket, denyBucketAction(bucket, action));
+            given().filter(ROOT_SIGNER).get("/" + bucket + "?" + aspect).then().statusCode(403)
+                    .body(containsString("<Code>AccessDenied</Code>"));
+            given().filter(ROOT_SIGNER).body(body).put("/" + bucket + "?" + aspect).then()
+                    .statusCode("tagging".equals(aspect) ? 204 : 200);
+            given().filter(ROOT_SIGNER).get("/" + bucket + "?" + aspect).then().statusCode(403);
+            given().filter(ROOT_SIGNER).delete("/" + bucket + "?policy").then().statusCode(204);
+            given().filter(ROOT_SIGNER).get("/" + bucket + "?" + aspect).then().statusCode(200)
+                    .body(containsString("tagging".equals(aspect) ? "<Value>after</Value>" : "<EncryptionType>NONE</EncryptionType>"));
+            given().filter(ROOT_SIGNER).delete("/" + bucket).then().statusCode(204);
+        }
+    }
+
+    @Test
+    void encryptionWriteDenialPreservesKmsKeyBucketKeyAndBlockedTypes() {
+        String bucket = "deny-encryption-write-" + UUID.randomUUID().toString().substring(0, 8);
+        createBucket(bucket);
+        for (String blocked : new String[]{"SSE-C", "NONE"}) {
+            String configuration = encryptionConfiguration(blocked, true);
+            given().filter(ROOT_SIGNER).body(configuration).put("/" + bucket + "?encryption").then().statusCode(200);
+            String before = given().filter(ROOT_SIGNER).get("/" + bucket + "?encryption").then().statusCode(200)
+                    .extract().asString();
+            putBucketPolicy(bucket, denyBucketAction(bucket, "s3:PutEncryptionConfiguration"));
+            given().filter(ROOT_SIGNER).body(configuration).put("/" + bucket + "?encryption").then().statusCode(403)
+                    .body(containsString("<Code>AccessDenied</Code>"));
+            given().filter(ROOT_SIGNER).body(encryptionConfiguration("NONE", false))
+                    .put("/" + bucket + "?encryption").then().statusCode(403);
+            given().filter(ROOT_SIGNER).delete("/" + bucket + "?encryption").then().statusCode(403);
+            given().filter(ROOT_SIGNER).get("/" + bucket + "?encryption").then().statusCode(200).body(equalTo(before));
+            given().filter(ROOT_SIGNER).delete("/" + bucket + "?policy").then().statusCode(204);
+        }
+        given().filter(ROOT_SIGNER).delete("/" + bucket + "?encryption").then().statusCode(204);
+        given().filter(ROOT_SIGNER).delete("/" + bucket).then().statusCode(204);
+    }
+
+    @Test
+    void expectedOwnerUsesStoredAccountNotSignedCallerOrDefaultAccount() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String bucket = "expected-owner-" + suffix;
+        Credentials owner = createAccountAdmin("owner-" + suffix, ACCOUNT_A);
+        Credentials caller = createAccountAdmin("caller-" + suffix, ACCOUNT_B);
+        createBucketAs(bucket, owner.signer());
+        putBucketPolicyAs(bucket, """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"%s"},
+                "Action":["s3:GetBucketLocation","s3:GetEncryptionConfiguration","s3:PutEncryptionConfiguration"],
+                "Resource":"arn:aws:s3:::%s"}]}
+                """.formatted(caller.userArn(), bucket), owner.signer());
+        for (String wrong : new String[]{ACCOUNT_B, "000000000000"}) {
+            given().filter(caller.signer()).header("x-amz-expected-bucket-owner", wrong)
+                    .get("/" + bucket + "?location").then().statusCode(403)
+                    .body(containsString("<Code>AccessDenied</Code>"));
+        }
+        given().filter(caller.signer()).header("x-amz-expected-bucket-owner", ACCOUNT_A)
+                .get("/" + bucket + "?location").then().statusCode(200);
+        given().filter(caller.signer()).header("x-amz-expected-bucket-owner", ACCOUNT_A)
+                .body(encryptionConfiguration("SSE-C", true)).put("/" + bucket + "?encryption").then().statusCode(200);
+        given().filter(owner.signer()).get("/" + bucket + "?encryption").then().statusCode(200)
+                .body(containsString("<EncryptionType>SSE-C</EncryptionType>"))
+                .body(containsString("<BucketKeyEnabled>true</BucketKeyEnabled>"));
+        given().filter(caller.signer()).header("x-amz-expected-bucket-owner", ACCOUNT_B)
+                .delete("/" + bucket + "?encryption").then().statusCode(403);
+        given().filter(caller.signer()).header("x-amz-expected-bucket-owner", ACCOUNT_A)
+                .delete("/" + bucket + "?encryption").then().statusCode(204);
+        given().filter(owner.signer()).get("/" + bucket + "?encryption").then().statusCode(200)
+                .body(containsString("<EncryptionType>NONE</EncryptionType>"));
+        given().filter(owner.signer()).delete("/" + bucket + "?policy").then().statusCode(204);
+        given().filter(owner.signer()).delete("/" + bucket).then().statusCode(204);
+    }
+
+    private static String denyBucketAction(String bucket, String action) {
+        return """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*",
+                "Action":"%s","Resource":"arn:aws:s3:::%s"}]}
+                """.formatted(action, bucket);
+    }
+
+    private static String encryptionConfiguration(String blocked, boolean bucketKey) {
+        return """
+                <ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>
+                <SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/policy-key</KMSMasterKeyID>
+                </ApplyServerSideEncryptionByDefault><BucketKeyEnabled>%s</BucketKeyEnabled>
+                <BlockedEncryptionTypes><EncryptionType>%s</EncryptionType></BlockedEncryptionTypes>
+                </Rule></ServerSideEncryptionConfiguration>
+                """.formatted(bucketKey, blocked);
+    }
+
+    @Test
     void sameAccountDirectUserBypassesBoundaryOnPrimaryRequest() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String bucket = "boundary-bucket-" + suffix;

@@ -1259,7 +1259,8 @@ public class IotService {
 
     public IotTopicRule getTopicRule(String ruleName, String region) {
         return topicRuleStore.get(topicRuleKey(region, ruleName))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Topic rule not found: " + ruleName, 404));
+                .orElseThrow(() -> new AwsException("UnauthorizedException",
+                        "Access to topic rule '" + ruleName + "' was denied", 401));
     }
 
     public List<IotTopicRule> listTopicRules(String region) {
@@ -1859,8 +1860,13 @@ public class IotService {
     }
 
     private TaggableResource taggableForArn(String resourceArn) {
-        String resource = resourceFromArn(resourceArn);
-        String region = regionFromArn(resourceArn);
+        AwsArnUtils.Arn arn = parseIotArn(resourceArn);
+        if (!regionResolver.getAccountId().equals(arn.accountId())
+                || !regionResolver.getRegion().equals(arn.region())) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
+        }
+        String resource = arn.resource();
+        String region = arn.region();
         if (resource.startsWith("thing/")) {
             String thingName = resource.substring("thing/".length());
             Thing thing = thingStore.get(thingKey(region, thingName))
@@ -1888,7 +1894,8 @@ public class IotService {
         }
         if (resource.startsWith("rule/")) {
             String ruleName = resource.substring("rule/".length());
-            IotTopicRule rule = getTopicRule(ruleName, region);
+            IotTopicRule rule = topicRuleStore.get(topicRuleKey(region, ruleName))
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
             return new TaggableResource(rule.getTags(), tags -> {
                 rule.setTags(tags);
                 topicRuleStore.put(topicRuleKey(region, ruleName), rule);
@@ -1960,10 +1967,6 @@ public class IotService {
         if (!Set.of("QUEUED", "IN_PROGRESS", "SUCCEEDED", "FAILED", "TIMED_OUT", "REJECTED", "REMOVED", "CANCELED").contains(status)) {
             throw new AwsException("InvalidRequestException", "Unsupported job execution status: " + status, 400);
         }
-    }
-
-    private String regionFromArn(String resourceArn) {
-        return parseIotArn(resourceArn).region();
     }
 
     private String resourceFromArn(String resourceArn) {

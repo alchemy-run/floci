@@ -88,6 +88,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
     private static final Map<String, String> SERVICE_LINKED_ROLE_NAMES = Map.of(
             "autoscaling.amazonaws.com", "AutoScaling",
             "cloud9.amazonaws.com", "AWSCloud9",
+            "lakeformation.amazonaws.com", "LakeFormationDataAccess",
             "ram.amazonaws.com", "ResourceAccessManager"
     );
     private static final String AMAZONAWS_DOMAIN = ".amazonaws.com";

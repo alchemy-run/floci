@@ -490,7 +490,8 @@ class KinesisAnalyticsV2ServiceTest {
         FlinkApplication updated = realMode.updateApplication("demo", 1L, null,
                 "bucket", "v2.jar", null, null);
 
-        Mockito.verify(manager).redeployCode(app);
+        Mockito.verify(manager).redeployCode(updated);
+        assertEquals("app.jar", app.getCodeS3Key());
         assertEquals("v2.jar", updated.getCodeS3Key());
         assertEquals(ApplicationStatus.STARTING, updated.getApplicationStatus());
     }
@@ -639,7 +640,8 @@ class KinesisAnalyticsV2ServiceTest {
             Thread.sleep(1500);
 
             Mockito.verify(store, Mockito.atLeastOnce())
-                    .putForAccount(Mockito.eq("000000000000"), Mockito.eq("demo"), Mockito.any());
+                    .putForAccount(Mockito.eq("000000000000"),
+                            Mockito.eq("arn:aws:kinesisanalytics:us-east-1:000000000000:application/demo"), Mockito.any());
             assertEquals("job-1", realMode.describeApplication("demo").getFlinkJobId());
         } finally {
             realMode.shutdown();

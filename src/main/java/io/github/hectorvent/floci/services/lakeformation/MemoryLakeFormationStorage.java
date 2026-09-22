@@ -1,15 +1,25 @@
 package io.github.hectorvent.floci.services.lakeformation;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.lakeformation.model.*;
-import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.services.lakeformation.model.DataLakePrincipal;
+import io.github.hectorvent.floci.services.lakeformation.model.DataLakeSettings;
+import io.github.hectorvent.floci.services.lakeformation.model.FilterCondition;
+import io.github.hectorvent.floci.services.lakeformation.model.LFTag;
+import io.github.hectorvent.floci.services.lakeformation.model.LFTagPair;
+import io.github.hectorvent.floci.services.lakeformation.model.PrincipalResourcePermissions;
+import io.github.hectorvent.floci.services.lakeformation.model.Resource;
+import io.github.hectorvent.floci.services.lakeformation.model.ResourceInfo;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -46,9 +56,15 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
         ResourceInfo info = new ResourceInfo();
         info.setResourceArn(resourceArn);
         info.setRoleArn(roleArn);
-        info.setWithFederation(withFederation);
-        // Use arn as key for storage
-        resourcesStorage.put(region + ":" + resourceArn, info);
+        info.setWithFederation(Boolean.TRUE.equals(withFederation));
+        info.setHybridAccessEnabled(false);
+        info.setLastModified(Instant.now().getEpochSecond());
+        registerResource(region, info);
+    }
+
+    @Override
+    public synchronized void registerResource(String region, ResourceInfo info) {
+        resourcesStorage.put(region + ":" + info.getResourceArn(), copyOf(info));
     }
 
     @Override
@@ -56,13 +72,14 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
                                Boolean hybridAccessEnabled, Boolean withFederation) {
         String resourceKey = region + ":" + resourceArn;
         ResourceInfo existing = resourcesStorage.get(resourceKey)
-                .orElseThrow(() -> new io.github.hectorvent.floci.core.common.AwsException(
+                .orElseThrow(() -> new AwsException(
                         "EntityNotFoundException", "Resource not found", 400));
         // Work on a defensive copy so concurrent readers (DescribeResource, ListResources)
         // never observe a partially-mutated ResourceInfo: they see either the old complete
         // state or the new complete state, never a mix of field values.
         ResourceInfo updated = copyOf(existing);
         updated.setRoleArn(roleArn);
+        updated.setLastModified(Instant.now().getEpochSecond());
         if (expectedResourceOwnerAccount != null) {
             updated.setExpectedResourceOwnerAccount(expectedResourceOwnerAccount);
         }
@@ -112,7 +129,7 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
                                     } else if ("BEGINS_WITH".equals(op)) {
                                         if (values.stream().noneMatch(arn::startsWith)) return false;
                                     } else {
-                                        throw new io.github.hectorvent.floci.core.common.AwsException("InvalidInputException", "Unsupported ComparisonOperator: " + op, 400);
+                                        throw new AwsException("InvalidInputException", "Unsupported ComparisonOperator: " + op, 400);
                                     }
                                 }
                             }
@@ -246,12 +263,33 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
             }
             tag.setTagValues(currentValues);
             lfTagsStorage.put(region + ":" + catalogId + ":" + tagKey, tag);
+            pruneTagAssignments(region, catalogId, tagKey, currentValues);
         });
     }
 
     @Override
-    public void deleteLFTag(String region, String catalogId, String tagKey) {
+    public synchronized void deleteLFTag(String region, String catalogId, String tagKey) {
         lfTagsStorage.delete(region + ":" + catalogId + ":" + tagKey);
+        pruneTagAssignments(region, catalogId, tagKey, List.of());
+    }
+
+    private void pruneTagAssignments(String region, String catalogId, String tagKey, List<String> allowedValues) {
+        String prefix = region + ":" + catalogId + ":";
+        for (String key : resourceTagsStorage.keys()) {
+            if (key.startsWith(prefix)) {
+                List<LFTagPair> updated = new ArrayList<>();
+                for (LFTagPair source : resourceTagsStorage.get(key).orElse(List.of())) {
+                    LFTagPair tag = copyTag(source, catalogId);
+                    if (tagKey.equals(tag.getTagKey()) && catalogId.equals(tag.getCatalogId())) {
+                        tag.setTagValues(tag.getTagValues().stream().filter(allowedValues::contains).toList());
+                    }
+                    if (!tag.getTagValues().isEmpty()) {
+                        updated.add(tag);
+                    }
+                }
+                resourceTagsStorage.put(key, updated);
+            }
+        }
     }
 
     @Override
@@ -269,23 +307,38 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
     }
 
     @Override
-    public void addLFTagsToResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags) {
+    public List<LFTagPair> getResourceLFTags(String region, String catalogId, Resource resource) {
+        return resourceTagsStorage.get(region + ":" + catalogId + ":" + getResourceKey(resource))
+                .orElse(List.of()).stream().map(tag -> copyTag(tag, catalogId)).toList();
+    }
+
+    private LFTagPair copyTag(LFTagPair tag, String catalogId) {
+        LFTagPair copy = new LFTagPair();
+        copy.setCatalogId(tag.getCatalogId() == null ? catalogId : tag.getCatalogId());
+        copy.setTagKey(tag.getTagKey());
+        copy.setTagValues(new ArrayList<>(tag.getTagValues()));
+        return copy;
+    }
+
+    @Override
+    public synchronized void addLFTagsToResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags) {
         String resourceKey = region + ":" + catalogId + ":" + getResourceKey(resource);
-        List<LFTagPair> currentTags = resourceTagsStorage.get(resourceKey).orElse(new ArrayList<>());
+        List<LFTagPair> currentTags = new ArrayList<>(getResourceLFTags(region, catalogId, resource));
         
         for (LFTagPair newTag : lfTags) {
             // Remove existing tag with same key if it exists, to replace values
             currentTags.removeIf(t -> t.getTagKey().equals(newTag.getTagKey()));
-            currentTags.add(newTag);
+            currentTags.add(copyTag(newTag, catalogId));
         }
         
         resourceTagsStorage.put(resourceKey, currentTags);
     }
 
     @Override
-    public void removeLFTagsFromResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags) {
+    public synchronized void removeLFTagsFromResource(String region, String catalogId, Resource resource, List<LFTagPair> lfTags) {
         String resourceKey = region + ":" + catalogId + ":" + getResourceKey(resource);
-        resourceTagsStorage.get(resourceKey).ifPresent(currentTags -> {
+        resourceTagsStorage.get(resourceKey).ifPresent(existing -> {
+            List<LFTagPair> currentTags = new ArrayList<>(getResourceLFTags(region, catalogId, resource));
             for (LFTagPair tagToRemove : lfTags) {
                 for (LFTagPair currentTag : currentTags) {
                     if (currentTag.getTagKey().equals(tagToRemove.getTagKey())) {
@@ -325,11 +378,11 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
             String cat = r.getTableWithColumns().getCatalogId() != null ? "catalog:" + r.getTableWithColumns().getCatalogId() + ":" : "";
             StringBuilder sb = new StringBuilder(cat + "tableWithColumns:" + r.getTableWithColumns().getDatabaseName() + ":" + r.getTableWithColumns().getName());
             if (r.getTableWithColumns().getColumnNames() != null && !r.getTableWithColumns().getColumnNames().isEmpty()) {
-                sb.append(":cols:").append(r.getTableWithColumns().getColumnNames().stream().map(c -> java.net.URLEncoder.encode(c, java.nio.charset.StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")));
+                sb.append(":cols:").append(r.getTableWithColumns().getColumnNames().stream().map(c -> URLEncoder.encode(c, StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")));
             } else if (r.getTableWithColumns().getColumnWildcard() != null) {
                 sb.append(":wildcard");
                 if (r.getTableWithColumns().getColumnWildcard().getExcludedColumnNames() != null && !r.getTableWithColumns().getColumnWildcard().getExcludedColumnNames().isEmpty()) {
-                    sb.append(":excl:").append(r.getTableWithColumns().getColumnWildcard().getExcludedColumnNames().stream().map(c -> java.net.URLEncoder.encode(c, java.nio.charset.StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")));
+                    sb.append(":excl:").append(r.getTableWithColumns().getColumnWildcard().getExcludedColumnNames().stream().map(c -> URLEncoder.encode(c, StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")));
                 }
             }
             return sb.toString();
@@ -344,9 +397,9 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
         }
         if (r.getLfTag() != null) {
             String cat = r.getLfTag().getCatalogId() != null ? "catalog:" + r.getLfTag().getCatalogId() + ":" : "";
-            StringBuilder sb = new StringBuilder(cat + "lfTag:" + java.net.URLEncoder.encode(r.getLfTag().getTagKey(), java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(cat + "lfTag:" + URLEncoder.encode(r.getLfTag().getTagKey(), StandardCharsets.UTF_8));
             if (r.getLfTag().getTagValues() != null) {
-                sb.append("=").append(r.getLfTag().getTagValues().stream().map(v -> java.net.URLEncoder.encode(v, java.nio.charset.StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")));
+                sb.append("=").append(r.getLfTag().getTagValues().stream().map(v -> URLEncoder.encode(v, StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")));
             }
             return sb.toString();
         }
@@ -362,7 +415,7 @@ public class MemoryLakeFormationStorage implements LakeFormationStorage {
             }
             if (r.getLfTagPolicy().getExpression() != null) {
                 sb.append(":expr:").append(r.getLfTagPolicy().getExpression().stream()
-                        .map(e -> java.net.URLEncoder.encode(e.getTagKey(), java.nio.charset.StandardCharsets.UTF_8) + "=" + e.getTagValues().stream().map(v -> java.net.URLEncoder.encode(v, java.nio.charset.StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")))
+                        .map(e -> URLEncoder.encode(e.getTagKey(), StandardCharsets.UTF_8) + "=" + e.getTagValues().stream().map(v -> URLEncoder.encode(v, StandardCharsets.UTF_8)).sorted().collect(Collectors.joining(",")))
                         .sorted().collect(Collectors.joining(";")));
             }
             return sb.toString();

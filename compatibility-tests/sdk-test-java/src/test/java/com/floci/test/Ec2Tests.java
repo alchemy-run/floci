@@ -453,6 +453,60 @@ class Ec2Tests {
     }
 
     @Test
+    @DisplayName("ModifySecurityGroupRules - default egress description converges without replacing rules")
+    void modifyDefaultEgressDescriptionConverges() {
+        String descriptionVpcId = ec2.createVpc(r -> r.cidrBlock("10.83.0.0/16")).vpc().vpcId();
+        try {
+            String descriptionGroupId = ec2.createSecurityGroup(r -> r.vpcId(descriptionVpcId)
+                    .groupName("description-convergence").description("description convergence")).groupId();
+            try {
+                ec2.authorizeSecurityGroupIngress(r -> r.groupId(descriptionGroupId).ipPermissions(
+                        IpPermission.builder().ipProtocol("tcp").fromPort(3000).toPort(3000)
+                                .ipRanges(IpRange.builder().cidrIp("0.0.0.0/0").description("app").build()).build(),
+                        IpPermission.builder().ipProtocol("tcp").fromPort(22).toPort(22)
+                                .ipRanges(IpRange.builder().cidrIp("0.0.0.0/0").description("ssh").build()).build()));
+                List<SecurityGroupRule> original = ec2.describeSecurityGroupRules(r -> r.filters(
+                        Filter.builder().name("group-id").values(descriptionGroupId).build())).securityGroupRules();
+                SecurityGroupRule egress = original.stream().filter(SecurityGroupRule::isEgress)
+                        .findFirst().orElseThrow();
+
+                for (String description : List.of("all outbound", "all outbound", "")) {
+                    ModifySecurityGroupRulesResponse modified = ec2.modifySecurityGroupRules(r ->
+                            r.groupId(descriptionGroupId).securityGroupRules(SecurityGroupRuleUpdate.builder()
+                                    .securityGroupRuleId(egress.securityGroupRuleId())
+                                    .securityGroupRule(SecurityGroupRuleRequest.builder().ipProtocol("-1")
+                                            .cidrIpv4("0.0.0.0/0").description(description).build()).build()));
+                    assertThat(modified.returnValue()).isTrue();
+                    List<SecurityGroupRule> observed = ec2.describeSecurityGroupRules(r -> r.filters(
+                            Filter.builder().name("group-id").values(descriptionGroupId).build())).securityGroupRules();
+                    assertThat(observed).extracting(SecurityGroupRule::securityGroupRuleId)
+                            .containsExactlyInAnyOrderElementsOf(original.stream()
+                                    .map(SecurityGroupRule::securityGroupRuleId).toList());
+                    assertThat(observed.stream().filter(SecurityGroupRule::isEgress).findFirst().orElseThrow())
+                            .satisfies(rule -> {
+                                assertThat(rule.description()).isEqualTo(description);
+                                assertThat(rule.ipProtocol()).isEqualTo("-1");
+                                assertThat(rule.cidrIpv4()).isEqualTo("0.0.0.0/0");
+                                assertThat(rule.fromPort()).isNull();
+                                assertThat(rule.toPort()).isNull();
+                            });
+                    assertThat(observed.stream().filter(rule -> !rule.isEgress()).toList())
+                            .extracting(SecurityGroupRule::description).containsExactlyInAnyOrder("app", "ssh");
+                    SecurityGroup group = ec2.describeSecurityGroups(r -> r.groupIds(descriptionGroupId))
+                            .securityGroups().get(0);
+                    assertThat(group.ipPermissionsEgress()).hasSize(1);
+                    assertThat(group.ipPermissionsEgress().get(0).ipRanges().get(0).description())
+                            .isEqualTo(description);
+                }
+            } finally {
+                ec2.deleteSecurityGroup(r -> r.groupId(descriptionGroupId));
+            }
+        } finally {
+            ec2.deleteVpc(r -> r.vpcId(descriptionVpcId));
+        }
+    }
+
+    @Test
     @Order(16)
     @DisplayName("CreateKeyPair - create SSH key pair")
     void createKeyPair() {
@@ -599,7 +653,7 @@ class Ec2Tests {
     @Test
     @Order(27)
     @DisplayName("RunInstances - launch EC2 instance")
-    void runInstances() {
+    void runInstances() throws InterruptedException {
         RunInstancesResponse resp = ec2.runInstances(RunInstancesRequest.builder()
                 .imageId("ami-0abcdef1234567890")
                 .instanceType(InstanceType.T2_MICRO)
@@ -613,13 +667,48 @@ class Ec2Tests {
         Instance launched = resp.instances().get(0);
 
         assertThat(instanceId).isNotNull().startsWith("i-");
-        // Control-plane marks the instance running immediately so Alchemy
-        // waitForState does not treat a later guest-launch failure as a
-        // failed create. Real AWS returns pending; DescribeInstances is
-        // where callers wait.
-        assertThat(launched.state().name()).isEqualTo(InstanceStateName.RUNNING);
+        assertThat(launched.state().name()).isIn(InstanceStateName.PENDING, InstanceStateName.RUNNING);
+        assertThat(waitForState(instanceId, InstanceStateName.RUNNING).state().name())
+                .isEqualTo(InstanceStateName.RUNNING);
         assertThat(launched.instanceType()).isEqualTo(InstanceType.T2_MICRO);
         assertThat(launched.keyName()).isEqualTo(keyName);
+    }
+
+    @Test
+    @Order(27)
+    @DisplayName("RunInstances - requested private addresses survive the container lifecycle")
+    void requestedPrivateAddressesSurviveContainerLifecycle() throws InterruptedException {
+        for (boolean primaryInterface : List.of(false, true)) {
+            String requested = primaryInterface ? "10.0.1.78" : "10.0.1.77";
+            RunInstancesRequest.Builder launch = RunInstancesRequest.builder()
+                    .imageId("ami-0abcdef1234567890").instanceType(InstanceType.T3_MICRO).minCount(1).maxCount(1);
+            if (primaryInterface) {
+                launch.networkInterfaces(InstanceNetworkInterfaceSpecification.builder()
+                        .deviceIndex(0).subnetId(subnetId).groups(sgId).privateIpAddress(requested).build());
+            } else {
+                launch.subnetId(subnetId).securityGroupIds(sgId).privateIpAddress(requested);
+            }
+            Instance created = ec2.runInstances(launch.build()).instances().getFirst();
+            String id = created.instanceId();
+            try {
+                assertThat(created.privateIpAddress()).isEqualTo(requested);
+                Instance running = waitForState(id, InstanceStateName.RUNNING);
+                assertThat(running.privateIpAddress()).isEqualTo(requested);
+                assertThat(running.networkInterfaces().getFirst().privateIpAddress()).isEqualTo(requested);
+                assertThat(ec2.describeNetworkInterfaces(r -> r.networkInterfaceIds(
+                        running.networkInterfaces().getFirst().networkInterfaceId()))
+                        .networkInterfaces().getFirst().privateIpAddress()).isEqualTo(requested);
+                assertThatThrownBy(() -> ec2.runInstances(launch.build())).isInstanceOfSatisfying(Ec2Exception.class,
+                        error -> assertThat(error.awsErrorDetails().errorCode()).isEqualTo("InvalidIPAddress.InUse"));
+                ec2.stopInstances(r -> r.instanceIds(id));
+                assertThat(waitForState(id, InstanceStateName.STOPPED).privateIpAddress()).isEqualTo(requested);
+                ec2.startInstances(r -> r.instanceIds(id));
+                assertThat(waitForState(id, InstanceStateName.RUNNING).privateIpAddress()).isEqualTo(requested);
+            } finally {
+                ec2.terminateInstances(r -> r.instanceIds(id));
+                waitForState(id, InstanceStateName.TERMINATED);
+            }
+        }
     }
 
     @Test

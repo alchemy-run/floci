@@ -4,13 +4,117 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
 class ApiGatewayUpdateAuthorizerIntegrationTest {
+
+    @Test
+    void optionalSettingsPersistAcrossCreateUpdateGetAndList() {
+        String apiId = given().contentType("application/json")
+                .body(Map.of("name", "authorizer-optional-settings"))
+                .when().post("/restapis")
+                .then().statusCode(201).extract().path("id");
+        String uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/"
+                + "arn:aws:lambda:us-east-1:000000000000:function:token-authorizer/invocations";
+        String credentials = "arn:aws:iam::000000000000:role/authorizer";
+        try {
+            String authorizerId = given().contentType("application/json")
+                    .body(Map.of("name", "token-authorizer", "type", "TOKEN", "authorizerUri", uri,
+                            "identitySource", "method.request.header.Authorization", "authType", "custom",
+                            "authorizerCredentials", credentials, "identityValidationExpression", "^Bearer .+$"))
+                    .when().post("/restapis/" + apiId + "/authorizers")
+                    .then().statusCode(201)
+                    .body("authorizerResultTtlInSeconds", equalTo(300))
+                    .body("authType", equalTo("custom"))
+                    .body("authorizerCredentials", equalTo(credentials))
+                    .body("identityValidationExpression", equalTo("^Bearer .+$"))
+                    .extract().path("id");
+            String path = "/restapis/" + apiId + "/authorizers/" + authorizerId;
+
+            given().contentType("application/json")
+                    .body(Map.of("patchOperations", List.of(
+                            Map.of("op", "remove", "path", "/authorizerResultTtlInSeconds"))))
+                    .when().patch(path)
+                    .then().statusCode(200).body("authorizerResultTtlInSeconds", equalTo(300));
+
+            given().contentType("application/json")
+                    .body(Map.of("patchOperations", List.of(
+                            Map.of("op", "replace", "path", "/authorizerResultTtlInSeconds", "value", "60"),
+                            Map.of("op", "replace", "path", "/authType", "value", "updated"),
+                            Map.of("op", "replace", "path", "/authorizerCredentials", "value", credentials + "-updated"),
+                            Map.of("op", "replace", "path", "/identityValidationExpression", "value", "^Token .+$"))))
+                    .when().patch(path)
+                    .then().statusCode(200).body("authorizerResultTtlInSeconds", equalTo(60));
+
+            for (String field : List.of("authorizerCredentials", "identityValidationExpression", "authorizerUri")) {
+                given().contentType("application/json")
+                        .body(Map.of("patchOperations", List.of(Map.of("op", "remove", "path", "/" + field))))
+                        .when().patch(path).then().statusCode(400);
+            }
+            given().when().get(path).then().statusCode(200)
+                    .body("authorizerUri", equalTo(uri))
+                    .body("authType", equalTo("updated"))
+                    .body("authorizerResultTtlInSeconds", equalTo(60))
+                    .body("authorizerCredentials", equalTo(credentials + "-updated"))
+                    .body("identityValidationExpression", equalTo("^Token .+$"));
+            given().when().get("/restapis/" + apiId + "/authorizers").then().statusCode(200)
+                    .body("item[0].id", equalTo(authorizerId))
+                    .body("item[0].authorizerResultTtlInSeconds", equalTo(60))
+                    .body("item[0].authorizerCredentials", equalTo(credentials + "-updated"));
+            for (int attempt = 0; attempt < 2; attempt++) {
+                given().contentType("application/json")
+                        .body(Map.of("patchOperations", List.of(
+                                Map.of("op", "remove", "path", "/authorizerResultTtlInSeconds"))))
+                        .when().patch(path).then().statusCode(200)
+                        .body("authorizerResultTtlInSeconds", equalTo(300));
+            }
+            given().when().get(path).then().statusCode(200)
+                    .body("authorizerResultTtlInSeconds", equalTo(300))
+                    .body("authorizerCredentials", equalTo(credentials + "-updated"));
+        } finally {
+            given().when().delete("/restapis/" + apiId).then().statusCode(202);
+        }
+    }
+
+    @Test
+    void invalidPatchAfterRemovalDoesNotChangeStoredSettings() {
+        String apiId = given().contentType("application/json")
+                .body(Map.of("name", "authorizer-removal-atomicity"))
+                .when().post("/restapis")
+                .then().statusCode(201).extract().path("id");
+        try {
+            String authorizerId = given().contentType("application/json")
+                    .body(Map.of("name", "request-authorizer", "type", "REQUEST",
+                            "identitySource", "method.request.header.Authorization", "authorizerResultTtlInSeconds", 0))
+                    .when().post("/restapis/" + apiId + "/authorizers")
+                    .then().statusCode(201).extract().path("id");
+            String path = "/restapis/" + apiId + "/authorizers/" + authorizerId;
+            given().contentType("application/json")
+                    .body(Map.of("patchOperations", List.of(
+                            Map.of("op", "remove", "path", "/identitySource"),
+                            Map.of("op", "remove", "path", "/authorizerResultTtlInSeconds"),
+                            Map.of("op", "remove", "path", "/name"))))
+                    .when().patch(path).then().statusCode(400);
+            given().when().get(path).then().statusCode(200)
+                    .body("name", equalTo("request-authorizer"))
+                    .body("identitySource", equalTo("method.request.header.Authorization"))
+                    .body("authorizerResultTtlInSeconds", equalTo(0));
+            given().contentType("application/json")
+                    .body(Map.of("patchOperations", List.of(Map.of("op", "remove", "path", "/identitySource"))))
+                    .when().patch(path).then().statusCode(200).body("identitySource", nullValue());
+            given().when().get(path).then().statusCode(200)
+                    .body("identitySource", nullValue())
+                    .body("authorizerResultTtlInSeconds", equalTo(0));
+        } finally {
+            given().when().delete("/restapis/" + apiId).then().statusCode(202);
+        }
+    }
 
     @Test
     void shouldUpdateAuthorizerAndPersistChanges() {

@@ -23,17 +23,28 @@ public class CloudTrailJsonHandler {
 
     private final CloudTrailService service;
     private final ObjectMapper mapper;
+    private final CloudTrailEventService events;
+    private final CloudTrailLakeService lake;
 
     @Inject
-    public CloudTrailJsonHandler(CloudTrailService service, ObjectMapper mapper) {
+    public CloudTrailJsonHandler(CloudTrailService service, ObjectMapper mapper,
+                                CloudTrailEventService events, CloudTrailLakeService lake) {
         this.service = service;
         this.mapper = mapper;
+        this.events = events;
+        this.lake = lake;
     }
 
     public Response handle(String action, JsonNode request, String region) throws Exception {
+        if (request == null || !request.isObject()) {
+            throw new AwsException("InvalidParameterException", "Request must be a JSON object.", 400);
+        }
         return switch (action) {
             case "CreateTrail" -> createTrail(request, region);
             case "DescribeTrails" -> describeTrails(request, region);
+            case "GetTrail" -> getTrail(request, region);
+            case "GetInsightSelectors" -> getInsightSelectors(request, region);
+            case "PutInsightSelectors" -> putInsightSelectors(request, region);
             case "DeleteTrail" -> deleteTrail(request, region);
             case "UpdateTrail" -> updateTrail(request, region);
             case "PutEventSelectors" -> putEventSelectors(request, region);
@@ -43,9 +54,14 @@ public class CloudTrailJsonHandler {
             case "GetTrailStatus" -> getTrailStatus(request, region);
             case "LookupEvents" -> lookupEvents(request, region);
             case "ListTrails" -> listTrails(request, region);
-            case "AddTags" -> addTags(request);
-            case "RemoveTags" -> removeTags(request);
-            case "ListTags" -> listTags(request);
+            case "ListPublicKeys" -> listPublicKeys(request);
+            case "CreateEventDataStore", "GetEventDataStore", "ListEventDataStores", "UpdateEventDataStore",
+                 "DeleteEventDataStore", "RestoreEventDataStore", "StartEventDataStoreIngestion",
+                 "StopEventDataStoreIngestion", "StartQuery", "DescribeQuery", "GetQueryResults", "ListQueries",
+                 "CancelQuery", "GenerateQuery" -> Response.ok(lake.handle(action, request, region)).build();
+            case "AddTags" -> addTags(request, region);
+            case "RemoveTags" -> removeTags(request, region);
+            case "ListTags" -> listTags(request, region);
             default -> throw new AwsException(
                     "InvalidAction", "Could not find operation " + action, 400);
         };
@@ -129,6 +145,41 @@ public class CloudTrailJsonHandler {
         ObjectNode resp = mapper.createObjectNode();
         resp.set("trailList", mapper.valueToTree(trails));
         return Response.ok(resp).build();
+    }
+
+    private Response getTrail(JsonNode req, String region) {
+        ObjectNode response = mapper.createObjectNode();
+        response.set("Trail", mapper.valueToTree(service.describeTrail(region, req.path("Name").asText(null))));
+        return Response.ok(response).build();
+    }
+
+    private Response getInsightSelectors(JsonNode req, String region) {
+        String name = req.path("TrailName").asText(null);
+        return insightResponse(service.describeTrail(region, name), service.getInsightSelectors(region, name));
+    }
+
+    private Response putInsightSelectors(JsonNode req, String region) {
+        String name = req.path("TrailName").asText(null);
+        JsonNode selectors = req.get("InsightSelectors");
+        if (selectors == null || !selectors.isArray()) {
+            throw new AwsException("InvalidInsightSelectorsException", "InsightSelectors must be an array.", 400);
+        }
+        List<String> types = new ArrayList<>();
+        for (JsonNode selector : selectors) {
+            types.add(selector.path("InsightType").asText(null));
+        }
+        List<String> stored = service.putInsightSelectors(region, name, types);
+        return insightResponse(service.describeTrail(region, name), stored);
+    }
+
+    private Response insightResponse(Trail trail, List<String> selectors) {
+        ObjectNode response = mapper.createObjectNode();
+        response.put("TrailARN", trail.trailArn());
+        ArrayNode values = response.putArray("InsightSelectors");
+        for (String selector : selectors) {
+            values.addObject().put("InsightType", selector);
+        }
+        return Response.ok(response).build();
     }
 
     private Response putEventSelectors(JsonNode req, String region) {
@@ -220,30 +271,52 @@ public class CloudTrailJsonHandler {
     }
 
     private Response lookupEvents(JsonNode req, String region) {
-        ObjectNode resp = mapper.createObjectNode();
-        resp.putArray("Events");
-        return Response.ok(resp).build();
+        return Response.ok(events.lookup(req, region)).build();
     }
 
-    private Response addTags(JsonNode req) {
+    private Response listPublicKeys(JsonNode req) {
+        CloudTrailPages.validateTimeRange(req);
+        if (req.has("NextToken")) {
+            throw new AwsException("InvalidNextTokenException", "No digest key page exists for this token.", 400);
+        }
+        // No digest signer exists, so there are no public keys to advertise.
+        ObjectNode response = mapper.createObjectNode();
+        response.putArray("PublicKeyList");
+        return Response.ok(response).build();
+    }
+
+    private Response addTags(JsonNode req, String region) {
         String resourceId = req.path("ResourceId").asText(null);
-        service.addTags(resourceId, parseTagsList(req.path("TagsList")));
+        if (isEventDataStore(resourceId)) {
+            lake.updateTags(resourceId, region, parseTagsList(req.path("TagsList")), List.of());
+        } else {
+            service.addTags(resourceId, parseTagsList(req.path("TagsList")));
+        }
         return Response.ok(mapper.createObjectNode()).build();
     }
 
-    private Response removeTags(JsonNode req) {
+    private Response removeTags(JsonNode req, String region) {
         String resourceId = req.path("ResourceId").asText(null);
         List<String> keys = new ArrayList<>(parseTagsList(req.path("TagsList")).keySet());
-        service.removeTags(resourceId, keys);
+        if (isEventDataStore(resourceId)) {
+            lake.updateTags(resourceId, region, Map.of(), keys);
+        } else {
+            service.removeTags(resourceId, keys);
+        }
         return Response.ok(mapper.createObjectNode()).build();
     }
 
-    private Response listTags(JsonNode req) {
+    private static boolean isEventDataStore(String arn) {
+        return arn != null && arn.contains(":eventdatastore/");
+    }
+
+    private Response listTags(JsonNode req, String region) {
         List<String> resourceIdList = extractStringList(req, "ResourceIdList");
         ObjectNode resp = mapper.createObjectNode();
         ArrayNode resourceTagList = resp.putArray("ResourceTagList");
         for (String resourceId : resourceIdList) {
-            Map<String, String> tags = service.listTags(resourceId);
+            Map<String, String> tags = isEventDataStore(resourceId)
+                    ? lake.tags(resourceId, region) : service.listTags(resourceId);
             ObjectNode entry = resourceTagList.addObject();
             entry.put("ResourceId", resourceId);
             ArrayNode tagsList = entry.putArray("TagsList");

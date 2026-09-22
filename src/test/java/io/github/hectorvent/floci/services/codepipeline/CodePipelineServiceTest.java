@@ -49,6 +49,98 @@ class CodePipelineServiceTest {
             mock(S3Service.class));
 
     @Test
+    void pollingRequiresAnActionTypeInTheSameAccountAndRegion() throws Exception {
+        JsonNode poll = mapper.readTree("""
+                {"actionTypeId":{"category":"Build","owner":"Custom","provider":"ScopedWorker","version":"1"}}
+                """);
+        try {
+            handle("CreateCustomActionType", """
+                    {"category":"Build","provider":"ScopedWorker","version":"1",
+                     "inputArtifactDetails":{"minimumCount":0,"maximumCount":0},
+                     "outputArtifactDetails":{"minimumCount":0,"maximumCount":0}}
+                    """);
+            assertEquals(0, service.handle("PollForJobs", poll, REGION, ACCOUNT).path("jobs").size());
+            for (String region : new String[] {REGION, "us-west-2"}) {
+                for (String account : new String[] {ACCOUNT, "111111111111"}) {
+                    if (REGION.equals(region) && ACCOUNT.equals(account)) {
+                        continue;
+                    }
+                    AwsException error = assertThrows(AwsException.class,
+                            () -> service.handle("PollForJobs", poll, region, account));
+                    assertEquals("ActionTypeNotFoundException", error.getErrorCode());
+                }
+            }
+            handle("DeleteCustomActionType", """
+                    {"category":"Build","provider":"ScopedWorker","version":"1"}
+                    """);
+            AwsException deleted = assertThrows(AwsException.class,
+                    () -> service.handle("PollForJobs", poll, REGION, ACCOUNT));
+            assertEquals("ActionTypeNotFoundException", deleted.getErrorCode());
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void sourceRevisionsStartRealExecutionsAndDeduplicate() throws Exception {
+        String pipelineName = "source-revision-pipeline";
+        try {
+            handle("CreateCustomActionType", """
+                    {"category":"Source","provider":"RevisionSource","version":"1",
+                     "inputArtifactDetails":{"minimumCount":0,"maximumCount":0},
+                     "outputArtifactDetails":{"minimumCount":0,"maximumCount":0}}
+                    """);
+            createExternalActionPipeline(service, pipelineName, """
+                    {"name":"SourceAction","actionTypeId":{
+                        "category":"Source","owner":"Custom","provider":"RevisionSource","version":"1"}}
+                    """);
+            JsonNode revision = mapper.readTree("""
+                    {"pipelineName":"%s","stageName":"External","actionName":"SourceAction",
+                     "actionRevision":{"revisionId":"revision-1","revisionChangeId":"change-1","created":1}}
+                    """.formatted(pipelineName));
+            JsonNode first = service.handle("PutActionRevision", revision, REGION, ACCOUNT);
+            JsonNode duplicate = service.handle("PutActionRevision", revision, REGION, ACCOUNT);
+            assertTrue(first.path("newRevision").asBoolean());
+            assertFalse(duplicate.path("newRevision").asBoolean());
+            assertEquals(first.path("pipelineExecutionId"), duplicate.path("pipelineExecutionId"));
+            assertEquals("revision-1", pipelineState(service, pipelineName).path("stageStates").path(0)
+                    .path("actionStates").path(0).path("currentRevision").path("revisionId").asText());
+            String executionId = first.path("pipelineExecutionId").asText();
+            JsonNode execution = handle("GetPipelineExecution", """
+                    {"pipelineName":"%s","pipelineExecutionId":"%s"}
+                    """.formatted(pipelineName, executionId));
+            assertEquals(executionId, execution.path("pipelineExecution").path("pipelineExecutionId").asText());
+            assertEquals("PutActionRevision", execution.path("pipelineExecution").path("trigger").path("triggerType").asText());
+            assertEquals(1, handle("ListPipelineExecutions", """
+                    {"pipelineName":"%s"}
+                    """.formatted(pipelineName)).path("pipelineExecutionSummaries").size());
+            AwsException otherAccount = assertThrows(AwsException.class,
+                    () -> service.handle("PutActionRevision", revision, REGION, "111111111111"));
+            assertEquals("PipelineNotFoundException", otherAccount.getErrorCode());
+            AwsException otherRegion = assertThrows(AwsException.class,
+                    () -> service.handle("PutActionRevision", revision, "us-west-2", ACCOUNT));
+            assertEquals("PipelineNotFoundException", otherRegion.getErrorCode());
+            JsonNode job = waitForJob("""
+                    {"actionTypeId":{"category":"Source","owner":"Custom","provider":"RevisionSource","version":"1"}}
+                    """);
+            JsonNode jobRequest = mapper.createObjectNode().put("jobId", job.path("id").asText())
+                    .put("nonce", job.path("nonce").asText());
+            for (String operation : new String[] {"GetJobDetails", "PutJobSuccessResult", "PutJobFailureResult", "AcknowledgeJob"}) {
+                AwsException accountError = assertThrows(AwsException.class,
+                        () -> service.handle(operation, jobRequest, REGION, "111111111111"));
+                assertEquals("JobNotFoundException", accountError.getErrorCode());
+                AwsException regionError = assertThrows(AwsException.class,
+                        () -> service.handle(operation, jobRequest, "us-west-2", ACCOUNT));
+                assertEquals("JobNotFoundException", regionError.getErrorCode());
+            }
+            stopExecution(service, pipelineName, executionId, true);
+            waitForExecutionStatus(service, pipelineName, executionId, "Stopped");
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void getPipelineTreatsMissingStoredVersionAsVersionOne() throws Exception {
         CapturingStorageFactory storageFactory = new CapturingStorageFactory();
         CodePipelineService legacyService = new CodePipelineService(
@@ -385,6 +477,18 @@ class CodePipelineServiceTest {
                 .path("pipelineExecutionSummaries");
         assertEquals(1, summaries.size());
         assertEquals("Failed", summaries.get(0).path("status").asText());
+    }
+
+    private JsonNode waitForJob(String body) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        do {
+            JsonNode jobs = handle("PollForJobs", body).path("jobs");
+            if (!jobs.isEmpty()) {
+                return jobs.get(0);
+            }
+            Thread.sleep(25);
+        } while (System.nanoTime() < deadline);
+        throw new AssertionError("Custom action job was not created");
     }
 
     private JsonNode handle(String action, String body) throws Exception {

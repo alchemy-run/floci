@@ -17,6 +17,7 @@ public class Analyzer {
     private String createdAt;
     private Map<String, String> tags = new LinkedHashMap<>();
     private JsonNode configuration;
+    private Map<String, JsonNode> archiveRules = new LinkedHashMap<>();
 
     public Analyzer() {
     }
@@ -67,6 +68,14 @@ public class Analyzer {
 
     public void setTags(Map<String, String> tags) {
         this.tags = tags;
+    }
+
+    public Map<String, JsonNode> getArchiveRules() {
+        return archiveRules;
+    }
+
+    public void setArchiveRules(Map<String, JsonNode> archiveRules) {
+        this.archiveRules = archiveRules;
     }
 
     public JsonNode getConfiguration() {

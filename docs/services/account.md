@@ -30,3 +30,29 @@ See the [AWS Account Management API Reference](https://docs.aws.amazon.com/accou
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_ACCOUNT_ENABLED` | `true` | Enable or disable AWS Account Management |
+| `FLOCI_SERVICES_ACCOUNT_BOOTSTRAP_CONTACT_INFORMATION` | unset | Initial primary-contact JSON for the configured default account |
+
+### Initialize a local account's primary contact
+
+AWS accounts already have primary contact information when they are created. A new
+Floci account has none until it is configured. Supply a `ContactInformation` JSON
+object through `FLOCI_SERVICES_ACCOUNT_BOOTSTRAP_CONTACT_INFORMATION` to initialize
+that prerequisite before clients start:
+
+```json
+{
+  "FullName": "Local AWS account",
+  "AddressLine1": "1 Example Street",
+  "City": "Seattle",
+  "StateOrRegion": "WA",
+  "PostalCode": "98101",
+  "CountryCode": "US",
+  "PhoneNumber": "+12025550100"
+}
+```
+
+The contact is validated and stored by the same implementation as
+`PutContactInformation`. Bootstrap only initializes an absent contact for
+`FLOCI_DEFAULT_ACCOUNT_ID`; it never overwrites saved contact information or
+initializes another account. Without this setting, an unconfigured account still
+returns `ResourceNotFoundException` from `GetContactInformation`.

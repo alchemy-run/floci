@@ -363,9 +363,8 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     private void deleteBucketLocked(String bucketName) {
-        // Check if bucket is empty
-        List<S3Object> objects = listObjects(bucketName, null, null, 1);
-        if (!objects.isEmpty()) {
+        // Noncurrent versions and delete markers also prevent bucket deletion.
+        if (!objectStore.scan(key -> key.startsWith(bucketName + "/")).isEmpty()) {
             throw new AwsException("BucketNotEmpty",
                     "The bucket you tried to delete is not empty.", 409);
         }
@@ -535,6 +534,7 @@ public class S3Service implements Resettable, ResourceProvider {
         String normalizedServerSideEncryption = normalizeServerSideEncryption(effectiveOptions.getServerSideEncryption());
         SseCustomerKey sseCustomerKey = validateSseCustomerKey(effectiveOptions.getSseCustomerAlgorithm(), effectiveOptions.getSseCustomerKey(), effectiveOptions.getSseCustomerKeyMd5());
         rejectConflictingServerSideEncryption(normalizedServerSideEncryption, sseCustomerKey);
+        validateSseCustomerUpload(bucketName, sseCustomerKey != null ? sseCustomerKey.algorithm() : null);
         checkWritePreconditions(bucketName, key, effectiveOptions.getIfMatch(), effectiveOptions.getIfNoneMatch());
 
         S3Object object = new S3Object(bucketName, key, data, contentType,
@@ -1467,19 +1467,20 @@ public class S3Service implements Resettable, ResourceProvider {
             return deleteMarker;
         } else if (versionId != null) {
             // Get the specific version before permanent deletion
-            S3Object toDelete = objectStore.get(versionedKey(bucketName, key, versionId)).orElse(null);
+            S3Object toDelete = getVersionForDeletion(bucketName, key, versionId);
             if (toDelete != null && !toDelete.isDeleteMarker()) {
                 checkLockProtection(toDelete, bypassGovernance);
             }
-            // Permanently delete a specific version (metadata + file data)
+            // Permanently delete a specific version (metadata + file data).
             objectStore.delete(versionedKey(bucketName, key, versionId));
             deleteVersionedFile(bucketName, key, versionId);
-            deleteAllAnnotationsFor(annotationParentKey(bucketName, key, versionId));
+            deleteAllAnnotationsFor(annotationParentKey(bucketName, key,
+                    toDelete != null ? toDelete.getVersionId() : versionId));
             LOG.debugv("Permanently deleted version: {0}/{1} v={2}", bucketName, key, versionId);
             // Promote the next most-recent version when the deleted one was the latest
             String latestKey = objectKey(bucketName, key);
             objectStore.get(latestKey).ifPresent(latest -> {
-                if (versionId.equals(latest.getVersionId())) {
+                if (versionId.equals(reportedVersionId(latest))) {
                     String vPrefix = versionedKey(bucketName, key, "");
                     List<S3Object> remaining = objectStore.scan(k -> k.startsWith(vPrefix));
                     if (remaining.isEmpty()) {
@@ -1523,6 +1524,17 @@ public class S3Service implements Resettable, ResourceProvider {
         }
     }
 
+    private S3Object getVersionForDeletion(String bucketName, String key, String versionId) {
+        S3Object version = objectStore.get(versionedKey(bucketName, key, versionId)).orElse(null);
+        if (version == null && "null".equals(versionId)) {
+            // Unversioned objects live at the plain key, but ListObjectVersions reports "null".
+            return objectStore.get(objectKey(bucketName, key))
+                    .filter(object -> object.getVersionId() == null)
+                    .orElse(null);
+        }
+        return version;
+    }
+
     /**
      * Returns whether the requested object version is currently protected by an active
      * GOVERNANCE retention period. The bypass permission is only relevant for those versions;
@@ -1531,10 +1543,9 @@ public class S3Service implements Resettable, ResourceProvider {
      */
     public boolean isGovernanceRetentionActive(String bucketName, String key, String versionId) {
         ensureBucketExists(bucketName);
-        S3Object object = (versionId != null
-                ? objectStore.get(versionedKey(bucketName, key, versionId))
-                : objectStore.get(objectKey(bucketName, key)))
-                .orElse(null);
+        S3Object object = versionId != null
+                ? getVersionForDeletion(bucketName, key, versionId)
+                : objectStore.get(objectKey(bucketName, key)).orElse(null);
         return object != null
                 && !object.isDeleteMarker()
                 && "GOVERNANCE".equals(object.getObjectLockMode())
@@ -1826,7 +1837,9 @@ public class S3Service implements Resettable, ResourceProvider {
 
             if (versionIdMarker != null && !versionIdMarker.isEmpty()) {
                 List<S3Object> remaining = new ArrayList<>();
-                boolean afterMarker = false;
+                // A cleanup may delete the previous page, including its marker, before continuing.
+                boolean afterMarker = versions.stream().noneMatch(version ->
+                        km.equals(version.getKey()) && versionIdMarker.equals(reportedVersionId(version)));
                 for (S3Object v : versions) {
                     int keyCompare = v.getKey().compareTo(km);
                     if (keyCompare < 0) {
@@ -3101,6 +3114,7 @@ public class S3Service implements Resettable, ResourceProvider {
         String normalizedServerSideEncryption = normalizeServerSideEncryption(serverSideEncryption);
         SseCustomerKey customerKey = validateSseCustomerKey(sseCustomerAlgorithm, sseCustomerKey, sseCustomerKeyMd5);
         rejectConflictingServerSideEncryption(normalizedServerSideEncryption, customerKey);
+        validateSseCustomerUpload(bucket, customerKey != null ? customerKey.algorithm() : null);
         MultipartUpload upload = new MultipartUpload(bucket, key, contentType);
         if (metadata != null) {
             upload.getMetadata().putAll(metadata);
@@ -3164,6 +3178,7 @@ public class S3Service implements Resettable, ResourceProvider {
                     "Part number must be between 1 and 10000.", 400);
         }
         validateSseCustomerAccess(upload, sseCustomerAlgorithm, sseCustomerKey, sseCustomerKeyMd5);
+        validateSseCustomerUpload(bucket, upload.getSseCustomerAlgorithm());
 
         if (inMemory) {
             memoryMultipartStore.get(uploadId).put(partNumber, data);
@@ -3241,6 +3256,7 @@ public class S3Service implements Resettable, ResourceProvider {
                     "The specified multipart upload does not exist.", 404);
         }
 
+        validateSseCustomerUpload(bucket, upload.getSseCustomerAlgorithm());
         ChecksumAlgorithm algorithm = upload.getChecksumAlgorithm() != null ? upload.getChecksumAlgorithm() : ChecksumAlgorithm.CRC64NVME;
         ChecksumType storedChecksumType = upload.getChecksumType() != null ? upload.getChecksumType() : ChecksumType.FULL_OBJECT;
 
@@ -3659,35 +3675,28 @@ public class S3Service implements Resettable, ResourceProvider {
      * every bucket and never returns 404 for {@code GetBucketEncryption}.
      */
     public String getBucketEncryption(String bucketName) {
-        Bucket bucket = bucketStore.get(bucketName)
+        return bucketEncryption(bucketName).toXml();
+    }
+
+    private S3EncryptionConfiguration bucketEncryption(String bucketName) {
+        Bucket bucket = resolveBucket(bucketName)
                 .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        if (bucket.getEncryptionConfiguration() == null) {
-            return new XmlBuilder()
-                    .start("ServerSideEncryptionConfiguration", AwsNamespaces.S3)
-                      .start("Rule")
-                        .start("ApplyServerSideEncryptionByDefault")
-                          .elem("SSEAlgorithm", "AES256")
-                        .end("ApplyServerSideEncryptionByDefault")
-                        .elem("BucketKeyEnabled", "false")
-                      .end("Rule")
-                    .end("ServerSideEncryptionConfiguration")
-                    .build();
-        }
-        return bucket.getEncryptionConfiguration();
+        return S3EncryptionConfiguration.fromStored(bucket.getEncryptionConfiguration());
     }
 
     public void putBucketEncryption(String bucketName, String encryptionXml) {
-        Bucket bucket = bucketStore.get(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        bucket.setEncryptionConfiguration(encryptionXml);
-        bucketStore.put(bucketName, bucket);
+        mutateBucket(bucketName, bucket -> bucket.setEncryptionConfiguration(
+                S3EncryptionConfiguration.parse(encryptionXml).toXml()));
     }
 
     public void deleteBucketEncryption(String bucketName) {
-        Bucket bucket = bucketStore.get(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
-        bucket.setEncryptionConfiguration(null);
-        bucketStore.put(bucketName, bucket);
+        mutateBucket(bucketName, bucket -> bucket.setEncryptionConfiguration(null));
+    }
+
+    private void validateSseCustomerUpload(String bucketName, String customerAlgorithm) {
+        if (customerAlgorithm != null && "SSE-C".equals(bucketEncryption(bucketName).blockedEncryptionType())) {
+            throw new AwsException("AccessDenied", "SSE-C uploads are blocked for this bucket.", 403);
+        }
     }
 
     public String getPublicAccessBlock(String bucketName) {
@@ -4634,6 +4643,17 @@ public class S3Service implements Resettable, ResourceProvider {
      */
     private Optional<Bucket> resolveBucket(String bucketName) {
         return resolveBucketEntry(bucketName).map(AccountAwareStorageBackend.OwnedEntry::value);
+    }
+
+    public void validateExpectedBucketOwner(String bucketName, String expectedOwner) {
+        if (expectedOwner == null) {
+            return;
+        }
+        AccountAwareStorageBackend.OwnedEntry<Bucket> bucket = resolveBucketEntry(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket", "The specified bucket does not exist.", 404));
+        if (!expectedOwner.equals(bucket.account())) {
+            throw new AwsException("AccessDenied", "Access Denied", 403);
+        }
     }
 
     private Optional<AccountAwareStorageBackend.OwnedEntry<Bucket>> resolveBucketEntry(String bucketName) {

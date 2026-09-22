@@ -98,16 +98,22 @@ public class GlueService {
                        GlueSchemaRegistryService schemaRegistryService,
                        RegionResolver regionResolver,
                        ResourceGroupsTaggingService resourceGroupsTaggingService) {
-        this.databaseStore = storageFactory.create("glue", "databases.json", new TypeReference<>() {});
-        this.tableStore = storageFactory.create("glue", "tables.json", new TypeReference<>() {});
-        this.tableVersionStore = storageFactory.create("glue", "table_versions.json", new TypeReference<>() {});
-        this.columnStatisticsStore = storageFactory.create("glue", "column_statistics.json", new TypeReference<>() {});
-        this.partitionStore = storageFactory.create("glue", "partitions.json", new TypeReference<>() {});
-        this.partitionIndexStore = storageFactory.create(
-                "glue", "partition_indexes.json", new TypeReference<>() {});
-        this.partitionColumnStatisticsStore = storageFactory.create(
-                "glue", "partition_column_statistics.json", new TypeReference<>() {});
-        this.functionStore = storageFactory.create("glue", "functions.json", new TypeReference<>() {});
+        this.databaseStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "databases.json", new TypeReference<>() {}), regionResolver);
+        this.tableStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "tables.json", new TypeReference<>() {}), regionResolver);
+        this.tableVersionStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "table_versions.json", new TypeReference<>() {}), regionResolver);
+        this.columnStatisticsStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "column_statistics.json", new TypeReference<>() {}), regionResolver);
+        this.partitionStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "partitions.json", new TypeReference<>() {}), regionResolver);
+        this.partitionIndexStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "partition_indexes.json", new TypeReference<>() {}), regionResolver);
+        this.partitionColumnStatisticsStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "partition_column_statistics.json", new TypeReference<>() {}), regionResolver);
+        this.functionStore = new GlueCatalogStorage<>(
+                storageFactory.create("glue", "functions.json", new TypeReference<>() {}), regionResolver);
         this.jobStore = storageFactory.create("glue", "jobs.json", new TypeReference<>() {});
         this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
         this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
@@ -132,14 +138,14 @@ public class GlueService {
                 GlueSchemaRegistryService schemaRegistryService,
                 RegionResolver regionResolver,
                 ResourceGroupsTaggingService resourceGroupsTaggingService) {
-        this.databaseStore = databaseStore;
-        this.tableStore = tableStore;
-        this.tableVersionStore = tableVersionStore;
-        this.columnStatisticsStore = columnStatisticsStore;
-        this.partitionStore = partitionStore;
-        this.partitionIndexStore = partitionIndexStore;
-        this.partitionColumnStatisticsStore = partitionColumnStatisticsStore;
-        this.functionStore = functionStore;
+        this.databaseStore = new GlueCatalogStorage<>(databaseStore, regionResolver);
+        this.tableStore = new GlueCatalogStorage<>(tableStore, regionResolver);
+        this.tableVersionStore = new GlueCatalogStorage<>(tableVersionStore, regionResolver);
+        this.columnStatisticsStore = new GlueCatalogStorage<>(columnStatisticsStore, regionResolver);
+        this.partitionStore = new GlueCatalogStorage<>(partitionStore, regionResolver);
+        this.partitionIndexStore = new GlueCatalogStorage<>(partitionIndexStore, regionResolver);
+        this.partitionColumnStatisticsStore = new GlueCatalogStorage<>(partitionColumnStatisticsStore, regionResolver);
+        this.functionStore = new GlueCatalogStorage<>(functionStore, regionResolver);
         this.jobStore = jobStore;
         this.jobRunStore = new InMemoryStorage<>();
         this.jobBookmarkStore = new InMemoryStorage<>();
@@ -152,7 +158,7 @@ public class GlueService {
     }
 
     public void createDatabase(Database database) {
-        createDatabase(database, null, regionResolver.getDefaultRegion());
+        createDatabase(database, null, regionResolver.getRegion());
     }
 
     public void createDatabase(Database database, Map<String, String> tags, String region) {
@@ -211,7 +217,7 @@ public class GlueService {
     }
 
     public void deleteDatabase(String name) {
-        deleteDatabase(name, regionResolver.getDefaultRegion());
+        deleteDatabase(name, regionResolver.getRegion());
     }
 
     public void deleteDatabase(String name, String region) {
@@ -221,6 +227,9 @@ public class GlueService {
                 .map(Table::getName)
                 .toList();
         tableNames.forEach(tableName -> deleteTable(name, tableName));
+        functionStore.keys().stream()
+                .filter(key -> key.startsWith(databaseName + ":"))
+                .forEach(functionStore::delete);
         databaseStore.delete(databaseName);
         resourceGroupsTaggingService.deleteResources(List.of(databaseArn(region, databaseName)), region);
         LOG.infov("Deleted Glue Database: {0}", name);
@@ -1069,7 +1078,7 @@ public class GlueService {
         boolean latest = ref.getSchemaVersionId() == null && ref.getSchemaVersionNumber() == null;
         return schemaRegistryService.getSchemaVersion(
                 ref.getSchemaId(), ref.getSchemaVersionId(),
-                ref.getSchemaVersionNumber(), latest, regionResolver.getDefaultRegion());
+                ref.getSchemaVersionNumber(), latest, regionResolver.getRegion());
     }
 
     private static SchemaReference schemaReferenceOf(Table table) {

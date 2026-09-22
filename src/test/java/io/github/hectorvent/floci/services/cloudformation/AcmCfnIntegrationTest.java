@@ -8,6 +8,8 @@ import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -48,7 +50,8 @@ class AcmCfnIntegrationTest {
                 "SubjectAlternativeNames": ["www.cfn-it.example.com"],
                 "ValidationMethod": "DNS",
                 "DomainValidationOptions": [
-                  {"DomainName": "api.cfn-it.example.com", "HostedZoneId": "Z0000000000000000000A"}
+                  {"DomainName": "api.cfn-it.example.com", "HostedZoneId": "%1$s"},
+                  {"DomainName": "www.cfn-it.example.com", "HostedZoneId": "%1$s"}
                 ],
                 "Tags": [{"Key": "stack", "Value": "acm-cfn-it"}]
               }
@@ -92,12 +95,14 @@ class AcmCfnIntegrationTest {
 
     @Test
     void certificateStackExposesAnArnThatDescribeCertificateFinds() throws InterruptedException {
-        cloudFormation(STACK, "CreateStack", TEMPLATE, Map.of());
+        String zoneId = createPublicZone("cfn-it.example.com");
+        cloudFormation(STACK, "CreateStack", TEMPLATE.formatted(zoneId), Map.of());
 
         String stacks = describeStacks(STACK, "CREATE_COMPLETE");
         String arn = outputValue(stacks, "CertArn");
         assertTrue(arn.startsWith("arn:aws:acm:us-east-1:"), "Fn::GetAtt CertificateArn must be an ARN: " + arn);
         assertEquals(arn, outputValue(stacks, "CertRef"));
+        validateCertificate(arn, zoneId, 2);
 
         describeCertificate(arn).then()
             .statusCode(200)
@@ -113,12 +118,15 @@ class AcmCfnIntegrationTest {
         describeCertificate(arn).then()
             .statusCode(404)
             .body("__type", equalTo("ResourceNotFoundException"));
+        deleteZone(zoneId);
     }
 
     @Test
     void certificateOptionsFollowTheTemplateThroughCreateAndUpdate() throws InterruptedException {
+        String zoneId = createPublicZone("options.cfn-it.example.com");
         cloudFormation(OPTIONS_STACK, "CreateStack", OPTIONS_TEMPLATE, options("ENABLED", "DISABLED"));
         String arn = outputValue(describeStacks(OPTIONS_STACK, "CREATE_COMPLETE"), "CertArn");
+        validateCertificate(arn, zoneId, 1);
         describeCertificate(arn).then()
             .statusCode(200)
             .body("Certificate.Status", equalTo("ISSUED"))
@@ -139,8 +147,10 @@ class AcmCfnIntegrationTest {
         describeCertificate(arn).then()
             .statusCode(404)
             .body("__type", equalTo("ResourceNotFoundException"));
+        validateCertificate(replacement, zoneId, 1);
         describeCertificate(replacement).then()
             .statusCode(200)
+            .body("Certificate.Status", equalTo("ISSUED"))
             .body("Certificate.DomainName", equalTo("options.cfn-it.example.com"))
             .body("Certificate.Options.Export", equalTo("DISABLED"))
             .body("Certificate.Options.CertificateTransparencyLoggingPreference", equalTo("ENABLED"));
@@ -151,6 +161,62 @@ class AcmCfnIntegrationTest {
         describeCertificate(replacement).then()
             .statusCode(404)
             .body("__type", equalTo("ResourceNotFoundException"));
+        deleteZone(zoneId);
+    }
+
+    private static String createPublicZone(String name) {
+        return given().contentType("application/xml").body("""
+            <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+              <Name>%1$s</Name><CallerReference>acm-cfn-%1$s</CallerReference>
+              <HostedZoneConfig><PrivateZone>false</PrivateZone></HostedZoneConfig>
+            </CreateHostedZoneRequest>
+            """.formatted(name))
+            .when().post("/2013-04-01/hostedzone").then().statusCode(201)
+            .body("CreateHostedZoneResponse.HostedZone.Config.PrivateZone", equalTo("false"))
+            .extract().xmlPath().getString("CreateHostedZoneResponse.HostedZone.Id")
+            .replace("/hostedzone/", "");
+    }
+
+    private static void validateCertificate(String arn, String zoneId, int domainCount) {
+        List<Map<String, String>> records = describeCertificate(arn).then()
+            .statusCode(200)
+            .body("Certificate.Status", equalTo("PENDING_VALIDATION"))
+            .body("Certificate.DomainValidationOptions.size()", equalTo(domainCount))
+            .extract().jsonPath().getList("Certificate.DomainValidationOptions.ResourceRecord");
+        int published = 0;
+        try {
+            for (int i = 0; i < records.size(); i++) {
+                changeValidationRecord(zoneId, records.get(i), "UPSERT");
+                published++;
+                describeCertificate(arn).then().statusCode(200)
+                    .body("Certificate.Status", equalTo(i + 1 == records.size() ? "ISSUED" : "PENDING_VALIDATION"));
+            }
+            describeCertificate(arn).then().statusCode(200)
+                .body("Certificate.Status", equalTo("ISSUED"))
+                .body("Certificate.DomainValidationOptions.ValidationStatus", equalTo(
+                    Collections.nCopies(domainCount, "SUCCESS")));
+        } finally {
+            for (int i = 0; i < published; i++) {
+                changeValidationRecord(zoneId, records.get(i), "DELETE");
+            }
+        }
+    }
+
+    private static void changeValidationRecord(String zoneId, Map<String, String> record, String action) {
+        assertEquals("CNAME", record.get("Type"));
+        given().contentType("application/xml").body("""
+            <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+              <ChangeBatch><Changes><Change><Action>%s</Action><ResourceRecordSet>
+                <Name>%s</Name><Type>CNAME</Type><TTL>60</TTL>
+                <ResourceRecords><ResourceRecord><Value>%s</Value></ResourceRecord></ResourceRecords>
+              </ResourceRecordSet></Change></Changes></ChangeBatch>
+            </ChangeResourceRecordSetsRequest>
+            """.formatted(action, record.get("Name"), record.get("Value")))
+            .when().post("/2013-04-01/hostedzone/" + zoneId + "/rrset").then().statusCode(200);
+    }
+
+    private static void deleteZone(String zoneId) {
+        given().when().delete("/2013-04-01/hostedzone/" + zoneId).then().statusCode(200);
     }
 
     private static Map<String, String> options(String export, String transparencyLogging) {

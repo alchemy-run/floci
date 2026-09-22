@@ -92,7 +92,7 @@ class S3TablesTest {
                 .tags(Map.of("suite", "sdk-java"))
                 .build());
         versionToken = table.versionToken();
-        assertThat(table.tableARN()).isEqualTo(bucketArn + "/table/" + tableName);
+        assertThat(table.tableARN()).startsWith(bucketArn + "/table/");
         assertThat(versionToken).isNotBlank();
 
         GetTableResponse fetched = client.getTable(GetTableRequest.builder()
@@ -100,6 +100,16 @@ class S3TablesTest {
         assertThat(fetched.tableARN()).isEqualTo(table.tableARN());
         assertThat(fetched.namespace()).containsExactly(NAMESPACE);
         assertThat(fetched.format()).isEqualTo(OpenTableFormat.ICEBERG);
+        assertThat(fetched.warehouseLocation()).startsWith("s3://");
+        assertThat(fetched.createdBy()).isNotBlank();
+        assertThat(fetched.metadataLocation()).isNull();
+        GetTableMetadataLocationResponse location = client.getTableMetadataLocation(GetTableMetadataLocationRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build());
+        assertThat(location.warehouseLocation()).isEqualTo(fetched.warehouseLocation());
+        assertThat(location.versionToken()).isEqualTo(versionToken);
+        assertThat(location.metadataLocation()).isNull();
+        assertThat(client.getTable(GetTableRequest.builder().tableArn(table.tableARN()).build()).tableARN())
+                .isEqualTo(table.tableARN());
     }
 
     @Test
@@ -114,6 +124,19 @@ class S3TablesTest {
         assertThat(client.listTables(ListTablesRequest.builder().tableBucketARN(bucketArn).namespace(NAMESPACE)
                         .prefix("events").build()).tables())
                 .anyMatch(table -> tableName.equals(table.name()));
+
+        String tableArn = client.getTable(GetTableRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build()).tableARN();
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(bucketArn).build()).tags())
+                .containsEntry("suite", "sdk-java");
+        client.tagResource(TagResourceRequest.builder().resourceArn(tableArn)
+                .tags(Map.of("owner", "analytics", "temporary", "true")).build());
+        client.untagResource(UntagResourceRequest.builder().resourceArn(tableArn)
+                .tagKeys("temporary", "missing").build());
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(tableArn).build()).tags())
+                .containsEntry("owner", "analytics").containsEntry("suite", "sdk-java").doesNotContainKey("temporary");
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(bucketArn).build()).tags())
+                .doesNotContainKey("owner");
     }
 
     @Test
@@ -139,6 +162,12 @@ class S3TablesTest {
                         .metadataLocation("s3://warehouse/stale.metadata.json")
                         .versionToken(versionToken).build()))
                 .isInstanceOf(ConflictException.class);
+        assertThatThrownBy(() -> client.deleteTable(DeleteTableRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).versionToken(versionToken).build()))
+                .isInstanceOf(ConflictException.class);
+        assertThat(client.getTable(GetTableRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build()).versionToken())
+                .isEqualTo(updated.versionToken());
         versionToken = updated.versionToken();
     }
 
@@ -183,6 +212,28 @@ class S3TablesTest {
                         .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build())
                 .configuration().get(TableMaintenanceType.ICEBERG_COMPACTION).status())
                 .isEqualTo(MaintenanceStatus.ENABLED);
+
+        GetTableMaintenanceJobStatusRequest statusRequest = GetTableMaintenanceJobStatusRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build();
+        GetTableMaintenanceJobStatusResponse status = client.getTableMaintenanceJobStatus(statusRequest);
+        assertThat(status.tableARN()).startsWith(bucketArn + "/table/");
+        assertThat(status.status()).hasSize(3);
+        assertThat(status.status().values()).allSatisfy(job -> {
+            assertThat(job.statusAsString()).isEqualTo("Not_Yet_Run");
+            assertThat(job.lastRunTimestamp()).isNull();
+            assertThat(job.failureMessage()).isNull();
+        });
+        client.putTableMaintenanceConfiguration(PutTableMaintenanceConfigurationRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName)
+                .type(TableMaintenanceType.ICEBERG_COMPACTION)
+                .value(TableMaintenanceConfigurationValue.builder().status(MaintenanceStatus.DISABLED).build()).build());
+        assertThat(client.getTableMaintenanceJobStatus(statusRequest).status()
+                .get(TableMaintenanceJobType.ICEBERG_COMPACTION).statusAsString()).isEqualTo("Disabled");
+        client.putTableMaintenanceConfiguration(PutTableMaintenanceConfigurationRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName)
+                .type(TableMaintenanceType.ICEBERG_COMPACTION).value(tableValue).build());
+        assertThat(client.getTableMaintenanceJobStatus(statusRequest).status()
+                .get(TableMaintenanceJobType.ICEBERG_COMPACTION).statusAsString()).isEqualTo("Not_Yet_Run");
     }
 
     @Test
@@ -190,6 +241,8 @@ class S3TablesTest {
     void renamesTableAndRotatesItsVersionToken() {
         String originalToken = versionToken;
         String renamedTableName = tableName + "-renamed";
+        GetTableResponse original = client.getTable(GetTableRequest.builder()
+                .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build());
         client.renameTable(RenameTableRequest.builder()
                 .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName)
                 .newName(renamedTableName).versionToken(originalToken).build());
@@ -197,6 +250,11 @@ class S3TablesTest {
         GetTableResponse renamed = client.getTable(GetTableRequest.builder()
                 .tableBucketARN(bucketArn).namespace(NAMESPACE).name(renamedTableName).build());
         assertThat(renamed.name()).isEqualTo(renamedTableName);
+        assertThat(renamed.tableARN()).isEqualTo(original.tableARN());
+        assertThat(renamed.warehouseLocation()).isEqualTo(original.warehouseLocation());
+        assertThat(renamed.metadataLocation()).isEqualTo(original.metadataLocation());
+        assertThat(client.listTagsForResource(ListTagsForResourceRequest.builder().resourceArn(original.tableARN()).build()).tags())
+                .containsEntry("owner", "analytics");
         assertThat(renamed.versionToken()).isNotEqualTo(originalToken);
         assertThatThrownBy(() -> client.getTable(GetTableRequest.builder()
                 .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build()))
@@ -208,6 +266,10 @@ class S3TablesTest {
     @Test
     @Order(8)
     void deletesPoliciesAndResourceHierarchy() {
+        assertThatThrownBy(() -> client.deleteTableBucket(DeleteTableBucketRequest.builder().tableBucketARN(bucketArn).build()))
+                .isInstanceOf(BadRequestException.class);
+        assertThat(client.getNamespace(GetNamespaceRequest.builder().tableBucketARN(bucketArn).namespace(NAMESPACE).build())
+                .namespace()).containsExactly(NAMESPACE);
         client.deleteTablePolicy(DeleteTablePolicyRequest.builder()
                 .tableBucketARN(bucketArn).namespace(NAMESPACE).name(tableName).build());
         assertThatThrownBy(() -> client.getTablePolicy(GetTablePolicyRequest.builder()

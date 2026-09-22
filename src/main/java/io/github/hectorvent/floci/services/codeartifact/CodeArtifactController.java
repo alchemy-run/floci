@@ -10,14 +10,20 @@ import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.AssetDownload;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.AuthorizationToken;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.DomainView;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PackageCoordinate;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.ResourcePolicy;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.VersionMutation;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactRepository;
 import io.github.hectorvent.floci.services.codeartifact.model.ExternalConnection;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -270,6 +276,212 @@ public class CodeArtifactController {
         CodeArtifactRepository r = service.disassociateExternalConnection(region, domain, domainOwner, repository,
                 externalConnection);
         return ok(single("repository", repositoryDescription(r)));
+    }
+
+    @POST
+    @Path("/v1/authorization-token")
+    public Response getAuthorizationToken(@Context HttpHeaders headers, @QueryParam("domain") String domain,
+                                           @QueryParam("domain-owner") String owner,
+                                           @QueryParam("duration") String duration) {
+        Long seconds = null;
+        if (duration != null) {
+            try {
+                seconds = Long.parseLong(duration);
+            } catch (NumberFormatException e) {
+                throw new AwsException("ValidationException", "duration must be an integer.", 400);
+            }
+        }
+        AuthorizationToken token = service.getAuthorizationToken(regionResolver.resolveRegion(headers), domain,
+                owner, seconds);
+        return Response.ok(Map.of("authorizationToken", token.authorizationToken(), "expiration", token.expiration()))
+                .build();
+    }
+
+    public static class PackageQuery {
+        @QueryParam("domain") public String domain;
+        @QueryParam("domain-owner") public String owner;
+        @QueryParam("repository") public String repository;
+        @QueryParam("format") public String format;
+        @QueryParam("namespace") public String namespace;
+        @QueryParam("package") public String name;
+        @QueryParam("version") public String version;
+        @QueryParam("max-results") public String maxResults;
+        @QueryParam("next-token") public String nextToken;
+
+        PackageCoordinate coordinate(String region) {
+            return new PackageCoordinate(region, domain, owner, repository, format, namespace, name);
+        }
+
+        Integer pageSize() {
+            return Pagination.parseMaxResults(maxResults, "ValidationException");
+        }
+    }
+
+    @POST
+    @Path("/v1/package/version/publish")
+    @Consumes(MediaType.WILDCARD)
+    public Response publishPackageVersion(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                           @QueryParam("asset") String asset,
+                                           @QueryParam("unfinished") String unfinished,
+                                           @HeaderParam("x-amz-content-sha256") String hash, byte[] body) {
+        if (unfinished != null && !"true".equals(unfinished) && !"false".equals(unfinished)) {
+            throw new AwsException("ValidationException", "unfinished must be a boolean.", 400);
+        }
+        return Response.ok(service.publishPackageVersion(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version, asset, body, hash, "true".equals(unfinished))).build();
+    }
+
+    @GET
+    @Path("/v1/package")
+    public Response describePackage(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.describePackage(query.coordinate(regionResolver.resolveRegion(headers)))).build();
+    }
+
+    @DELETE
+    @Path("/v1/package")
+    public Response deletePackage(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.deletePackage(query.coordinate(regionResolver.resolveRegion(headers)))).build();
+    }
+
+    @POST
+    @Path("/v1/package")
+    public Response putPackageOriginConfiguration(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                                   String body) {
+        JsonNode request = readTree(body);
+        return Response.ok(service.putPackageOriginConfiguration(query.coordinate(regionResolver.resolveRegion(headers)),
+                stringMap(request.get("restrictions")))).build();
+    }
+
+    @GET
+    @Path("/v1/package/version")
+    public Response describePackageVersion(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.describePackageVersion(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version)).build();
+    }
+
+    @POST
+    @Path("/v1/packages")
+    public Response listPackages(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                  @QueryParam("package-prefix") String prefix, @QueryParam("publish") String publish,
+                                  @QueryParam("upstream") String upstream) {
+        return Response.ok(service.listPackages(query.coordinate(regionResolver.resolveRegion(headers)), prefix,
+                publish, upstream, query.pageSize(), query.nextToken)).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions")
+    public Response listPackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                         @QueryParam("status") String status, @QueryParam("originType") String originType,
+                                         @QueryParam("sortBy") String sortBy) {
+        return Response.ok(service.listPackageVersions(query.coordinate(regionResolver.resolveRegion(headers)), status,
+                originType, sortBy, query.pageSize(), query.nextToken)).build();
+    }
+
+    @POST
+    @Path("/v1/package/version/assets")
+    public Response listPackageVersionAssets(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.listPackageVersionAssets(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version, query.pageSize(), query.nextToken)).build();
+    }
+
+    @GET
+    @Path("/v1/package/version/asset")
+    @Produces(MediaType.APPLICATION_OCTET_STREAM)
+    public Response getPackageVersionAsset(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                            @QueryParam("asset") String asset, @QueryParam("revision") String revision) {
+        AssetDownload download = service.getPackageVersionAsset(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version, asset, revision);
+        return Response.ok(download.content(), MediaType.APPLICATION_OCTET_STREAM)
+                .header("X-AssetName", download.name()).header("X-PackageVersion", download.version())
+                .header("X-PackageVersionRevision", download.revision()).build();
+    }
+
+    @GET
+    @Path("/v1/package/version/readme")
+    public Response getPackageVersionReadme(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.getPackageVersionReadme(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version)).build();
+    }
+
+    @POST
+    @Path("/v1/package/version/dependencies")
+    public Response listPackageVersionDependencies(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
+        return Response.ok(service.listPackageVersionDependencies(query.coordinate(regionResolver.resolveRegion(headers)),
+                query.version)).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/update_status")
+    public Response updatePackageVersionsStatus(@Context HttpHeaders headers, @BeanParam PackageQuery query, String body) {
+        return Response.ok(service.mutatePackageVersions(query.coordinate(regionResolver.resolveRegion(headers)),
+                "status", versionMutation(readTree(body)))).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/dispose")
+    public Response disposePackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query, String body) {
+        return Response.ok(service.mutatePackageVersions(query.coordinate(regionResolver.resolveRegion(headers)),
+                "dispose", versionMutation(readTree(body)))).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/delete")
+    public Response deletePackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query, String body) {
+        return Response.ok(service.mutatePackageVersions(query.coordinate(regionResolver.resolveRegion(headers)),
+                "delete", versionMutation(readTree(body)))).build();
+    }
+
+    @POST
+    @Path("/v1/package/versions/copy")
+    public Response copyPackageVersions(@Context HttpHeaders headers, @BeanParam PackageQuery query,
+                                         @QueryParam("source-repository") String source,
+                                         @QueryParam("destination-repository") String destination, String body) {
+        PackageCoordinate coordinate = new PackageCoordinate(regionResolver.resolveRegion(headers), query.domain,
+                query.owner, source, query.format, query.namespace, query.name);
+        return Response.ok(service.copyPackageVersions(coordinate, destination, versionMutation(readTree(body)))).build();
+    }
+
+    private VersionMutation versionMutation(JsonNode request) {
+        List<String> versions = null;
+        if (request.hasNonNull("versions")) {
+            if (!request.get("versions").isArray()) {
+                throw new AwsException("ValidationException", "versions must be an array.", 400);
+            }
+            versions = new ArrayList<>();
+            for (JsonNode version : request.get("versions")) {
+                if (!version.isTextual()) {
+                    throw new AwsException("ValidationException", "versions must contain strings.", 400);
+                }
+                versions.add(version.textValue());
+            }
+        }
+        return new VersionMutation(versions, stringMap(request.get("versionRevisions")), text(request, "expectedStatus"),
+                text(request, "targetStatus"), booleanValue(request, "allowOverwrite"),
+                booleanValue(request, "includeFromUpstream"));
+    }
+
+    private boolean booleanValue(JsonNode request, String field) {
+        if (request.hasNonNull(field) && !request.get(field).isBoolean()) {
+            throw new AwsException("ValidationException", field + " must be a boolean.", 400);
+        }
+        return request.path(field).asBoolean(false);
+    }
+
+    private Map<String, String> stringMap(JsonNode node) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (node == null || node.isNull()) {
+            return result;
+        }
+        if (!node.isObject()) {
+            throw new AwsException("ValidationException", "Expected a string map.", 400);
+        }
+        node.properties().forEach(entry -> {
+            if (!entry.getValue().isTextual()) {
+                throw new AwsException("ValidationException", "Expected a string map.", 400);
+            }
+            result.put(entry.getKey(), entry.getValue().textValue());
+        });
+        return result;
     }
 
     // -------------------------------------------------------------------- tags

@@ -19,6 +19,10 @@ public class StackResource {
     private String updateReplacePolicy;
     private Instant timestamp = Instant.now();
     private Map<String, String> attributes = new HashMap<>();
+    private com.fasterxml.jackson.databind.JsonNode expectedProperties;
+
+    public com.fasterxml.jackson.databind.JsonNode getExpectedProperties() { return expectedProperties; }
+    public void setExpectedProperties(com.fasterxml.jackson.databind.JsonNode value) { expectedProperties = value; }
 
     public String getLogicalId() { return logicalId; }
     public void setLogicalId(String logicalId) { this.logicalId = logicalId; }

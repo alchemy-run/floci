@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.s3;
 
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.testutil.S3RequestSigner;
+import io.restassured.RestAssured;
 import io.restassured.specification.RequestSpecification;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -1799,6 +1800,101 @@ class S3AuthEnforcementIntegrationTest {
             .delete("/" + BUCKET_CONFIG_BUCKET + "?policy")
         .then()
             .statusCode(204);
+    }
+
+    @Test
+    void encodedAssetKeyRoundTripHonorsOwnerPolicies() throws Exception {
+        String bucket = "auth-assets-000000000000-us-east-1-an";
+        String key = "lambda/0123456789abcdef.zip";
+        String canonicalPath = "/" + bucket + "/" + key;
+        String wirePath = "/" + bucket + "/lambda%2F0123456789abcdef.zip";
+        S3RequestSigner signer = LOCAL_SIGNER.withContentSha256("UNSIGNED-PAYLOAD");
+        given().filter(signer).header("x-amz-bucket-namespace", "account-regional")
+                .body("""
+                        <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                          <Tags><Tag><Key>alchemy::assets-bucket</Key><Value>true</Value></Tag></Tags>
+                        </CreateBucketConfiguration>
+                        """)
+                .put("/" + bucket).then().statusCode(200);
+        try {
+            given().filter(signer).head("/" + bucket).then().statusCode(200);
+            given().filter(signer).get("/" + bucket + "?tagging").then().statusCode(200)
+                    .body(containsString("<Key>alchemy::assets-bucket</Key>"));
+            assertThat(signedEncodedRequest("HEAD", wirePath, canonicalPath, "", signer).statusCode(), equalTo(404));
+            HttpResponse<String> missing = signedEncodedRequest("GET", wirePath, canonicalPath, "", signer);
+            assertThat(missing.statusCode(), equalTo(404));
+            assertThat(missing.body(), containsString("<Code>NoSuchKey</Code>"));
+            assertThat(signedEncodedRequest("PUT", wirePath, canonicalPath, "asset bytes", signer).statusCode(), equalTo(200));
+            assertThat(signedEncodedRequest("HEAD", wirePath, canonicalPath, "", signer).statusCode(), equalTo(200));
+            given().filter(signer).get(canonicalPath).then().statusCode(200).body(equalTo("asset bytes"));
+
+            given().filter(signer).body("""
+                    {"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*",
+                    "Action":["s3:GetObject","s3:PutObject"],"Resource":"arn:aws:s3:::%s/%s"}]}
+                    """.formatted(bucket, key)).put("/" + bucket + "?policy").then().statusCode(200);
+            assertThat(signedEncodedRequest("HEAD", wirePath, canonicalPath, "", signer).statusCode(), equalTo(403));
+            HttpResponse<String> denied = signedEncodedRequest("PUT", wirePath, canonicalPath, "replacement", signer);
+            assertThat(denied.statusCode(), equalTo(403));
+            assertThat(denied.body(), containsString("<Code>AccessDenied</Code>"));
+            given().filter(signer).delete("/" + bucket + "?policy").then().statusCode(204);
+            assertThat(signedEncodedRequest("GET", wirePath, canonicalPath, "", signer).body(), equalTo("asset bytes"));
+        } finally {
+            given().filter(signer).delete("/" + bucket + "?policy").then().statusCode(204);
+            given().filter(signer).delete(canonicalPath).then().statusCode(204);
+            given().filter(signer).delete("/" + bucket).then().statusCode(204);
+        }
+    }
+
+    @Test
+    void encodedPathSignaturesStillBindKeySecretAndPayload() throws Exception {
+        String bucket = "auth-encoded-key-binding";
+        String canonicalPath = "/" + bucket + "/nested/object.zip";
+        String wirePath = "/" + bucket + "/nested%2Fobject.zip";
+        String literalPercentPath = "/" + bucket + "/nested%252Fobject.zip";
+        given().filter(LOCAL_SIGNER).put("/" + bucket).then().statusCode(200);
+        try {
+            HttpResponse<String> forged = signedEncodedRequest("PUT", wirePath, canonicalPath, "forged",
+                    LOCAL_SIGNER.withSignature("deadbeef"));
+            assertThat(forged.statusCode(), equalTo(403));
+            assertThat(forged.body(), containsString("<Code>SignatureDoesNotMatch</Code>"));
+            HttpResponse<String> wrongSecret = signedEncodedRequest("PUT", wirePath, canonicalPath, "forged",
+                    S3RequestSigner.signedAs("test", "wrong-secret"));
+            assertThat(wrongSecret.statusCode(), equalTo(403));
+            assertThat(wrongSecret.body(), containsString("<Code>SignatureDoesNotMatch</Code>"));
+            HttpResponse<String> changedKey = signedEncodedRequest("PUT", wirePath + "-changed", canonicalPath, "forged", LOCAL_SIGNER);
+            assertThat(changedKey.statusCode(), equalTo(403));
+            assertThat(changedKey.body(), containsString("<Code>SignatureDoesNotMatch</Code>"));
+            HttpResponse<String> changedPayload = signedEncodedRequest("PUT", wirePath, canonicalPath, "changed",
+                    LOCAL_SIGNER.withContentSha256(sha256Hex("original")));
+            assertThat(changedPayload.statusCode(), equalTo(400));
+            assertThat(changedPayload.body(), containsString("<Code>XAmzContentSHA256Mismatch</Code>"));
+            HttpResponse<String> doubleDecoded = signedEncodedRequest("PUT", literalPercentPath, canonicalPath, "forged", LOCAL_SIGNER);
+            assertThat(doubleDecoded.statusCode(), equalTo(403));
+            assertThat(doubleDecoded.body(), containsString("<Code>SignatureDoesNotMatch</Code>"));
+            assertThat(signedEncodedRequest("HEAD", wirePath, canonicalPath, "", LOCAL_SIGNER).statusCode(), equalTo(404));
+            assertThat(signedEncodedRequest("PUT", literalPercentPath, literalPercentPath, "literal percent", LOCAL_SIGNER)
+                    .statusCode(), equalTo(200));
+            assertThat(signedEncodedRequest("HEAD", wirePath, canonicalPath, "", LOCAL_SIGNER).statusCode(), equalTo(404));
+            assertThat(signedEncodedRequest("PUT", wirePath, canonicalPath, "nested key", LOCAL_SIGNER).statusCode(), equalTo(200));
+            assertThat(signedEncodedRequest("GET", wirePath, canonicalPath, "", LOCAL_SIGNER).body(), equalTo("nested key"));
+            assertThat(signedEncodedRequest("GET", literalPercentPath, literalPercentPath, "", LOCAL_SIGNER).body(), equalTo("literal percent"));
+        } finally {
+            assertThat(signedEncodedRequest("DELETE", wirePath, canonicalPath, "", LOCAL_SIGNER).statusCode(), equalTo(204));
+            assertThat(signedEncodedRequest("DELETE", literalPercentPath, literalPercentPath, "", LOCAL_SIGNER).statusCode(), equalTo(204));
+            given().filter(LOCAL_SIGNER).delete("/" + bucket).then().statusCode(204);
+        }
+    }
+
+    private static HttpResponse<String> signedEncodedRequest(String method, String wirePath, String canonicalPath,
+                                                              String body, S3RequestSigner signer) throws Exception {
+        String endpoint = "http://localhost:" + RestAssured.port;
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(endpoint + wirePath))
+                .method(method, bytes.length == 0 ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(bytes));
+        signer.headersFor(method, URI.create(endpoint + canonicalPath), bytes).forEach(request::header);
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
     }
 
     @Test

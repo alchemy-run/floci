@@ -16,6 +16,7 @@ public class DbParameterGroup {
     private String description;
     private String region;
     private Map<String, String> parameters = new HashMap<>();
+    private Map<String, String> parameterApplyMethods = new HashMap<>();
 
     public DbParameterGroup() {}
 
@@ -39,7 +40,17 @@ public class DbParameterGroup {
     public void setRegion(String region) { this.region = region; }
 
     public Map<String, String> getParameters() { return parameters; }
-    public void setParameters(Map<String, String> parameters) { this.parameters = parameters; }
+    public void setParameters(Map<String, String> parameters) {
+        this.parameters = parameters == null ? new HashMap<>() : new HashMap<>(parameters);
+    }
+
+    public Map<String, String> getParameterApplyMethods() { return parameterApplyMethods; }
+
+    /** Older records store only values; their apply methods are derived from the family catalog. */
+    public void setParameterApplyMethods(Map<String, String> parameterApplyMethods) {
+        this.parameterApplyMethods = parameterApplyMethods == null
+                ? new HashMap<>() : new HashMap<>(parameterApplyMethods);
+    }
 
     public Map<String, String> getTags() { return tags; }
 

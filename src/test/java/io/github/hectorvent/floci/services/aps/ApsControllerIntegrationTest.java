@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -15,6 +17,7 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
 class ApsControllerIntegrationTest {
@@ -43,6 +46,137 @@ class ApsControllerIntegrationTest {
     }
 
     @Test
+    void defaultScraperConfigurationIsABase64EncodedPrometheusConfiguration() {
+        String configuration = given()
+                .header("Authorization", auth("us-east-1"))
+                .when().get("/scraperconfiguration")
+                .then().statusCode(200)
+                .extract().path("configuration");
+        assertTrue(new String(Base64.getDecoder().decode(configuration),
+                StandardCharsets.UTF_8).contains("scrape_configs:"));
+    }
+
+    @Test
+    void scraperDescribeReturnsTypedNotFoundRatherThanS3Validation() {
+        given().header("Authorization", auth("us-east-1"))
+                .when().get("/scrapers/s-00000000-0000-0000-0000-000000000000")
+                .then().statusCode(404).header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void alertManagerDefinitionRoutesPreserveValidatedYaml() {
+        String workspaceId = createWorkspace("alert-definition");
+        String path = "/workspaces/" + workspaceId + "/alertmanager/definition";
+        String definition = Base64.getEncoder().encodeToString("""
+                alertmanager_config: |
+                  route:
+                    receiver: default
+                  receivers:
+                    - name: default
+                """.getBytes(StandardCharsets.UTF_8));
+        given().header("Authorization", auth("us-east-1")).when().get(path)
+                .then().statusCode(404).header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"));
+        given().contentType("application/json").body(Map.of("data", definition))
+                .when().post(path).then().statusCode(202)
+                .body("status.statusCode", equalTo("ACTIVE"))
+                .body("status.statusReason", containsString("not implemented"));
+        given().when().get(path).then().statusCode(200)
+                .body("alertManagerDefinition.data", equalTo(definition))
+                .body("alertManagerDefinition.createdAt", notNullValue());
+        given().contentType("application/json").body(Map.of("data", definition))
+                .when().put(path).then().statusCode(202);
+        given().header("Authorization", auth("us-east-1")).contentType("application/json")
+                .body(Map.of("data", "invalid-base64!"))
+                .when().put(path).then().statusCode(400).header("X-Amzn-Errortype", equalTo("ValidationException"));
+        given().when().delete(path).then().statusCode(202).body(is(emptyString()));
+        given().when().get(path).then().statusCode(404);
+        given().when().delete("/workspaces/" + workspaceId).then().statusCode(202);
+    }
+
+    @Test
+    void workspaceSettingsLoggingAndPolicyWireContracts() {
+        String workspaceId = createWorkspace("configuration-contracts");
+        String path = "/workspaces/" + workspaceId;
+        given().contentType("application/json").body(Map.of("retentionPeriodInDays", 30))
+                .when().patch(path + "/configuration").then().statusCode(202);
+        given().when().get(path + "/configuration").then().statusCode(200)
+                .body("workspaceConfiguration.retentionPeriodInDays", equalTo(30));
+        String arn = "arn:aws:logs:us-east-1:000000000000:log-group:/aws/vendedlogs/prometheus/test:*";
+        given().contentType("application/json").body(Map.of("logGroupArn", arn))
+                .when().post(path + "/logging").then().statusCode(202);
+        given().when().get(path + "/logging").then().statusCode(200)
+                .body("loggingConfiguration.workspace", equalTo(workspaceId))
+                .body("loggingConfiguration.logGroupArn", equalTo(arn));
+        for (int threshold : List.of(0, 1000)) {
+            Map<String, Object> body = Map.of("destinations", List.of(Map.of("cloudWatchLogs", Map.of("logGroupArn", arn),
+                    "filters", Map.of("qspThreshold", threshold))));
+            if (threshold == 0) {
+                given().contentType("application/json").body(body).when().post(path + "/logging/query")
+                        .then().statusCode(202);
+            } else {
+                given().contentType("application/json").body(body).when().put(path + "/logging/query")
+                        .then().statusCode(202);
+            }
+            given().when().get(path + "/logging/query").then().statusCode(200)
+                    .body("queryLoggingConfiguration.destinations[0].filters.qspThreshold", equalTo(threshold));
+        }
+        String policy = """
+                {"Statement":[{"Effect":"Allow","Principal":"*","Action":"aps:QueryMetrics",
+                "Resource":"arn:aws:aps:us-east-1:000000000000:workspace/%s"}]}
+                """.formatted(workspaceId);
+        String revision = given().contentType("application/json").body(Map.of("policyDocument", policy))
+                .when().put(path + "/policy").then().statusCode(202).extract().path("revisionId");
+        given().when().get(path + "/policy").then().statusCode(200)
+                .body("policyDocument", equalTo(policy)).body("revisionId", equalTo(revision));
+        given().header("Authorization", auth("us-east-1")).queryParam("revisionId", "stale")
+                .when().delete(path + "/policy").then().statusCode(409)
+                .header("X-Amzn-Errortype", equalTo("ConflictException"));
+        given().queryParam("revisionId", revision).when().delete(path + "/policy").then().statusCode(202);
+        given().when().delete(path).then().statusCode(202);
+        for (String suffix : List.of("/configuration", "/logging", "/logging/query", "/policy")) {
+            given().header("Authorization", auth("us-east-1")).when().get(path + suffix)
+                    .then().statusCode(404).header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"));
+        }
+    }
+
+    @Test
+    void anomalyDetectorRoutesExposeMetadataAndUnsupportedExecution() {
+        String workspaceId = createWorkspace("anomaly-metadata");
+        String path = "/workspaces/" + workspaceId + "/anomalydetectors";
+        Map<String, Object> configuration = Map.of("randomCutForest", Map.of("query", "up"));
+        String id = given().contentType("application/json").body(Map.of("alias", "detector", "configuration", configuration,
+                        "evaluationIntervalInSeconds", 60, "tags", Map.of("team", "metrics")))
+                .when().post(path).then().statusCode(202)
+                .body("status.statusCode", equalTo("CREATION_FAILED"))
+                .body("status.statusReason", containsString("not implemented"))
+                .extract().path("anomalyDetectorId");
+        given().when().get(path + "/" + id).then().statusCode(200)
+                .body("anomalyDetector.configuration.randomCutForest.query", equalTo("up"))
+                .body("anomalyDetector.evaluationIntervalInSeconds", equalTo(60));
+        given().when().get(path + "?alias=det&maxResults=1").then().statusCode(200)
+                .body("anomalyDetectors.anomalyDetectorId", hasItem(id));
+        given().contentType("application/json").body(Map.of("configuration", configuration, "evaluationIntervalInSeconds", 120))
+                .when().put(path + "/" + id).then().statusCode(202).body("status.statusCode", equalTo("UPDATE_FAILED"));
+        given().when().get(path + "/" + id).then().statusCode(200)
+                .body("anomalyDetector.evaluationIntervalInSeconds", equalTo(120));
+        given().when().delete(path + "/" + id).then().statusCode(202);
+        given().header("Authorization", auth("us-east-1")).when().get(path + "/" + id)
+                .then().statusCode(404).header("X-Amzn-Errortype", equalTo("ResourceNotFoundException"));
+        given().when().delete("/workspaces/" + workspaceId).then().statusCode(202);
+    }
+
+    @Test
+    void dataPlaneRejectsUnsignedRequestsWithoutStartingBackend() {
+        String workspaceId = createWorkspace("unsigned-data-plane");
+        given().when().get("/workspaces/{workspaceId}/api/v1/query?query=up", workspaceId)
+                .then().statusCode(403);
+        given().contentType("application/x-protobuf").body(new byte[]{0, 1, 2})
+                .when().post("/workspaces/{workspaceId}/api/v1/remote_write", workspaceId)
+                .then().statusCode(403);
+        given().when().delete("/workspaces/{workspaceId}", workspaceId).then().statusCode(202);
+    }
+
+    @Test
     void workspaceLifecycleRoundTrip() {
         String workspaceId = createWorkspace("lifecycle-test");
 
@@ -55,7 +189,7 @@ class ApsControllerIntegrationTest {
             .body("workspace.alias", equalTo("lifecycle-test"))
             .body("workspace.status.statusCode", equalTo("ACTIVE"))
             .body("workspace.prometheusEndpoint",
-                    equalTo("https://aps-workspaces.us-east-1.amazonaws.com/workspaces/" + workspaceId + "/"))
+                    containsString("://" + workspaceId + ".localhost.floci.io"))
             // Epoch-seconds number, not an ISO string: restJson1 timestamps with no
             // timestampFormat trait fail SDK deserialization as strings.
             .body("workspace.createdAt", notNullValue())

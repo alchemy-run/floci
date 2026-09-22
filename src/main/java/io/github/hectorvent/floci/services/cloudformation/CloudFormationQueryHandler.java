@@ -63,6 +63,10 @@ public class CloudFormationQueryHandler {
             case "GetTemplate" -> getTemplate(params, region);
             case "GetTemplateSummary" -> getTemplateSummary(params, region);
             case "ValidateTemplate" -> validateTemplate(params);
+            case "SignalResource" -> signalResource(params, region);
+            case "DetectStackDrift" -> detectStackDrift(params, region);
+            case "DescribeStackDriftDetectionStatus" -> describeStackDriftDetectionStatus(params, region);
+            case "DescribeStackResourceDrifts" -> describeStackResourceDrifts(params, region);
             case "ListStacks" -> listStacks(params, region);
             case "ListExports" -> listExports(params, region);
             case "SetStackPolicy" -> Response.ok(emptyResult("SetStackPolicyResponse")).build();
@@ -149,8 +153,15 @@ public class CloudFormationQueryHandler {
                 extractParameters(params, cfnService.currentParameters(stackName, region));
         List<String> capabilities = extractList(params, "Capabilities.member.");
 
+        Stack current = cfnService.describeStacks(stackName, region).getFirst();
+        if (Boolean.parseBoolean(params.getFirst("UsePreviousTemplate"))) {
+            templateBody = current.getOriginalTemplateBody() != null
+                    ? current.getOriginalTemplateBody() : current.getTemplateBody();
+        }
+        Map<String, String> tags = params.keySet().stream().anyMatch(key -> key.startsWith("Tags.member."))
+                ? extractTags(params) : current.getTags();
         ChangeSet cs = cfnService.createChangeSet(stackName, "update-" + UUID.randomUUID().toString().substring(0, 8),
-                "UPDATE", templateBody, templateUrl, parameters, capabilities, Map.of(), region);
+                "UPDATE", templateBody, templateUrl, parameters, capabilities, tags, region);
         awaitExecution(cfnService.executeChangeSet(stackName, cs.getChangeSetName(), region));
 
         Stack stack = cfnService.describeStacks(stackName, region).get(0);
@@ -532,15 +543,85 @@ public class CloudFormationQueryHandler {
     // ── ValidateTemplate ──────────────────────────────────────────────────────
 
     private Response validateTemplate(MultivaluedMap<String, String> params) {
-        String xml = new XmlBuilder()
-                .start("ValidateTemplateResponse", CF_NS)
-                .start("ValidateTemplateResult")
-                .raw("<Parameters/><Capabilities/><CapabilitiesReason/>")
-                .end("ValidateTemplateResult")
-                .raw(AwsQueryResponse.responseMetadata())
-                .end("ValidateTemplateResponse")
-                .build();
-        return Response.ok(xml).type("text/xml").build();
+        TemplateSummary summary = cfnService.validateTemplate(params.getFirst("TemplateBody"), params.getFirst("TemplateURL"));
+        XmlBuilder xml = new XmlBuilder().start("ValidateTemplateResponse", CF_NS).start("ValidateTemplateResult")
+                .elem("Description", summary.description()).start("Parameters");
+        for (var parameter : summary.parameters()) {
+            xml.start("member").elem("ParameterKey", parameter.parameterKey())
+                    .elem("DefaultValue", parameter.defaultValue()).elem("NoEcho", parameter.noEcho())
+                    .elem("Description", parameter.description()).end("member");
+        }
+        xml.end("Parameters").start("Capabilities");
+        for (String capability : summary.capabilities()) xml.elem("member", capability);
+        xml.end("Capabilities").elem("CapabilitiesReason", summary.capabilitiesReason())
+                .start("DeclaredTransforms");
+        for (String transform : summary.declaredTransforms()) xml.elem("member", transform);
+        xml.end("DeclaredTransforms").end("ValidateTemplateResult").raw(AwsQueryResponse.responseMetadata())
+                .end("ValidateTemplateResponse");
+        return Response.ok(xml.build()).type("text/xml").build();
+    }
+
+    private Response signalResource(MultivaluedMap<String, String> params, String region) {
+        cfnService.signalResource(params.getFirst("StackName"), params.getFirst("LogicalResourceId"),
+                params.getFirst("UniqueId"), params.getFirst("Status"), region);
+        return Response.ok(new XmlBuilder().start("SignalResourceResponse", CF_NS)
+                .start("SignalResourceResult").end("SignalResourceResult")
+                .raw(AwsQueryResponse.responseMetadata()).end("SignalResourceResponse").build()).type("text/xml").build();
+    }
+
+    private Response detectStackDrift(MultivaluedMap<String, String> params, String region) {
+        var detection = cfnService.detectStackDrift(params.getFirst("StackName"),
+                extractList(params, "LogicalResourceIds.member."), region);
+        return Response.ok(new XmlBuilder().start("DetectStackDriftResponse", CF_NS).start("DetectStackDriftResult")
+                .elem("StackDriftDetectionId", detection.detectionId()).end("DetectStackDriftResult")
+                .raw(AwsQueryResponse.responseMetadata()).end("DetectStackDriftResponse").build()).type("text/xml").build();
+    }
+
+    private Response describeStackDriftDetectionStatus(MultivaluedMap<String, String> params, String region) {
+        var detection = cfnService.describeStackDriftDetection(params.getFirst("StackDriftDetectionId"), region);
+        return Response.ok(new XmlBuilder().start("DescribeStackDriftDetectionStatusResponse", CF_NS)
+                .start("DescribeStackDriftDetectionStatusResult").elem("StackId", detection.stackId())
+                .elem("StackDriftDetectionId", detection.detectionId()).elem("DetectionStatus", detection.detectionStatus())
+                .elem("StackDriftStatus", detection.stackDriftStatus()).elem("DetectionStatusReason", detection.statusReason())
+                .elem("DriftedStackResourceCount", detection.driftedResourceCount()).elem("Timestamp", ISO.format(detection.timestamp()))
+                .end("DescribeStackDriftDetectionStatusResult").raw(AwsQueryResponse.responseMetadata())
+                .end("DescribeStackDriftDetectionStatusResponse").build()).type("text/xml").build();
+    }
+
+    private Response describeStackResourceDrifts(MultivaluedMap<String, String> params, String region) {
+        String name = params.getFirst("StackName");
+        Stack stack = cfnService.describeStacks(name, region).getFirst();
+        var drifts = cfnService.describeStackResourceDrifts(name,
+                extractList(params, "StackResourceDriftStatusFilters.member."), region);
+        int start;
+        int size;
+        try {
+            start = params.getFirst("NextToken") == null ? 0 : Integer.parseInt(params.getFirst("NextToken"));
+            size = params.getFirst("MaxResults") == null ? 100 : Integer.parseInt(params.getFirst("MaxResults"));
+            if (start < 0 || start > drifts.size() || size < 1 || size > 100) throw new NumberFormatException();
+        } catch (NumberFormatException e) {
+            throw new AwsException("ValidationError", "Invalid pagination parameters.", 400);
+        }
+        int end = Math.min(drifts.size(), start + size);
+        XmlBuilder xml = new XmlBuilder().start("DescribeStackResourceDriftsResponse", CF_NS)
+                .start("DescribeStackResourceDriftsResult").start("StackResourceDrifts");
+        for (var drift : drifts.subList(start, end)) {
+            xml.start("member").elem("StackId", stack.getStackId()).elem("LogicalResourceId", drift.logicalId())
+                    .elem("PhysicalResourceId", drift.physicalId()).elem("ResourceType", drift.resourceType())
+                    .elem("StackResourceDriftStatus", drift.status()).elem("Timestamp", ISO.format(drift.timestamp()))
+                    .elem("ExpectedProperties", drift.expectedProperties()).elem("ActualProperties", drift.actualProperties())
+                    .start("PropertyDifferences");
+            for (var difference : drift.differences()) {
+                xml.start("member").elem("PropertyPath", difference.path()).elem("ExpectedValue", difference.expectedValue())
+                        .elem("ActualValue", difference.actualValue()).elem("DifferenceType", difference.type()).end("member");
+            }
+            xml.end("PropertyDifferences").end("member");
+        }
+        xml.end("StackResourceDrifts");
+        if (end < drifts.size()) xml.elem("NextToken", Integer.toString(end));
+        xml.end("DescribeStackResourceDriftsResult").raw(AwsQueryResponse.responseMetadata())
+                .end("DescribeStackResourceDriftsResponse");
+        return Response.ok(xml.build()).type("text/xml").build();
     }
 
     // ── ListStacks ────────────────────────────────────────────────────────────

@@ -313,6 +313,17 @@ public class ControlTowerService {
         return baselines;
     }
 
+    public ObjectNode getBaseline(String region, String identifier) {
+        if (!isArn(identifier)) {
+            throw validation("baselineIdentifier must be a valid ARN.");
+        }
+        return listBaselines(region).stream()
+                .filter(baseline -> identifier.equals(baseline.path("arn").asText()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "The request references a baseline that does not exist.", 404));
+    }
+
     public synchronized List<EnabledBaseline> listEnabledBaselines(String accountId, String region) {
         return listEnabledBaselines(accountId, region, JsonNodeFactory.instance.objectNode()).enabledBaselines();
     }

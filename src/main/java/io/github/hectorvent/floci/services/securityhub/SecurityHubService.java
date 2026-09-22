@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.securityhub;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
@@ -16,6 +18,10 @@ import io.github.hectorvent.floci.services.securityhub.model.SecurityHubState;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -94,7 +100,13 @@ public class SecurityHubService implements Resettable {
             throw invalid("ControlFindingGenerator must be SECURITY_CONTROL or STANDARD_CONTROL.");
         }
         validateTags(request == null ? null : request.get("Tags"));
+        if (request.has("EnableDefaultStandards") && !request.get("EnableDefaultStandards").isBoolean()) {
+            throw invalid("EnableDefaultStandards must be a boolean.");
+        }
         state.setEnabled(true);
+        if (request.path("EnableDefaultStandards").asBoolean(true)) {
+            enableStandard(region, state, object());
+        }
         if (controlFindingGenerator != null) {
             state.setControlFindingGenerator(controlFindingGenerator);
         }
@@ -124,10 +136,877 @@ public class SecurityHubService implements Resettable {
         save(region, state);
     }
 
+    public synchronized void disableSecurityHub(String region) {
+        requireEnabled(region);
+        SecurityHubState state = state(region);
+        state.setEnabled(false);
+        state.setHubTags(new LinkedHashMap<>());
+        state.setAutoEnableControls(true);
+        state.setControlFindingGenerator("SECURITY_CONTROL");
+        state.getActionTargets().clear();
+        state.getInsights().clear();
+        state.getAutomationRules().clear();
+        state.getFindings().clear();
+        state.getFindingHistory().clear();
+        state.getStandardsSubscriptions().clear();
+        state.getProductSubscriptions().clear();
+        state.getMembers().clear();
+        state.setAdministrator(null);
+        state.setAggregatorArn(null);
+        state.setRegionLinkingMode(null);
+        state.setRegions(null);
+        save(region, state);
+    }
+
     public void requireEnabled(String region) {
         if (!state(region).isEnabled()) {
             throw notFound("Security Hub is not enabled for this account.");
         }
+    }
+
+    private void requireSubscribed(String region) {
+        if (!state(region).isEnabled()) {
+            throw invalidAccess("Security Hub is not enabled for this account and region.");
+        }
+    }
+
+    public synchronized ObjectNode createActionTarget(String region, JsonNode request) {
+        requireSubscribed(region);
+        String id = requireText(request, "Id", "InvalidInputException");
+        if (!id.matches("[a-zA-Z0-9_-]{1,20}")) {
+            throw invalid("Id must contain 1 to 20 alphanumeric, hyphen, or underscore characters.");
+        }
+        String arn = resourceArn(region, "action/custom/" + id);
+        SecurityHubState state = state(region);
+        if (state.getActionTargets().containsKey(arn)) {
+            throw conflict("The action target already exists.");
+        }
+        ObjectNode action = object().put("ActionTargetArn", arn);
+        action.put("Name", boundedText(request, "Name", 20));
+        action.put("Description", boundedText(request, "Description", 500));
+        state.getActionTargets().put(arn, action);
+        save(region, state);
+        return object().put("ActionTargetArn", arn);
+    }
+
+    public synchronized ObjectNode describeActionTargets(String region, JsonNode request) {
+        requireSubscribed(region);
+        return documentPage("ActionTargets", select(state(region).getActionTargets(), request,
+                "ActionTargetArns", 100), "ActionTargetArn", request);
+    }
+
+    public synchronized void updateActionTarget(String region, String arn, JsonNode request) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        ObjectNode action = requiredDocument(state.getActionTargets(), arn).deepCopy();
+        if (request.has("Name")) {
+            action.put("Name", boundedText(request, "Name", 20));
+        }
+        if (request.has("Description")) {
+            action.put("Description", boundedText(request, "Description", 500));
+        }
+        state.getActionTargets().put(arn, action);
+        save(region, state);
+    }
+
+    public synchronized ObjectNode deleteActionTarget(String region, String arn) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        requiredDocument(state.getActionTargets(), arn);
+        state.getActionTargets().remove(arn);
+        save(region, state);
+        return object().put("ActionTargetArn", arn);
+    }
+
+    public synchronized ObjectNode createInsight(String region, JsonNode request) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        String name = boundedText(request, "Name", 128);
+        if (state.getInsights().values().stream().anyMatch(item -> name.equals(item.path("Name").asText()))) {
+            throw conflict("An insight with this name already exists.");
+        }
+        validateFilters(request.get("Filters"));
+        String group = requireText(request, "GroupByAttribute", "InvalidInputException");
+        String arn = resourceArn(region, "insight/" + regionResolver.getAccountId() + "/custom/" + UUID.randomUUID());
+        ObjectNode insight = object().put("InsightArn", arn).put("Name", name).put("GroupByAttribute", group);
+        insight.set("Filters", request.path("Filters").deepCopy());
+        state.getInsights().put(arn, insight);
+        save(region, state);
+        return object().put("InsightArn", arn);
+    }
+
+    public synchronized ObjectNode getInsights(String region, JsonNode request) {
+        requireSubscribed(region);
+        return documentPage("Insights", select(state(region).getInsights(), request, "InsightArns", 100),
+                "InsightArn", request);
+    }
+
+    public synchronized void updateInsight(String region, String arn, JsonNode request) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        ObjectNode insight = requiredDocument(state.getInsights(), arn).deepCopy();
+        if (request.has("Name")) {
+            String name = boundedText(request, "Name", 128);
+            if (state.getInsights().entrySet().stream().anyMatch(entry -> !entry.getKey().equals(arn)
+                    && name.equals(entry.getValue().path("Name").asText()))) {
+                throw conflict("An insight with this name already exists.");
+            }
+            insight.put("Name", name);
+        }
+        if (request.has("Filters")) {
+            validateFilters(request.get("Filters"));
+            insight.set("Filters", request.get("Filters").deepCopy());
+        }
+        if (request.has("GroupByAttribute")) {
+            insight.put("GroupByAttribute", requireText(request, "GroupByAttribute", "InvalidInputException"));
+        }
+        state.getInsights().put(arn, insight);
+        save(region, state);
+    }
+
+    public synchronized ObjectNode deleteInsight(String region, String arn) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        requiredDocument(state.getInsights(), arn);
+        state.getInsights().remove(arn);
+        save(region, state);
+        return object().put("InsightArn", arn);
+    }
+
+    public synchronized ObjectNode createAutomationRule(String region, JsonNode request) {
+        requireSubscribed(region);
+        ObjectNode rule = (ObjectNode) request.deepCopy();
+        validateRule(rule);
+        validateTags(rule.get("Tags"));
+        String arn = resourceArn(region, "automation-rule/" + UUID.randomUUID());
+        String now = Instant.now().toString();
+        rule.put("RuleArn", arn).put("CreatedAt", now).put("UpdatedAt", now)
+                .put("CreatedBy", regionResolver.getAccountId());
+        if (!rule.has("RuleStatus")) {
+            rule.put("RuleStatus", "ENABLED");
+        }
+        if (!rule.has("IsTerminal")) {
+            rule.put("IsTerminal", false);
+        }
+        SecurityHubState state = state(region);
+        state.getAutomationRules().put(arn, rule);
+        save(region, state);
+        return object().put("RuleArn", arn);
+    }
+
+    public synchronized ObjectNode listAutomationRules(String region, JsonNode request) {
+        requireSubscribed(region);
+        return documentPage("AutomationRulesMetadata", new ArrayList<>(state(region).getAutomationRules().values()),
+                "RuleArn", request);
+    }
+
+    public synchronized ObjectNode batchAutomationRules(String region, JsonNode request, String operation) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        JsonNode items = requiredArray(request,
+                "update".equals(operation) ? "UpdateAutomationRulesRequestItems" : "AutomationRulesArns", 100);
+        ObjectNode response = object();
+        ArrayNode processed = response.putArray("get".equals(operation) ? "Rules" : "ProcessedAutomationRules");
+        ArrayNode unprocessed = response.putArray("UnprocessedAutomationRules");
+        for (JsonNode item : items) {
+            String arn = "update".equals(operation) ? text(item, "RuleArn") : item.asText(null);
+            try {
+                ObjectNode rule = requiredDocument(state.getAutomationRules(), arn).deepCopy();
+                if ("get".equals(operation)) {
+                    processed.add(rule);
+                } else if ("delete".equals(operation)) {
+                    state.getAutomationRules().remove(arn);
+                    processed.add(arn);
+                } else {
+                    for (String field : List.of("RuleName", "Description", "RuleOrder", "RuleStatus", "IsTerminal",
+                            "Criteria", "Actions")) {
+                        if (item.has(field)) {
+                            rule.set(field, item.get(field).deepCopy());
+                        }
+                    }
+                    validateRule(rule);
+                    rule.put("UpdatedAt", Instant.now().toString());
+                    state.getAutomationRules().put(arn, rule);
+                    processed.add(arn);
+                }
+            } catch (AwsException e) {
+                unprocessed.addObject().put("RuleArn", arn).put("ErrorCode", e.getHttpStatus())
+                        .put("ErrorMessage", e.getMessage());
+            }
+        }
+        if (!"get".equals(operation)) {
+            save(region, state);
+        }
+        return response;
+    }
+
+    private static void validateRule(JsonNode rule) {
+        boundedText(rule, "RuleName", 256);
+        boundedText(rule, "Description", 1024);
+        Integer order = integer(rule, "RuleOrder");
+        if (order == null || order < 1 || order > 1000) {
+            throw invalid("RuleOrder must be between 1 and 1000.");
+        }
+        if (rule.has("RuleStatus") && !List.of("ENABLED", "DISABLED").contains(rule.path("RuleStatus").asText())) {
+            throw invalid("RuleStatus must be ENABLED or DISABLED.");
+        }
+        if (rule.has("IsTerminal") && !rule.get("IsTerminal").isBoolean()) {
+            throw invalid("IsTerminal must be a boolean.");
+        }
+        validateFilters(rule.get("Criteria"));
+        for (JsonNode action : requiredArray(rule, "Actions", 1)) {
+            if (!"FINDING_FIELDS_UPDATE".equals(action.path("Type").asText())
+                    || !action.path("FindingFieldsUpdate").isObject()) {
+                throw invalid("Actions must contain a FINDING_FIELDS_UPDATE action with FindingFieldsUpdate.");
+            }
+            validateFindingUpdate(action.get("FindingFieldsUpdate"));
+        }
+    }
+
+    public synchronized void deleteFindingAggregator(String region, String arn) {
+        SecurityHubState state = getFindingAggregator(region, arn);
+        state.setAggregatorArn(null);
+        state.setRegionLinkingMode(null);
+        state.setRegions(null);
+        save(region, state);
+    }
+
+    public synchronized ObjectNode batchImportFindings(String region, JsonNode request) {
+        requireSubscribed(region);
+        JsonNode findings = requiredArray(request, "Findings", 100);
+        SecurityHubState state = state(region);
+        ObjectNode response = object();
+        ArrayNode errors = response.putArray("FailedFindings");
+        int success = 0;
+        for (JsonNode input : findings) {
+            try {
+                validateFinding(region, input);
+                String key = findingKey(input);
+                JsonNode previous = state.getFindings().get(key);
+                if (previous != null && timestamp(input, "UpdatedAt").isBefore(timestamp(previous, "UpdatedAt"))) {
+                    success++;
+                    continue;
+                }
+                ObjectNode finding = previous == null ? object() : (ObjectNode) previous.deepCopy();
+                finding.setAll((ObjectNode) input.deepCopy());
+                if (previous != null) {
+                    for (String field : List.of("Note", "Workflow", "VerificationState", "UserDefinedFields")) {
+                        if (previous.has(field)) {
+                            finding.set(field, previous.get(field).deepCopy());
+                        }
+                    }
+                }
+                if (!finding.has("RecordState")) {
+                    finding.put("RecordState", "ACTIVE");
+                }
+                if (!finding.has("Workflow")) {
+                    finding.putObject("Workflow").put("Status", "NEW");
+                }
+                finding.put("Region", region);
+                applyAutomationRules(state, finding);
+                state.getFindings().put(key, finding);
+                recordHistory(state, key, previous, finding, "BATCH_IMPORT_FINDINGS");
+                success++;
+            } catch (AwsException e) {
+                errors.addObject().put("Id", input.path("Id").asText())
+                        .put("ErrorCode", "InvalidAccessException".equals(e.getErrorCode()) ? "InvalidAccess" : "InvalidInput")
+                        .put("ErrorMessage", e.getMessage());
+            }
+        }
+        save(region, state);
+        return response.put("SuccessCount", success).put("FailedCount", errors.size());
+    }
+
+    public synchronized ObjectNode getFindings(String region, JsonNode request) {
+        requireSubscribed(region);
+        JsonNode filters = request.has("Filters") ? request.get("Filters") : object();
+        validateFilters(filters);
+        if (request.has("SortCriteria") && !request.path("SortCriteria").isEmpty()) {
+            throw invalid("SortCriteria is not supported by the local findings store.");
+        }
+        List<JsonNode> findings = state(region).getFindings().values().stream()
+                .filter(finding -> matchesFilters(finding, filters)).toList();
+        PaginatedResult<JsonNode> page = Pagination.paginate(findings, SecurityHubService::findingKey,
+                integer(request, "MaxResults"), text(request, "NextToken"), 100, "InvalidInputException");
+        ObjectNode response = object();
+        ArrayNode items = response.putArray("Findings");
+        page.items().forEach(item -> items.add(item.<JsonNode>deepCopy()));
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
+        return response;
+    }
+
+    public synchronized ObjectNode batchUpdateFindings(String region, JsonNode request) {
+        requireSubscribed(region);
+        JsonNode identifiers = requiredArray(request, "FindingIdentifiers", 100);
+        for (JsonNode identifier : identifiers) {
+            findingKey(identifier);
+        }
+        validateFindingUpdate(request);
+        SecurityHubState state = state(region);
+        ObjectNode response = object();
+        ArrayNode processed = response.putArray("ProcessedFindings");
+        ArrayNode unprocessed = response.putArray("UnprocessedFindings");
+        for (JsonNode identifier : identifiers) {
+            String key = findingKey(identifier);
+            JsonNode previous = state.getFindings().get(key);
+            if (previous == null) {
+                ObjectNode error = unprocessed.addObject().put("ErrorCode", "FindingNotFound")
+                        .put("ErrorMessage", "The specified finding was not found.");
+                error.set("FindingIdentifier", identifier.deepCopy());
+                continue;
+            }
+            ObjectNode finding = (ObjectNode) previous.deepCopy();
+            applyFindingUpdate(finding, request);
+            state.getFindings().put(key, finding);
+            recordHistory(state, key, previous, finding, "BATCH_UPDATE_FINDINGS");
+            processed.add(identifier.<JsonNode>deepCopy());
+        }
+        save(region, state);
+        return response;
+    }
+
+    public synchronized ObjectNode getFindingHistory(String region, JsonNode request) {
+        requireSubscribed(region);
+        String key = findingKey(request.path("FindingIdentifier"));
+        SecurityHubState state = state(region);
+        requiredDocument(state.getFindings(), key);
+        Instant start = request.has("StartTime") ? timestamp(request, "StartTime") : Instant.MIN;
+        Instant end = request.has("EndTime") ? timestamp(request, "EndTime") : Instant.MAX;
+        if (end.isBefore(start)) {
+            throw invalid("EndTime must not precede StartTime.");
+        }
+        List<JsonNode> records = new ArrayList<>();
+        JsonNode history = state.getFindingHistory().get(key);
+        if (history != null) {
+            for (JsonNode record : history) {
+                Instant time = timestamp(record, "UpdateTime");
+                if (!time.isBefore(start) && !time.isAfter(end)) {
+                    records.add(record);
+                }
+            }
+        }
+        return documentPage("Records", records, "UpdateTime", request);
+    }
+
+    private void validateFinding(String region, JsonNode finding) {
+        if (!finding.isObject() || !"2018-10-08".equals(finding.path("SchemaVersion").asText())) {
+            throw invalid("SchemaVersion must be 2018-10-08.");
+        }
+        boundedText(finding, "Id", 512);
+        boundedText(finding, "GeneratorId", 512);
+        boundedText(finding, "Title", 256);
+        boundedText(finding, "Description", 1024);
+        String account = requireText(finding, "AwsAccountId", "InvalidInputException");
+        requireAccountId(account, "AwsAccountId");
+        if (!regionResolver.getAccountId().equals(account)
+                || !defaultProductArn(region).equals(text(finding, "ProductArn"))) {
+            throw invalidAccess("Findings must belong to the caller and use the caller's default product ARN.");
+        }
+        Instant created = timestamp(finding, "CreatedAt");
+        if (timestamp(finding, "UpdatedAt").isBefore(created)) {
+            throw invalid("UpdatedAt must not precede CreatedAt.");
+        }
+        for (JsonNode type : requiredArray(finding, "Types", 50)) {
+            if (!type.isTextual() || type.textValue().isBlank()) {
+                throw invalid("Types must contain non-empty strings.");
+            }
+        }
+        for (JsonNode resource : requiredArray(finding, "Resources", 32)) {
+            requireText(resource, "Id", "InvalidInputException");
+            requireText(resource, "Type", "InvalidInputException");
+        }
+        if (!finding.path("Severity").isObject()) {
+            throw invalid("Severity is required.");
+        }
+        validateFindingUpdate(finding);
+        if (finding.has("RecordState") && !List.of("ACTIVE", "ARCHIVED").contains(finding.path("RecordState").asText())) {
+            throw invalid("RecordState must be ACTIVE or ARCHIVED.");
+        }
+    }
+
+    private static Instant timestamp(JsonNode input, String field) {
+        String value = requireText(input, field, "InvalidInputException");
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException e) {
+            throw invalid(field + " must be an ISO-8601 timestamp.");
+        }
+    }
+
+    private static String findingKey(JsonNode identifier) {
+        return requireText(identifier, "ProductArn", "InvalidInputException") + "\u0000"
+                + requireText(identifier, "Id", "InvalidInputException");
+    }
+
+    private static void validateFindingUpdate(JsonNode request) {
+        if (request.has("Workflow") && !List.of("NEW", "NOTIFIED", "RESOLVED", "SUPPRESSED")
+                .contains(request.path("Workflow").path("Status").asText())) {
+            throw invalid("Workflow.Status must be NEW, NOTIFIED, RESOLVED, or SUPPRESSED.");
+        }
+        if (request.has("Note")) {
+            boundedText(request.get("Note"), "Text", 512);
+            boundedText(request.get("Note"), "UpdatedBy", 512);
+        }
+        if (request.has("Severity")) {
+            JsonNode severity = request.get("Severity");
+            if (!severity.isObject() || severity.isEmpty()) {
+                throw invalid("Severity must be a non-empty object.");
+            }
+            if (severity.has("Label") && !List.of("INFORMATIONAL", "LOW", "MEDIUM", "HIGH", "CRITICAL")
+                    .contains(severity.path("Label").asText())) {
+                throw invalid("Severity.Label is invalid.");
+            }
+        }
+        for (String field : List.of("Confidence", "Criticality")) {
+            if (request.has(field)) {
+                Integer value = integer(request, field);
+                if (value == null || value < 0 || value > 100) {
+                    throw invalid(field + " must be between 0 and 100.");
+                }
+            }
+        }
+        if (request.has("UserDefinedFields") && !request.get("UserDefinedFields").isObject()) {
+            throw invalid("UserDefinedFields must be an object.");
+        }
+        if (request.has("VerificationState") && !List.of("UNKNOWN", "TRUE_POSITIVE", "FALSE_POSITIVE", "BENIGN_POSITIVE")
+                .contains(request.path("VerificationState").asText())) {
+            throw invalid("VerificationState is invalid.");
+        }
+    }
+
+    private static void applyFindingUpdate(ObjectNode finding, JsonNode request) {
+        for (String field : List.of("Note", "Severity", "VerificationState", "Confidence", "Criticality",
+                "Types", "UserDefinedFields", "Workflow", "RelatedFindings")) {
+            if (request.has(field)) {
+                finding.set(field, request.get(field).deepCopy());
+            }
+        }
+        if (request.has("Note")) {
+            ((ObjectNode) finding.get("Note")).put("UpdatedAt", Instant.now().toString());
+        }
+    }
+
+    private static void applyAutomationRules(SecurityHubState state, ObjectNode finding) {
+        List<JsonNode> rules = state.getAutomationRules().values().stream()
+                .filter(rule -> "ENABLED".equals(rule.path("RuleStatus").asText()))
+                .sorted((left, right) -> Integer.compare(left.path("RuleOrder").asInt(), right.path("RuleOrder").asInt()))
+                .toList();
+        for (JsonNode rule : rules) {
+            if (matchesFilters(finding, rule.path("Criteria"))) {
+                for (JsonNode action : rule.path("Actions")) {
+                    applyFindingUpdate(finding, action.path("FindingFieldsUpdate"));
+                }
+                if (rule.path("IsTerminal").asBoolean()) {
+                    break;
+                }
+            }
+        }
+    }
+
+    private void recordHistory(SecurityHubState state, String key, JsonNode previous, JsonNode finding, String source) {
+        ObjectNode record = object().put("UpdateTime", Instant.now().toString()).put("FindingCreated", previous == null);
+        record.putObject("FindingIdentifier").put("Id", finding.path("Id").asText())
+                .put("ProductArn", finding.path("ProductArn").asText());
+        record.putObject("UpdateSource").put("Type", source).put("Identity", regionResolver.getAccountId());
+        ArrayNode updates = record.putArray("Updates");
+        finding.fields().forEachRemaining(entry -> {
+            if (List.of("CreatedAt", "UpdatedAt", "FirstObservedAt", "LastObservedAt", "ProcessedAt")
+                    .contains(entry.getKey())) {
+                return;
+            }
+            JsonNode old = previous == null ? null : previous.get(entry.getKey());
+            if (!entry.getValue().equals(old)) {
+                ObjectNode change = updates.addObject().put("UpdatedField", entry.getKey())
+                        .put("NewValue", historyValue(entry.getValue()));
+                if (old != null) {
+                    change.put("OldValue", historyValue(old));
+                }
+            }
+        });
+        if (previous != null && updates.isEmpty()) {
+            return;
+        }
+        ArrayNode history = state.getFindingHistory().containsKey(key)
+                ? (ArrayNode) state.getFindingHistory().get(key).deepCopy() : JsonNodeFactory.instance.arrayNode();
+        history.add(record);
+        state.getFindingHistory().put(key, history);
+    }
+
+    private static String historyValue(JsonNode value) {
+        return value.isTextual() ? value.textValue() : value.toString();
+    }
+
+    private static void validateFilters(JsonNode filters) {
+        if (filters == null || !filters.isObject()) {
+            throw invalid("Filters or Criteria must be an object.");
+        }
+        Iterator<Map.Entry<String, JsonNode>> fields = filters.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            if (!List.of("Id", "ProductArn", "AwsAccountId", "GeneratorId", "Title", "Description", "RecordState",
+                    "WorkflowStatus", "SeverityLabel", "VerificationState", "ResourceId", "ResourceType",
+                    "ResourceRegion", "Region", "Type", "ComplianceStatus").contains(field.getKey())) {
+                throw invalid("Unsupported finding filter: " + field.getKey());
+            }
+            JsonNode conditions = field.getValue();
+            if (!conditions.isArray() || conditions.isEmpty() || conditions.size() > 20) {
+                throw invalid("Finding filters must contain between 1 and 20 comparisons.");
+            }
+            boolean negative = false;
+            boolean positive = false;
+            for (JsonNode condition : conditions) {
+                requireText(condition, "Value", "InvalidInputException");
+                String comparison = requireText(condition, "Comparison", "InvalidInputException");
+                if (!List.of("EQUALS", "NOT_EQUALS", "PREFIX", "PREFIX_NOT_EQUALS", "CONTAINS", "NOT_CONTAINS")
+                        .contains(comparison)) {
+                    throw invalid("Unsupported string comparison: " + comparison);
+                }
+                if (comparison.contains("NOT")) {
+                    negative = true;
+                } else {
+                    positive = true;
+                }
+            }
+            if (negative && positive) {
+                throw invalid("Positive and negative comparisons cannot be combined for the same filter.");
+            }
+        }
+    }
+
+    private static boolean matchesFilters(JsonNode finding, JsonNode filters) {
+        Iterator<Map.Entry<String, JsonNode>> fields = filters.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            List<String> values = findingValues(finding, field.getKey());
+            boolean negative = field.getValue().get(0).path("Comparison").asText().contains("NOT");
+            boolean matched = negative;
+            for (JsonNode condition : field.getValue()) {
+                String comparison = condition.path("Comparison").asText();
+                String expected = condition.path("Value").asText();
+                boolean any = values.stream().anyMatch(value -> switch (comparison) {
+                    case "PREFIX", "PREFIX_NOT_EQUALS" -> value.startsWith(expected);
+                    case "CONTAINS", "NOT_CONTAINS" -> value.contains(expected);
+                    default -> value.equals(expected);
+                });
+                matched = negative ? matched && !any : matched || any;
+            }
+            if (!matched) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<String> findingValues(JsonNode finding, String field) {
+        if (field.startsWith("Resource")) {
+            String resourceField = field.substring("Resource".length());
+            List<String> values = new ArrayList<>();
+            for (JsonNode resource : finding.path("Resources")) {
+                if (resource.has(resourceField)) {
+                    values.add(resource.path(resourceField).asText());
+                }
+            }
+            return values;
+        }
+        JsonNode value = switch (field) {
+            case "WorkflowStatus" -> finding.path("Workflow").path("Status");
+            case "SeverityLabel" -> finding.path("Severity").path("Label");
+            case "ComplianceStatus" -> finding.path("Compliance").path("Status");
+            case "Type" -> finding.path("Types");
+            default -> finding.path(field);
+        };
+        if (value.isArray()) {
+            List<String> values = new ArrayList<>();
+            value.forEach(item -> values.add(item.asText()));
+            return values;
+        }
+        return value.isMissingNode() ? List.of() : List.of(value.asText());
+    }
+
+    public synchronized ObjectNode describeProducts(String region, JsonNode request) {
+        ObjectNode product = object().put("ProductArn", defaultProductArn(region)).put("ProductName", "Default")
+                .put("CompanyName", "Personal").put("Description", "Default product for custom findings");
+        product.putArray("IntegrationTypes").add("SEND_FINDINGS_TO_SECURITY_HUB");
+        String arn = text(request, "ProductArn");
+        return documentPage("Products", arn == null || arn.equals(defaultProductArn(region))
+                ? List.of(product) : List.of(), "ProductArn", request);
+    }
+
+    public synchronized ObjectNode describeStandards(String region, JsonNode request) {
+        return documentPage("Standards", standards(region), "StandardsArn", request);
+    }
+
+    private List<JsonNode> standards(String region) {
+        ObjectNode standard = object().put("StandardsArn", standardsArn(region))
+                .put("Name", "AWS Foundational Security Best Practices v1.0.0")
+                .put("Description", "AWS Foundational Security Best Practices standard")
+                .put("EnabledByDefault", true);
+        standard.putObject("StandardsManagedBy").put("Company", "AWS");
+        return List.of(standard);
+    }
+
+    private String standardsArn(String region) {
+        return "arn:aws:securityhub:" + region + "::standards/aws-foundational-security-best-practices/v/1.0.0";
+    }
+
+    private String defaultProductArn(String region) {
+        return resourceArn(region, "product/" + regionResolver.getAccountId() + "/default");
+    }
+
+    public synchronized ObjectNode getEnabledStandards(String region, JsonNode request) {
+        requireSubscribed(region);
+        return documentPage("StandardsSubscriptions", select(state(region).getStandardsSubscriptions(), request,
+                "StandardsSubscriptionArns", 25), "StandardsSubscriptionArn", request);
+    }
+
+    public synchronized ObjectNode batchEnableStandards(String region, JsonNode request) {
+        requireSubscribed(region);
+        JsonNode subscriptions = requiredArray(request, "StandardsSubscriptionRequests", 25);
+        for (JsonNode subscription : subscriptions) {
+            if (!standardsArn(region).equals(text(subscription, "StandardsArn"))) {
+                throw invalid("The specified standard is not available in this region's local catalog.");
+            }
+            if (subscription.has("StandardsInput") && !subscription.get("StandardsInput").isObject()) {
+                throw invalid("StandardsInput must be an object.");
+            }
+        }
+        SecurityHubState state = state(region);
+        ObjectNode response = object();
+        ArrayNode items = response.putArray("StandardsSubscriptions");
+        for (JsonNode subscription : subscriptions) {
+            items.add(enableStandard(region, state, subscription));
+        }
+        save(region, state);
+        return response;
+    }
+
+    private ObjectNode enableStandard(String region, SecurityHubState state, JsonNode request) {
+        String arn = resourceArn(region, "subscription/aws-foundational-security-best-practices/v/1.0.0");
+        // Standards are metadata only; no control evaluations run.
+        ObjectNode subscription = object().put("StandardsArn", standardsArn(region)).put("StandardsSubscriptionArn", arn)
+                .put("StandardsStatus", "INCOMPLETE").put("StandardsControlsUpdatable", "NOT_READY_FOR_UPDATES");
+        subscription.set("StandardsInput", request.has("StandardsInput") ? request.get("StandardsInput").deepCopy() : object());
+        state.getStandardsSubscriptions().put(arn, subscription);
+        return subscription.deepCopy();
+    }
+
+    public synchronized ObjectNode batchDisableStandards(String region, JsonNode request) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        List<JsonNode> subscriptions = select(state.getStandardsSubscriptions(), request, "StandardsSubscriptionArns", 25);
+        requiredArray(request, "StandardsSubscriptionArns", 25);
+        ObjectNode response = object();
+        ArrayNode items = response.putArray("StandardsSubscriptions");
+        for (JsonNode subscription : subscriptions) {
+            state.getStandardsSubscriptions().remove(subscription.path("StandardsSubscriptionArn").asText());
+            items.add(((ObjectNode) subscription.deepCopy()).put("StandardsStatus", "DELETING"));
+        }
+        save(region, state);
+        return response;
+    }
+
+    public synchronized ObjectNode listSecurityControlDefinitions(String region, JsonNode request) {
+        String standard = text(request, "StandardsArn");
+        if (standard != null && !standard.equals(standardsArn(region))) {
+            throw notFound("The specified standard was not found in the local catalog.");
+        }
+        return documentPage("SecurityControlDefinitions", List.of(controlDefinition("IAM.1")), "SecurityControlId", request);
+    }
+
+    public synchronized ObjectNode getSecurityControlDefinition(String id) {
+        ObjectNode response = object();
+        response.set("SecurityControlDefinition", controlDefinition(id));
+        return response;
+    }
+
+    private static ObjectNode controlDefinition(String id) {
+        if (id == null || id.isBlank()) {
+            throw invalid("SecurityControlId is required.");
+        }
+        if (!"IAM.1".equals(id)) {
+            throw notFound("The specified security control definition was not found in the local catalog.");
+        }
+        ObjectNode control = object().put("SecurityControlId", id)
+                .put("Title", "IAM policies should not allow full \"*\" administrative privileges")
+                .put("Description", "Checks whether IAM policies grant full administrative privileges.")
+                .put("RemediationUrl", "https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html#iam-1")
+                .put("SeverityRating", "HIGH").put("CurrentRegionAvailability", "AVAILABLE");
+        control.putObject("ParameterDefinitions");
+        return control;
+    }
+
+    public synchronized ObjectNode listEnabledProductsForImport(String region, JsonNode request) {
+        requireSubscribed(region);
+        PaginatedResult<String> page = Pagination.paginate(new ArrayList<>(state(region).getProductSubscriptions().keySet()),
+                item -> item, integer(request, "MaxResults"), text(request, "NextToken"), 100, "InvalidInputException");
+        ObjectNode response = object();
+        ArrayNode items = response.putArray("ProductSubscriptions");
+        page.items().forEach(items::add);
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
+        return response;
+    }
+
+    public synchronized ObjectNode enableImportFindingsForProduct(String region, JsonNode request) {
+        requireSubscribed(region);
+        if (!defaultProductArn(region).equals(requireText(request, "ProductArn", "InvalidInputException"))) {
+            throw notFound("The product was not found in the local catalog.");
+        }
+        String arn = resourceArn(region, "product-subscription/" + regionResolver.getAccountId() + "/default");
+        SecurityHubState state = state(region);
+        state.getProductSubscriptions().put(arn, request.deepCopy());
+        save(region, state);
+        return object().put("ProductSubscriptionArn", arn);
+    }
+
+    public synchronized void disableImportFindingsForProduct(String region, String arn) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        requiredDocument(state.getProductSubscriptions(), arn);
+        state.getProductSubscriptions().remove(arn);
+        save(region, state);
+    }
+
+    public synchronized ObjectNode listMembers(String region, JsonNode request) {
+        requireSubscribed(region);
+        if (request.has("OnlyAssociated") && !request.get("OnlyAssociated").isBoolean()) {
+            throw invalid("OnlyAssociated must be a boolean.");
+        }
+        boolean associated = request.path("OnlyAssociated").asBoolean(true);
+        List<JsonNode> members = state(region).getMembers().values().stream()
+                .filter(member -> !associated || "Enabled".equals(member.path("MemberStatus").asText())).toList();
+        return documentPage("Members", members, "AccountId", request);
+    }
+
+    public synchronized ObjectNode createMembers(String region, JsonNode request) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        ObjectNode response = object();
+        ArrayNode errors = response.putArray("UnprocessedAccounts");
+        for (JsonNode detail : requiredArray(request, "AccountDetails", 50)) {
+            String id = text(detail, "AccountId");
+            try {
+                requireAccountId(id, "AccountId");
+                if (regionResolver.getAccountId().equals(id)) {
+                    throw invalid("An account cannot be its own member.");
+                }
+                String email = boundedText(detail, "Email", 320);
+                if (!email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")) {
+                    throw invalid("Email must be a valid email address.");
+                }
+                if (!state.getMembers().containsKey(id)) {
+                    state.getMembers().put(id, object().put("AccountId", id).put("Email", email)
+                            .put("AdministratorId", regionResolver.getAccountId()).put("MemberStatus", "Created")
+                            .put("UpdatedAt", Instant.now().toString()));
+                }
+            } catch (AwsException e) {
+                errors.addObject().put("AccountId", id).put("ProcessingResult", e.getMessage());
+            }
+        }
+        save(region, state);
+        return response;
+    }
+
+    public synchronized ObjectNode memberBatch(String region, JsonNode request, boolean delete) {
+        requireSubscribed(region);
+        SecurityHubState state = state(region);
+        ObjectNode response = object();
+        ArrayNode errors = response.putArray("UnprocessedAccounts");
+        ArrayNode members = delete ? null : response.putArray("Members");
+        for (JsonNode id : requiredArray(request, "AccountIds", 50)) {
+            requireAccountId(id.asText(null), "AccountIds");
+            JsonNode member = state.getMembers().get(id.textValue());
+            if (member == null) {
+                errors.addObject().put("AccountId", id.textValue()).put("ProcessingResult", "Member not found.");
+            } else if (delete) {
+                state.getMembers().remove(id.textValue());
+            } else {
+                members.add(member.<JsonNode>deepCopy());
+            }
+        }
+        if (delete) {
+            save(region, state);
+        }
+        return response;
+    }
+
+    public synchronized ObjectNode listInvitations(String region, JsonNode request) {
+        return documentPage("Invitations", new ArrayList<>(state(region).getInvitations().values()), "InvitationId", request);
+    }
+
+    public synchronized ObjectNode getInvitationsCount(String region) {
+        return object().put("InvitationsCount", state(region).getInvitations().size());
+    }
+
+    public synchronized ObjectNode getAdministratorAccount(String region) {
+        requireSubscribed(region);
+        ObjectNode response = object();
+        JsonNode administrator = state(region).getAdministrator();
+        if (administrator != null) {
+            response.set("Administrator", administrator.deepCopy());
+        }
+        return response;
+    }
+
+    private String resourceArn(String region, String suffix) {
+        return "arn:aws:securityhub:" + region + ":" + regionResolver.getAccountId() + ":" + suffix;
+    }
+
+    private static ObjectNode object() {
+        return JsonNodeFactory.instance.objectNode();
+    }
+
+    private static ObjectNode requiredDocument(Map<String, JsonNode> documents, String key) {
+        JsonNode document = key == null ? null : documents.get(key);
+        if (!(document instanceof ObjectNode result)) {
+            throw notFound("The specified Security Hub resource was not found.");
+        }
+        return result;
+    }
+
+    private static JsonNode requiredArray(JsonNode request, String field, int maximum) {
+        JsonNode items = request == null ? null : request.get(field);
+        if (items == null || !items.isArray() || items.isEmpty() || items.size() > maximum) {
+            throw invalid(field + " must contain between 1 and " + maximum + " entries.");
+        }
+        return items;
+    }
+
+    private static String boundedText(JsonNode request, String field, int maximum) {
+        String value = requireText(request, field, "InvalidInputException");
+        if (value.length() > maximum) {
+            throw invalid(field + " exceeds the maximum length of " + maximum + ".");
+        }
+        return value;
+    }
+
+    private static List<JsonNode> select(Map<String, JsonNode> documents, JsonNode request, String field, int maximum) {
+        if (!request.has(field)) {
+            return new ArrayList<>(documents.values());
+        }
+        List<JsonNode> result = new ArrayList<>();
+        for (JsonNode identifier : requiredArray(request, field, maximum)) {
+            if (!identifier.isTextual()) {
+                throw invalid(field + " must contain strings.");
+            }
+            result.add(requiredDocument(documents, identifier.textValue()));
+        }
+        return result;
+    }
+
+    private static ObjectNode documentPage(String field, List<JsonNode> documents, String key, JsonNode request) {
+        PaginatedResult<JsonNode> page = Pagination.paginate(documents, item -> item.path(key).asText(),
+                integer(request, "MaxResults"), text(request, "NextToken"), 100, "InvalidInputException");
+        ObjectNode response = object();
+        ArrayNode items = response.putArray(field);
+        page.items().forEach(item -> items.add(item.<JsonNode>deepCopy()));
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
+        return response;
     }
 
     public String normalizeFeature(String feature) {
@@ -486,7 +1365,10 @@ public class SecurityHubService implements Resettable {
 
     private JsonNode taggedPolicy(SecurityHubState state, String region, String arn) {
         validateResourceArn(region, arn);
-        if (arn.equals(state.getAggregatorArn())) {
+        if (arn.startsWith(resourceArn(region, "automation-rule/"))) {
+            return requiredDocument(state.getAutomationRules(), arn);
+        }
+        if (!arn.startsWith(resourceArn(region, "configuration-policy/"))) {
             throw notFound("The specified Security Hub resource was not found.");
         }
         String id = normalizePolicyId(arn);

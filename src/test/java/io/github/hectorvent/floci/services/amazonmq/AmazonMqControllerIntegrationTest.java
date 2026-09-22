@@ -86,6 +86,22 @@ class AmazonMqControllerIntegrationTest {
     }
 
     @Test
+    void userOperationsOnMissingBrokerReturnNotFound() {
+        String brokerId = "b-00000000-0000-0000-0000-000000000000";
+        String authorization = "AWS4-HMAC-SHA256 Credential=test/20260921/us-east-1/mq/aws4_request, SignedHeaders=host, Signature=test";
+        given().header("Authorization", authorization).get("/v1/brokers/{id}/users", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().header("Authorization", authorization).get("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().header("Authorization", authorization).delete("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().header("Authorization", authorization).contentType("application/json")
+                .body("{\"password\":\"AnotherPass99\",\"consoleAccess\":false}")
+                .post("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
     void rejectsBrokerWithoutUser() {
         given()
             .contentType("application/json")

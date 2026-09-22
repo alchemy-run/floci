@@ -1,7 +1,14 @@
 package io.github.hectorvent.floci.services.efs;
 
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.json.JsonPath;
+import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -9,21 +16,46 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.util.List;
+import java.util.Map;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class EfsIntegrationTest {
 
+    @Inject
+    Ec2Service ec2;
+
     private String fileSystemId;
     private String mountTargetId;
     private String accessPointId;
+    private String vpcId;
+    private Subnet subnet;
+    private String securityGroupId;
+    private String replacementSecurityGroupId;
 
     @BeforeAll
-    static void configureRestAssured() {
+    void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+        vpcId = ec2.createVpc("us-east-1", "10.87.0.0/16", false).getVpcId();
+        subnet = ec2.createSubnet("us-east-1", vpcId, "10.87.1.0/24", "us-east-1b");
+        securityGroupId = ec2.createSecurityGroup("us-east-1", "efs-initial", "EFS initial", vpcId).getGroupId();
+        replacementSecurityGroupId = ec2.createSecurityGroup(
+                "us-east-1", "efs-replacement", "EFS replacement", vpcId).getGroupId();
+    }
+
+    @AfterAll
+    void deleteNetwork() {
+        ec2.deleteSecurityGroup("us-east-1", replacementSecurityGroupId);
+        ec2.deleteSecurityGroup("us-east-1", securityGroupId);
+        ec2.deleteSubnet("us-east-1", subnet.getSubnetId());
+        ec2.deleteVpc("us-east-1", vpcId);
     }
 
     @Test
@@ -90,17 +122,22 @@ class EfsIntegrationTest {
             .body("""
                 {
                     "FileSystemId": "%s",
-                    "SubnetId": "subnet-12345",
-                    "SecurityGroups": ["sg-11111"]
+                    "SubnetId": "%s",
+                    "SecurityGroups": ["%s"]
                 }
-                """.formatted(fileSystemId))
+                """.formatted(fileSystemId, subnet.getSubnetId(), securityGroupId))
         .when()
             .post("/2015-02-01/mount-targets")
         .then()
             .statusCode(200)
             .body("MountTargetId", startsWith("fsmt-"))
             .body("FileSystemId", equalTo(fileSystemId))
-            .body("SubnetId", equalTo("subnet-12345"))
+            .body("SubnetId", equalTo(subnet.getSubnetId()))
+            .body("VpcId", equalTo(vpcId))
+            .body("AvailabilityZoneName", equalTo(subnet.getAvailabilityZone()))
+            .body("AvailabilityZoneId", equalTo(subnet.getAvailabilityZoneId()))
+            .body("IpAddress", startsWith("10.87.1."))
+            .body("OwnerId", equalTo(subnet.getOwnerId()))
             .extract().jsonPath().getString("MountTargetId");
     }
 
@@ -124,9 +161,9 @@ class EfsIntegrationTest {
             .contentType("application/json")
             .body("""
                 {
-                    "SecurityGroups": ["sg-22222"]
+                    "SecurityGroups": ["%s"]
                 }
-                """)
+                """.formatted(replacementSecurityGroupId))
         .when()
             .put("/2015-02-01/mount-targets/" + mountTargetId + "/security-groups")
         .then()
@@ -138,7 +175,7 @@ class EfsIntegrationTest {
             .get("/2015-02-01/mount-targets/" + mountTargetId + "/security-groups")
         .then()
             .statusCode(200)
-            .body("SecurityGroups", hasItem("sg-22222"));
+            .body("SecurityGroups", contains(replacementSecurityGroupId));
     }
 
     @Test
@@ -254,6 +291,141 @@ class EfsIntegrationTest {
             .put("/2015-02-01/file-systems/fs-does-not-exist/protection")
         .then()
             .statusCode(404);
+    }
+
+    @Test
+    @Order(12)
+    void mountTargetUsesDefaultGroupAndOwnsItsNetworkInterface() {
+        String fsId = given()
+                .contentType("application/json")
+                .body("""
+                    {"CreationToken":"efs-default-group"}
+                    """)
+                .post("/2015-02-01/file-systems")
+                .then().statusCode(201).extract().path("FileSystemId");
+        String targetId = null;
+        try {
+            String defaultGroupId = ec2.describeSecurityGroups("us-east-1", List.of(), List.of(),
+                    Map.of("vpc-id", List.of(vpcId), "group-name", List.of("default")))
+                    .getFirst().getGroupId();
+            JsonPath created = given()
+                    .contentType("application/json")
+                    .body("""
+                        {"FileSystemId":"%s","SubnetId":"%s"}
+                        """.formatted(fsId, subnet.getSubnetId()))
+                    .post("/2015-02-01/mount-targets")
+                    .then().statusCode(200)
+                    .body("VpcId", equalTo(vpcId))
+                    .body("AvailabilityZoneName", equalTo(subnet.getAvailabilityZone()))
+                    .body("AvailabilityZoneId", equalTo(subnet.getAvailabilityZoneId()))
+                    .extract().jsonPath();
+            targetId = created.getString("MountTargetId");
+            String eniId = created.getString("NetworkInterfaceId");
+            String ipAddress = created.getString("IpAddress");
+            NetworkInterface eni = ec2.describeNetworkInterfaces("us-east-1", List.of(eniId), Map.of(), 0, null)
+                    .networkInterfaces().getFirst();
+            assertEquals(subnet.getSubnetId(), eni.getSubnetId());
+            assertEquals(ipAddress, eni.getPrivateIpAddress());
+            assertEquals(defaultGroupId, eni.getGroups().getFirst().getGroupId());
+            given()
+                    .get("/2015-02-01/mount-targets/" + targetId + "/security-groups")
+                    .then().statusCode(200).body("SecurityGroups", contains(defaultGroupId));
+
+            given()
+                    .delete("/2015-02-01/mount-targets/" + targetId)
+                    .then().statusCode(204);
+            given()
+                    .queryParam("MountTargetId", targetId)
+                    .get("/2015-02-01/mount-targets")
+                    .then().statusCode(404)
+                    .body("__type", equalTo("MountTargetNotFound"))
+                    .body("ErrorCode", equalTo("MountTargetNotFound"));
+            targetId = null;
+            AwsException gone = assertThrows(AwsException.class, () -> ec2.describeNetworkInterfaces(
+                    "us-east-1", List.of(eniId), Map.of(), 0, null));
+            assertEquals("InvalidNetworkInterfaceID.NotFound", gone.getErrorCode());
+        } finally {
+            if (targetId != null) {
+                given().delete("/2015-02-01/mount-targets/" + targetId).then().statusCode(204);
+            }
+            given().delete("/2015-02-01/file-systems/" + fsId).then().statusCode(204);
+        }
+    }
+
+    @Test
+    @Order(12)
+    void regionalBackupDefaultsToDisabledAndPutPersistsBothStates() {
+        given()
+        .when()
+            .get("/2015-02-01/file-systems/" + fileSystemId + "/backup-policy")
+        .then()
+            .statusCode(200)
+            .body("BackupPolicy.Status", equalTo("DISABLED"));
+
+        for (String status : new String[]{"ENABLED", "DISABLED"}) {
+            given()
+                .contentType("application/json")
+                .body("""
+                    {"BackupPolicy":{"Status":"%s"}}
+                    """.formatted(status))
+            .when()
+                .put("/2015-02-01/file-systems/" + fileSystemId + "/backup-policy")
+            .then()
+                .statusCode(200)
+                .body("BackupPolicy.Status", equalTo(status));
+
+            given()
+            .when()
+                .get("/2015-02-01/file-systems/" + fileSystemId + "/backup-policy")
+            .then()
+                .statusCode(200)
+                .body("BackupPolicy.Status", equalTo(status));
+        }
+
+        given()
+            .contentType("application/json")
+            .body("""
+                {"BackupPolicy":{"Status":"ENABLING"}}
+                """)
+        .when()
+            .put("/2015-02-01/file-systems/" + fileSystemId + "/backup-policy")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("BadRequest"));
+
+        given()
+        .when()
+            .get("/2015-02-01/file-systems/" + fileSystemId + "/backup-policy")
+        .then()
+            .statusCode(200)
+            .body("BackupPolicy.Status", equalTo("DISABLED"));
+    }
+
+    @Test
+    @Order(12)
+    void describeReplicationReturnsTypedNotFoundForAnUnreplicatedFileSystem() {
+        given()
+            .queryParam("FileSystemId", fileSystemId)
+        .when()
+            .get("/2015-02-01/file-systems/replication-configurations")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("ReplicationNotFound"));
+
+        given()
+            .queryParam("FileSystemId", "fs-does-not-exist")
+        .when()
+            .get("/2015-02-01/file-systems/replication-configurations")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("FileSystemNotFound"));
+
+        given()
+        .when()
+            .get("/2015-02-01/file-systems/replication-configurations")
+        .then()
+            .statusCode(200)
+            .body("Replications", empty());
     }
 
     @Test

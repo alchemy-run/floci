@@ -26,11 +26,18 @@ import software.amazon.awssdk.services.lambda.model.DeleteFunctionRequest;
 import software.amazon.awssdk.services.lambda.model.FunctionCode;
 import software.amazon.awssdk.services.lambda.model.Runtime;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +47,9 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -177,6 +187,79 @@ class ApiGatewayV2WebSocketDataPlaneTest {
         }
         if (gw != null) gw.close();
         if (lambda != null) lambda.close();
+    }
+
+    @Test
+    @DisplayName("A TLS WebSocket default route echoes through the signed management callback")
+    void defaultRoutePushesThroughManagementApiOverTls() throws Exception {
+        assertThat(lambdaAvailable).as("Lambda dispatch is required for the callback lifecycle").isTrue();
+        String apiId = createWsApi("signed-callback");
+        String awsHost = apiId + ".execute-api.us-east-1.amazonaws.com/" + STAGE;
+        String functionName = createLambda("signed-callback", """
+                const { ApiGatewayManagementApiClient, PostToConnectionCommand } =
+                    require('@aws-sdk/client-apigatewaymanagementapi');
+                const client = new ApiGatewayManagementApiClient({ endpoint: process.env.CALLBACK_URL });
+                exports.handler = async (event) => {
+                    if (!event.requestContext) {
+                        return { wsUrl: process.env.WS_URL, callbackUrl: process.env.CALLBACK_URL };
+                    }
+                    if (event.requestContext.routeKey === '$default') {
+                        await client.send(new PostToConnectionCommand({
+                            ConnectionId: event.requestContext.connectionId,
+                            Data: Buffer.from('echo:' + (event.body || ''))
+                        }));
+                    }
+                    return { statusCode: 200 };
+                };
+                """, Map.of("WS_URL", "wss://" + awsHost, "CALLBACK_URL", "https://" + awsHost));
+        String integrationId = gw.createIntegration(request -> request.apiId(apiId)
+                .integrationType(IntegrationType.AWS_PROXY).integrationMethod("POST")
+                .integrationUri("arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/"
+                        + "arn:aws:lambda:us-east-1:000000000000:function:" + functionName + "/invocations"))
+                .integrationId();
+        for (String routeKey : List.of("$connect", "$default", "$disconnect")) {
+            gw.createRoute(request -> request.apiId(apiId).routeKey(routeKey)
+                    .target("integrations/" + integrationId));
+        }
+        gw.createStage(request -> request.apiId(apiId).stageName(STAGE).autoDeploy(true));
+        JsonNode discovery = JSON.readTree(lambda.invoke(request -> request.functionName(functionName)
+                .payload(SdkBytes.fromUtf8String("{}"))).payload().asUtf8String());
+        assertThat(discovery.path("wsUrl").asText()).startsWith("wss://");
+        assertThat(discovery.path("callbackUrl").asText()).startsWith("https://");
+        URI advertised = URI.create(discovery.path("wsUrl").asText());
+        URI endpoint = TestFixtures.endpoint();
+        URI socketUri = new URI("wss", null, endpoint.getHost(), endpoint.getPort(),
+                advertised.getPath(), advertised.getQuery(), null);
+        try (HttpClient tlsClient = gatewayTlsClient()) {
+            for (String message : List.of("hello-websocket", "again")) {
+                MultiMessageCapture capture = new MultiMessageCapture();
+                WebSocket socket = tlsClient.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10))
+                        .buildAsync(socketUri, capture).get(15, TimeUnit.SECONDS);
+                try {
+                    socket.sendText(message, true).get(10, TimeUnit.SECONDS);
+                    assertThat(capture.getNextMessage(15, TimeUnit.SECONDS)).isEqualTo("echo:" + message);
+                } finally {
+                    socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
+                }
+            }
+        }
+    }
+
+    private static HttpClient gatewayTlsClient() throws Exception {
+        byte[] ca = http.send(HttpRequest.newBuilder(TestFixtures.endpoint().resolve("/_floci/ca.pem"))
+                .timeout(Duration.ofSeconds(10)).build(), HttpResponse.BodyHandlers.ofByteArray()).body();
+        KeyStore trust = KeyStore.getInstance(KeyStore.getDefaultType());
+        trust.load(null, null);
+        int index = 0;
+        for (Certificate certificate : CertificateFactory.getInstance("X.509")
+                .generateCertificates(new ByteArrayInputStream(ca))) {
+            trust.setCertificateEntry("floci-ca-" + index++, certificate);
+        }
+        TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        factory.init(trust);
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, factory.getTrustManagers(), null);
+        return HttpClient.newBuilder().sslContext(context).connectTimeout(Duration.ofSeconds(10)).build();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

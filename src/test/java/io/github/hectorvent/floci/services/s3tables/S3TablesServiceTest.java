@@ -4,18 +4,29 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.core.storage.PersistentStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.s3tables.model.S3Table;
 import io.github.hectorvent.floci.services.s3tables.model.TableBucket;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class S3TablesServiceTest {
     private static final String ACCOUNT_ID = "000000000000";
@@ -55,7 +66,7 @@ class S3TablesServiceTest {
         assertError("ConflictException", () -> service.createTableBucket(BUCKET, null, null, Map.of(), REGION));
 
         service.createNamespace(arn, List.of("analytics"), REGION);
-        assertError("ConflictException", () -> service.deleteTableBucket(arn, REGION));
+        assertError("BadRequestException", () -> service.deleteTableBucket(arn, REGION));
 
         createTable(arn, "analytics", "events");
         assertError("ConflictException", () -> service.deleteNamespace(arn, "analytics", REGION));
@@ -71,6 +82,9 @@ class S3TablesServiceTest {
         String arn = createBucketWithNamespace("analytics");
         S3Table created = createTable(arn, "analytics", "events");
         String originalToken = created.getVersionToken();
+        assertError("BadRequestException", () -> service.updateTableMetadataLocation(arn, "analytics", "events",
+                "s3://warehouse/events/metadata/v2.json", null, REGION));
+        assertEquals(originalToken, created.getVersionToken());
 
         S3Table updated = service.updateTableMetadataLocation(arn, "analytics", "events",
                 "s3://warehouse/events/metadata/v2.json", originalToken, REGION);
@@ -89,13 +103,17 @@ class S3TablesServiceTest {
         service.createNamespace(arn, List.of("reporting"), REGION);
         S3Table created = createTable(arn, "analytics", "events");
         String originalToken = created.getVersionToken();
+        String originalArn = created.getArn();
+        String warehouse = created.getWarehouseLocation();
 
         S3Table renamed = service.renameTable(arn, "analytics", "events", "reporting", "daily_events",
                 originalToken, REGION);
 
         assertEquals("reporting", renamed.getNamespace());
         assertEquals("daily_events", renamed.getName());
-        assertEquals(arn + "/table/daily_events", renamed.getArn());
+        assertEquals(originalArn, renamed.getArn());
+        assertEquals(warehouse, renamed.getWarehouseLocation());
+        assertEquals(renamed, service.getTableByArn(originalArn, REGION));
         assertNotEquals(originalToken, renamed.getVersionToken());
         assertError("NotFoundException", () -> service.getTable(arn, "analytics", "events", REGION));
         assertEquals(renamed, service.getTable(arn, "reporting", "daily_events", REGION));
@@ -129,6 +147,138 @@ class S3TablesServiceTest {
         assertError("NotFoundException", () -> service.getTablePolicy(arn, "analytics", "events", REGION));
     }
 
+    @Test
+    void persistsWarehouseCommitAndMaintenanceStateAcrossRestart(@TempDir Path directory) {
+        service = persistentService(directory);
+        String arn = createBucketWithNamespace("analytics");
+        S3Table table = service.createTable(arn, "analytics", "events", "ICEBERG",
+                Map.of("iceberg", Map.of("schema", Map.of("fields", List.of(Map.of("name", "id", "type", "long"))))),
+                null, null, Map.of("owner", "analytics"), REGION);
+        String warehouse = table.getWarehouseLocation();
+        String originalToken = table.getVersionToken();
+        assertTrue(warehouse.startsWith("s3://"));
+        assertNull(table.getMetadataLocation());
+        assertEquals(Map.of("status", "Not_Yet_Run"),
+                service.getTableMaintenanceJobStatus(arn, "analytics", "events", REGION).get("icebergCompaction"));
+
+        service.putTableMaintenance(arn, "analytics", "events", "icebergCompaction", Map.of("status", "disabled"), REGION);
+        service.putTableBucketMaintenance(arn, "icebergUnreferencedFileRemoval", Map.of("status", "disabled"), REGION);
+        service.putTablePolicy(arn, "analytics", "events", "{\"Statement\":[]}", REGION);
+        service.updateTableMetadataLocation(arn, "analytics", "events", warehouse + "/metadata/v1.json", originalToken, REGION);
+        String committedToken = table.getVersionToken();
+        service = persistentService(directory);
+
+        S3Table restored = service.getTable(arn, "analytics", "events", REGION);
+        assertEquals(table.getArn(), restored.getArn());
+        assertEquals(warehouse, restored.getWarehouseLocation());
+        assertEquals(warehouse + "/metadata/v1.json", restored.getMetadataLocation());
+        assertEquals(committedToken, restored.getVersionToken());
+        assertEquals(table.getMetadata(), restored.getMetadata());
+        assertEquals("{\"Statement\":[]}", service.getTablePolicy(arn, "analytics", "events", REGION));
+        assertEquals(Map.of("owner", "analytics"), service.listTagsForResource(restored.getArn(), REGION));
+        assertEquals(Map.of(
+                "icebergCompaction", Map.of("status", "Disabled"),
+                "icebergSnapshotManagement", Map.of("status", "Not_Yet_Run"),
+                "icebergUnreferencedFileRemoval", Map.of("status", "Disabled")),
+                service.getTableMaintenanceJobStatus(arn, "analytics", "events", REGION));
+        service.putTableMaintenance(arn, "analytics", "events", "icebergCompaction", Map.of("status", "enabled"), REGION);
+        assertEquals(Map.of("status", "Not_Yet_Run"),
+                service.getTableMaintenanceJobStatus(arn, "analytics", "events", REGION).get("icebergCompaction"));
+        assertEquals(committedToken, restored.getVersionToken());
+        assertError("ConflictException", () -> service.updateTableMetadataLocation(arn, "analytics", "events",
+                warehouse + "/metadata/stale.json", originalToken, REGION));
+    }
+
+    @Test
+    void backfillsLegacyWarehouseWithoutChangingIdentityOrVersion(@TempDir Path directory) {
+        service = persistentService(directory);
+        String arn = createBucketWithNamespace("analytics");
+        S3Table table = createTable(arn, "analytics", "events");
+        String token = table.getVersionToken();
+        table.setWarehouseLocation(null);
+        service.putTablePolicy(arn, "analytics", "events", "{\"Statement\":[]}", REGION);
+        service = persistentService(directory);
+        String warehouse = service.getTable(arn, "analytics", "events", REGION).getWarehouseLocation();
+        assertTrue(warehouse.startsWith("s3://"));
+        service = persistentService(directory);
+        assertEquals(warehouse, service.getTableByArn(table.getArn(), REGION).getWarehouseLocation());
+        assertEquals(token, service.getTableByArn(table.getArn(), REGION).getVersionToken());
+    }
+
+    @Test
+    void isolatesTableIdentityTagsAndMaintenanceByNamespaceAndRegion() {
+        String arn = createBucketWithNamespace("analytics");
+        service.createNamespace(arn, List.of("reporting"), REGION);
+        S3Table analytics = createTable(arn, "analytics", "events");
+        S3Table reporting = createTable(arn, "reporting", "events");
+        assertNotEquals(analytics.getArn(), reporting.getArn());
+        assertNotEquals(analytics.getWarehouseLocation(), reporting.getWarehouseLocation());
+        service.tagResource(analytics.getArn(), Map.of("owner", "analytics", "remove", "yes"), REGION);
+        service.untagResource(analytics.getArn(), List.of("remove", "absent"), REGION);
+        service.tagResource(arn, Map.of("owner", "bucket"), REGION);
+        assertEquals(Map.of("owner", "analytics"), service.listTagsForResource(analytics.getArn(), REGION));
+        assertEquals(Map.of(), service.listTagsForResource(reporting.getArn(), REGION));
+        assertEquals(Map.of("owner", "bucket"), service.listTagsForResource(arn, REGION));
+        service.putTableMaintenance(arn, "analytics", "events", "icebergCompaction", Map.of("status", "disabled"), REGION);
+        assertEquals(Map.of("status", "Not_Yet_Run"),
+                service.getTableMaintenanceJobStatus(arn, "reporting", "events", REGION).get("icebergCompaction"));
+        assertError("NotFoundException", () -> service.getTableMaintenanceJobStatus(arn, "missing", "events", REGION));
+        assertError("NotFoundException", () -> service.getTableMaintenanceJobStatus(arn, "analytics", "events", "eu-west-1"));
+        assertError("NotFoundException", () -> service.listTagsForResource(analytics.getArn(), "eu-west-1"));
+        assertError("NotFoundException", () -> service.getTableByArn(
+                analytics.getArn().replace(ACCOUNT_ID, "111111111111"), REGION));
+        service.deleteTable(arn, "analytics", "events", REGION);
+        assertError("NotFoundException", () -> service.listTagsForResource(analytics.getArn(), REGION));
+        assertError("NotFoundException", () -> service.getTableMaintenanceJobStatus(arn, "analytics", "events", REGION));
+        S3Table recreated = createTable(arn, "analytics", "events");
+        assertNotEquals(analytics.getArn(), recreated.getArn());
+        assertNotEquals(analytics.getWarehouseLocation(), recreated.getWarehouseLocation());
+    }
+
+    @Test
+    void rejectsAmbiguousLegacyTableArnsWithoutChangingEitherTable() {
+        String arn = createBucketWithNamespace("analytics");
+        service.createNamespace(arn, List.of("reporting"), REGION);
+        S3Table analytics = createTable(arn, "analytics", "events");
+        S3Table reporting = createTable(arn, "reporting", "events");
+        analytics.setArn(arn + "/table/events");
+        reporting.setArn(analytics.getArn());
+        assertError("ConflictException", () -> service.getTableByArn(analytics.getArn(), REGION));
+        assertError("ConflictException", () -> service.tagResource(analytics.getArn(), Map.of("owner", "ambiguous"), REGION));
+        assertEquals(Map.of(), analytics.getTags());
+        assertEquals(Map.of(), reporting.getTags());
+        assertEquals(analytics, service.getTable(arn, "analytics", "events", REGION));
+        assertEquals(reporting, service.getTable(arn, "reporting", "events", REGION));
+    }
+
+    @Test
+    void conditionalDeleteRejectsStaleTokenAndUnconditionalDeleteRemainsAvailable() {
+        String arn = createBucketWithNamespace("analytics");
+        S3Table table = createTable(arn, "analytics", "events");
+        String token = table.getVersionToken();
+        service.updateTableMetadataLocation(arn, "analytics", "events", "s3://warehouse/metadata.json", token, REGION);
+        assertError("ConflictException", () -> service.deleteTable(arn, "analytics", "events", token, REGION));
+        assertEquals(table.getArn(), service.getTable(arn, "analytics", "events", REGION).getArn());
+        service.deleteTable(arn, "analytics", "events", REGION);
+        assertError("NotFoundException", () -> service.getTable(arn, "analytics", "events", REGION));
+        S3Table recreated = createTable(arn, "analytics", "events");
+        service.deleteTable(arn, "analytics", "events", recreated.getVersionToken(), REGION);
+        assertError("NotFoundException", () -> service.getTable(arn, "analytics", "events", REGION));
+    }
+
+    private S3TablesService persistentService(Path directory) {
+        StorageFactory factory = new StorageFactory(null, null) {
+            @Override
+            public <V> AccountAwareStorageBackend<V> create(String serviceName, String fileName,
+                    TypeReference<Map<String, V>> typeReference) {
+                PersistentStorage<String, V> storage = new PersistentStorage<>(directory.resolve(fileName), typeReference);
+                storage.load();
+                return new AccountAwareStorageBackend<>(storage, null, ACCOUNT_ID);
+            }
+        };
+        return new S3TablesService(factory, new RegionResolver(REGION, ACCOUNT_ID));
+    }
+
     private TableBucket createBucket() {
         return service.createTableBucket(BUCKET, null, null, Map.of(), REGION);
     }
@@ -145,7 +295,7 @@ class S3TablesServiceTest {
                 null, null, Map.of(), REGION);
     }
 
-    private void assertError(String expectedCode, org.junit.jupiter.api.function.Executable action) {
+    private void assertError(String expectedCode, Executable action) {
         AwsException exception = assertThrows(AwsException.class, action);
         assertEquals(expectedCode, exception.getErrorCode());
     }
@@ -154,20 +304,21 @@ class S3TablesServiceTest {
     void allowsOnlyOneConcurrentMetadataUpdatePerVersionToken() throws Exception {
         String arn = createBucketWithNamespace("analytics");
         S3Table created = createTable(arn, "analytics", "events");
-        var ready = new java.util.concurrent.CountDownLatch(2);
-        var start = new java.util.concurrent.CountDownLatch(1);
-        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        String token = created.getVersionToken();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
-            var first = executor.submit(() -> updateMetadataWithToken(arn, created.getVersionToken(),
+            Future<String> first = executor.submit(() -> updateMetadataWithToken(arn, token,
                     "s3://warehouse/events/metadata/v2.json", ready, start));
-            var second = executor.submit(() -> updateMetadataWithToken(arn, created.getVersionToken(),
+            Future<String> second = executor.submit(() -> updateMetadataWithToken(arn, token,
                     "s3://warehouse/events/metadata/v3.json", ready, start));
 
-            assertEquals(true, ready.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
             start.countDown();
-            List<String> outcomes = List.of(first.get(5, java.util.concurrent.TimeUnit.SECONDS),
-                    second.get(5, java.util.concurrent.TimeUnit.SECONDS));
+            List<String> outcomes = List.of(first.get(5, TimeUnit.SECONDS),
+                    second.get(5, TimeUnit.SECONDS));
 
             assertEquals(1L, outcomes.stream().filter("updated"::equals).count());
             assertEquals(1L, outcomes.stream().filter("ConflictException"::equals).count());
@@ -177,10 +328,10 @@ class S3TablesServiceTest {
     }
 
     private String updateMetadataWithToken(String arn, String token, String metadataLocation,
-                                           java.util.concurrent.CountDownLatch ready,
-                                           java.util.concurrent.CountDownLatch start) throws InterruptedException {
+                                           CountDownLatch ready,
+                                           CountDownLatch start) throws InterruptedException {
         ready.countDown();
-        if (!start.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+        if (!start.await(5, TimeUnit.SECONDS)) {
             return "timed out";
         }
         try {

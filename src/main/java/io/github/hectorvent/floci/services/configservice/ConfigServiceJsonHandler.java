@@ -25,15 +25,27 @@ public class ConfigServiceJsonHandler {
 
     private final AwsConfigService service;
     private final ObjectMapper mapper;
+    private final ConfigResourceService resources;
 
     @Inject
-    public ConfigServiceJsonHandler(AwsConfigService service, ObjectMapper mapper) {
+    public ConfigServiceJsonHandler(AwsConfigService service, ObjectMapper mapper, ConfigResourceService resources) {
         this.service = service;
         this.mapper = mapper;
+        this.resources = resources;
     }
 
     public Response handle(String action, JsonNode request, String region) throws Exception {
         return switch (action) {
+            case "PutResourceConfig" -> Response.ok(resources.putResourceConfig(region, request)).build();
+            case "DeleteResourceConfig" -> Response.ok(resources.deleteResourceConfig(region, request)).build();
+            case "ListDiscoveredResources" -> Response.ok(resources.listDiscoveredResources(region, request)).build();
+            case "GetDiscoveredResourceCounts" -> Response.ok(resources.getDiscoveredResourceCounts(region, request)).build();
+            case "BatchGetResourceConfig" -> Response.ok(resources.batchGetResourceConfig(region, request)).build();
+            case "GetResourceConfigHistory" -> Response.ok(resources.getResourceConfigHistory(region, request)).build();
+            case "SelectResourceConfig" -> Response.ok(resources.selectResourceConfig(region, request)).build();
+            case "StartResourceEvaluation" -> Response.ok(resources.startResourceEvaluation(region, request)).build();
+            case "GetResourceEvaluationSummary" -> Response.ok(resources.getResourceEvaluationSummary(region, request)).build();
+            case "ListResourceEvaluations" -> Response.ok(resources.listResourceEvaluations(region, request)).build();
             case "PutConfigRule" -> putConfigRule(request, region);
             case "DeleteConfigRule" -> deleteConfigRule(request, region);
             case "DescribeConfigRules" -> describeConfigRules(request, region);
@@ -190,7 +202,7 @@ public class ConfigServiceJsonHandler {
 
     private Response putConfigurationRecorder(JsonNode req, String region) throws Exception {
         ConfigurationRecorder recorder = mapper.treeToValue(req.path("ConfigurationRecorder"), ConfigurationRecorder.class);
-        service.putConfigurationRecorder(region, recorder);
+        service.putConfigurationRecorder(region, recorder, extractTags(req));
         return Response.ok(mapper.createObjectNode()).build();
     }
 

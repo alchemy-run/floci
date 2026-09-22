@@ -35,6 +35,8 @@ public class CloudWatchMetricsQueryHandler {
     private CloudWatchMetricsService metricsService;
     private final CloudWatchDashboardsService dashboardsService;
     private final CloudWatchMetricStreamsService metricStreamsService;
+    @Inject
+    CloudWatchMetricsJsonHandler jsonHandler;
 
     @Inject
     public CloudWatchMetricsQueryHandler(CloudWatchMetricsService metricsService,
@@ -47,6 +49,17 @@ public class CloudWatchMetricsQueryHandler {
 
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
         String normalizedAction = action.substring(0, 1).toUpperCase() + action.substring(1);
+        if (jsonHandler != null && java.util.Set.of(
+                "PutMetricData", "PutMetricAlarm", "DescribeAlarms", "DeleteAlarms", "SetAlarmState",
+                "ListTagsForResource", "TagResource", "UntagResource", "PutCompositeAlarm",
+                "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector",
+                "PutAlarmMuteRule", "GetAlarmMuteRule", "ListAlarmMuteRules", "DeleteAlarmMuteRule",
+                "DescribeAlarmsForMetric", "DescribeAlarmHistory", "DescribeAlarmContributors",
+                "EnableAlarmActions", "DisableAlarmActions", "GetMetricWidgetImage",
+                "PutInsightRule", "DescribeInsightRules", "DeleteInsightRules", "EnableInsightRules",
+                "DisableInsightRules", "GetInsightRuleReport", "ListManagedInsightRules").contains(normalizedAction)) {
+            return CloudWatchQueryCodec.handle(jsonHandler, normalizedAction, params, region);
+        }
         return switch (normalizedAction) {
             case "PutMetricData" -> handlePutMetricData(params, region);
             case "ListMetrics" -> handleListMetrics(params, region);
@@ -59,7 +72,6 @@ public class CloudWatchMetricsQueryHandler {
             case "ListTagsForResource" -> handleListTagsForResource(params, region);
             case "TagResource" -> handleTagResource(params, region);
             case "UntagResource" -> handleUntagResource(params, region);
-            case "DescribeInsightRules" -> handleDescribeInsightRules();
             case "PutDashboard" -> handlePutDashboard(params, region);
             case "GetDashboard" -> handleGetDashboard(params, region);
             case "ListDashboards" -> handleListDashboards(params, region);
@@ -768,11 +780,6 @@ public class CloudWatchMetricsQueryHandler {
                 return null;
             }
         }
-    }
-
-    private Response handleDescribeInsightRules() {
-        String result = new XmlBuilder().start("InsightRules").end("InsightRules").build();
-        return Response.ok(AwsQueryResponse.envelope("DescribeInsightRules", AwsNamespaces.CW, result)).build();
     }
 
     private int parseIntParam(MultivaluedMap<String, String> params, String name, int defaultValue) {

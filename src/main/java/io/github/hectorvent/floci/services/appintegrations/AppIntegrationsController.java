@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.appintegrations.model.DataIntegration;
 import io.github.hectorvent.floci.services.appintegrations.model.EventIntegration;
@@ -17,6 +20,7 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -24,8 +28,10 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * Amazon AppIntegrations REST-JSON controller (API version 2020-07-29).
@@ -53,20 +59,70 @@ public class AppIntegrationsController {
     }
 
     @POST
+    @Path(AppIntegrationsRouteFilter.APPLICATIONS_PATH)
+    public Response createApplication(@Context HttpHeaders headers, String body) {
+        return Response.ok(appIntegrationsService.createApplication(readTree(body),
+                regionResolver.resolveRegion(headers))).build();
+    }
+
+    @GET
+    @Path(AppIntegrationsRouteFilter.APPLICATIONS_PATH + "/{identifier:.+}")
+    public Response getApplication(@PathParam("identifier") String identifier, @Context HttpHeaders headers) {
+        return Response.ok(appIntegrationsService.getApplication(identifier,
+                regionResolver.resolveRegion(headers))).build();
+    }
+
+    @PATCH
+    @Path(AppIntegrationsRouteFilter.APPLICATIONS_PATH + "/{identifier:.+}")
+    public Response updateApplication(@PathParam("identifier") String identifier,
+                                      @Context HttpHeaders headers, String body) {
+        appIntegrationsService.updateApplication(identifier, readTree(body), regionResolver.resolveRegion(headers));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @DELETE
+    @Path(AppIntegrationsRouteFilter.APPLICATIONS_PATH + "/{identifier:.+}")
+    public Response deleteApplication(@PathParam("identifier") String identifier, @Context HttpHeaders headers) {
+        appIntegrationsService.deleteApplication(identifier, regionResolver.resolveRegion(headers));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @GET
+    @Path(AppIntegrationsRouteFilter.APPLICATIONS_PATH)
+    public Response listApplications(@Context HttpHeaders headers,
+                                     @QueryParam("maxResults") String maxResults,
+                                     @QueryParam("nextToken") String nextToken,
+                                     @QueryParam("applicationType") String applicationType) {
+        return page("Applications", appIntegrationsService.listApplications(
+                        regionResolver.resolveRegion(headers), applicationType),
+                app -> app.path("Id").asText(), this::applicationSummary, maxResults, nextToken);
+    }
+
+    @GET
+    @Path(AppIntegrationsRouteFilter.APPLICATIONS_PATH + "/{identifier:.+}/associations")
+    public Response listApplicationAssociations(@PathParam("identifier") String identifier,
+                                               @Context HttpHeaders headers,
+                                               @QueryParam("maxResults") String maxResults,
+                                               @QueryParam("nextToken") String nextToken) {
+        return page("ApplicationAssociations", appIntegrationsService.listApplicationAssociations(
+                        identifier, regionResolver.resolveRegion(headers)),
+                association -> association.path("ApplicationAssociationArn").asText(),
+                Function.identity(), maxResults, nextToken);
+    }
+
+    @POST
     @Path("/eventIntegrations")
     public Response createEventIntegration(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         JsonNode request = readTree(body);
-        EventIntegration integration = appIntegrationsService.createEventIntegration(
-                textOrNull(request, "Name"),
-                textOrNull(request, "Description"),
-                request.get("EventFilter"),
-                textOrNull(request, "EventBridgeBus"),
-                parseTags(request.get("Tags")),
-                region);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("EventIntegrationArn", integration.getEventIntegrationArn());
+        ObjectNode response = appIntegrationsService.createIdempotently("CreateEventIntegration", request, region, () -> {
+            EventIntegration integration = appIntegrationsService.createEventIntegration(
+                    textOrNull(request, "Name"), textOrNull(request, "Description"), request.get("EventFilter"),
+                    textOrNull(request, "EventBridgeBus"), parseTags(request.get("Tags")), region);
+            ObjectNode result = objectMapper.createObjectNode();
+            result.put("EventIntegrationArn", integration.getEventIntegrationArn());
+            return result;
+        });
         return Response.ok(response).build();
     }
 
@@ -98,14 +154,11 @@ public class AppIntegrationsController {
 
     @GET
     @Path("/eventIntegrations")
-    public Response listEventIntegrations(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode integrations = response.putArray("EventIntegrations");
-        for (EventIntegration integration : appIntegrationsService.listEventIntegrations(region)) {
-            integrations.add(eventIntegrationNode(integration));
-        }
-        return Response.ok(response).build();
+    public Response listEventIntegrations(@Context HttpHeaders headers,
+                                         @QueryParam("maxResults") String maxResults,
+                                         @QueryParam("nextToken") String nextToken) {
+        return page("EventIntegrations", appIntegrationsService.listEventIntegrations(regionResolver.resolveRegion(headers)),
+                EventIntegration::getName, this::eventIntegrationNode, maxResults, nextToken);
     }
 
     /**
@@ -117,12 +170,13 @@ public class AppIntegrationsController {
     @GET
     @Path("/eventIntegrations/{name}/associations")
     public Response listEventIntegrationAssociations(@PathParam("name") String name,
-                                                     @Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
-        appIntegrationsService.getEventIntegration(name, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("EventIntegrationAssociations");
-        return Response.ok(response).build();
+                                                     @Context HttpHeaders headers,
+                                                     @QueryParam("maxResults") String maxResults,
+                                                     @QueryParam("nextToken") String nextToken) {
+        appIntegrationsService.getEventIntegration(name, regionResolver.resolveRegion(headers));
+        return page("EventIntegrationAssociations", List.<ObjectNode>of(),
+                association -> association.path("EventIntegrationAssociationArn").asText(),
+                Function.identity(), maxResults, nextToken);
     }
 
     @POST
@@ -130,22 +184,17 @@ public class AppIntegrationsController {
     public Response createDataIntegration(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         JsonNode request = readTree(body);
-        DataIntegration integration = appIntegrationsService.createDataIntegration(
-                textOrNull(request, "Name"),
-                textOrNull(request, "Description"),
-                textOrNull(request, "KmsKey"),
-                textOrNull(request, "SourceURI"),
-                request.get("ScheduleConfig"),
-                request.get("FileConfiguration"),
-                request.get("ObjectConfiguration"),
-                parseTags(request.get("Tags")),
-                region);
-
-        ObjectNode response = dataIntegrationNode(integration);
-        String clientToken = textOrNull(request, "ClientToken");
-        if (clientToken != null) {
-            response.put("ClientToken", clientToken);
-        }
+        ObjectNode response = appIntegrationsService.createIdempotently("CreateDataIntegration", request, region, () -> {
+            DataIntegration integration = appIntegrationsService.createDataIntegration(
+                    textOrNull(request, "Name"), textOrNull(request, "Description"), textOrNull(request, "KmsKey"),
+                    textOrNull(request, "SourceURI"), request.get("ScheduleConfig"), request.get("FileConfiguration"),
+                    request.get("ObjectConfiguration"), parseTags(request.get("Tags")), region);
+            ObjectNode result = dataIntegrationNode(integration);
+            if (request.hasNonNull("ClientToken")) {
+                result.put("ClientToken", textOrNull(request, "ClientToken"));
+            }
+            return result;
+        });
         return Response.ok(response).build();
     }
 
@@ -180,17 +229,70 @@ public class AppIntegrationsController {
 
     @GET
     @Path("/dataIntegrations")
-    public Response listDataIntegrations(@Context HttpHeaders headers) {
-        String region = regionResolver.resolveRegion(headers);
+    public Response listDataIntegrations(@Context HttpHeaders headers,
+                                        @QueryParam("maxResults") String maxResults,
+                                        @QueryParam("nextToken") String nextToken) {
+        return page("DataIntegrations", appIntegrationsService.listDataIntegrations(regionResolver.resolveRegion(headers)),
+                DataIntegration::getId, integration -> {
+                    ObjectNode summary = objectMapper.createObjectNode();
+                    summary.put("Arn", integration.getArn());
+                    summary.put("Name", integration.getName());
+                    if (integration.getSourceUri() != null) {
+                        summary.put("SourceURI", integration.getSourceUri());
+                    }
+                    return summary;
+                }, maxResults, nextToken);
+    }
+
+    @GET
+    @Path("/dataIntegrations/{identifier}/associations")
+    public Response listDataIntegrationAssociations(@PathParam("identifier") String identifier,
+                                                   @Context HttpHeaders headers,
+                                                   @QueryParam("maxResults") String maxResults,
+                                                   @QueryParam("nextToken") String nextToken) {
+        return page("DataIntegrationAssociations", appIntegrationsService.listDataIntegrationAssociations(
+                        identifier, regionResolver.resolveRegion(headers)),
+                association -> association.path("DataIntegrationAssociationArn").asText(),
+                Function.identity(), maxResults, nextToken);
+    }
+
+    @POST
+    @Path("/dataIntegrations/{identifier}/associations")
+    public Response createDataIntegrationAssociation(@PathParam("identifier") String identifier,
+                                                     @Context HttpHeaders headers, String body) {
+        readTree(body);
+        throw appIntegrationsService.dataIntegrationAssociationWriteDenied(identifier,
+                "CreateDataIntegrationAssociation", regionResolver.resolveRegion(headers));
+    }
+
+    @PATCH
+    @Path("/dataIntegrations/{identifier}/associations/{associationId}")
+    public Response updateDataIntegrationAssociation(@PathParam("identifier") String identifier,
+                                                     @Context HttpHeaders headers, String body) {
+        readTree(body);
+        throw appIntegrationsService.dataIntegrationAssociationWriteDenied(identifier,
+                "UpdateDataIntegrationAssociation", regionResolver.resolveRegion(headers));
+    }
+
+    private ObjectNode applicationSummary(ObjectNode application) {
+        ObjectNode summary = objectMapper.createObjectNode();
+        for (String field : List.of("Arn", "Id", "Name", "Namespace", "CreatedTime", "LastModifiedTime",
+                "IsService", "ApplicationType")) {
+            setIfPresent(summary, field, application.get(field));
+        }
+        return summary;
+    }
+
+    private <T> Response page(String field, List<T> values, Function<T, String> cursor,
+                              Function<T, ObjectNode> serialize, String maxResults, String nextToken) {
+        PaginatedResult<T> page = Pagination.paginate(values, cursor,
+                Pagination.parseMaxResults(maxResults, "InvalidRequestException"), nextToken,
+                50, "InvalidRequestException");
         ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode integrations = response.putArray("DataIntegrations");
-        for (DataIntegration integration : appIntegrationsService.listDataIntegrations(region)) {
-            ObjectNode summary = integrations.addObject();
-            summary.put("Arn", integration.getArn());
-            summary.put("Name", integration.getName());
-            if (integration.getSourceUri() != null) {
-                summary.put("SourceURI", integration.getSourceUri());
-            }
+        ArrayNode entries = response.putArray(field);
+        page.items().forEach(item -> entries.add(serialize.apply(item)));
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
         }
         return Response.ok(response).build();
     }
@@ -237,7 +339,11 @@ public class AppIntegrationsController {
 
     private JsonNode readTree(String body) {
         try {
-            return objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            if (request == null || !request.isObject()) {
+                throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
+            }
+            return request;
         } catch (Exception e) {
             throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
         }
@@ -252,13 +358,24 @@ public class AppIntegrationsController {
         if (value == null || value.isNull()) {
             return Optional.empty();
         }
+        if (!value.isTextual()) {
+            throw new AwsException("InvalidRequestException", field + " must be a string", 400);
+        }
         return Optional.of(value.asText());
     }
 
     private Map<String, String> parseTags(JsonNode tagsNode) {
         Map<String, String> tags = new HashMap<>();
-        if (tagsNode != null && tagsNode.isObject()) {
-            tagsNode.fields().forEachRemaining(e -> tags.put(e.getKey(), e.getValue().asText()));
+        if (tagsNode != null && !tagsNode.isNull()) {
+            if (!tagsNode.isObject()) {
+                throw new AwsException("InvalidRequestException", "Tags must be a map", 400);
+            }
+            tagsNode.fields().forEachRemaining(entry -> {
+                if (!entry.getValue().isTextual()) {
+                    throw new AwsException("InvalidRequestException", "Tag values must be strings", 400);
+                }
+                tags.put(entry.getKey(), entry.getValue().asText());
+            });
         }
         return tags;
     }

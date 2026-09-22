@@ -1,6 +1,9 @@
 package io.github.hectorvent.floci.services.configservice;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -20,6 +23,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Verifies AWS Config durable resources survive a restart. Two service instances share the same
@@ -128,6 +132,81 @@ class AwsConfigServicePersistenceTest {
 
         assertEquals(90, reloaded.describeRetentionConfigurations(REGION, null)
                 .getFirst().retentionPeriodInDays());
+    }
+
+    @Test
+    void legacyRecorderReceivesOneDurableArnOnRead() {
+        SharedStorageFactory storage = new SharedStorageFactory();
+        storage.create("config", "config-recorders.json", new TypeReference<Map<String, ConfigurationRecorder>>() {})
+                .put(REGION, new ConfigurationRecorder("legacy", "arn:aws:iam::000000000000:role/config",
+                        new RecordingGroup(true, false, null)));
+        AwsConfigService first = serviceWithStorage(storage);
+        String arn = first.describeConfigurationRecorders(REGION, null).getFirst().arn();
+        assertTrue(arn.contains(":configuration-recorder/legacy/"));
+        assertEquals(arn, first.describeConfigurationRecorders(REGION, null).getFirst().arn());
+        assertEquals(arn, serviceWithStorage(storage).describeConfigurationRecorders(REGION, null).getFirst().arn());
+    }
+
+    @Test
+    void recordedHistoryAndProactiveEvaluationsSurviveRestart() throws Exception {
+        SharedStorageFactory storage = new SharedStorageFactory();
+        ObjectMapper mapper = new ObjectMapper();
+        AwsConfigService first = serviceWithStorage(storage);
+        ConfigResourceService resources = resourcesWithStorage(first, storage, mapper);
+        first.putConfigurationRecorder(REGION, new ConfigurationRecorder("default",
+                "arn:aws:iam::000000000000:role/config", new RecordingGroup(true, false, null),
+                Map.of("recordingFrequency", "DAILY"), null));
+        String arn = first.describeConfigurationRecorders(REGION, null).getFirst().arn();
+        first.putDeliveryChannel(REGION, new DeliveryChannel("default", "bucket", null, null, null, null));
+        first.startConfigurationRecorder(REGION, "default");
+        ObjectNode put = mapper.createObjectNode().put("ResourceType", "Example::Config::Widget")
+                .put("ResourceId", "widget").put("SchemaVersionId", "1").put("Configuration", "{\"v\":1}");
+        resources.putResourceConfig(REGION, put);
+        resources.putResourceConfig(REGION, put.deepCopy().put("Configuration", "{\"v\":2}"));
+        first.putConfigRule(REGION, mapper.readValue("""
+                {"ConfigRuleName":"versioning","Source":{"Owner":"AWS","SourceIdentifier":"S3_BUCKET_VERSIONING_ENABLED"},
+                 "EvaluationModes":[{"Mode":"PROACTIVE"}]}
+                """, ConfigRule.class));
+        ObjectNode start = (ObjectNode) mapper.readTree("""
+                {"EvaluationMode":"PROACTIVE","ClientToken":"persistent-evaluation",
+                 "ResourceDetails":{"ResourceId":"bucket","ResourceType":"AWS::S3::Bucket","ResourceConfiguration":"{}"}}
+                """);
+        String evaluationId = resources.startResourceEvaluation(REGION, start).path("ResourceEvaluationId").asText();
+
+        AwsConfigService reloaded = serviceWithStorage(storage);
+        ConfigResourceService reloadedResources = resourcesWithStorage(reloaded, storage, mapper);
+        assertEquals(arn, reloaded.describeConfigurationRecorders(REGION, null).getFirst().arn());
+        assertEquals("DAILY", reloaded.describeConfigurationRecorders(REGION, null).getFirst()
+                .recordingMode().get("recordingFrequency"));
+        ObjectNode history = mapper.createObjectNode().put("resourceType", "Example::Config::Widget").put("resourceId", "widget");
+        assertEquals(2, reloadedResources.getResourceConfigHistory(REGION, history).path("configurationItems").size());
+        assertEquals(1, reloadedResources.getDiscoveredResourceCounts(REGION, mapper.createObjectNode())
+                .path("totalDiscoveredResources").asInt());
+        assertEquals("NON_COMPLIANT", reloadedResources.getResourceEvaluationSummary(REGION,
+                mapper.createObjectNode().put("ResourceEvaluationId", evaluationId)).path("Compliance").asText());
+        assertEquals(evaluationId, reloadedResources.startResourceEvaluation(REGION, start)
+                .path("ResourceEvaluationId").asText());
+        assertEquals(1, reloadedResources.listResourceEvaluations(REGION, mapper.createObjectNode())
+                .path("ResourceEvaluations").size());
+        AwsException stopped = assertThrows(AwsException.class, () -> reloadedResources.deleteResourceConfig(REGION, put));
+        assertEquals("NoRunningConfigurationRecorderException", stopped.getErrorCode());
+        reloaded.startConfigurationRecorder(REGION, "default");
+        reloadedResources.deleteResourceConfig(REGION, put);
+
+        AwsConfigService third = serviceWithStorage(storage);
+        ConfigResourceService thirdResources = resourcesWithStorage(third, storage, mapper);
+        assertEquals(0, thirdResources.getDiscoveredResourceCounts(REGION, mapper.createObjectNode())
+                .path("totalDiscoveredResources").asInt());
+        assertEquals("ResourceDeleted", thirdResources.getResourceConfigHistory(REGION, history)
+                .path("configurationItems").path(0).path("configurationItemStatus").asText());
+    }
+
+    private static ConfigResourceService resourcesWithStorage(AwsConfigService config, StorageFactory storage,
+            ObjectMapper mapper) {
+        ConfigResourceService service = new ConfigResourceService(config,
+                new RegionResolver(REGION, "000000000000"), storage, mapper);
+        service.initializeStorage();
+        return service;
     }
 
     private static ConfigRule rule(String name, String owner, String sourceIdentifier) {

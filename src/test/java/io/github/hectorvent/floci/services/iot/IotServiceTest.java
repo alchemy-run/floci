@@ -410,6 +410,38 @@ class IotServiceTest {
     }
 
     @Test
+    void missingTopicRulesUseUnauthorizedButMissingTagsUseResourceNotFound() {
+        AwsException read = assertThrows(AwsException.class, () -> service.getTopicRule("missing", REGION));
+        assertEquals("UnauthorizedException", read.getErrorCode());
+        assertEquals(401, read.getHttpStatus());
+        assertEquals("Access to topic rule 'missing' was denied", read.getMessage());
+        AwsException delete = assertThrows(AwsException.class, () -> service.deleteTopicRule("missing", REGION));
+        assertEquals("UnauthorizedException", delete.getErrorCode());
+        AwsException tags = assertThrows(AwsException.class,
+                () -> service.listTagsForResource("arn:aws:iot:" + REGION + ":" + ACCOUNT + ":rule/missing"));
+        assertEquals("ResourceNotFoundException", tags.getErrorCode());
+    }
+
+    @Test
+    void topicRuleTagsRejectForeignAccountAndRegionArns() throws Exception {
+        IotTopicRule local = createRule("ownedRule", sqsThenLambdaRule(null));
+        service.createTopicRule("ownedRule", mapper.readTree(sqsThenLambdaRule(null)), "eu-west-1");
+        service.tagResource(local.getRuleArn(), Map.of("owner", "local"));
+        for (String foreignArn : List.of(
+                "arn:aws:iot:" + REGION + ":111111111111:rule/ownedRule",
+                "arn:aws:iot:eu-west-1:" + ACCOUNT + ":rule/ownedRule")) {
+            assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                    () -> service.listTagsForResource(foreignArn)).getErrorCode());
+            assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                    () -> service.tagResource(foreignArn, Map.of("owner", "foreign"))).getErrorCode());
+            assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                    () -> service.untagResource(foreignArn, List.of("owner"))).getErrorCode());
+        }
+        assertEquals(Map.of("owner", "local"), service.listTagsForResource(local.getRuleArn()));
+        assertTrue(service.getTopicRule("ownedRule", "eu-west-1").getTags().isEmpty());
+    }
+
+    @Test
     void topicRuleKeepsTheSqlVersionAndTheErrorAction() throws Exception {
         createRule("versionedRule", """
             {

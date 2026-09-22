@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.rds;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -8,8 +9,10 @@ import io.github.hectorvent.floci.core.common.docker.CurrentContainerNetworkReso
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.PersistentStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.ec2.model.VpcIpv6CidrBlockAssociation;
@@ -27,6 +30,7 @@ import io.github.hectorvent.floci.services.rds.model.DbInstanceStatus;
 import io.github.hectorvent.floci.services.rds.model.DbParameterGroup;
 import io.github.hectorvent.floci.services.rds.model.DbProxy;
 import io.github.hectorvent.floci.services.rds.model.DbProxyAuth;
+import io.github.hectorvent.floci.services.rds.model.DbProxyEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbProxyTarget;
 import io.github.hectorvent.floci.services.rds.model.DbProxyTargetGroup;
 import io.github.hectorvent.floci.services.rds.model.DbSnapshot;
@@ -43,11 +47,13 @@ import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
@@ -2304,6 +2310,114 @@ class RdsServiceTest {
     }
 
     @Test
+    void namedMissingParameterGroupFailsButEmptyUnfilteredListIsValid() {
+        assertTrue(rdsService.listDbParameterGroups(null, "us-east-1").isEmpty());
+        AwsException missing = assertThrows(AwsException.class,
+                () -> rdsService.listDbParameterGroups("missing", "us-east-1"));
+        assertEquals("DBParameterGroupNotFound", missing.getErrorCode());
+        assertEquals(404, missing.getHttpStatus());
+        rdsService.createDbParameterGroup("regional", "postgres16", "east", "us-east-1");
+        assertEquals(1, rdsService.listDbParameterGroups("regional", "us-east-1").size());
+        assertThrows(AwsException.class, () -> rdsService.listDbParameterGroups("regional", "us-west-2"));
+        rdsService.deleteDbParameterGroup("regional", "us-east-1");
+        assertThrows(AwsException.class, () -> rdsService.listDbParameterGroups("regional", "us-east-1"));
+    }
+
+    @Test
+    void parameterOverridesAndApplyMethodsSurviveStorageReloadAndReset(@TempDir Path directory) {
+        Path file = directory.resolve("parameters.json");
+        PersistentStorage<String, DbParameterGroup> writer = new PersistentStorage<>(
+                file, new TypeReference<Map<String, DbParameterGroup>>() {});
+        RdsService original = newService(containerManager, proxyManager,
+                new InMemoryStorage<>(), new InMemoryStorage<>(), writer,
+                new InMemoryStorage<>(), new InMemoryStorage<>());
+        DbParameterGroup group = original.createDbParameterGroup("persisted", "postgres16", "persisted", "us-east-1");
+        List<RdsParameterCatalog.Parameter> defaults = original.describeDbParameters("persisted", null, "us-east-1");
+        assertTrue(group.getParameters().isEmpty());
+        original.addTagsToResource(group.getDbParameterGroupArn(), Map.of("owner", "test"), "us-east-1");
+        original.modifyDbParameterGroup("persisted", Map.of("work_mem", "8192", "max_connections", "200"),
+                Map.of("work_mem", "pending-reboot", "max_connections", "pending-reboot"), "us-east-1");
+        original.copyDbParameterGroup("persisted", "copied", "copy", "us-east-1");
+        original.modifyDbParameterGroup("persisted", Map.of("work_mem", "16384"),
+                Map.of("work_mem", "immediate"), "us-east-1");
+
+        PersistentStorage<String, DbParameterGroup> reader = new PersistentStorage<>(
+                file, new TypeReference<Map<String, DbParameterGroup>>() {});
+        reader.load();
+        RdsService restored = newService(containerManager, proxyManager,
+                new InMemoryStorage<>(), new InMemoryStorage<>(), reader,
+                new InMemoryStorage<>(), new InMemoryStorage<>());
+        DbParameterGroup copy = restored.getDbParameterGroup("copied", "us-east-1");
+        assertEquals(Map.of("work_mem", "8192", "max_connections", "200"), copy.getParameters());
+        assertEquals(Map.of("work_mem", "pending-reboot", "max_connections", "pending-reboot"),
+                copy.getParameterApplyMethods());
+        assertEquals("immediate", restored.getDbParameterGroup("persisted", "us-east-1")
+                .getParameterApplyMethods().get("work_mem"));
+        assertEquals("pending-reboot", restored.describeDbParameters("copied", "user", "us-east-1").stream()
+                .filter(parameter -> "work_mem".equals(parameter.name())).findFirst().orElseThrow().applyMethod());
+        restored.resetDbParameterGroup("copied", false, List.of("max_connections"), "us-east-1");
+        assertFalse(copy.getParameterApplyMethods().containsKey("max_connections"));
+        assertEquals(1, restored.describeDbParameters("copied", "user", "us-east-1").size());
+        assertTrue(restored.describeDbParameters("copied", "engine-default", "us-east-1").stream()
+                .anyMatch(parameter -> "max_connections".equals(parameter.name())
+                        && "LEAST({DBInstanceClassMemory/9531392},5000)".equals(parameter.value())));
+        restored.resetDbParameterGroup("copied", true, List.of(), "us-east-1");
+        reader.load();
+        assertTrue(restored.getDbParameterGroup("copied", "us-east-1").getParameters().isEmpty());
+        assertTrue(restored.getDbParameterGroup("copied", "us-east-1").getParameterApplyMethods().isEmpty());
+        assertEquals(defaults, restored.describeDbParameters("copied", null, "us-east-1"));
+        assertTrue(restored.describeDbParameters("copied", "user", "us-east-1").isEmpty());
+        assertEquals(Map.of("owner", "test"), restored.listTagsForResource(group.getDbParameterGroupArn(), "us-east-1"));
+        assertEquals("16384", restored.getDbParameterGroup("persisted", "us-east-1").getParameters().get("work_mem"));
+        verifyNoInteractions(containerManager, proxyManager);
+    }
+
+    @Test
+    void legacyParameterValuesUseFamilyMetadataWithoutPersistingDefaults() throws Exception {
+        DbParameterGroup legacy = new ObjectMapper().readValue("""
+                {"dbParameterGroupName":"legacy","dbParameterGroupFamily":"postgres16",
+                 "parameters":{"max_connections":"200","work_mem":"8192"}}
+                """, DbParameterGroup.class);
+        assertTrue(legacy.getParameterApplyMethods().isEmpty());
+        Map<String, RdsParameterCatalog.Parameter> parameters = RdsParameterCatalog.describe(legacy, null).stream()
+                .collect(Collectors.toMap(RdsParameterCatalog.Parameter::name, parameter -> parameter));
+        assertEquals("static", parameters.get("max_connections").applyType());
+        assertEquals("pending-reboot", parameters.get("max_connections").applyMethod());
+        assertEquals("immediate", parameters.get("work_mem").applyMethod());
+        assertEquals("user", parameters.get("work_mem").source());
+        assertEquals("engine-default", parameters.get("log_autovacuum_min_duration").source());
+        assertEquals(2, legacy.getParameters().size());
+        assertTrue(legacy.getParameterApplyMethods().isEmpty());
+    }
+
+    @Test
+    void invalidApplyMethodsDoNotPartiallyModifyParameterGroups() {
+        rdsService.createDbParameterGroup("validate", "postgres16", "validation", "us-east-1");
+        assertEquals("InvalidParameterCombination", assertThrows(AwsException.class,
+                () -> rdsService.modifyDbParameterGroup("validate", Map.of("work_mem", "8192", "max_connections", "200"),
+                        Map.of("work_mem", "immediate", "max_connections", "immediate"), "us-east-1")).getErrorCode());
+        assertTrue(rdsService.getDbParameterGroup("validate", "us-east-1").getParameters().isEmpty());
+        assertTrue(rdsService.getDbParameterGroup("validate", "us-east-1").getParameterApplyMethods().isEmpty());
+        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+                () -> rdsService.modifyDbParameterGroup("validate", Map.of("work_mem", "8192"),
+                        Map.of("work_mem", "invalid"), "us-east-1")).getErrorCode());
+    }
+
+    @Test
+    void engineVersionCatalogHonorsMajorDefaultsAndConjunctiveFilters() {
+        assertEquals(List.of("16.3"), rdsService.describeDbEngineVersions(
+                "postgres", "16", null, true, false, Map.of()).stream().map(RdsEngineCatalog.Version::version).toList());
+        assertEquals(List.of("8.4.3"), rdsService.describeDbEngineVersions(
+                "mysql", null, "mysql8.4", true, false, Map.of()).stream().map(RdsEngineCatalog.Version::version).toList());
+        assertTrue(rdsService.describeDbEngineVersions("postgres", "99.99", null, false, false, Map.of()).isEmpty());
+        assertEquals(2, rdsService.describeDbEngineVersions(null, null, null, false, false,
+                Map.of("engine", List.of("mysql", "postgres"), "engine-version", List.of("16.3", "8.4.3"),
+                        "engine-mode", List.of("provisioned"), "status", List.of("available"))).size());
+        assertEquals("InvalidParameterCombination", assertThrows(AwsException.class,
+                () -> rdsService.describeDbEngineVersions("postgres", null, null, true, true, Map.of())).getErrorCode());
+    }
+
+    @Test
     void aParameterGroupPersistedWithoutAnArnGetsOneOnFirstRead() {
         // Only creation assigned the ARN, so a group written by an earlier version would never
         // get one — and the ARN is what a caller tags by, so the group could not be tagged at all.
@@ -3323,6 +3437,173 @@ class RdsServiceTest {
         assertEquals("default", targetGroup.getTargetGroupName());
         assertTrue(targetGroup.getTargets().isEmpty());
         assertTrue(targetGroup.getTargetGroupArn().contains(":target-group:prx-tg-"));
+    }
+
+    @Test
+    void proxyEndpointsPreserveIdentityAndTagsAcrossRenameAndProxyUpdates() {
+        stubProxyEndpointSecurityGroups();
+        DbProxy proxy = rdsService.createDbProxy("endpoint-parent", "POSTGRESQL", true, false,
+                PROXY_ROLE_ARN, PROXY_SUBNET_IDS, List.of(), PROXY_AUTH, Map.of());
+        DbProxyEndpoint defaultEndpoint = rdsService.describeDbProxyEndpoints("endpoint-parent", null,
+                "us-east-1").getFirst();
+        assertTrue(defaultEndpoint.isDefault());
+        assertEquals(proxy.getEndpoint(), defaultEndpoint.getEndpoint());
+        DbProxyEndpoint endpoint = rdsService.createDbProxyEndpoint("endpoint-parent", "reader",
+                PROXY_SUBNET_IDS, List.of(), "READ_ONLY", "IPV4", Map.of("owner", "team"), "us-east-1");
+        String arn = endpoint.getDbProxyEndpointArn();
+        rdsService.addTagsToResource(arn, Map.of("phase", "updated"), "us-east-1");
+        DbProxyEndpoint renamed = rdsService.modifyDbProxyEndpoint("reader", "reader-renamed",
+                null, "us-east-1");
+        assertEquals(arn, renamed.getDbProxyEndpointArn());
+        assertEquals(endpoint.getEndpoint(), renamed.getEndpoint());
+        assertEquals(endpoint.getCreatedDate(), renamed.getCreatedDate());
+        assertEquals("reader", endpoint.getDbProxyEndpointName());
+        assertEquals("DBProxyEndpointNotFoundFault", assertThrows(AwsException.class,
+                () -> rdsService.getDbProxyEndpoint("reader", "us-east-1")).getErrorCode());
+        rdsService.addTagsToResource(proxy.getDbProxyArn(), Map.of("parent", "updated"), "us-east-1");
+        assertEquals(Map.of("owner", "team", "phase", "updated"), rdsService.listTagsForResource(arn));
+        rdsService.removeTagsFromResource(arn, List.of("owner"));
+        assertEquals(Map.of("phase", "updated"), rdsService.listTagsForResource(arn));
+        assertEquals("deleting", rdsService.deleteDbProxyEndpoint("reader-renamed", "us-east-1").getStatus());
+        assertEquals("DBProxyEndpointNotFoundFault", assertThrows(AwsException.class,
+                () -> rdsService.deleteDbProxyEndpoint("reader-renamed", "us-east-1")).getErrorCode());
+        assertEquals("DBProxyEndpointNotFoundFault", assertThrows(AwsException.class,
+                () -> rdsService.listTagsForResource(arn)).getErrorCode());
+        verifyNoInteractions(proxyManager);
+    }
+
+    @Test
+    void proxyEndpointsValidateParentPlacementIdentityAndDefaultProtection() {
+        stubProxyEndpointSecurityGroups();
+        assertEquals("DBProxyNotFoundFault", assertThrows(AwsException.class,
+                () -> rdsService.createDbProxyEndpoint("missing", "reader", PROXY_SUBNET_IDS,
+                        null, null, null, Map.of(), "us-east-1")).getErrorCode());
+        rdsService.createDbProxy("endpoint-parent", "POSTGRESQL", true, false,
+                PROXY_ROLE_ARN, PROXY_SUBNET_IDS, List.of(), PROXY_AUTH, Map.of());
+        for (String name : List.of("", "1reader", "reader--one", "reader-")) {
+            assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+                    () -> rdsService.createDbProxyEndpoint("endpoint-parent", name, PROXY_SUBNET_IDS,
+                            null, null, null, Map.of(), "us-east-1")).getErrorCode());
+        }
+        assertEquals("InvalidSubnet", assertThrows(AwsException.class,
+                () -> rdsService.createDbProxyEndpoint("endpoint-parent", "reader", List.of("missing"),
+                        null, null, null, Map.of(), "us-east-1")).getErrorCode());
+        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+                () -> rdsService.createDbProxyEndpoint("endpoint-parent", "reader", PROXY_SUBNET_IDS,
+                        null, "WRITER", null, Map.of(), "us-east-1")).getErrorCode());
+        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+                () -> rdsService.createDbProxyEndpoint("endpoint-parent", "reader", PROXY_SUBNET_IDS,
+                        null, null, "INVALID", Map.of(), "us-east-1")).getErrorCode());
+        assertEquals("InvalidDBProxyEndpointStateFault", assertThrows(AwsException.class,
+                () -> rdsService.deleteDbProxyEndpoint("endpoint-parent", "us-east-1")).getErrorCode());
+        assertEquals("InvalidDBProxyEndpointStateFault", assertThrows(AwsException.class,
+                () -> rdsService.modifyDbProxyEndpoint("endpoint-parent", "renamed", null, "us-east-1"))
+                .getErrorCode());
+        rdsService.createDbProxyEndpoint("endpoint-parent", "reader", PROXY_SUBNET_IDS,
+                null, null, null, Map.of(), "us-east-1");
+        assertEquals("DBProxyEndpointAlreadyExistsFault", assertThrows(AwsException.class,
+                () -> rdsService.modifyDbProxyEndpoint("reader", "endpoint-parent", null, "us-east-1"))
+                .getErrorCode());
+        rdsService.getDbProxy("endpoint-parent").setStatus("deleting");
+        assertEquals("InvalidDBProxyStateFault", assertThrows(AwsException.class,
+                () -> rdsService.createDbProxyEndpoint("endpoint-parent", "blocked", PROXY_SUBNET_IDS,
+                        null, null, null, Map.of(), "us-east-1")).getErrorCode());
+    }
+
+    @Test
+    void proxyEndpointsPersistInAccountAndRegionScopedParentStorage(@TempDir Path directory) {
+        stubProxyEndpointSecurityGroups();
+        when(rdsConfig.mock()).thenReturn(true);
+        String account = "123456789012";
+        String otherAccount = "222222222222";
+        Path file = directory.resolve("proxies.json");
+        PersistentStorage<String, DbProxy> writer = new PersistentStorage<>(file,
+                new TypeReference<Map<String, DbProxy>>() {});
+        AccountAwareStorageBackend<DbProxy> storage = new AccountAwareStorageBackend<>(writer, null, account);
+        storage.putForAccount(account, "us-east-1::endpoint-parent",
+                persistedProxy("endpoint-parent", "us-east-1", account, "east", 5432));
+        storage.putForAccount(account, "us-west-2::endpoint-parent",
+                persistedProxy("endpoint-parent", "us-west-2", account, "west", 5433));
+        storage.putForAccount(otherAccount, "us-east-1::endpoint-parent",
+                persistedProxy("endpoint-parent", "us-east-1", otherAccount, "other", 5434));
+        RdsService original = proxyStoreService(regionResolver, config, storage,
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>());
+        DbProxyEndpoint east = original.createDbProxyEndpoint("endpoint-parent", "reader", PROXY_SUBNET_IDS,
+                null, null, null, Map.of("scope", "east"), "us-east-1");
+        DbProxyEndpoint west = original.createDbProxyEndpoint("endpoint-parent", "reader", PROXY_SUBNET_IDS,
+                null, "READ_ONLY", null, Map.of("scope", "west"), "us-west-2");
+        RdsService other = proxyStoreService(new RegionResolver("us-east-1", otherAccount), config,
+                new AccountAwareStorageBackend<>(writer, null, otherAccount),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>());
+        assertTrue(other.describeDbProxyEndpoints(null, null, "us-east-1").stream().allMatch(DbProxyEndpoint::isDefault));
+        DbProxyEndpoint otherEndpoint = other.createDbProxyEndpoint("endpoint-parent", "reader", PROXY_SUBNET_IDS,
+                null, null, null, Map.of("scope", "other"), "us-east-1");
+        assertNotEquals(east.getDbProxyEndpointArn(), otherEndpoint.getDbProxyEndpointArn());
+        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+                () -> other.listTagsForResource(east.getDbProxyEndpointArn(), "us-east-1")).getErrorCode());
+        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+                () -> original.listTagsForResource(west.getDbProxyEndpointArn(), "us-east-1")).getErrorCode());
+        original.modifyDbProxyEndpoint("reader", "renamed", List.of("sg-updated"), "us-east-1");
+        String defaultArn = original.getDbProxyEndpoint("endpoint-parent", "us-east-1").getDbProxyEndpointArn();
+        original.addTagsToResource(defaultArn, Map.of("default", "tagged"), "us-east-1");
+
+        PersistentStorage<String, DbProxy> reader = new PersistentStorage<>(file,
+                new TypeReference<Map<String, DbProxy>>() {});
+        reader.load();
+        RdsService restored = proxyStoreService(regionResolver, config,
+                new AccountAwareStorageBackend<>(reader, null, account),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>());
+        DbProxyEndpoint recovered = restored.getDbProxyEndpoint("renamed", "us-east-1");
+        assertEquals(east.getDbProxyEndpointArn(), recovered.getDbProxyEndpointArn());
+        assertEquals(east.getEndpoint(), recovered.getEndpoint());
+        assertEquals(east.getCreatedDate(), recovered.getCreatedDate());
+        assertEquals(List.of("sg-updated"), recovered.getVpcSecurityGroupIds());
+        assertEquals(Map.of("scope", "east"), restored.listTagsForResource(east.getDbProxyEndpointArn()));
+        assertEquals(Map.of("default", "tagged"), restored.listTagsForResource(defaultArn));
+        restored.deleteDbProxy("endpoint-parent", "us-east-1");
+        assertTrue(restored.describeDbProxyEndpoints(null, null, "us-east-1").isEmpty());
+        assertEquals(west.getDbProxyEndpointArn(), restored.getDbProxyEndpoint("reader", "us-west-2")
+                .getDbProxyEndpointArn());
+        assertEquals(otherEndpoint.getDbProxyEndpointArn(), other.getDbProxyEndpoint("reader", "us-east-1")
+                .getDbProxyEndpointArn());
+    }
+
+    @Test
+    void proxyEndpointPersistenceFailureRestoresTheParentAndEndpoint() {
+        stubProxyEndpointSecurityGroups();
+        InMemoryStorage<String, DbProxy> proxies = spy(new InMemoryStorage<>());
+        RdsService service = proxyStoreService(regionResolver, config, proxies,
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>());
+        service.createDbProxy("endpoint-parent", "POSTGRESQL", true, false,
+                PROXY_ROLE_ARN, PROXY_SUBNET_IDS, List.of(), PROXY_AUTH, Map.of());
+        DbProxyEndpoint endpoint = service.createDbProxyEndpoint("endpoint-parent", "reader", PROXY_SUBNET_IDS,
+                null, null, null, Map.of(), "us-east-1");
+        IllegalStateException failure = new IllegalStateException("post-write failure");
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            throw failure;
+        }).doCallRealMethod().when(proxies).put(eq("us-east-1::endpoint-parent"), any());
+        assertSame(failure, assertThrows(IllegalStateException.class,
+                () -> service.modifyDbProxyEndpoint("reader", "renamed", null, "us-east-1")));
+        assertEquals(endpoint.getDbProxyEndpointArn(), service.getDbProxyEndpoint("reader", "us-east-1")
+                .getDbProxyEndpointArn());
+        assertEquals("DBProxyEndpointNotFoundFault", assertThrows(AwsException.class,
+                () -> service.getDbProxyEndpoint("renamed", "us-east-1")).getErrorCode());
+    }
+
+    private void stubProxyEndpointSecurityGroups() {
+        when(ec2Service.describeSecurityGroups(anyString(), anyList(), anyList(), any()))
+                .thenAnswer(invocation -> {
+                    List<String> ids = invocation.getArgument(1);
+                    List<String> selected = ids.isEmpty() ? List.of("sg-default") : ids;
+                    return selected.stream().map(id -> {
+                        SecurityGroup group = new SecurityGroup();
+                        group.setGroupId(id);
+                        group.setGroupName("default");
+                        group.setVpcId("vpc-default");
+                        return group;
+                    }).toList();
+                });
     }
 
     @Test

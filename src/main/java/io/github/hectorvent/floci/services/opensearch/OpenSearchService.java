@@ -164,9 +164,8 @@ public class OpenSearchService implements ResourceProvider {
 
     public List<Domain> describeDomains(List<String> domainNames) {
         return domainNames.stream()
-                .map(name -> domainStore.get(name)
-                        .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                                "Domain not found: " + name, 409)))
+                .distinct()
+                .flatMap(name -> domainStore.get(name).stream())
                 .toList();
     }
 

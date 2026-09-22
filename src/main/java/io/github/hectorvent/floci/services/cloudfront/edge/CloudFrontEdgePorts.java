@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudfront.edge;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.vertx.core.Context;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClient;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -65,7 +67,7 @@ public class CloudFrontEdgePorts {
 
     /** distributionId -> the port it is served on. */
     private final Map<String, Integer> ports = new ConcurrentHashMap<>();
-    /** port -> the server bound to it. */
+    /** port -> the bound or closing server reserving it. */
     private final Map<Integer, HttpServer> servers = new ConcurrentHashMap<>();
 
     private HttpClient client;
@@ -128,12 +130,8 @@ public class CloudFrontEdgePorts {
         if (distributionId == null || !enabled()) {
             return null;
         }
-        Integer existing = ports.get(distributionId);
-        if (existing != null) {
-            return existing;
-        }
         synchronized (this) {
-            existing = ports.get(distributionId);
+            Integer existing = ports.get(distributionId);
             if (existing != null) {
                 return existing;
             }
@@ -157,8 +155,8 @@ public class CloudFrontEdgePorts {
         }
     }
 
-    /** Release {@code distributionId}'s port, if it holds one. */
-    public void release(String distributionId) {
+    /** Release the assignment, reserving its port until the server has actually closed. */
+    public synchronized void release(String distributionId) {
         if (distributionId == null) {
             return;
         }
@@ -166,9 +164,24 @@ public class CloudFrontEdgePorts {
         if (port == null) {
             return;
         }
-        HttpServer server = servers.remove(port);
-        if (server != null) {
-            server.close();
+        HttpServer server = servers.get(port);
+        if (server == null) {
+            return;
+        }
+        try {
+            CompletableFuture<Void> closed = server.close().toCompletionStage().toCompletableFuture()
+                    .thenRun(() -> servers.remove(port, server));
+            // Completion must not take this monitor: Vert.x also completes close on its event loop.
+            if (!Context.isOnEventLoopThread()) {
+                closed.get(5, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.debugv("Interrupted closing CloudFront edge port {0}; reserved until close completes",
+                    String.valueOf(port));
+        } catch (Exception e) {
+            LOG.warnv("CloudFront edge port {0} close did not complete; retaining reservation: {1}",
+                    String.valueOf(port), e.getMessage());
         }
     }
 

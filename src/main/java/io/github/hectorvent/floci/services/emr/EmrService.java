@@ -112,10 +112,12 @@ public class EmrService {
         // ValidationException if any were termination protected.
         boolean anyProtected = false;
         for (String id : ids) {
-            EmrCluster cluster = clusterStore.get(id).orElse(null);
-            if (cluster == null) {
-                continue;
+            if (clusterStore.get(id).isEmpty()) {
+                throw new AwsException("ValidationException", "Specified job flow ID not valid: " + id, 400);
             }
+        }
+        for (String id : ids) {
+            EmrCluster cluster = clusterStore.get(id).orElseThrow();
             if (cluster.isTerminationProtected()) {
                 anyProtected = true;
                 continue;
@@ -288,13 +290,13 @@ public class EmrService {
 
     public SecurityConfiguration describeSecurityConfiguration(String name) {
         return secConfigStore.get(name).orElseThrow(() -> new AwsException(
-                "InvalidRequestException", "Security configuration does not exist: " + name, 400));
+                "InvalidRequestException", "Security configuration with name " + name + " does not exist", 400));
     }
 
     public void deleteSecurityConfiguration(String name) {
         if (secConfigStore.get(name).isEmpty()) {
             throw new AwsException("InvalidRequestException",
-                    "Security configuration does not exist: " + name, 400);
+                    "Security configuration with name " + name + " does not exist", 400);
         }
         secConfigStore.delete(name);
     }

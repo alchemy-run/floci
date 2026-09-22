@@ -12,6 +12,10 @@ import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.acm.AcmService;
 import io.github.hectorvent.floci.services.acm.model.Certificate;
 import io.github.hectorvent.floci.services.acm.model.CertificateStatus;
+import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
+import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.CognitoCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.ProvisionContext;
 import io.github.hectorvent.floci.services.cognito.model.CognitoGroup;
 import io.github.hectorvent.floci.services.cognito.model.CognitoUser;
 import io.github.hectorvent.floci.services.cognito.model.IdentityProvider;
@@ -3059,7 +3063,7 @@ class CognitoServiceTest {
         UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
         UserPoolDomain created = service.createUserPoolDomain("my-app-auth", pool.getId(), null, 2);
         assertEquals("ACTIVE", created.getStatus());
-        assertNull(created.getCloudFrontDistribution());
+        assertTrue(created.getCloudFrontDistribution().endsWith(".cloudfront.net"));
         assertEquals(2, created.getManagedLoginVersion());
 
         UserPoolDomain described = service.describeUserPoolDomain("my-app-auth");
@@ -3960,6 +3964,258 @@ class CognitoServiceTest {
     }
 
     @Test
+    void restoreUserPoolDomainPreservesTheFullSnapshotAndCertificateRegistration() {
+        UserPool pool = createPoolWithCustomDomain("auth.restore.example.com");
+        UserPoolDomain prior = MAPPER.convertValue(service.describeUserPoolDomain("auth.restore.example.com"),
+                UserPoolDomain.class);
+        String consumer = consumerArn(prior.getDomain());
+        service.deleteUserPoolDomain(prior.getDomain(), pool.getId());
+        clearInvocations(acmService);
+
+        service.restoreUserPoolDomain(prior);
+
+        assertEquals(MAPPER.valueToTree(prior), MAPPER.valueToTree(service.describeUserPoolDomain(prior.getDomain())));
+        verify(acmService).addInUseBy(CERTIFICATE_ARN, consumer, "us-east-1");
+        service.restoreUserPoolDomain(prior);
+        assertEquals(1, service.listUserPoolDomains(pool.getId()).size());
+        service.deleteUserPoolDomain(prior);
+        verify(acmService).removeInUseBy(CERTIFICATE_ARN, consumer, "us-east-1");
+    }
+
+    @Test
+    void snapshotDeletionRemovesTheObservedRotatedCertificateConsumer() {
+        UserPool pool = createPoolWithCustomDomain("auth.rotate-cleanup.example.com");
+        UserPoolDomain snapshot = MAPPER.convertValue(
+                service.describeUserPoolDomain("auth.rotate-cleanup.example.com"), UserPoolDomain.class);
+        String consumer = consumerArn(snapshot.getDomain());
+        service.updateUserPoolDomain(snapshot.getDomain(), pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2);
+        clearInvocations(acmService);
+
+        service.deleteUserPoolDomain(snapshot);
+
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain(snapshot.getDomain()));
+        verify(acmService).removeInUseBy(RENEWED_CERTIFICATE_ARN, consumer, "us-east-1");
+        verify(acmService, never()).removeInUseBy(CERTIFICATE_ARN, consumer, "us-east-1");
+    }
+
+    @Test
+    void snapshotDeletionRetainsTheObservedCertificateWhenReleaseFails() {
+        UserPool pool = createPoolWithCustomDomain("auth.retry-cleanup.example.com");
+        UserPoolDomain snapshot = MAPPER.convertValue(
+                service.describeUserPoolDomain("auth.retry-cleanup.example.com"), UserPoolDomain.class);
+        String consumer = consumerArn(snapshot.getDomain());
+        service.updateUserPoolDomain(snapshot.getDomain(), pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2);
+        clearInvocations(acmService);
+        doThrow(new IllegalStateException("ACM unavailable")).doNothing()
+                .when(acmService).removeInUseBy(RENEWED_CERTIFICATE_ARN, consumer, "us-east-1");
+
+        assertThrows(IllegalStateException.class, () -> service.deleteUserPoolDomain(snapshot));
+        assertEquals(RENEWED_CERTIFICATE_ARN, service.describeUserPoolDomain(snapshot.getDomain()).getCertificateArn());
+        service.deleteUserPoolDomain(snapshot);
+
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain(snapshot.getDomain()));
+        verify(acmService, times(2)).removeInUseBy(RENEWED_CERTIFICATE_ARN, consumer, "us-east-1");
+        verify(acmService, never()).removeInUseBy(CERTIFICATE_ARN, consumer, "us-east-1");
+    }
+
+    @Test
+    void snapshotDeletionReleasesPartialRegistrationWithoutALiveDomain() {
+        InMemoryStorage<String, UserPoolDomain> domains = spy(new InMemoryStorage<String, UserPoolDomain>());
+        service = new CognitoService(poolStore, new InMemoryStorage<>(), new InMemoryStorage<>(),
+                domains, new InMemoryStorage<>(), userStore, groupStore, revokedTokenStore,
+                "http://localhost:4566", regionResolver, null, acmService, null, null, null);
+        UserPool pool = service.createUserPool(Map.of("PoolName", "PartialDomainPool"), "us-east-1");
+        doThrow(new IllegalStateException("storage unavailable")).when(domains).put(anyString(), any());
+        List<UserPoolDomain> candidates = new ArrayList<>();
+
+        assertThrows(IllegalStateException.class, () -> service.createUserPoolDomain("auth.partial.example.com",
+                pool.getId(), Map.of("CertificateArn", CERTIFICATE_ARN), 1, candidates::add));
+        assertEquals(1, candidates.size());
+        UserPoolDomain snapshot = candidates.getFirst();
+        ArgumentCaptor<String> consumer = ArgumentCaptor.forClass(String.class);
+        verify(acmService).addInUseBy(eq(CERTIFICATE_ARN), consumer.capture(), eq("us-east-1"));
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain(snapshot.getDomain()));
+
+        assertDoesNotThrow(() -> service.deleteUserPoolDomain(snapshot));
+
+        verify(acmService).removeInUseBy(CERTIFICATE_ARN, consumer.getValue(), "us-east-1");
+        assertTrue(service.listUserPoolDomains(pool.getId()).isEmpty());
+    }
+
+    @Test
+    void snapshotRestorationReleasesTheObservedCertificateAndKeepsSnapshotsDetached() {
+        UserPool pool = createPoolWithCustomDomain("auth.restore-rotation.example.com");
+        UserPoolDomain snapshot = service.describeUserPoolDomain("auth.restore-rotation.example.com");
+        String consumer = consumerArn(snapshot.getDomain());
+        service.updateUserPoolDomain(snapshot.getDomain(), pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2);
+        assertEquals(CERTIFICATE_ARN, snapshot.getCertificateArn());
+        assertEquals(1, snapshot.getManagedLoginVersion());
+        clearInvocations(acmService);
+
+        service.restoreUserPoolDomain(snapshot);
+
+        UserPoolDomain restored = service.describeUserPoolDomain(snapshot.getDomain());
+        assertNotSame(snapshot, restored);
+        assertEquals(MAPPER.valueToTree(snapshot), MAPPER.valueToTree(restored));
+        verify(acmService).addInUseBy(CERTIFICATE_ARN, consumer, "us-east-1");
+        verify(acmService).removeInUseBy(RENEWED_CERTIFICATE_ARN, consumer, "us-east-1");
+        snapshot.setCertificateArn(RENEWED_CERTIFICATE_ARN);
+        snapshot.setManagedLoginVersion(2);
+        assertEquals(CERTIFICATE_ARN, service.describeUserPoolDomain(restored.getDomain()).getCertificateArn());
+        assertEquals(1, service.describeUserPoolDomain(restored.getDomain()).getManagedLoginVersion());
+    }
+
+    @Test
+    void snapshotRestorationRetriesReleasingAnObservedRotatedCertificate() {
+        UserPool pool = createPoolWithCustomDomain("auth.retry-restore.example.com");
+        UserPoolDomain snapshot = service.describeUserPoolDomain("auth.retry-restore.example.com");
+        String consumer = consumerArn(snapshot.getDomain());
+        service.updateUserPoolDomain(snapshot.getDomain(), pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2);
+        clearInvocations(acmService);
+        doThrow(new IllegalStateException("ACM unavailable")).doNothing()
+                .when(acmService).removeInUseBy(RENEWED_CERTIFICATE_ARN, consumer, "us-east-1");
+
+        assertThrows(IllegalStateException.class, () -> service.restoreUserPoolDomain(snapshot));
+        assertEquals(RENEWED_CERTIFICATE_ARN, service.describeUserPoolDomain(snapshot.getDomain()).getCertificateArn());
+        service.restoreUserPoolDomain(snapshot);
+
+        assertEquals(MAPPER.valueToTree(snapshot), MAPPER.valueToTree(service.describeUserPoolDomain(snapshot.getDomain())));
+        verify(acmService, times(2)).removeInUseBy(RENEWED_CERTIFICATE_ARN, consumer, "us-east-1");
+    }
+
+    @Test
+    void cfnRenameRefusesARecreatedPredecessorWithoutDeletingItsForeignIncarnation() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "RecreatedDomainPool"), "us-east-1");
+        UserPoolDomain original = service.createUserPoolDomain("original-snapshot-prefix", pool.getId(), null, 1);
+        String originalDistribution = original.getCloudFrontDistribution();
+        CognitoService racing = spy(service);
+        List<UserPoolDomain> foreignDomains = new ArrayList<>();
+        doAnswer(inv -> {
+            UserPoolDomain expected = inv.getArgument(0);
+            assertNotSame(original, expected);
+            service.deleteUserPoolDomain(original.getDomain(), pool.getId());
+            UserPoolDomain foreign = service.createUserPoolDomain(original.getDomain(), pool.getId(), null, 2);
+            foreignDomains.add(foreign);
+            original.setCloudFrontDistribution(foreign.getCloudFrontDistribution());
+            assertEquals(originalDistribution, expected.getCloudFrontDistribution());
+            return inv.callRealMethod();
+        }).when(racing).deleteUserPoolDomain(any(UserPoolDomain.class));
+        CloudFormationTemplateEngine engine = mock(CloudFormationTemplateEngine.class);
+        when(engine.resolve(any())).thenAnswer(inv -> inv.<JsonNode>getArgument(0).asText());
+        when(engine.resolveNode(any())).thenAnswer(inv -> inv.getArgument(0));
+        CognitoCfnProvisioner provisioner = new CognitoCfnProvisioner(racing);
+        StackResource resource = new StackResource();
+        resource.setLogicalId("Domain");
+        resource.setResourceType("AWS::Cognito::UserPoolDomain");
+        resource.setPhysicalId(original.getDomain());
+        resource.setAttributes(new HashMap<>(Map.of("UserPoolId", pool.getId(),
+                "CloudFrontDistribution", originalDistribution)));
+        ProvisionContext context = new ProvisionContext(engine, "us-east-1", "000000000000", "rename-test",
+                original.getDomain());
+
+        AwsException failure = assertThrows(AwsException.class, () -> provisioner.provision(resource,
+                MAPPER.createObjectNode().put("Domain", "replacement-snapshot-prefix").put("UserPoolId", pool.getId()),
+                context));
+
+        assertEquals("InvalidParameterException", failure.getErrorCode());
+        assertEquals(1, foreignDomains.size());
+        UserPoolDomain foreign = foreignDomains.getFirst();
+        assertNotEquals(originalDistribution, foreign.getCloudFrontDistribution());
+        assertEquals(MAPPER.valueToTree(foreign), MAPPER.valueToTree(service.describeUserPoolDomain(original.getDomain())));
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain("replacement-snapshot-prefix"));
+        verify(racing, never()).deleteUserPoolDomain(anyString(), anyString());
+        verify(racing, never()).createUserPoolDomain(any(), any(), any(), any());
+        verify(racing, never()).createUserPoolDomain(any(), any(), any(), any(), any());
+        assertTrue(provisioner.retainsFailedUpdateState(resource));
+        assertThrows(AwsException.class, () -> provisioner.rollbackUpdate(resource));
+        assertEquals(MAPPER.valueToTree(foreign), MAPPER.valueToTree(service.describeUserPoolDomain(original.getDomain())));
+    }
+
+    @Test
+    void domainSnapshotsCannotOverwriteOrDeleteAnotherIncarnation() {
+        UserPool pool = createPoolWithCustomDomain("auth.restore.example.com");
+        UserPoolDomain prior = MAPPER.convertValue(service.describeUserPoolDomain("auth.restore.example.com"),
+                UserPoolDomain.class);
+        service.deleteUserPoolDomain(prior.getDomain(), pool.getId());
+        UserPoolDomain foreign = service.createUserPoolDomain(prior.getDomain(), pool.getId(),
+                Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2);
+        clearInvocations(acmService);
+
+        assertEquals("InvalidParameterException",
+                assertThrows(AwsException.class, () -> service.restoreUserPoolDomain(prior)).getErrorCode());
+        assertEquals("InvalidParameterException",
+                assertThrows(AwsException.class, () -> service.deleteUserPoolDomain(prior)).getErrorCode());
+        assertEquals(foreign.getCloudFrontDistribution(),
+                service.describeUserPoolDomain(prior.getDomain()).getCloudFrontDistribution());
+        verifyNoInteractions(acmService);
+    }
+
+    @Test
+    void restoreUserPoolDomainRefusesAnOccupiedPoolSlotOrAnotherAccount() {
+        UserPool pool = createPoolWithCustomDomain("auth.restore.example.com");
+        UserPoolDomain prior = MAPPER.convertValue(service.describeUserPoolDomain("auth.restore.example.com"),
+                UserPoolDomain.class);
+        service.deleteUserPoolDomain(prior.getDomain(), pool.getId());
+        UserPoolDomain replacement = service.createUserPoolDomain("login.restore.example.com", pool.getId(),
+                Map.of("CertificateArn", CERTIFICATE_ARN), 2);
+
+        assertThrows(AwsException.class, () -> service.restoreUserPoolDomain(prior));
+        assertEquals(replacement.getDomain(), service.listUserPoolDomains(pool.getId()).getFirst().getDomain());
+        service.deleteUserPoolDomain(replacement);
+        prior.setAwsAccountId("111111111111");
+        assertThrows(AwsException.class, () -> service.restoreUserPoolDomain(prior));
+        assertTrue(service.listUserPoolDomains(pool.getId()).isEmpty());
+    }
+
+    @Test
+    void createUserPoolDomainKeepsOneDomainPerTypePerPool() {
+        UserPool pool = createPoolWithCustomDomain("auth.unique.example.com");
+        service.createUserPoolDomain("unique-prefix", pool.getId(), null, 1);
+
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class, () ->
+                service.createUserPoolDomain("other-prefix", pool.getId(), null, 1)).getErrorCode());
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class, () ->
+                service.createUserPoolDomain("other.unique.example.com", pool.getId(),
+                        Map.of("CertificateArn", CERTIFICATE_ARN), 1)).getErrorCode());
+        assertEquals(2, service.listUserPoolDomains(pool.getId()).size());
+    }
+
+    @Test
+    void createUserPoolDomainTracksPartialCreationBeforeTlsFailure() {
+        TlsCertificateManager tls = mock(TlsCertificateManager.class);
+        service = new CognitoService(poolStore, new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), userStore, groupStore, revokedTokenStore,
+                "http://localhost:4566", regionResolver, null, acmService, null, null, tls);
+        UserPool pool = createPoolWithCustomDomain("auth.restore.example.com");
+        UserPoolDomain prior = MAPPER.convertValue(service.describeUserPoolDomain("auth.restore.example.com"),
+                UserPoolDomain.class);
+        String originalConsumer = consumerArn(prior.getDomain());
+        service.deleteUserPoolDomain(prior);
+        doThrow(new IllegalStateException("TLS unavailable")).when(tls).ensureHost("login.restore.example.com");
+        List<UserPoolDomain> candidates = new ArrayList<>();
+
+        assertThrows(IllegalStateException.class, () -> service.createUserPoolDomain("login.restore.example.com",
+                pool.getId(), Map.of("CertificateArn", RENEWED_CERTIFICATE_ARN), 2, candidates::add));
+
+        assertEquals(1, candidates.size());
+        UserPoolDomain candidate = candidates.getFirst();
+        assertEquals(MAPPER.valueToTree(candidate),
+                MAPPER.valueToTree(service.describeUserPoolDomain(candidate.getDomain())));
+        String targetConsumer = consumerArn(candidate.getDomain());
+        service.deleteUserPoolDomain(candidate);
+        service.restoreUserPoolDomain(prior);
+        assertThrows(AwsException.class, () -> service.describeUserPoolDomain(candidate.getDomain()));
+        assertEquals(MAPPER.valueToTree(prior), MAPPER.valueToTree(service.describeUserPoolDomain(prior.getDomain())));
+        verify(acmService).removeInUseBy(RENEWED_CERTIFICATE_ARN, targetConsumer, "us-east-1");
+        verify(acmService, times(2)).addInUseBy(CERTIFICATE_ARN, originalConsumer, "us-east-1");
+        verify(tls, times(2)).ensureHost(prior.getDomain());
+    }
+
+    @Test
     void updateUserPoolDomainKeepsTheCurrentCertificateWhenTheNewOneVanishesBeforeRegistration() {
         UserPool pool = createPoolWithCustomDomain("auth.example.com");
         doThrow(new AwsException("ResourceNotFoundException", "gone", 404))
@@ -4192,13 +4448,15 @@ class CognitoServiceTest {
     @Test
     void updateUserPoolDomainSetsTheManagedLoginVersionOfAPrefixDomain() {
         UserPool pool = service.createUserPool(Map.of("PoolName", "DomainPool"), "us-east-1");
-        service.createUserPoolDomain("my-prefix", pool.getId(), null, null);
+        String distribution = service.createUserPoolDomain("my-prefix", pool.getId(), null, null)
+                .getCloudFrontDistribution();
 
         UserPoolDomain updated = service.updateUserPoolDomain("my-prefix", pool.getId(), null, 2);
 
         assertEquals(2, updated.getManagedLoginVersion());
         assertFalse(updated.isCustomDomain());
-        assertNull(updated.getCloudFrontDistribution());
+        assertTrue(distribution.endsWith(".cloudfront.net"));
+        assertEquals(distribution, updated.getCloudFrontDistribution());
     }
 
     @Test

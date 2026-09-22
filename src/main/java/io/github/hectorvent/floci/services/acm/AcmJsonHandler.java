@@ -1,17 +1,30 @@
 package io.github.hectorvent.floci.services.acm;
 
-import io.github.hectorvent.floci.core.common.AwsErrorResponse;
-import io.github.hectorvent.floci.services.acm.model.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.acm.model.Certificate;
+import io.github.hectorvent.floci.services.acm.model.CertificateOptions;
+import io.github.hectorvent.floci.services.acm.model.CertificateStatus;
+import io.github.hectorvent.floci.services.acm.model.DomainValidation;
+import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
+import io.github.hectorvent.floci.services.acm.model.ListResult;
+import io.github.hectorvent.floci.services.acm.model.RevocationReason;
+import io.github.hectorvent.floci.services.acm.model.ValidationMethod;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * JSON handler for AWS Certificate Manager (ACM) API operations.
@@ -108,14 +121,6 @@ public class AcmJsonHandler {
     private Response handleGetCertificate(JsonNode request, String region) {
         String certificateArn = request.path("CertificateArn").asText();
         Certificate cert = service.getCertificate(certificateArn, region);
-
-        // AWS returns RequestInProgressException for certificates still pending validation
-        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
-            throw new io.github.hectorvent.floci.core.common.AwsException(
-                "RequestInProgressException",
-                "The certificate request is in progress. The certificate body is not yet available.",
-                400);
-        }
 
         ObjectNode response = objectMapper.createObjectNode();
         response.put("Certificate", cert.getCertificateBody());
@@ -336,7 +341,7 @@ public class AcmJsonHandler {
         }
         String value = optionsNode.path(field).asText();
         if (!"ENABLED".equals(value) && !"DISABLED".equals(value)) {
-            throw new io.github.hectorvent.floci.core.common.AwsException(
+            throw new AwsException(
                 "ValidationException", field + " must be ENABLED or DISABLED", 400);
         }
         return value;
@@ -595,7 +600,7 @@ public class AcmJsonHandler {
             String domainName = option.path("DomainName").asText(null);
             String validationDomain = option.path("ValidationDomain").asText(null);
             if (domainName == null || domainName.isBlank() || validationDomain == null || validationDomain.isBlank()) {
-                throw new io.github.hectorvent.floci.core.common.AwsException(
+                throw new AwsException(
                     "InvalidDomainValidationOptionsException",
                     "One or more values in the DomainValidationOption structure is incorrect.",
                     400);
@@ -610,7 +615,7 @@ public class AcmJsonHandler {
         try {
             return ValidationMethod.valueOf(method.toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new io.github.hectorvent.floci.core.common.AwsException(
+            throw new AwsException(
                 "ValidationException",
                 "Invalid validation method: " + method + ". Must be DNS or EMAIL.",
                 400);

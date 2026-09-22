@@ -20,6 +20,7 @@ import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.kms.KmsService;
@@ -38,6 +39,7 @@ import io.github.hectorvent.floci.services.rds.model.DbInstanceStatus;
 import io.github.hectorvent.floci.services.rds.model.DbParameterGroup;
 import io.github.hectorvent.floci.services.rds.model.DbProxy;
 import io.github.hectorvent.floci.services.rds.model.DbProxyAuth;
+import io.github.hectorvent.floci.services.rds.model.DbProxyEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbProxyTarget;
 import io.github.hectorvent.floci.services.rds.model.DbProxyTargetGroup;
 import io.github.hectorvent.floci.services.rds.model.DbSnapshot;
@@ -1462,6 +1464,18 @@ public class RdsService implements Resettable, ResourceProvider {
                 yield new TagHandle(snapshot.getTags(), updated -> {
                     snapshot.setTags(updated);
                     putSnapshotForScope(currentAccountId(), effectiveRegion, resourceId, snapshot);
+                });
+            }
+            case "db-proxy-endpoint" -> {
+                DbProxyEndpoint endpoint = listDbProxies(null, effectiveRegion).stream()
+                        .flatMap(proxy -> proxyEndpoints(proxy).stream())
+                        .filter(candidate -> resourceName.equals(candidate.getDbProxyEndpointArn()))
+                        .findFirst().orElseThrow(() -> proxyEndpointNotFound(resourceId));
+                yield new TagHandle(endpoint.getTags(), updated -> {
+                    DbProxyEndpoint updatedEndpoint = new DbProxyEndpoint(endpoint);
+                    updatedEndpoint.setTags(updated);
+                    saveDbProxyEndpoint(getDbProxy(endpoint.getDbProxyName(), effectiveRegion),
+                            updatedEndpoint, effectiveRegion, false);
                 });
             }
             case "db-proxy" -> {
@@ -4076,6 +4090,224 @@ public class RdsService implements Resettable, ResourceProvider {
         return List.copyOf(unique.values());
     }
 
+    public synchronized DbProxyEndpoint createDbProxyEndpoint(
+            String proxyName, String name, List<String> subnetIds, List<String> securityGroupIds,
+            String targetRole, String networkType, Map<String, String> tags, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        DbProxy proxy = getDbProxy(proxyName, effectiveRegion);
+        requireAvailableProxy(proxy);
+        validateProxyEndpointName(name);
+        if (findDbProxyEndpoint(name, effectiveRegion).isPresent()) {
+            throw new AwsException("DBProxyEndpointAlreadyExistsFault",
+                    "DB proxy endpoint " + name + " already exists.", 400);
+        }
+        if (proxy.getEndpoints().stream().filter(endpoint -> !endpoint.isDefault()).count() >= 20) {
+            throw new AwsException("DBProxyEndpointQuotaExceededFault",
+                    "A DB proxy can have at most 20 additional endpoints.", 400);
+        }
+        String role = targetRole == null ? "READ_WRITE" : targetRole;
+        if (!List.of("READ_WRITE", "READ_ONLY").contains(role)) {
+            throw new AwsException("InvalidParameterValue", "TargetRole must be READ_WRITE or READ_ONLY.", 400);
+        }
+        if ("SQLSERVER".equals(proxy.getEngineFamily()) && "READ_ONLY".equals(role)) {
+            throw new AwsException("InvalidParameterValue", "SQL Server proxy endpoints must use READ_WRITE.", 400);
+        }
+        String type = networkType == null ? "IPV4" : networkType;
+        if (!List.of("IPV4", "IPV6", "DUAL").contains(type)) {
+            throw new AwsException("InvalidParameterValue", "EndpointNetworkType must be IPV4, IPV6, or DUAL.", 400);
+        }
+        if (subnetIds == null || subnetIds.isEmpty()) {
+            throw new AwsException("InvalidParameterValue", "VpcSubnetIds is required.", 400);
+        }
+        String vpcId;
+        try {
+            vpcId = resolveDbProxyVpc(subnetIds, effectiveRegion);
+        } catch (AwsException failure) {
+            if (!"InvalidSubnetID.NotFound".equals(failure.getErrorCode())) {
+                throw failure;
+            }
+            throw new AwsException("InvalidSubnet", "One or more VpcSubnetIds do not exist in this region.", 400);
+        }
+        if (requiresIpv6VpcCidrBlock(type, null)) {
+            validateVpcHasIpv6CidrBlock(vpcId, effectiveRegion);
+            validateSubnetsHaveIpv6CidrBlock(subnetIds, effectiveRegion);
+            if (ec2Service.describeVpcs(effectiveRegion, List.of(vpcId), Map.of()).stream()
+                    .anyMatch(vpc -> "dedicated".equals(vpc.getInstanceTenancy()))) {
+                throw new AwsException("InvalidParameterValue",
+                        "IPv6 and dual-stack proxy endpoints cannot use a dedicated-tenancy VPC.", 400);
+            }
+        }
+        DbProxyEndpoint endpoint = new DbProxyEndpoint();
+        String suffix = randomResourceSuffix();
+        endpoint.setDbProxyEndpointName(name);
+        endpoint.setDbProxyEndpointArn(regionResolver.buildArn("rds", effectiveRegion,
+                "db-proxy-endpoint:prx-endpoint-" + suffix));
+        endpoint.setDbProxyName(proxyName);
+        endpoint.setCreatedDate(Instant.now());
+        endpoint.setVpcId(vpcId);
+        endpoint.setVpcSubnetIds(subnetIds);
+        endpoint.setVpcSecurityGroupIds(resolveProxyEndpointSecurityGroups(securityGroupIds, vpcId, effectiveRegion));
+        endpoint.setTargetRole(role);
+        endpoint.setEndpointNetworkType(type);
+        endpoint.setTags(tags);
+        // Control-plane DNS identity only; custom endpoints do not alias the writer relay.
+        endpoint.setEndpoint(name + ".proxy-custom-" + suffix + "." + effectiveRegion + ".rds.amazonaws.com");
+        saveDbProxyEndpoint(proxy, endpoint, effectiveRegion, false);
+        return new DbProxyEndpoint(endpoint);
+    }
+
+    public synchronized List<DbProxyEndpoint> describeDbProxyEndpoints(
+            String proxyName, String endpointName, String region) {
+        if (endpointName != null) {
+            validateProxyEndpointName(endpointName);
+        }
+        String effectiveRegion = effectiveRegion(region);
+        Collection<DbProxy> selected = proxyName == null ? listDbProxies(null, effectiveRegion)
+                : List.of(getDbProxy(proxyName, effectiveRegion));
+        List<DbProxyEndpoint> endpoints = selected.stream()
+                .flatMap(proxy -> proxyEndpoints(proxy).stream())
+                .filter(endpoint -> endpointName == null || endpointName.equals(endpoint.getDbProxyEndpointName()))
+                .sorted(Comparator.comparing(DbProxyEndpoint::getDbProxyEndpointName))
+                .map(DbProxyEndpoint::new)
+                .toList();
+        if (endpointName != null && endpoints.isEmpty()) {
+            throw proxyEndpointNotFound(endpointName);
+        }
+        return endpoints;
+    }
+
+    public DbProxyEndpoint getDbProxyEndpoint(String name, String region) {
+        validateProxyEndpointName(name);
+        return findDbProxyEndpoint(name, effectiveRegion(region)).orElseThrow(() -> proxyEndpointNotFound(name));
+    }
+
+    public synchronized DbProxyEndpoint modifyDbProxyEndpoint(
+            String name, String newName, List<String> securityGroupIds, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        DbProxyEndpoint endpoint = getDbProxyEndpoint(name, effectiveRegion);
+        DbProxy proxy = getDbProxy(endpoint.getDbProxyName(), effectiveRegion);
+        requireAvailableProxy(proxy);
+        requireCustomProxyEndpoint(endpoint);
+        if (!"available".equals(endpoint.getStatus())) {
+            throw new AwsException("InvalidDBProxyEndpointStateFault", "The DB proxy endpoint is not available.", 400);
+        }
+        if (newName != null) {
+            validateProxyEndpointName(newName);
+            if (!newName.equals(name) && findDbProxyEndpoint(newName, effectiveRegion).isPresent()) {
+                throw new AwsException("DBProxyEndpointAlreadyExistsFault",
+                        "DB proxy endpoint " + newName + " already exists.", 400);
+            }
+            endpoint.setDbProxyEndpointName(newName);
+        }
+        if (securityGroupIds != null) {
+            endpoint.setVpcSecurityGroupIds(resolveProxyEndpointSecurityGroups(
+                    securityGroupIds, endpoint.getVpcId(), effectiveRegion));
+        }
+        saveDbProxyEndpoint(proxy, endpoint, effectiveRegion, false);
+        return new DbProxyEndpoint(endpoint);
+    }
+
+    public synchronized DbProxyEndpoint deleteDbProxyEndpoint(String name, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        DbProxyEndpoint endpoint = getDbProxyEndpoint(name, effectiveRegion);
+        requireCustomProxyEndpoint(endpoint);
+        DbProxy proxy = getDbProxy(endpoint.getDbProxyName(), effectiveRegion);
+        saveDbProxyEndpoint(proxy, endpoint, effectiveRegion, true);
+        endpoint.setStatus("deleting");
+        return endpoint;
+    }
+
+    private Optional<DbProxyEndpoint> findDbProxyEndpoint(String name, String region) {
+        return listDbProxies(null, region).stream().flatMap(proxy -> proxyEndpoints(proxy).stream())
+                .filter(endpoint -> name.equals(endpoint.getDbProxyEndpointName()))
+                .findFirst().map(DbProxyEndpoint::new);
+    }
+
+    private List<DbProxyEndpoint> proxyEndpoints(DbProxy proxy) {
+        List<DbProxyEndpoint> endpoints = new ArrayList<>(proxy.getEndpoints().stream()
+                .filter(endpoint -> !endpoint.isDefault()).map(DbProxyEndpoint::new).toList());
+        // Derive the implicit endpoint for proxies persisted before endpoint support existed.
+        DbProxyEndpoint defaultEndpoint = new DbProxyEndpoint();
+        defaultEndpoint.setDbProxyEndpointName(proxy.getDbProxyName());
+        defaultEndpoint.setDbProxyEndpointArn(proxy.getDbProxyArn().replace(":db-proxy:prx-",
+                ":db-proxy-endpoint:prx-endpoint-"));
+        defaultEndpoint.setDbProxyName(proxy.getDbProxyName());
+        defaultEndpoint.setDefault(true);
+        defaultEndpoint.setEndpoint(proxy.getEndpoint());
+        defaultEndpoint.setCreatedDate(proxy.getCreatedAt());
+        defaultEndpoint.setStatus(proxy.getStatus());
+        defaultEndpoint.setVpcId(proxy.getVpcId());
+        defaultEndpoint.setVpcSubnetIds(proxy.getVpcSubnetIds());
+        defaultEndpoint.setVpcSecurityGroupIds(proxy.getVpcSecurityGroupIds());
+        defaultEndpoint.setEndpointNetworkType(proxy.getEndpointNetworkType());
+        proxy.getEndpoints().stream().filter(DbProxyEndpoint::isDefault).findFirst()
+                .ifPresent(saved -> defaultEndpoint.setTags(saved.getTags()));
+        endpoints.add(defaultEndpoint);
+        return endpoints;
+    }
+
+    private void saveDbProxyEndpoint(DbProxy proxy, DbProxyEndpoint endpoint, String region, boolean delete) {
+        DbProxy updated = copyDbProxy(proxy);
+        updated.getEndpoints().removeIf(existing ->
+                existing.getDbProxyEndpointArn().equals(endpoint.getDbProxyEndpointArn()));
+        if (!delete) {
+            updated.getEndpoints().add(new DbProxyEndpoint(endpoint));
+        }
+        String key = dbProxyKey(region, proxy.getDbProxyName());
+        String accountId = accountIdFromArn(proxy.getDbProxyArn());
+        // Endpoints share the StorageFactory-backed parent write and its account/region scope.
+        try {
+            putProxyForAccount(accountId, key, updated);
+        } catch (RuntimeException failure) {
+            attemptRollback(failure, () -> putProxyForAccount(accountId, key, proxy));
+            throw failure;
+        }
+    }
+
+    private List<String> resolveProxyEndpointSecurityGroups(List<String> ids, String vpcId, String region) {
+        boolean useDefault = ids == null || ids.isEmpty();
+        List<SecurityGroup> groups;
+        try {
+            groups = ec2Service.describeSecurityGroups(region, useDefault ? List.of() : ids, List.of(),
+                    useDefault ? Map.of("vpc-id", List.of(vpcId), "group-name", List.of("default")) : Map.of());
+        } catch (AwsException failure) {
+            if (!"InvalidGroup.NotFound".equals(failure.getErrorCode())) {
+                throw failure;
+            }
+            throw new AwsException("InvalidParameterValue", "VpcSecurityGroupIds contains an unknown security group.", 400);
+        }
+        if (groups.isEmpty() || groups.stream().anyMatch(group -> !vpcId.equals(group.getVpcId()))
+                || (!useDefault && groups.size() != Set.copyOf(ids).size())) {
+            throw new AwsException("InvalidParameterValue", "VpcSecurityGroupIds must belong to the endpoint VPC.", 400);
+        }
+        return useDefault ? groups.stream().map(SecurityGroup::getGroupId).toList() : List.copyOf(ids);
+    }
+
+    private static void validateProxyEndpointName(String name) {
+        if (name == null || name.length() > 63 || !DB_PROXY_NAME_PATTERN.matcher(name).matches()) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBProxyEndpointName must be 1-63 characters, begin with a letter, and contain only letters, digits, and single hyphens.",
+                    400);
+        }
+    }
+
+    private static void requireAvailableProxy(DbProxy proxy) {
+        if (!"available".equals(proxy.getStatus())) {
+            throw new AwsException("InvalidDBProxyStateFault", "The DB proxy is not available.", 400);
+        }
+    }
+
+    private static void requireCustomProxyEndpoint(DbProxyEndpoint endpoint) {
+        if (endpoint.isDefault()) {
+            throw new AwsException("InvalidDBProxyEndpointStateFault",
+                    "The default DB proxy endpoint cannot be modified or deleted independently of its proxy.", 400);
+        }
+    }
+
+    private static AwsException proxyEndpointNotFound(String name) {
+        return new AwsException("DBProxyEndpointNotFoundFault", "DB proxy endpoint " + name + " not found.", 404);
+    }
+
     public Collection<DbProxyTargetGroup> describeDbProxyTargetGroups(String dbProxyName) {
         return describeDbProxyTargetGroups(dbProxyName, null);
     }
@@ -4346,8 +4578,7 @@ public class RdsService implements Resettable, ResourceProvider {
             String filterName, String region) {
         String effectiveRegion = effectiveRegion(region);
         if (filterName != null && !filterName.isBlank()) {
-            DbParameterGroup group = findParameterGroupForRegion(filterName, effectiveRegion);
-            return group != null ? List.of(group) : List.of();
+            return List.of(getDbParameterGroup(filterName, effectiveRegion));
         }
         Map<String, DbParameterGroup> unique = new LinkedHashMap<>();
         List<DbParameterGroup> storedGroups;
@@ -4392,14 +4623,44 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     public DbParameterGroup modifyDbParameterGroup(
-            String name, java.util.Map<String, String> parameters, String region) {
+            String name, Map<String, String> parameters, String region) {
+        return modifyDbParameterGroup(name, parameters, Map.of(), region);
+    }
+
+    public DbParameterGroup modifyDbParameterGroup(
+            String name, Map<String, String> parameters, Map<String, String> applyMethods, String region) {
         String effectiveRegion = effectiveRegion(region);
         DbParameterGroup group = getDbParameterGroup(name, effectiveRegion);
+        Map<String, String> methods = new LinkedHashMap<>();
         if (parameters != null) {
+            parameters.forEach((parameter, value) -> {
+                String method = applyMethods.getOrDefault(parameter,
+                        RdsParameterCatalog.defaultApplyMethod(group.getDbParameterGroupFamily(), parameter));
+                if (!"immediate".equals(method) && !"pending-reboot".equals(method)) {
+                    throw new AwsException("InvalidParameterValue", "Invalid ApplyMethod: " + method, 400);
+                }
+                if ("immediate".equals(method) && "pending-reboot".equals(
+                        RdsParameterCatalog.defaultApplyMethod(group.getDbParameterGroupFamily(), parameter))) {
+                    throw new AwsException("InvalidParameterCombination",
+                            "Cannot use immediate apply method for static parameter " + parameter, 400);
+                }
+                methods.put(parameter, method);
+            });
             group.getParameters().putAll(parameters);
+            group.getParameterApplyMethods().putAll(methods);
         }
         putParameterGroupForRegion(name, effectiveRegion, group);
         return group;
+    }
+
+    public List<RdsParameterCatalog.Parameter> describeDbParameters(String name, String source, String region) {
+        return RdsParameterCatalog.describe(getDbParameterGroup(name, region), source);
+    }
+
+    public List<RdsEngineCatalog.Version> describeDbEngineVersions(
+            String engine, String version, String family, boolean defaultOnly, boolean includeAll,
+            Map<String, List<String>> filters) {
+        return RdsEngineCatalog.describe(engine, version, family, defaultOnly, includeAll, filters);
     }
 
     public DbParameterGroup resetDbParameterGroup(String name, boolean resetAll, List<String> parameterNames) {
@@ -4422,6 +4683,7 @@ public class RdsService implements Resettable, ResourceProvider {
         DbParameterGroup target = createDbParameterGroup(
                 targetName, source.getDbParameterGroupFamily(), targetDescription, effectiveRegion);
         target.getParameters().putAll(source.getParameters());
+        target.getParameterApplyMethods().putAll(source.getParameterApplyMethods());
         putParameterGroupForRegion(targetName, effectiveRegion, target);
         return target;
     }
@@ -4435,6 +4697,7 @@ public class RdsService implements Resettable, ResourceProvider {
         String effectiveRegion = effectiveRegion(region);
         DbParameterGroup group = getDbParameterGroup(name, effectiveRegion);
         resetParameters(group.getParameters(), resetAllParameters, parameterNames);
+        resetParameters(group.getParameterApplyMethods(), resetAllParameters, parameterNames);
         putParameterGroupForRegion(name, effectiveRegion, group);
         return group;
     }
@@ -4500,12 +4763,17 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     public DbSubnetGroup modifyDbSubnetGroup(String name, List<String> subnetIds, String region) {
+        return modifyDbSubnetGroup(name, null, subnetIds, region);
+    }
+
+    public DbSubnetGroup modifyDbSubnetGroup(String name, String description, List<String> subnetIds, String region) {
         DbSubnetGroup existing = getDbSubnetGroup(name, region);
         if (subnetIds == null || subnetIds.isEmpty()) {
             throw new AwsException("InvalidParameterValue",
                     "SubnetIds must contain at least one subnet.", 400);
         }
-        DbSubnetGroup group = buildSubnetGroup(name, existing.getDescription(), subnetIds, effectiveRegion(region));
+        DbSubnetGroup group = buildSubnetGroup(name,
+                description != null ? description : existing.getDescription(), subnetIds, effectiveRegion(region));
         group.setTags(existing.getTags());
         putSubnetGroupForScope(
                 currentAccountId(), effectiveRegion(region), name, group);
@@ -5932,6 +6200,7 @@ public class RdsService implements Resettable, ResourceProvider {
         copy.setVpcSecurityGroupIds(source.getVpcSecurityGroupIds());
         copy.setAuth(source.getAuth().stream().map(this::copyDbProxyAuth).toList());
         copy.setTags(source.getTags());
+        copy.setEndpoints(source.getEndpoints());
         return copy;
     }
 

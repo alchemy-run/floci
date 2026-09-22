@@ -1,32 +1,30 @@
 package io.github.hectorvent.floci.services.servicecatalog;
 
+import io.github.hectorvent.floci.services.cloudformation.CloudFormationService;
+import io.github.hectorvent.floci.services.cloudformation.model.Stack;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.equalTo;
+import java.time.Duration;
 
-/**
- * Wire-level tests for {@code DescribeProvisionedProduct},
- * {@code UpdateProvisionedProduct}, {@code UpdateProvisionedProductProperties} and
- * {@code TerminateProvisionedProduct}.
- *
- * <p>New class, not appended to an existing one, so falsifiability isolates per
- * operation (CS-001). {@code UpdateProvisionedProduct},
- * {@code UpdateProvisionedProductProperties} and {@code TerminateProvisionedProduct}
- * all had the same RecordId-discard bug as issues 0021/0023 — fixed the same way.
- * {@code TerminateProvisionedProduct} also had its {@code RecordType} hardcoded to
- * the wrong value ({@code PROVISION} instead of
- * {@code TERMINATE_PROVISIONED_PRODUCT}) and conflated the provisioned product's own
- * {@code TERMINATED} status with the record's {@code SUCCEEDED} outcome status;
- * both fixed. {@code UpdateProvisionedProduct} does not apply any request fields —
- * documented as a validate-and-echo limitation (CS-021 precedent), not fixed further.
- */
+import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** Wire-level coverage for provisioned-product lifecycle and persisted operation records. */
 @QuarkusTest
 class ServiceCatalogProvisionedProductLifecycleConsumerTest {
+
+    @Inject
+    CloudFormationService cloudFormationService;
 
     private static final String CONTENT_TYPE = "application/x-amz-json-1.1";
     private static final String AUTH_HEADER =
@@ -66,6 +64,88 @@ class ServiceCatalogProvisionedProductLifecycleConsumerTest {
                 + name + "\",\"PhysicalId\":\"phys-" + name + "\",\"IdempotencyToken\":\"tok-" + name + "\"}")
                 .then().statusCode(200)
                 .extract().path("RecordDetail.ProvisionedProductId");
+    }
+
+    @Test
+    void provisionProductTracksRealStackRecordsOutputsAndDeletion() {
+        String bucket = "sc-real-stack-template";
+        String s3Auth = "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/s3/aws4_request";
+        given().header("Authorization", s3Auth).put("/" + bucket).then().statusCode(200);
+        given().header("Authorization", s3Auth).contentType("application/json").body("""
+                {"AWSTemplateFormatVersion":"2010-09-09",
+                 "Resources":{"Handle":{"Type":"AWS::CloudFormation::WaitConditionHandle"}},
+                 "Outputs":{"Message":{"Value":"real-stack-output"}}}
+                """).put("/" + bucket + "/template.json").then().statusCode(200);
+        String productId = call("CreateProduct", """
+                {"Name":"real-stack-product","Owner":"platform","ProductType":"CLOUD_FORMATION_TEMPLATE",
+                 "IdempotencyToken":"real-stack-product",
+                 "ProvisioningArtifactParameters":{"Name":"v1","Type":"CLOUD_FORMATION_TEMPLATE",
+                   "Info":{"LoadTemplateFromURL":"https://%s.s3.us-east-1.amazonaws.com/template.json"}}}
+                """.formatted(bucket)).then().statusCode(200)
+                .extract().path("ProductViewDetail.ProductViewSummary.ProductId");
+        String artifactId = firstArtifactId(productId);
+        String request = """
+                {"ProductId":"%s","ProvisioningArtifactId":"%s",
+                 "ProvisionedProductName":"real-stack-instance","ProvisionToken":"real-stack-instance"}
+                """.formatted(productId, artifactId);
+        Response provisioned = call("ProvisionProduct", request);
+        String recordId = provisioned.then().statusCode(200).extract().path("RecordDetail.RecordId");
+        String provisionedId = provisioned.path("RecordDetail.ProvisionedProductId");
+        call("ProvisionProduct", request).then().statusCode(200)
+                .body("RecordDetail.RecordId", equalTo(recordId))
+                .body("RecordDetail.ProvisionedProductId", equalTo(provisionedId));
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                call("DescribeRecord", "{\"Id\":\"" + recordId + "\"}").then().statusCode(200)
+                        .body("RecordDetail.Status", equalTo("SUCCEEDED"))
+                        .body("RecordDetail.RecordErrors.size()", equalTo(0)));
+        String stackArn = call("DescribeProvisionedProduct", "{\"Name\":\"real-stack-instance\"}")
+                .then().statusCode(200)
+                .body("ProvisionedProductDetail.Status", equalTo("AVAILABLE"))
+                .body("ProvisionedProductDetail.LastRecordId", equalTo(recordId))
+                .extract().path("ProvisionedProductDetail.PhysicalId");
+        String accountId = stackArn.split(":")[4];
+        Stack stack = cloudFormationService.describeStacks(stackArn, "us-east-1", accountId).getFirst();
+        assertEquals("CREATE_COMPLETE", stack.getStatus());
+        assertTrue(stack.getResources().containsKey("Handle"));
+        assertEquals("real-stack-output", stack.getOutputs().get("Message"));
+        call("GetProvisionedProductOutputs", "{\"ProvisionedProductName\":\"real-stack-instance\"}")
+                .then().statusCode(200)
+                .body("Outputs.find { it.OutputKey == 'Message' }.OutputValue", equalTo("real-stack-output"))
+                .body("Outputs.find { it.OutputKey == 'CloudformationStackARN' }.OutputValue", equalTo(stackArn));
+        String terminate = "{\"ProvisionedProductName\":\"real-stack-instance\",\"TerminateToken\":\"real-stack-delete\"}";
+        String terminationRecordId = call("TerminateProvisionedProduct", terminate).then().statusCode(200)
+                .extract().path("RecordDetail.RecordId");
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                call("DescribeRecord", "{\"Id\":\"" + terminationRecordId + "\"}").then().statusCode(200)
+                        .body("RecordDetail.Status", equalTo("SUCCEEDED")));
+        assertEquals("DELETE_COMPLETE", cloudFormationService.describeStacks(stackArn, "us-east-1", accountId)
+                .getFirst().getStatus());
+        call("DescribeProvisionedProduct", "{\"Name\":\"real-stack-instance\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        call("DescribeProvisionedProduct", "{\"Id\":\"" + provisionedId + "\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        call("TerminateProvisionedProduct", terminate).then().statusCode(200)
+                .body("RecordDetail.RecordId", equalTo(terminationRecordId));
+        call("DeleteProduct", "{\"Id\":\"" + productId + "\"}").then().statusCode(200);
+        call("ListRecordHistory", "{}").then().statusCode(200)
+                .body("RecordDetails.RecordId", hasItem(recordId))
+                .body("RecordDetails.RecordId", hasItem(terminationRecordId));
+        given().header("Authorization", s3Auth).delete("/" + bucket + "/template.json").then().statusCode(204);
+        given().header("Authorization", s3Auth).delete("/" + bucket).then().statusCode(204);
+    }
+
+    @Test
+    void provisionProductRejectsMissingTemplateWithoutRecordingSuccess() {
+        String productId = createProduct("missing-template-product");
+        String artifactId = firstArtifactId(productId);
+        call("ProvisionProduct", """
+                {"ProductId":"%s","ProvisioningArtifactId":"%s",
+                 "ProvisionedProductName":"missing-template-instance","ProvisionToken":"missing-template-instance"}
+                """.formatted(productId, artifactId)).then().statusCode(400)
+                .body("__type", equalTo("InvalidParametersException"));
+        call("DescribeProvisionedProduct", "{\"Name\":\"missing-template-instance\"}")
+                .then().statusCode(400).body("__type", equalTo("ResourceNotFoundException"));
+        call("DeleteProduct", "{\"Id\":\"" + productId + "\"}").then().statusCode(200);
     }
 
     // ---------- DescribeProvisionedProduct ----------
@@ -155,7 +235,7 @@ class ServiceCatalogProvisionedProductLifecycleConsumerTest {
     // ---------- TerminateProvisionedProduct ----------
 
     @Test
-    void terminateProvisionedProduct_marksTerminatedAndReturnsDescribableRecord() {
+    void terminateProvisionedProduct_removesProductAndPreservesRecord() {
         String productId = createProduct("ab-terminate-pp-product");
         String artifactId = firstArtifactId(productId);
         String provisionedId = importProvisionedProduct(productId, artifactId, "ab-terminate-pp");
@@ -171,8 +251,15 @@ class ServiceCatalogProvisionedProductLifecycleConsumerTest {
 
         call("DescribeProvisionedProduct", "{\"Id\":\"" + provisionedId + "\"}")
         .then()
-            .statusCode(200)
-            .body("ProvisionedProductDetail.Status", equalTo("TERMINATED"));
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+
+        call("DescribeProvisionedProduct", "{\"Name\":\"ab-terminate-pp\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        call("SearchProvisionedProducts", "{}").then().statusCode(200)
+                .body("ProvisionedProducts.Id", not(hasItem(provisionedId)));
+        call("ListRecordHistory", "{}").then().statusCode(200)
+                .body("RecordDetails.RecordId", hasItem(recordId));
 
         call("DescribeRecord", "{\"Id\":\"" + recordId + "\"}")
         .then()

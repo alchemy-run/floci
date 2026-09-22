@@ -1,12 +1,23 @@
 package io.github.hectorvent.floci.services.cloudfront;
 
+import com.sun.net.httpserver.HttpServer;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ExtractableResponse;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,15 +26,15 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The emulated CloudFront edge: a distribution's viewer-request function runs
  * for real, reads the distribution's key value store, and its response is
  * served to the viewer.
  *
- * <p>The functions here return a response rather than falling through to an
- * origin, so the whole pipeline is covered without standing up an origin
- * server.
+ * <p>Covers function responses and KVS-selected local HTTP origins through the
+ * gateway and per-distribution edge ports.
  */
 @QuarkusTest
 class CloudFrontEdgeIntegrationTest {
@@ -61,7 +72,7 @@ class CloudFrontEdgeIntegrationTest {
         given()
                 .contentType("application/json")
                 .header("If-Match", etag)
-                .body("{\"Value\":\"%s\"}".formatted(value))
+                .body(Map.of("Value", value))
                 .when()
                 .put("/key-value-stores/" + arn + "/keys/" + key)
                 .then()
@@ -378,6 +389,217 @@ class CloudFrontEdgeIntegrationTest {
 
         given().get("/_floci/cloudfront/" + id + "/blocked").then().statusCode(404);
         given().header("Host", id + ".cloudfront.net").get("/blocked").then().statusCode(404);
+    }
+
+    @Test
+    @Timeout(90)
+    void routesLocalDevOriginsThroughKvsAcrossEdgePortReuse() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        Map<String, String> env = Map.of("SITE_ENV_MARKER", "local-dev-env-marker");
+        HttpServer origin = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        origin.createContext("/", exchange -> {
+            hits.incrementAndGet();
+            String path = exchange.getRequestURI().getPath();
+            if ("/redirect".equals(path)) {
+                exchange.getResponseHeaders().add("Location", "/redirect-target");
+                exchange.sendResponseHeaders(302, -1);
+                exchange.close();
+                return;
+            }
+            String content = switch (path) {
+                case "/robots.txt" -> "local-dev-robots-marker";
+                case "/api/hello" -> exchange.getRequestURI().getRawQuery();
+                default -> "LOCAL_DEV_PAGE_MARKER env:" + env.get("SITE_ENV_MARKER");
+            };
+            byte[] body = content.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=utf-8");
+            for (String header : List.of("Host", "X-Forwarded-Host", "Cookie", "X-Viewer-Test", "X-Distribution")) {
+                String value = exchange.getRequestHeaders().getFirst(header);
+                if (value != null) {
+                    exchange.getResponseHeaders().add("X-Origin-" + header, value);
+                }
+            }
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        origin.start();
+        String kvsName = "edge-local-dev-kvs";
+        String kvsArn = null;
+        Function function = null;
+        try {
+            String authority = "localhost:" + origin.getAddress().getPort();
+            kvsArn = createKeyValueStore(kvsName, "router:routes", "site,site,,/");
+            putKey(kvsArn, "site:metadata", """
+                    {"servers":[["%s"]],"origin":{"protocol":"http"}}
+                    """.formatted(authority));
+            function = createFunction("edge-local-dev-fn", """
+                    import cf from "cloudfront";
+                    async function handler(event) {
+                      var route = (await cf.kvs().get("router:routes")).split(",");
+                      var metadata = JSON.parse(await cf.kvs().get(route[1] + ":metadata"));
+                      event.request.headers["x-forwarded-host"] = event.request.headers.host;
+                      event.request.headers["x-distribution"] = { value: event.context.distributionId };
+                      var origin = { domainName: metadata.servers[0][0],
+                        customOriginConfig: { protocol: "https", port: 443 } };
+                      if (metadata.origin.protocol === "http") delete origin.customOriginConfig;
+                      cf.updateRequestOrigin(origin);
+                      return event.request;
+                    }
+                    """, kvsArn);
+            Integer reusedPort = null;
+            for (int generation = 0; generation < 3; generation++) {
+                String id = createDistribution("edge-local-dev-" + generation, function.arn());
+                try {
+                    int port = assignedPort(id);
+                    if (reusedPort == null) {
+                        reusedPort = port;
+                    } else {
+                        assertEquals(reusedPort.intValue(), port, "deleted distributions release their edge port");
+                    }
+                    given().get("/_floci/cloudfront/" + id + "/").then().statusCode(200)
+                            .body(containsString("LOCAL_DEV_PAGE_MARKER"));
+                    HttpResponse<String> page = requestEdge(port, "/");
+                    assertEquals(200, page.statusCode(), page.body());
+                    assertTrue(page.body().contains("LOCAL_DEV_PAGE_MARKER"));
+                    assertTrue(page.body().contains("env:local-dev-env-marker"));
+                    assertEquals(authority, page.headers().firstValue("x-origin-host").orElseThrow());
+                    assertEquals("localhost:" + port,
+                            page.headers().firstValue("x-origin-x-forwarded-host").orElseThrow());
+                    assertEquals("session=viewer-cookie", page.headers().firstValue("x-origin-cookie").orElseThrow());
+                    assertEquals("viewer-value", page.headers().firstValue("x-origin-x-viewer-test").orElseThrow());
+                    assertEquals(id, page.headers().firstValue("x-origin-x-distribution").orElseThrow());
+                    for (String value : List.of("router-one", "router-two")) {
+                        HttpResponse<String> api = requestEdge(port, "/api/hello?echo=" + value);
+                        assertEquals(200, api.statusCode(), api.body());
+                        assertEquals("echo=" + value, api.body());
+                    }
+                    HttpResponse<String> asset = requestEdge(port, "/robots.txt");
+                    assertEquals(200, asset.statusCode(), asset.body());
+                    assertEquals("local-dev-robots-marker", asset.body());
+                    HttpResponse<String> redirect = requestEdge(port, "/redirect");
+                    assertEquals(302, redirect.statusCode());
+                    assertEquals("/redirect-target", redirect.headers().firstValue("location").orElseThrow());
+                } finally {
+                    deleteDistribution(id);
+                }
+            }
+            assertEquals(18, hits.get(), "each request reaches the origin once; redirects are not followed");
+        } finally {
+            origin.stop(0);
+            try {
+                if (function != null) {
+                    deleteFunction(function);
+                }
+            } finally {
+                if (kvsArn != null) {
+                    deleteKeyValueStore(kvsName);
+                }
+            }
+        }
+    }
+
+    @Test
+    @Timeout(90)
+    void rejectsOrdinaryPrivateAndMetadataOriginsSelectedByAFunction() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        HttpServer origin = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        origin.createContext("/", exchange -> {
+            hits.incrementAndGet();
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        origin.start();
+        String kvsName = "edge-blocked-origin-kvs";
+        String kvsArn = null;
+        Function function = null;
+        try {
+            kvsArn = createKeyValueStore(kvsName, "origin", "{}");
+            function = createFunction("edge-blocked-origin-fn", """
+                    import cf from "cloudfront";
+                    async function handler(event) {
+                      cf.updateRequestOrigin(JSON.parse(await cf.kvs().get("origin")));
+                      return event.request;
+                    }
+                    """, kvsArn);
+            String id = createDistribution("edge-blocked-origin", function.arn());
+            try {
+                int port = assignedPort(id);
+                for (String selected : List.of(
+                        """
+                        {"domainName":"127.0.0.1","customOriginConfig":{"protocol":"http","port":%d}}
+                        """.formatted(origin.getAddress().getPort()),
+                        """
+                        {"domainName":"169.254.169.254:80","customOriginConfig":{"protocol":"http","port":80}}
+                        """,
+                        """
+                        {"domainName":"10.0.0.1:8080","customOriginConfig":{"protocol":"http","port":8080}}
+                        """)) {
+                    putKey(kvsArn, "origin", selected);
+                    HttpResponse<String> response = requestEdge(port, "/");
+                    assertEquals(502, response.statusCode(), response.body());
+                    assertTrue(response.body().contains("blocked address"), response.body());
+                }
+                assertEquals(0, hits.get());
+            } finally {
+                deleteDistribution(id);
+            }
+        } finally {
+            origin.stop(0);
+            try {
+                if (function != null) {
+                    deleteFunction(function);
+                }
+            } finally {
+                if (kvsArn != null) {
+                    deleteKeyValueStore(kvsName);
+                }
+            }
+        }
+    }
+
+    private void putKey(String arn, String key, String value) {
+        String etag = given().get("/key-value-stores/" + arn).then().statusCode(200).extract().header("ETag");
+        given().contentType("application/json").header("If-Match", etag).body(Map.of("Value", value))
+                .put("/key-value-stores/" + arn + "/keys/" + key).then().statusCode(200);
+    }
+
+    private int assignedPort(String id) {
+        return given().get("/_floci/cloudfront-edge/" + id).then().statusCode(200).extract().path("Port");
+    }
+
+    private HttpResponse<String> requestEdge(int port, String path) throws Exception {
+        // A new client exercises fresh accepted sockets rather than a pooled viewer connection.
+        try (HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                .followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(5)).build()) {
+            return client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                            .timeout(Duration.ofSeconds(10)).header("Cookie", "session=viewer-cookie")
+                            .header("X-Viewer-Test", "viewer-value").GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+        }
+    }
+
+    private void deleteDistribution(String id) {
+        String path = "/2020-05-31/distribution/" + id;
+        ExtractableResponse<Response> config = given().get(path + "/config").then().statusCode(200).extract();
+        String etag = given().contentType("application/xml").header("If-Match", config.header("ETag"))
+                .body(config.body().asString().replace("<Enabled>true</Enabled>", "<Enabled>false</Enabled>"))
+                .put(path + "/config").then().statusCode(200).extract().header("ETag");
+        given().header("If-Match", etag).delete(path).then().statusCode(204);
+        given().get("/_floci/cloudfront-edge/" + id).then().statusCode(404);
+    }
+
+    private void deleteFunction(Function function) {
+        String path = "/2020-05-31/function/" + function.name();
+        String etag = given().queryParam("Stage", "DEVELOPMENT").get(path + "/describe")
+                .then().statusCode(200).extract().header("ETag");
+        given().header("If-Match", etag).delete(path).then().statusCode(204);
+    }
+
+    private void deleteKeyValueStore(String name) {
+        String path = "/2020-05-31/key-value-store/" + name;
+        String etag = given().get(path).then().statusCode(200).extract().header("ETag");
+        given().header("If-Match", etag).delete(path).then().statusCode(204);
     }
 
     /**

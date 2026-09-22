@@ -12,8 +12,15 @@ public record AuthRequestInfo(
         String accountId,
         String region,
         Map<String, String> requestHeaders,
-        String rawBody
+        String rawBody,
+        String requestPath
 ) {
+    public AuthRequestInfo(String query, String operationName, Map<String, Object> variables,
+                           List<String> sourceIp, String requestId, String accountId, String region,
+                           Map<String, String> requestHeaders, String rawBody) {
+        this(query, operationName, variables, sourceIp, requestId, accountId, region, requestHeaders, rawBody, null);
+    }
+
     public AuthRequestInfo {
         sourceIp = sourceIp == null ? List.of() : List.copyOf(sourceIp);
         variables = variables == null ? Map.of() : Map.copyOf(variables);

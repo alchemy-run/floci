@@ -34,9 +34,120 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CloudFrontOriginHttpClientTest {
+
+    @Test
+    void localDevOriginsRequireAnExactLoopbackAuthorityAndExplicitPort() {
+        for (String authority : List.of("localhost:5173", "LOCALHOST:5173", "127.0.0.1:80", "[::1]:65535")) {
+            assertTrue(CloudFrontOriginHttpClient.isLocalDevOrigin(authority), authority);
+        }
+        for (String authority : List.of("localhost", "127.0.0.1", "[::1]", "localhost:0", "localhost:65536",
+                "localhost:-1", "localhost:", "localhost:abc", "localhost:80/", "localhost:80?x=1",
+                "localhost:80#fragment", "user@localhost:80", "localhost.evil.test:80", "localhost.:80",
+                "http://localhost:80", "127.1:80", "0.0.0.0:80", "[::]:80", "[::ffff:127.0.0.1]:80",
+                "169.254.169.254:80", "10.0.0.1:8080", "host.docker.internal:8080", "example.com:8080")) {
+            assertFalse(CloudFrontOriginHttpClient.isLocalDevOrigin(authority), authority);
+            assertThrows(IllegalArgumentException.class,
+                    () -> CloudFrontOriginHttpClient.forLocalDevOrigin(authority, "127.0.0.1"), authority);
+        }
+        assertFalse(CloudFrontOriginHttpClient.isLocalDevOrigin(null));
+    }
+
+    @Test
+    void localDevTransportPinsTheTranslatedHostWithoutRelaxingThePublicClient() throws Exception {
+        AtomicInteger resolutions = new AtomicInteger();
+        AtomicInteger hits = new AtomicInteger();
+        AtomicReference<String> hostHeader = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            hits.incrementAndGet();
+            hostHeader.set(exchange.getRequestHeaders().getFirst("Host"));
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+        DnsResolver delegate = new DnsResolver() {
+            @Override
+            public InetAddress[] resolve(String host) throws UnknownHostException {
+                assertEquals("host.docker.internal", host);
+                assertEquals(1, resolutions.incrementAndGet());
+                return new InetAddress[] { InetAddress.getByName("127.0.0.1") };
+            }
+
+            @Override
+            public String resolveCanonicalHostname(String host) {
+                return host;
+            }
+        };
+        String authority = "localhost:" + server.getAddress().getPort();
+        HttpRequest request = request("http://host.docker.internal:" + server.getAddress().getPort() + "/");
+        try (CloudFrontOriginHttpClient local = CloudFrontOriginHttpClient.forLocalDevOrigin(
+                     delegate, authority, "host.docker.internal");
+             CloudFrontOriginHttpClient ordinary = new CloudFrontOriginHttpClient(
+                     resolver(InetAddress.getByName("127.0.0.1")), List.of())) {
+            assertEquals(200, local.send(request, Map.of("Host", authority),
+                    HttpResponse.BodyHandlers.ofByteArray()).statusCode());
+            assertEquals(authority, hostHeader.get());
+            assertEquals(1, resolutions.get());
+            assertThrows(UnknownHostException.class,
+                    () -> ordinary.send(request, HttpResponse.BodyHandlers.ofByteArray()));
+            assertThrows(UnknownHostException.class, () -> local.send(
+                    request("http://other.invalid:8080/"), HttpResponse.BodyHandlers.ofByteArray()));
+            assertEquals(1, hits.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void localDevTransportRejectsNonLoopbackAnswersAndMetadataTranslations() throws Exception {
+        for (String address : List.of("10.0.0.1", "169.254.169.254", "8.8.8.8")) {
+            try (CloudFrontOriginHttpClient local = CloudFrontOriginHttpClient.forLocalDevOrigin(
+                    resolver(InetAddress.getByName("127.0.0.1"), InetAddress.getByName(address)),
+                    "localhost:5173", "localhost")) {
+                assertThrows(UnknownHostException.class, () -> local.send(
+                        request("http://localhost:5173/"), HttpResponse.BodyHandlers.ofByteArray()));
+            }
+        }
+        try (CloudFrontOriginHttpClient local = CloudFrontOriginHttpClient.forLocalDevOrigin(
+                resolver(InetAddress.getByName("192.168.65.254"), InetAddress.getByName("169.254.169.254")),
+                "localhost:5173", "host.docker.internal")) {
+            assertThrows(UnknownHostException.class, () -> local.send(
+                    request("http://host.docker.internal:5173/"), HttpResponse.BodyHandlers.ofByteArray()));
+        }
+    }
+
+    @Test
+    void localDevTransportDoesNotFollowRedirects() throws Exception {
+        AtomicInteger redirectedHits = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/start", exchange -> {
+            exchange.getResponseHeaders().add("Location", "/target");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.createContext("/target", exchange -> {
+            redirectedHits.incrementAndGet();
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+        String authority = "localhost:" + server.getAddress().getPort();
+        try (CloudFrontOriginHttpClient local = CloudFrontOriginHttpClient.forLocalDevOrigin(
+                resolver(InetAddress.getByName("127.0.0.1")), authority, "localhost")) {
+            HttpResponse<byte[]> response = local.send(
+                    request("http://" + authority + "/start"), HttpResponse.BodyHandlers.ofByteArray());
+            assertEquals(302, response.statusCode());
+            assertEquals("/target", response.headers().firstValue("location").orElseThrow());
+            assertEquals(0, redirectedHits.get());
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void forwardsEdgeRequestBodiesThroughThePinnedTransport() throws Exception {

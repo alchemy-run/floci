@@ -61,6 +61,7 @@ import io.github.hectorvent.floci.services.ssooidc.SsoOidcController;
 import io.github.hectorvent.floci.services.ssoportal.SsoPortalController;
 import io.github.hectorvent.floci.services.detective.DetectiveController;
 import io.github.hectorvent.floci.services.aps.ApsController;
+import io.github.hectorvent.floci.services.aps.ApsDataPlaneController;
 import io.github.hectorvent.floci.services.controlcatalog.ControlCatalogController;
 import io.github.hectorvent.floci.services.controltower.ControlTowerControlController;
 import io.github.hectorvent.floci.services.controltower.ControlTowerController;
@@ -704,7 +705,7 @@ public class ResolvedServiceCatalog {
                         "aps", storageMode(config.storage().services().aps().mode(), config.storage().mode()),
                         config.storage().services().aps().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
-                        Set.of(), Set.of("aps"), Set.of(), Set.of(ApsController.class)),
+                        Set.of(), Set.of("aps"), Set.of(), Set.of(ApsController.class, ApsDataPlaneController.class)),
                 descriptor("lakeformation", "lakeformation", config.services().lakeformation().enabled(), true,
                         "lakeformation",
                         storageMode(config.storage().services().lakeformation().mode(), config.storage().mode()),

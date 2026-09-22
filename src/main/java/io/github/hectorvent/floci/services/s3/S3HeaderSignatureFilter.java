@@ -15,6 +15,7 @@ import org.jboss.logging.Logger;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
@@ -196,7 +197,7 @@ public class S3HeaderSignatureFilter implements ContainerRequestFilter {
         }
 
         String canonicalRequest = ctx.getMethod() + "\n"
-                + requestUri.getRawPath() + "\n"
+                + canonicalPath(requestUri.getRawPath()) + "\n"
                 + PreSignedUrlFilter.buildCanonicalQueryString(ctx.getUriInfo().getQueryParameters()) + "\n"
                 + canonicalHeaders + "\n"
                 + signedHeaders + "\n"
@@ -210,6 +211,15 @@ public class S3HeaderSignatureFilter implements ContainerRequestFilter {
         return MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.UTF_8),
                 signature.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String canonicalPath(String rawPath) {
+        if (rawPath == null || rawPath.isEmpty()) {
+            return "/";
+        }
+        // Decode once, preserving literal plus signs and repeated slashes in object keys.
+        String decoded = URLDecoder.decode(rawPath.replace("+", "%2B"), StandardCharsets.UTF_8);
+        return PreSignedUrlFilter.awsUriEncode(decoded).replace("%2F", "/");
     }
 
     /**

@@ -20,6 +20,93 @@ class CloudFormationSsmParameterIntegrationTest {
     }
 
     @Test
+    void arnUpdateTagsSignalsAndDriftUseTheLiveParameter() {
+        String name = "cfn-observed-parameter-stack";
+        String parameter = "/cfn/observed/parameter";
+        String template = """
+                {"Parameters":{"Value":{"Type":"String"}},"Resources":{"Param":{"Type":"AWS::SSM::Parameter",
+                "Properties":{"Name":"/cfn/observed/parameter","Type":"String","Value":{"Ref":"Value"}}}}}
+                """;
+        String id = query("CreateStack").formParam("StackName", name).formParam("TemplateBody", template)
+                .formParam("Parameters.member.1.ParameterKey", "Value").formParam("Parameters.member.1.ParameterValue", "one")
+                .when().post("/").then().statusCode(200).extract().xmlPath().getString("CreateStackResponse.CreateStackResult.StackId");
+        try {
+            query("UpdateStack").formParam("StackName", id).formParam("TemplateBody", template)
+                    .formParam("Parameters.member.1.ParameterKey", "Value").formParam("Parameters.member.1.ParameterValue", "two")
+                    .formParam("Tags.member.1.Key", "env").formParam("Tags.member.1.Value", "prod")
+                    .when().post("/").then().statusCode(200).body(containsString(id));
+            query("DescribeStacks").formParam("StackName", id).when().post("/").then().statusCode(200)
+                    .body(containsString("<StackStatus>UPDATE_COMPLETE</StackStatus>"))
+                    .body(containsString("<Key>env</Key><Value>prod</Value>"));
+            given().contentType(SSM_CONTENT_TYPE).header("X-Amz-Target", "AmazonSSM.GetParameter")
+                    .body("{\"Name\":\"" + parameter + "\"}").when().post("/").then().statusCode(200)
+                    .body("Parameter.Value", org.hamcrest.Matchers.equalTo("two"));
+            query("SignalResource").formParam("StackName", id).formParam("LogicalResourceId", "Param")
+                    .formParam("UniqueId", "signal-one").formParam("Status", "SUCCESS")
+                    .when().post("/").then().statusCode(200).body(containsString("<SignalResourceResult>"));
+            query("SignalResource").formParam("StackName", id).formParam("LogicalResourceId", "Missing")
+                    .formParam("UniqueId", "signal-one").formParam("Status", "SUCCESS")
+                    .when().post("/").then().statusCode(400).body(containsString("ValidationError"));
+            assertDrift(id, "IN_SYNC", "IN_SYNC", 0);
+            given().contentType(SSM_CONTENT_TYPE).header("X-Amz-Target", "AmazonSSM.PutParameter")
+                    .body("{\"Name\":\"" + parameter + "\",\"Type\":\"String\",\"Value\":\"external\",\"Overwrite\":true}")
+                    .when().post("/").then().statusCode(200);
+            assertDrift(id, "DRIFTED", "MODIFIED", 1);
+            query("DescribeStackResourceDrifts").formParam("StackName", id).when().post("/").then().statusCode(200)
+                    .body(containsString("<PropertyPath>/Value</PropertyPath>"))
+                    .body(containsString("external"));
+            given().contentType(SSM_CONTENT_TYPE).header("X-Amz-Target", "AmazonSSM.DeleteParameter")
+                    .body("{\"Name\":\"" + parameter + "\"}").when().post("/").then().statusCode(200);
+            assertDrift(id, "DRIFTED", "DELETED", 1);
+        } finally {
+            query("DeleteStack").formParam("StackName", id).when().post("/").then().statusCode(200);
+        }
+    }
+
+    @Test
+    void validationReturnsTemplateMetadataAndRejectsInvalidResources() {
+        query("ValidateTemplate").formParam("TemplateBody", "{\"Resources\":{}}")
+                .when().post("/").then().statusCode(400).body(containsString("ValidationError"));
+        query("ValidateTemplate").formParam("TemplateBody", "{broken")
+                .when().post("/").then().statusCode(400).body(containsString("ValidationError"));
+        query("ValidateTemplate").formParam("TemplateBody", """
+                Parameters:
+                  Value:
+                    Type: String
+                    Default: hello
+                Resources:
+                  Param:
+                    Type: AWS::SSM::Parameter
+                    Properties:
+                      Type: String
+                      Value: !Ref Value
+                """).when().post("/").then().statusCode(200)
+                .body(containsString("<ParameterKey>Value</ParameterKey>"))
+                .body(containsString("<DefaultValue>hello</DefaultValue>"));
+        query("DescribeStackDriftDetectionStatus").formParam("StackDriftDetectionId", "missing")
+                .when().post("/").then().statusCode(400).body(containsString("ValidationError"));
+    }
+
+    private void assertDrift(String id, String stackStatus, String resourceStatus, int count) {
+        String detection = query("DetectStackDrift").formParam("StackName", id).when().post("/")
+                .then().statusCode(200).extract().xmlPath().getString("DetectStackDriftResponse.DetectStackDriftResult.StackDriftDetectionId");
+        query("DescribeStackDriftDetectionStatus").formParam("StackDriftDetectionId", detection)
+                .when().post("/").then().statusCode(200)
+                .body(containsString("<DetectionStatus>DETECTION_COMPLETE</DetectionStatus>"))
+                .body(containsString("<StackDriftStatus>" + stackStatus + "</StackDriftStatus>"))
+                .body(containsString("<DriftedStackResourceCount>" + count + "</DriftedStackResourceCount>"));
+        query("DescribeStackResourceDrifts").formParam("StackName", id).when().post("/").then().statusCode(200)
+                .body(containsString("<LogicalResourceId>Param</LogicalResourceId>"))
+                .body(containsString("<StackResourceDriftStatus>" + resourceStatus + "</StackResourceDriftStatus>"));
+    }
+
+    private io.restassured.specification.RequestSpecification query(String action) {
+        return given().contentType("application/x-www-form-urlencoded")
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260922/us-east-1/cloudformation/aws4_request")
+                .formParam("Action", action);
+    }
+
+    @Test
     void createStack_resolvesSsmTypedParameterValue() {
         given()
             .header("X-Amz-Target", "AmazonSSM.PutParameter")

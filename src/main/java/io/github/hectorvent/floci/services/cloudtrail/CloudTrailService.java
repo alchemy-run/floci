@@ -46,6 +46,7 @@ public class CloudTrailService {
     static final long MAX_PENDING_BYTES_PER_TRAIL = 4L * 1024L * 1024L;
 
     private final StorageBackend<String, CloudTrailEntry> store;
+    private final StorageBackend<String, List<String>> insightSelectors;
     private final RegionResolver regionResolver;
     private final IamService iamService;
     private final ObjectMapper mapper;
@@ -68,6 +69,8 @@ public class CloudTrailService {
                              IamService iamService, ObjectMapper mapper) {
         this.store = storageFactory.create("cloudtrail", "cloudtrail-trails.json",
                 new TypeReference<Map<String, CloudTrailEntry>>() {});
+        this.insightSelectors = storageFactory.create("cloudtrail", "cloudtrail-insight-selectors.json",
+                new TypeReference<Map<String, List<String>>>() {});
         this.regionResolver = regionResolver;
         this.iamService = iamService;
         this.mapper = mapper;
@@ -115,6 +118,7 @@ public class CloudTrailService {
                 name, arn, s3BucketName, s3KeyPrefix, snsTopicArn,
                 includeGlobalServiceEvents, isMultiRegionTrail, region,
                 enableLogFileValidation, false, false, isOrganizationTrail);
+        insightSelectors.delete(key);
         store.put(key, new CloudTrailEntry(trail, List.of(), List.of(), false, null, null,
                 initialTags, null, null));
         return trail;
@@ -123,8 +127,13 @@ public class CloudTrailService {
     public void deleteTrail(String region, String trailNameOrArn) {
         Trail trail = findTrailOrThrow(region, trailNameOrArn);
         String key = regionKey(trail.homeRegion(), trail.name());
-        withTrailLock(key, () -> store.delete(key));
-        pendingRecordsByTrail.keySet().removeIf(k -> k.trailName().equals(trail.name()));
+        withTrailLock(key, () -> {
+            insightSelectors.delete(key);
+            store.delete(key);
+        });
+        String accountId = regionResolver.getAccountId();
+        pendingRecordsByTrail.keySet().removeIf(k -> k.trailName().equals(trail.name())
+                && k.region().equals(trail.homeRegion()) && k.accountId().equals(accountId));
     }
 
     public Trail updateTrail(String region, String trailNameOrArn,
@@ -175,6 +184,42 @@ public class CloudTrailService {
             if (t != null) results.add(t);
         }
         return results;
+    }
+
+    public Trail describeTrail(String region, String trailNameOrArn) {
+        return findTrailOrThrow(region, trailNameOrArn);
+    }
+
+    public List<String> getInsightSelectors(String region, String trailNameOrArn) {
+        Trail trail = findTrailOrThrow(region, trailNameOrArn);
+        List<String> selectors = insightSelectors.get(regionKey(trail.homeRegion(), trail.name())).orElse(List.of());
+        if (selectors.isEmpty()) {
+            throw new AwsException("InsightNotEnabledException", "Insights are not enabled for this trail.", 400);
+        }
+        return selectors;
+    }
+
+    public List<String> putInsightSelectors(String region, String trailNameOrArn, List<String> selectors) {
+        if (selectors == null || selectors.size() > 2 || selectors.stream().distinct().count() != selectors.size()
+                || selectors.stream().anyMatch(type -> !"ApiCallRateInsight".equals(type)
+                        && !"ApiErrorRateInsight".equals(type))) {
+            throw new AwsException("InvalidInsightSelectorsException", "Invalid insight selectors.", 400);
+        }
+        List<String> normalized = List.copyOf(selectors);
+        Trail resolved = findTrailOrThrow(region, trailNameOrArn);
+        String key = regionKey(resolved.homeRegion(), resolved.name());
+        return withTrailLock(key, () -> {
+            CloudTrailEntry entry = store.get(key).orElseThrow(() -> new AwsException(
+                    "TrailNotFoundException", "Unknown trail: " + trailNameOrArn, 400));
+            Trail trail = entry.trail();
+            Trail updated = new Trail(trail.name(), trail.trailArn(), trail.s3BucketName(), trail.s3KeyPrefix(),
+                    trail.snsTopicArn(), trail.includeGlobalServiceEvents(), trail.isMultiRegionTrail(),
+                    trail.homeRegion(), trail.logFileValidationEnabled(), trail.hasCustomEventSelectors(),
+                    !normalized.isEmpty(), trail.isOrganizationTrail());
+            insightSelectors.put(key, normalized);
+            store.put(key, entry.withTrail(updated));
+            return normalized;
+        });
     }
 
     public List<EventSelector> putEventSelectors(String region, String trailNameOrArn, List<EventSelector> selectors) {
@@ -348,6 +393,36 @@ public class CloudTrailService {
 
     // --- Data plane: called by S3 (and other services) when an op happens ---
 
+    public boolean recordManagementEvent(String region, ObjectNode record) {
+        boolean selected = false;
+        for (CloudTrailEntry entry : store.scan(k -> true)) {
+            Trail trail = entry.trail();
+            if (!entry.logging() || (!trail.homeRegion().equals(region) && !trail.isMultiRegionTrail())) continue;
+            String source = record.path("eventSource").asText();
+            if (!trail.includeGlobalServiceEvents()
+                    && List.of("iam.amazonaws.com", "organizations.amazonaws.com").contains(source)) continue;
+            boolean matches;
+            if (entry.advancedSelectors() != null && !entry.advancedSelectors().isEmpty()) {
+                matches = CloudTrailLakeService.matchesSelectors(mapper.valueToTree(entry.advancedSelectors()), record);
+            } else {
+                List<EventSelector> selectors = entry.selectors() == null ? List.of() : entry.selectors();
+                boolean readOnly = record.path("readOnly").asBoolean();
+                matches = selectors.isEmpty() || selectors.stream().anyMatch(selector ->
+                        !Boolean.FALSE.equals(selector.includeManagementEvents())
+                                && !("ReadOnly".equals(selector.readWriteType()) && !readOnly)
+                                && !("WriteOnly".equals(selector.readWriteType()) && readOnly)
+                                && (selector.excludeManagementEventSources() == null
+                                    || !selector.excludeManagementEventSources().contains(source)));
+            }
+            if (matches) {
+                selected = true;
+                append(new TrailKey(trail.homeRegion(), trail.name(), region, regionResolver.getAccountId()),
+                        record.deepCopy());
+            }
+        }
+        return selected;
+    }
+
     public void emitS3DataEvent(S3EventInput in) {
         try {
             String region = in.region() != null ? in.region() : regionResolver.getDefaultRegion();
@@ -379,10 +454,16 @@ public class CloudTrailService {
             List<PendingRecord> pending = records.stream()
                     .map(record -> new PendingRecord(record, estimatedRecordBytes(record)))
                     .toList();
-            pendingRecordsByTrail.compute(pendingTrailKey(key), (ignored, buffer) -> {
-                PendingRecordBuffer updated = buffer == null ? new PendingRecordBuffer() : buffer;
-                updated.requeueFront(key.eventRegion(), pending);
-                return updated.isEmpty() ? null : updated;
+            withTrailLock(regionKey(key.region(), key.trailName()), () -> {
+                if (getTrail(key.region(), key.trailName()) == null) {
+                    discardPendingRecords(key);
+                    return;
+                }
+                pendingRecordsByTrail.compute(pendingTrailKey(key), (ignored, buffer) -> {
+                    PendingRecordBuffer updated = buffer == null ? new PendingRecordBuffer() : buffer;
+                    updated.requeueFront(key.eventRegion(), pending);
+                    return updated.isEmpty() ? null : updated;
+                });
             });
         }
     }
@@ -424,7 +505,8 @@ public class CloudTrailService {
         List<TrailKey> result = new ArrayList<>();
         for (Map.Entry<PendingTrailKey, PendingRecordBuffer> e : pendingRecordsByTrail.entrySet()) {
             for (String eventRegion : e.getValue().eventRegions()) {
-                result.add(new TrailKey(e.getKey().region(), e.getKey().trailName(), eventRegion));
+                result.add(new TrailKey(e.getKey().region(), e.getKey().trailName(), eventRegion,
+                        e.getKey().accountId()));
             }
         }
         return result;
@@ -479,9 +561,13 @@ public class CloudTrailService {
      * {@code eventRegion} is the region where the event occurred (used for the S3 delivery path).
      * For single-region trails these are the same; for multi-region trails they differ.
      */
-    public record TrailKey(String region, String trailName, String eventRegion) {}
+    public record TrailKey(String region, String trailName, String eventRegion, String accountId) {
+        public TrailKey(String region, String trailName, String eventRegion) {
+            this(region, trailName, eventRegion, null);
+        }
+    }
 
-    private record PendingTrailKey(String region, String trailName) {}
+    private record PendingTrailKey(String region, String trailName, String accountId) {}
 
     private record PendingRecord(ObjectNode record, long byteCount) {}
 
@@ -608,8 +694,9 @@ public class CloudTrailService {
         }
     }
 
-    private static PendingTrailKey pendingTrailKey(TrailKey key) {
-        return new PendingTrailKey(key.region(), key.trailName());
+    private PendingTrailKey pendingTrailKey(TrailKey key) {
+        return new PendingTrailKey(key.region(), key.trailName(),
+                key.accountId() == null ? regionResolver.getAccountId() : key.accountId());
     }
 
     // --- Helpers ---

@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.servicecatalog;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +10,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @QuarkusTest
 class ServiceCatalogIntegrationTest {
@@ -22,6 +24,104 @@ class ServiceCatalogIntegrationTest {
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    private static Response call(String action, String body) {
+        return given().contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", TARGET + action)
+                .header("Authorization", AUTH)
+                .body(body).when().post("/");
+    }
+
+    @Test
+    void portfolioTagDeltasPreserveIdentityAndUnchangedTags() {
+        String request = """
+                {"DisplayName":"portfolio-tag-lifecycle","ProviderName":"platform",
+                 "IdempotencyToken":"portfolio-tag-lifecycle",
+                 "Tags":[{"Key":"owner","Value":"platform"},{"Key":"purpose","Value":"initial"},
+                         {"Key":"obsolete","Value":"remove"}]}
+                """;
+        String id = call("CreatePortfolio", request).then().statusCode(200)
+                .body("Tags.find { it.Key == 'owner' }.Value", equalTo("platform"))
+                .extract().path("PortfolioDetail.Id");
+        call("CreatePortfolio", request).then().statusCode(200).body("PortfolioDetail.Id", equalTo(id));
+        String update = """
+                {"Id":"%s","Description":"updated","ProviderName":"new-owner",
+                 "AddTags":[{"Key":"purpose","Value":"updated"},{"Key":"extra","Value":"yes"}],
+                 "RemoveTags":["obsolete","missing"]}
+                """.formatted(id);
+        call("UpdatePortfolio", update).then().statusCode(200);
+        call("UpdatePortfolio", update).then().statusCode(200);
+        call("DescribePortfolio", "{\"Id\":\"" + id + "\"}").then().statusCode(200)
+                .body("PortfolioDetail.Id", equalTo(id))
+                .body("PortfolioDetail.ProviderName", equalTo("new-owner"))
+                .body("PortfolioDetail.Description", equalTo("updated"))
+                .body("Tags.size()", equalTo(3))
+                .body("Tags.find { it.Key == 'owner' }.Value", equalTo("platform"))
+                .body("Tags.find { it.Key == 'purpose' }.Value", equalTo("updated"))
+                .body("Tags.find { it.Key == 'extra' }.Value", equalTo("yes"))
+                .body("Tags.find { it.Key == 'obsolete' }", equalTo(null));
+        call("DeletePortfolio", "{\"Id\":\"" + id + "\"}").then().statusCode(200);
+        call("DescribePortfolio", "{\"Id\":\"" + id + "\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void productLifecycleUsesAwsArtifactAndTagShapes() {
+        call("DescribeProductAsAdmin", "{\"Name\":\"product-wire-lifecycle\"}")
+                .then().statusCode(400).body("__type", equalTo("ResourceNotFoundException"));
+        String request = """
+                {"Name":"product-wire-lifecycle","Owner":"platform","Description":"initial",
+                 "ProductType":"CLOUD_FORMATION_TEMPLATE","IdempotencyToken":"product-wire-lifecycle",
+                 "ProvisioningArtifactParameters":{"Name":"release-1","Description":"initial version",
+                   "Type":"CLOUD_FORMATION_TEMPLATE","Info":{"LoadTemplateFromURL":"https://templates.s3.us-east-1.amazonaws.com/product.json"}},
+                 "Tags":[{"Key":"owner","Value":"platform"},{"Key":"purpose","Value":"initial"},
+                         {"Key":"obsolete","Value":"remove"}]}
+                """;
+        Response created = call("CreateProduct", request);
+        String id = created.then().statusCode(200)
+                .body("ProductViewDetail.ProductViewSummary.Type", equalTo("CLOUD_FORMATION_TEMPLATE"))
+                .body("ProductViewDetail.ProductViewSummary.ShortDescription", equalTo("initial"))
+                .body("ProvisioningArtifactDetail.Name", equalTo("release-1"))
+                .extract().path("ProductViewDetail.ProductViewSummary.ProductId");
+        String artifactId = created.path("ProvisioningArtifactDetail.Id");
+        String arn = created.path("ProductViewDetail.ProductARN");
+        assertNotNull(arn);
+        call("CreateProduct", request).then().statusCode(200)
+                .body("ProductViewDetail.ProductViewSummary.ProductId", equalTo(id))
+                .body("ProvisioningArtifactDetail.Id", equalTo(artifactId));
+        call("DescribeProductAsAdmin", "{\"Name\":\"product-wire-lifecycle\"}")
+                .then().statusCode(200)
+                .body("ProductViewDetail.ProductARN", equalTo(arn))
+                .body("ProvisioningArtifactSummaries[0].Id", equalTo(artifactId))
+                .body("ProvisioningArtifactSummaries[0].Description", equalTo("initial version"))
+                .body("Tags.find { it.Key == 'owner' }.Value", equalTo("platform"));
+        String update = """
+                {"Id":"%s","Owner":"new-owner","SupportEmail":"support@example.com",
+                 "Description":"updated","AddTags":[{"Key":"purpose","Value":"updated"}],
+                 "RemoveTags":["obsolete"]}
+                """.formatted(id);
+        call("UpdateProduct", update).then().statusCode(200);
+        call("UpdateProduct", update).then().statusCode(200);
+        call("UpdateProvisioningArtifact", """
+                {"ProductId":"%s","ProvisioningArtifactId":"%s","Description":"updated version"}
+                """.formatted(id, artifactId)).then().statusCode(200);
+        call("DescribeProductAsAdmin", "{\"Id\":\"" + id + "\"}").then().statusCode(200)
+                .body("ProductViewDetail.ProductViewSummary.ProductId", equalTo(id))
+                .body("ProductViewDetail.ProductARN", equalTo(arn))
+                .body("ProductViewDetail.ProductViewSummary.Owner", equalTo("new-owner"))
+                .body("ProductViewDetail.ProductViewSummary.ShortDescription", equalTo("updated"))
+                .body("ProductViewDetail.ProductViewSummary.SupportEmail", equalTo("support@example.com"))
+                .body("ProvisioningArtifactSummaries[0].Description", equalTo("updated version"))
+                .body("Tags.size()", equalTo(2))
+                .body("Tags.find { it.Key == 'owner' }.Value", equalTo("platform"))
+                .body("Tags.find { it.Key == 'purpose' }.Value", equalTo("updated"));
+        call("SearchProductsAsAdmin", "{}").then().statusCode(200)
+                .body("ProductViewDetails.find { it.ProductViewSummary.ProductId == '" + id + "' }.ProductARN",
+                        equalTo(arn));
+        call("DeleteProduct", "{\"Id\":\"" + id + "\"}").then().statusCode(200);
+        call("DescribeProductAsAdmin", "{\"Id\":\"" + id + "\"}").then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
     }
 
     @Test

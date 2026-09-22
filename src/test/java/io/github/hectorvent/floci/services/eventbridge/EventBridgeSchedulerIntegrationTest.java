@@ -305,6 +305,12 @@ class EventBridgeSchedulerIntegrationTest {
             public DnsConfig dns() {
                 return new DnsConfig() {
                     @Override
+                    public boolean sourceEnabled() { return false; }
+                    @Override
+                    public int sourcePort() { return 0; }
+                    @Override
+                    public String sourceHelperImage() { return "floci/source-network-helper:local"; }
+                    @Override
                     public Optional<List<String>> extraSuffixes() { return Optional.empty(); }
                     @Override
                     public boolean containerFallbackEnabled() { return true; }

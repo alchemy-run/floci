@@ -113,7 +113,7 @@ class EksImdsDockerIntegrationTest {
         eksClusterManager.configureLinkLocalMetadataEndpoint(cluster, containerId);
 
         // IMDSv2 token test
-        String tokenCmd = "curl -s -f -X PUT http://169.254.169.254/latest/api/token -H 'x-aws-ec2-metadata-token-ttl-seconds: 21600'";
+        String tokenCmd = "curl -s --fail-with-body -X PUT http://169.254.169.254/latest/api/token -H 'x-aws-ec2-metadata-token-ttl-seconds: 21600'";
         String token = execInContainer(containerId, new String[]{"sh", "-c", tokenCmd});
         assertNotNull(token, "IMDSv2 token response should not be null");
         assertTrue(!token.isBlank(), "IMDSv2 token should not be blank");
@@ -144,6 +144,21 @@ class EksImdsDockerIntegrationTest {
                 """;
         ExecResult podResult = execInContainerWithExitCode(containerId, new String[]{"sh", "-c", podIsolationCmd});
         assertNotEquals(0L, podResult.exitCode(), "IMDS should not be reachable from an isolated pod network namespace");
+        assertEquals("600", execInContainer(containerId,
+                new String[]{"stat", "-c", "%a", "/var/lib/floci-imds-proxy.json"}).trim());
+        String spoofed = execInContainer(containerId, new String[]{"curl", "-fsS",
+                "-H", "X-Floci-IMDS-Capability: attacker-supplied",
+                "http://169.254.169.254/latest/meta-data/instance-id"});
+        assertEquals(instanceId.trim(), spoofed.trim());
+        String directStatus = execInContainer(containerId, new String[]{"curl", "-sS", "-o", "/dev/null",
+                "-w", "%{http_code}", "http://host.docker.internal:" + config.services().ec2().imdsPort()
+                + "/latest/meta-data/instance-id"}).trim();
+        assertTrue(List.of("401", "404").contains(directStatus), "Direct metadata access must require proxy identity");
+        eksClusterManager.unregisterMetadataEndpoint(cluster);
+        String revokedStatus = execInContainer(containerId, new String[]{"curl", "-sS", "-o", "/dev/null",
+                "-w", "%{http_code}", "-H", "x-aws-ec2-metadata-token: " + token.trim(),
+                "http://169.254.169.254/latest/meta-data/instance-id"}).trim();
+        assertEquals("401", revokedStatus);
     }
 
     private boolean isDockerAvailable() {
@@ -192,7 +207,8 @@ class EksImdsDockerIntegrationTest {
     private String execInContainer(String containerId, String[] cmd) throws Exception {
         ExecResult result = execInContainerWithExitCode(containerId, cmd);
         if (result.exitCode() != 0) {
-            throw new RuntimeException("exec failed with code " + result.exitCode() + ": " + result.stderr());
+            throw new RuntimeException("exec failed with code " + result.exitCode()
+                    + ": " + result.stderr() + "\n" + result.stdout());
         }
         return result.stdout();
     }

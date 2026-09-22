@@ -146,6 +146,86 @@ class S3DeleteObjectsIntegrationTest {
             .body(not(containsString(versionId)));
     }
 
+    @Test
+    void deleteObjects_listedNullVersionsWithNamespacedQuietRequestEmptiesBucket() {
+        String bucket = createBucket();
+        putObject(bucket, "nested/first.txt");
+        putObject(bucket, "second.txt");
+
+        given().when().delete("/" + bucket).then().statusCode(409)
+                .body(containsString("<Code>BucketNotEmpty</Code>"));
+        given().when().get("/" + bucket + "?versions").then().statusCode(200)
+                .body(containsString("<VersionId>null</VersionId>"));
+
+        given()
+            .contentType("application/xml")
+            .body("""
+                    <Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                      <Object><Key>nested/first.txt</Key><VersionId>null</VersionId></Object>
+                      <Object><Key>second.txt</Key><VersionId>null</VersionId></Object>
+                      <Quiet>true</Quiet>
+                    </Delete>
+                    """)
+        .when()
+            .post("/" + bucket + "?delete")
+        .then()
+            .statusCode(200)
+            .body(not(containsString("<Deleted>")))
+            .body(not(containsString("<Error>")));
+
+        assertEmptyAndDeleteBucket(bucket);
+    }
+
+    @Test
+    void deleteObject_explicitNullVersionPermanentlyDeletesUnversionedObject() {
+        String bucket = createBucket();
+        putObject(bucket, "file.txt");
+        enableVersioning(bucket);
+
+        given().queryParam("versionId", "null").when().delete("/" + bucket + "/file.txt")
+                .then().statusCode(204);
+        given().queryParam("versionId", "null").when().delete("/" + bucket + "/file.txt")
+                .then().statusCode(204);
+
+        assertEmptyAndDeleteBucket(bucket);
+    }
+
+    @Test
+    void deleteObjects_quietRequestReportsRetentionErrors() {
+        String bucket = createBucket();
+        enableVersioning(bucket);
+        String versionId = putGovernanceLockedObject(bucket, "locked.txt");
+        String body = """
+                <Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                  <Object><Key>locked.txt</Key><VersionId>%s</VersionId></Object>
+                  <Quiet>true</Quiet>
+                </Delete>
+                """.formatted(versionId);
+
+        given().contentType("application/xml").body(body)
+                .when().post("/" + bucket + "?delete").then().statusCode(200)
+                .body(containsString("<Code>AccessDenied</Code>"))
+                .body(not(containsString("<Deleted>")));
+        given().when().get("/" + bucket + "/locked.txt").then().statusCode(200);
+        given().when().delete("/" + bucket).then().statusCode(409);
+
+        given().header("x-amz-bypass-governance-retention", "true")
+                .contentType("application/xml").body(body)
+                .when().post("/" + bucket + "?delete").then().statusCode(200)
+                .body(not(containsString("<Error>")));
+        assertEmptyAndDeleteBucket(bucket);
+    }
+
+    private static void assertEmptyAndDeleteBucket(String bucket) {
+        given().when().get("/" + bucket + "?versions").then().statusCode(200)
+                .body(not(containsString("<Version>")))
+                .body(not(containsString("<DeleteMarker>")));
+        given().when().get("/" + bucket + "?list-type=2").then().statusCode(200)
+                .body(not(containsString("<Contents>")));
+        given().when().delete("/" + bucket).then().statusCode(204);
+        given().when().head("/" + bucket).then().statusCode(404);
+    }
+
     private static String createBucket() {
         String bucket = "delete-objects-" + UUID.randomUUID().toString().substring(0, 8);
         given()

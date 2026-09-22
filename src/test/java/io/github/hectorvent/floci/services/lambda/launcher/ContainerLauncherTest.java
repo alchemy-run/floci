@@ -16,6 +16,7 @@ import com.github.dockerjava.api.model.StreamType;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerReachableEndpoint;
@@ -76,6 +77,7 @@ class ContainerLauncherTest {
     @Mock ImageResolver imageResolver;
     @Mock RuntimeApiServerFactory runtimeApiServerFactory;
     @Mock DockerHostResolver dockerHostResolver;
+    @Mock ContainerDetector containerDetector;
     @Mock EmulatorConfig config;
     @Mock EcrRegistryManager ecrRegistryManager;
     @Mock EmbeddedDnsServer embeddedDnsServer;
@@ -133,7 +135,7 @@ class ContainerLauncherTest {
                 new ContainerReachableEndpoint(config, dockerHostResolver, embeddedDnsServer);
         LaunchedContainerAwsEnv awsEnv = new LaunchedContainerAwsEnv(reachableEndpoint);
         launcher = new ContainerLauncher(containerBuilder, lifecycleManager, logStreamer, imageResolver,
-                runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
+                runtimeApiServerFactory, dockerHostResolver, containerDetector, config, ecrRegistryManager,
                 mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv,
                 executionRoleCredentials);
 
@@ -679,31 +681,59 @@ class ContainerLauncherTest {
         verify(executionRoleCredentials).unregister("222233334444", "ASIAROLEKEY");
     }
 
-    @Test
-    void launchFunction_rewritesLoopbackCollectorUrlsOntoDockerHost() throws Exception {
-        Path codePath = Files.createDirectory(tempDir.resolve("otel-loopback"));
-
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void launchFunction_routesEnvironmentUrlsBeforeRuntimeSigning(boolean runningInContainer) throws Exception {
+        when(containerDetector.isRunningInContainer()).thenReturn(runningInContainer);
+        when(dockerHostResolver.resolve()).thenReturn(runningInContainer ? "172.24.0.2" : "host.docker.internal");
+        when(config.port()).thenReturn(14566);
+        Path codePath = Files.createDirectory(tempDir.resolve("routing"));
+        String graphqlUrl = "https://gql123.appsync-api.eu-west-1.localhost.floci.io:8443/graphql";
+        Map<String, String> environment = Map.of(
+                "COLLECTOR_URL", "http://localhost:8787",
+                "EXPORTERS", "[{\"traces\":{\"url\":\"http://127.0.0.1:8787/v1/traces\"}}]",
+                "WS_URL", "wss://abc123.execute-api.us-east-1.amazonaws.com/test",
+                "CALLBACK_URL", "https://abc123.execute-api.us-east-1.amazonaws.com/test",
+                "GRAPHQL_URL", graphqlUrl);
         LambdaFunction fn = new LambdaFunction();
-        fn.setFunctionName("otel-fn");
+        fn.setFunctionName("routing-fn");
         fn.setRuntime("nodejs20.x");
         fn.setHandler("index.handler");
         fn.setCodeLocalPath(codePath.toString());
-        fn.setEnvironment(Map.of(
-                "COLLECTOR_URL", "http://localhost:8787",
-                "ALCHEMY_OTEL_EXPORTERS",
-                "[{\"traces\":{\"url\":\"http://127.0.0.1:8787/v1/traces\"}}]",
-                "WS_URL", "wss://abc123.execute-api.us-east-1.amazonaws.com/test",
-                "CALLBACK_URL", "https://abc123.execute-api.us-east-1.amazonaws.com/test"));
+        fn.setEnvironment(environment);
 
         launcher.launch(fn);
 
         List<String> env = captureRealContainerSpec().env();
+        String callbackHost = runningInContainer ? "localhost.floci.io" : "host.docker.internal";
         assertTrue(env.contains("COLLECTOR_URL=http://host.docker.internal:8787"));
         assertTrue(env.contains(
-                "ALCHEMY_OTEL_EXPORTERS=[{\"traces\":{\"url\":\"http://host.docker.internal:8787/v1/traces\"}}]"));
-        assertTrue(env.contains("WS_URL=wss://127.0.0.1:4566/ws/abc123/test"));
-        assertTrue(env.contains(
-                "CALLBACK_URL=https://localhost.floci.io:4566/execute-api/abc123/test"));
+                "EXPORTERS=[{\"traces\":{\"url\":\"http://host.docker.internal:8787/v1/traces\"}}]"));
+        assertTrue(env.contains("WS_URL=wss://127.0.0.1:14566/ws/abc123/test"));
+        assertTrue(env.contains("CALLBACK_URL=https://" + callbackHost + ":14566/execute-api/abc123/test"));
+        assertTrue(env.contains("GRAPHQL_URL=" + (runningInContainer ? graphqlUrl
+                : "https://host.docker.internal:8443/v1/apis/gql123/graphql")));
+        assertEquals(environment, fn.getEnvironment());
+    }
+
+    @Test
+    void launchFunction_routesSourceEnvironmentUrlsThroughResolvedHostOverride() throws Exception {
+        when(dockerHostResolver.resolve()).thenReturn("floci.internal");
+        Path codePath = Files.createDirectory(tempDir.resolve("routing-override"));
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("routing-override-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setCodeLocalPath(codePath.toString());
+        fn.setEnvironment(Map.of(
+                "GRAPHQL_URL", "http://gql123.appsync-api.us-east-1.localhost.floci.io:4566/graphql",
+                "CALLBACK_URL", "https://abc123.execute-api.us-east-1.amazonaws.com:8443/test"));
+
+        launcher.launch(fn);
+
+        List<String> env = captureRealContainerSpec().env();
+        assertTrue(env.contains("GRAPHQL_URL=http://floci.internal:4566/v1/apis/gql123/graphql"));
+        assertTrue(env.contains("CALLBACK_URL=https://floci.internal:8443/execute-api/abc123/test"));
     }
 
     @Test
@@ -943,12 +973,13 @@ class ContainerLauncherTest {
                 "IPv6 addresses (containing colons) must survive the hostname/ip split");
         assertTrue(extraHosts.contains("v6end.internal:fd00::"),
                 "IPv6 addresses ending in :: must not be classified as missing an ip");
-        assertEquals(4, extraHosts.size(),
-                "entries without a hostname and an ip must be skipped, not passed to Docker");
+        assertTrue(extraHosts.contains("localhost.floci.io:host-gateway"));
+        assertEquals(5, extraHosts.size(),
+                "only valid configured entries and the source-mode gateway mapping should be present");
     }
 
     @Test
-    void launchFunction_noExtraHostsByDefault() throws Exception {
+    void launchFunction_sourceModeAddsSharedGatewayHostByDefault() throws Exception {
         Path codePath = Files.createDirectory(tempDir.resolve("no-extra-hosts"));
 
         LambdaFunction fn = new LambdaFunction();
@@ -959,8 +990,59 @@ class ContainerLauncherTest {
 
         launcher.launch(fn);
 
-        assertTrue(captureRealContainerSpec().extraHosts().isEmpty(),
-                "no extra hosts when the config is unset (non-Linux host in this test)");
+        assertEquals(List.of("localhost.floci.io:host-gateway"), captureRealContainerSpec().extraHosts(),
+                "source mode maps the shared hostname without changing localhost itself");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void launchFunctionUsesSharedUnsignedGatewayAndTopologySpecificDns(boolean runningInContainer) throws Exception {
+        when(containerDetector.isRunningInContainer()).thenReturn(runningInContainer);
+        when(dockerHostResolver.resolve()).thenReturn("host.docker.internal");
+        when(embeddedDnsServer.getServerIp()).thenReturn(Optional.of(
+                runningInContainer ? "172.18.0.4" : "172.18.0.9"));
+        when(embeddedDnsServer.isSourceMode()).thenReturn(!runningInContainer);
+        EmulatorConfig.DnsConfig dnsConfig = mock(EmulatorConfig.DnsConfig.class);
+        lenient().when(config.dns()).thenReturn(dnsConfig);
+
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("network-topology-fn");
+        fn.setCodeLocalPath(Files.createDirectory(tempDir.resolve("network-topology")).toString());
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        String signed = "https://127.0.0.1:4566/bucket/key?X-Amz-Signature=abc%2F123";
+        fn.setEnvironment(Map.of(
+                "ENDPOINT", "https://127.0.0.1:4566/base?x=%2F",
+                "OTLP", "http://localhost:4318/v1/traces",
+                "SYNC", "https://sync-states.us-east-1.amazonaws.com",
+                "SIGNED", signed));
+
+        launcher.launch(fn);
+
+        ContainerSpec spec = captureRealContainerSpec();
+        assertTrue(spec.env().contains("ENDPOINT=https://localhost.floci.io:4566/base?x=%2F"));
+        assertTrue(spec.env().contains("OTLP=http://host.docker.internal:4318/v1/traces"));
+        assertTrue(spec.env().contains("SYNC=https://sync-states.us-east-1.amazonaws.com"));
+        assertTrue(spec.env().contains("SIGNED=" + signed));
+        assertEquals("https://127.0.0.1:4566/base?x=%2F", fn.getEnvironment().get("ENDPOINT"));
+        assertEquals(List.of(runningInContainer ? "172.18.0.4" : "172.18.0.9"), spec.dnsServers());
+        assertEquals(runningInContainer ? List.of()
+                : List.of("localhost.floci.io:host-gateway", "host.docker.internal:host-gateway"), spec.extraHosts());
+    }
+
+    @Test
+    void launchFunctionPreservesConfiguredSharedHostnameMapping() throws Exception {
+        when(config.services().lambda().extraHosts()).thenReturn(
+                Optional.of(List.of("localhost.floci.io:10.0.0.2")));
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("explicit-gateway-fn");
+        fn.setCodeLocalPath(Files.createDirectory(tempDir.resolve("explicit-gateway")).toString());
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+
+        launcher.launch(fn);
+
+        assertEquals(List.of("localhost.floci.io:10.0.0.2"), captureRealContainerSpec().extraHosts());
     }
 
     @Test
@@ -1660,7 +1742,7 @@ class ContainerLauncherTest {
                 new ContainerBuilder(config, dockerHostResolver, embeddedDnsServer),
                 lifecycleManager,
                 new ContainerLogStreamer(dockerClient, cloudWatchLogs),
-                imageResolver, runtimeApiServerFactory, dockerHostResolver, config,
+                imageResolver, runtimeApiServerFactory, dockerHostResolver, containerDetector, config,
                 ecrRegistryManager,
                 mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class),
                 new LaunchedContainerAwsEnv(reachableEndpoint),

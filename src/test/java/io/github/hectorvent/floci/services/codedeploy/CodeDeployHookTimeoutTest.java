@@ -41,7 +41,7 @@ class CodeDeployHookTimeoutTest {
         service.registerOnPremisesInstance(region, "onprem", null, null);
 
         service.createDeployment(region, "app", "group", null,
-                Map.of("appSpecContent", Map.of("content", """
+                Map.of("revisionType", "AppSpecContent", "appSpecContent", Map.of("content", """
                         os: linux
                         hooks:
                           ApplicationStart:
@@ -70,7 +70,7 @@ class CodeDeployHookTimeoutTest {
 
         AwsException error = assertThrows(AwsException.class, () -> service.createDeployment(
                 region, "app", "group", null,
-                Map.of("appSpecContent", Map.of("content", """
+                Map.of("revisionType", "AppSpecContent", "appSpecContent", Map.of("content", """
                         os: linux
                         hooks:
                           ApplicationStart:

@@ -3,10 +3,14 @@ package io.github.hectorvent.floci.services.servicecatalog;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+
 import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
@@ -28,9 +32,31 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/servicecatalog/aws4_request";
 
-    @BeforeAll
-    static void configureRestAssured() {
+    private static final String TEMPLATE_BUCKET = "sc-provision-validation-templates";
+    private static final String S3_AUTH = "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/s3/aws4_request";
+
+    @BeforeEach
+    void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+        given().header("Authorization", S3_AUTH).put("/" + TEMPLATE_BUCKET).then().statusCode(200);
+        given().header("Authorization", S3_AUTH).contentType("application/json").body("""
+                {"Parameters":{"AccountName":{"Type":"String","Default":""},
+                               "AccountEmail":{"Type":"String","Default":""}},
+                 "Resources":{"Handle":{"Type":"AWS::CloudFormation::WaitConditionHandle"}}}
+                """).put("/" + TEMPLATE_BUCKET + "/template.json").then().statusCode(200);
+    }
+
+    @AfterEach
+    void deleteTemplate() {
+        given().header("Authorization", S3_AUTH).delete("/" + TEMPLATE_BUCKET + "/template.json")
+                .then().statusCode(204);
+        given().header("Authorization", S3_AUTH).delete("/" + TEMPLATE_BUCKET).then().statusCode(204);
+    }
+
+    private static void awaitRecord(String recordId) {
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
+                call("DescribeRecord", "{\"Id\":\"" + recordId + "\"}").then().statusCode(200)
+                        .body("RecordDetail.Status", equalTo("SUCCEEDED")));
     }
 
     private static Response call(String target, String action, String body) {
@@ -65,7 +91,8 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
 
     private static String createProduct(String name) {
         return call("CreateProduct", "{\"Name\":\"" + name + "\",\"Owner\":\"floci-test\","
-                + "\"ProvisioningArtifactParameters\":[{\"Name\":\"v1\"}]}")
+                + "\"ProductType\":\"CLOUD_FORMATION_TEMPLATE\",\"ProvisioningArtifactParameters\":{\"Name\":\"v1\","
+                + "\"Info\":{\"LoadTemplateFromURL\":\"https://" + TEMPLATE_BUCKET + ".s3.us-east-1.amazonaws.com/template.json\"}}}")
                 .then().statusCode(200)
                 .extract().path("ProductViewDetail.ProductViewSummary.Id");
     }
@@ -163,12 +190,11 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
         String artifactId = firstArtifactId(productId);
         String email = "ab-plain-product@floci.test";
 
-        call("ProvisionProduct", "{\"ProductId\":\"" + productId + "\","
+        String recordId = call("ProvisionProduct", "{\"ProductId\":\"" + productId + "\","
                 + "\"ProvisioningArtifactId\":\"" + artifactId + "\","
                 + accountFactoryParameters("ab-provision-plain", email) + "}")
-        .then()
-            .statusCode(200)
-            .body("RecordDetail.Status", equalTo("SUCCEEDED"));
+                .then().statusCode(200).extract().path("RecordDetail.RecordId");
+        awaitRecord(recordId);
 
         call("DescribeProvisionedProduct", "{\"Name\":\"ab-provision-plain\"}")
         .then()
@@ -179,10 +205,10 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
 
         assertNoAccountWithEmail(email);
 
-        call("TerminateProvisionedProduct", "{\"ProvisionedProductName\":\"ab-provision-plain\","
+        String terminationRecordId = call("TerminateProvisionedProduct", "{\"ProvisionedProductName\":\"ab-provision-plain\","
                 + "\"TerminateToken\":\"tok-terminate-plain\"}")
-        .then()
-            .statusCode(200);
+                .then().statusCode(200).extract().path("RecordDetail.RecordId");
+        awaitRecord(terminationRecordId);
     }
 
     /**
@@ -213,18 +239,17 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
         String productId = createProduct("ab-provision-no-email-plain-product");
         String artifactId = firstArtifactId(productId);
 
-        call("ProvisionProduct", "{\"ProductId\":\"" + productId + "\","
+        String recordId = call("ProvisionProduct", "{\"ProductId\":\"" + productId + "\","
                 + "\"ProvisioningArtifactId\":\"" + artifactId + "\","
                 + "\"ProvisionedProductName\":\"ab-provision-no-email-plain\","
                 + "\"ProvisionToken\":\"tok-no-email-plain\"}")
-        .then()
-            .statusCode(200)
-            .body("RecordDetail.Status", equalTo("SUCCEEDED"));
+                .then().statusCode(200).extract().path("RecordDetail.RecordId");
+        awaitRecord(recordId);
 
-        call("TerminateProvisionedProduct", "{\"ProvisionedProductName\":\"ab-provision-no-email-plain\","
+        String terminationRecordId = call("TerminateProvisionedProduct", "{\"ProvisionedProductName\":\"ab-provision-no-email-plain\","
                 + "\"TerminateToken\":\"tok-terminate-no-email-plain\"}")
-        .then()
-            .statusCode(200);
+                .then().statusCode(200).extract().path("RecordDetail.RecordId");
+        awaitRecord(terminationRecordId);
     }
 
     @Test

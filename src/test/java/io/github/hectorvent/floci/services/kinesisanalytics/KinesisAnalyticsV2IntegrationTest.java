@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.kinesisanalytics;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.config.JsonPathConfig;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -44,6 +45,59 @@ class KinesisAnalyticsV2IntegrationTest {
             .body("ApplicationDetail.ApplicationName", equalTo(name))
             .body("ApplicationDetail.ApplicationStatus", equalTo("READY"))
             .body("ApplicationDetail.ApplicationARN", startsWith("arn:aws:kinesisanalytics:"));
+    }
+
+    @Test
+    void metadataRoutesUseAwsJsonEnvelopesAndTypedErrors() {
+        String name = "it-metadata-protocol";
+        String request = "{\"ApplicationName\":\"" + name + "\"}";
+        createApplication(name);
+        String timestamp = metadataRequest("DescribeApplication", request).statusCode(200)
+                .extract().jsonPath(new JsonPathConfig(JsonPathConfig.NumberReturnType.BIG_DECIMAL))
+                .getString("ApplicationDetail.CreateTimestamp");
+        try {
+            metadataRequest("ListApplicationVersions", request).statusCode(200)
+                    .body("ApplicationVersionSummaries.size()", equalTo(1))
+                    .body("ApplicationVersionSummaries[0].ApplicationVersionId", equalTo(1));
+            metadataRequest("DescribeApplicationVersion", """
+                    {"ApplicationName":"it-metadata-protocol","ApplicationVersionId":1}
+                    """).statusCode(200)
+                    .body("ApplicationVersionDetail.ApplicationVersionId", equalTo(1));
+            metadataRequest("ListApplicationOperations", request).statusCode(200)
+                    .body("ApplicationOperationInfoList.size()", equalTo(0));
+            metadataRequest("UpdateApplicationMaintenanceConfiguration", """
+                    {"ApplicationName":"it-metadata-protocol","ApplicationMaintenanceConfigurationUpdate":{
+                      "ApplicationMaintenanceWindowStartTimeUpdate":"02:00"}}
+                    """).statusCode(200)
+                    .body("ApplicationMaintenanceConfigurationDescription.ApplicationMaintenanceWindowStartTime", equalTo("02:00"))
+                    .body("ApplicationMaintenanceConfigurationDescription.ApplicationMaintenanceWindowEndTime", equalTo("10:00"));
+            String id = metadataRequest("AddApplicationCloudWatchLoggingOption", """
+                    {"ApplicationName":"it-metadata-protocol","CurrentApplicationVersionId":1,
+                     "CloudWatchLoggingOption":{"LogStreamARN":"arn:aws:logs:us-east-1:000000000000:log-group:app:log-stream:errors"}}
+                    """).statusCode(200).body("ApplicationVersionId", equalTo(2))
+                    .extract().path("CloudWatchLoggingOptionDescriptions[0].CloudWatchLoggingOptionId");
+            metadataRequest("DeleteApplicationCloudWatchLoggingOption", """
+                    {"ApplicationName":"it-metadata-protocol","CurrentApplicationVersionId":1,
+                     "CloudWatchLoggingOptionId":"%s"}
+                    """.formatted(id)).statusCode(400)
+                    .body("__type", equalTo("ConcurrentModificationException"));
+            metadataRequest("DeleteApplicationCloudWatchLoggingOption", """
+                    {"ApplicationName":"it-metadata-protocol","CurrentApplicationVersionId":2,
+                     "CloudWatchLoggingOptionId":"%s"}
+                    """.formatted(id)).statusCode(200)
+                    .body("CloudWatchLoggingOptionDescriptions.size()", equalTo(0));
+            metadataRequest("DescribeApplicationOperation", """
+                    {"ApplicationName":"it-metadata-protocol","OperationId":"missing"}
+                    """).statusCode(400).body("__type", equalTo("ResourceNotFoundException"));
+        } finally {
+            metadataRequest("DeleteApplication", "{\"ApplicationName\":\"" + name
+                    + "\",\"CreateTimestamp\":" + timestamp + "}").statusCode(200);
+        }
+    }
+
+    private ValidatableResponse metadataRequest(String action, String body) {
+        return given().header("X-Amz-Target", "KinesisAnalytics_20180523." + action)
+                .contentType(CONTENT_TYPE).body(body).when().post("/").then();
     }
 
     @Test

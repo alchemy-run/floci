@@ -38,6 +38,8 @@ describe('S3 Tables lifecycle', () => {
   const namespace = 'analytics';
   let tableName = uniqueName('events');
   let versionToken: string;
+  let tableArn: string;
+  let warehouseLocation: string;
 
   beforeAll(() => {
     client = makeClient(S3TablesClient);
@@ -77,7 +79,8 @@ describe('S3 Tables lifecycle', () => {
       tags: { suite: 'sdk-node' },
     }));
     versionToken = table.versionToken!;
-    expect(table.tableARN).toBe(`${bucketArn}/table/${tableName}`);
+    tableArn = table.tableARN!;
+    expect(tableArn).toMatch(new RegExp(`^${bucketArn}/table/[0-9a-f-]{36}$`));
   });
 
   it('gets resources and applies list prefixes', async () => {
@@ -95,7 +98,9 @@ describe('S3 Tables lifecycle', () => {
     const tables = await client.send(new ListTablesCommand({ tableBucketARN: bucketArn, namespace, prefix: 'events' }));
     expect(tables.tables?.some((table) => table.name === tableName)).toBe(true);
     const table = await client.send(new GetTableCommand({ tableBucketARN: bucketArn, namespace, name: tableName }));
-    expect(table.tableARN).toBe(`${bucketArn}/table/${tableName}`);
+    expect(table.tableARN).toBe(tableArn);
+    warehouseLocation = table.warehouseLocation!;
+    expect(warehouseLocation).toMatch(/^s3:\/\//);
   });
 
   it('round-trips policies and metadata version tokens', async () => {
@@ -170,6 +175,8 @@ describe('S3 Tables lifecycle', () => {
       name: renamedTableName,
     }));
     expect(renamed.name).toBe(renamedTableName);
+    expect(renamed.tableARN).toBe(tableArn);
+    expect(renamed.warehouseLocation).toBe(warehouseLocation);
     expect(renamed.versionToken).not.toBe(originalToken);
     await expect(client.send(new GetTableCommand({ tableBucketARN: bucketArn, namespace, name: tableName })))
       .rejects.toBeInstanceOf(NotFoundException);

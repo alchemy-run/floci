@@ -2,10 +2,10 @@ package io.github.hectorvent.floci.services.cloudfront;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.cloudfront.CloudFrontResolvedOrigin.AccessControl;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import io.github.hectorvent.floci.services.cloudfront.model.DistributionConfig;
 import io.github.hectorvent.floci.services.cloudfront.model.Origin;
-import io.github.hectorvent.floci.services.cloudfront.model.OriginAccessControl;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
@@ -210,11 +210,29 @@ public class CloudFrontServingController {
         return toResponse(origin, includeBody, directives);
     }
 
+    /** CloudFront rejects ports in DomainName; this loopback form is an emulator-only dev origin. */
+    public static boolean isLocalDevOrigin(String authority) {
+        return CloudFrontOriginHttpClient.isLocalDevOrigin(authority);
+    }
+
+    public Response forwardEdgeLocalDevOrigin(String authority, URI target, String method,
+                                              Map<String, String> headers, byte[] body) throws Exception {
+        try (CloudFrontOriginHttpClient localClient =
+                     CloudFrontOriginHttpClient.forLocalDevOrigin(authority, target.getHost())) {
+            return forwardEdgeCustomOrigin(localClient, target, method, headers, body);
+        }
+    }
+
     public Response forwardEdgeCustomOrigin(URI target, String method, Map<String, String> headers, byte[] body)
             throws Exception {
+        return forwardEdgeCustomOrigin(httpClient, target, method, headers, body);
+    }
+
+    private Response forwardEdgeCustomOrigin(CloudFrontOriginHttpClient client, URI target, String method,
+                                              Map<String, String> headers, byte[] body) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(target).timeout(Duration.ofSeconds(30))
                 .method(method, HttpRequest.BodyPublishers.noBody()).build();
-        HttpResponse<byte[]> response = httpClient.send(
+        HttpResponse<byte[]> response = client.send(
                 request, headers, HttpResponse.BodyHandlers.ofByteArray(), body);
         byte[] data = response.body() != null ? response.body() : new byte[0];
         boolean includeBody = !"HEAD".equals(method);
@@ -224,8 +242,9 @@ public class CloudFrontServingController {
                 response.headers().map()), includeBody, null);
     }
 
-    public Response serveEdgeS3Origin(Distribution distribution, Origin origin, String rawPath,
+    public Response serveEdgeS3Origin(Distribution distribution, CloudFrontResolvedOrigin resolved, String rawPath,
                                       String method, Map<String, String> headers) {
+        Origin origin = resolved.origin();
         OriginResponse response;
         if ("OPTIONS".equals(method)) {
             response = fetchS3Preflight(origin, headers.get("origin"),
@@ -233,7 +252,8 @@ public class CloudFrontServingController {
         } else {
             String key = CloudFrontRequestRouter.resolveOriginKey(origin.getOriginPath(),
                     decodedViewerPath(rawPath), distribution.getConfig().getDefaultRootObject());
-            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method));
+            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method),
+                    resolved.accessControl());
         }
         return toResponse(response, !"HEAD".equals(method), null);
     }
@@ -451,6 +471,16 @@ public class CloudFrontServingController {
             String key,
             String viewerAuthorization,
             boolean includeBody) {
+        return fetchFromS3(distribution, origin, key, viewerAuthorization, includeBody, null);
+    }
+
+    private OriginResponse fetchFromS3(
+            Distribution distribution,
+            Origin origin,
+            String key,
+            String viewerAuthorization,
+            boolean includeBody,
+            AccessControl accessControl) {
         String bucket = CloudFrontRequestRouter.bucketFromS3Domain(origin.getDomainName());
         if (bucket == null) {
             return OriginResponse.error(502, "Could not determine S3 bucket for origin.");
@@ -458,7 +488,7 @@ public class CloudFrontServingController {
         OriginResponse response;
         try {
             authorizeS3OriginRead(
-                    distribution, origin, bucket, key, viewerAuthorization);
+                    distribution, origin, bucket, key, viewerAuthorization, accessControl);
             if (includeBody) {
                 S3Object obj = s3Service.getObject(bucket, key);
                 byte[] data = obj.getData() != null ? obj.getData() : new byte[0];
@@ -481,20 +511,24 @@ public class CloudFrontServingController {
             Origin origin,
             String bucket,
             String key,
-            String viewerAuthorization) {
+            String viewerAuthorization,
+            AccessControl accessControl) {
         String oacId = origin.getOriginAccessControlId();
-        if (oacId != null && !oacId.isBlank()) {
-            OriginAccessControl oac = service.getOriginAccessControl(oacId);
-            String signingBehavior = oac.getSigningBehavior();
-            boolean viewerSigned = viewerAuthorization != null && !viewerAuthorization.isBlank();
-            boolean cloudFrontSigns = "always".equalsIgnoreCase(signingBehavior)
-                    || ("no-override".equalsIgnoreCase(signingBehavior) && !viewerSigned);
+        if (accessControl == null && oacId != null && !oacId.isBlank()) {
+            accessControl = AccessControl.configured(service.getOriginAccessControl(oacId));
+        }
+        if (accessControl != null) {
+            String signingBehavior = accessControl.signingBehavior();
+            // Even an empty Authorization header suppresses no-override signing.
+            boolean viewerSigned = viewerAuthorization != null;
+            boolean cloudFrontSigns = accessControl.enabled() && ("always".equalsIgnoreCase(signingBehavior)
+                    || ("no-override".equalsIgnoreCase(signingBehavior) && !viewerSigned));
             if (cloudFrontSigns) {
                 s3Service.authorizeCloudFrontOacGetObject(
                         bucket, key, distribution.getArn());
                 return;
             }
-            if ("no-override".equalsIgnoreCase(signingBehavior) && viewerSigned) {
+            if (viewerSigned) {
                 s3Service.authorizeCloudFrontViewerGetObject(
                         bucket, key, viewerAuthorization);
                 return;

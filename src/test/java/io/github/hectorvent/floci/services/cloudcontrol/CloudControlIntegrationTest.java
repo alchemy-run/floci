@@ -244,10 +244,8 @@ class CloudControlIntegrationTest {
     }
 
     @Test
-    void getResourceReadsBackATypeTheReadSideDoesNotList() throws InterruptedException {
+    void getResourceReadsTheLiveInternetGateway() throws InterruptedException {
         String ct = "application/x-amz-json-1.0";
-        // AWS::EC2::InternetGateway is provisionable but not one of the listed types, so before
-        // the create-time record existed this GetResource returned ResourceNotFoundException.
         String token = given()
                 .config(config().encoderConfig(encoderConfig().encodeContentTypeAs(ct, TEXT)))
                 .contentType(ct)
@@ -285,6 +283,79 @@ class CloudControlIntegrationTest {
                 .when().post("/")
                 .then().statusCode(200)
                 .body("ProgressEvent.OperationStatus", org.hamcrest.Matchers.equalTo("FAILED"));
+    }
+
+    @Test
+    void ssmLifecycleObservesBackendMutationsAndTracksOnlyRealRequests() throws Exception {
+        String name = "/cloudcontrol/observed-parameter";
+        String type = "AWS::SSM::Parameter";
+        var identity = java.util.Map.of("TypeName", type, "Identifier", name);
+        JsonNode created = jsonCall("CloudApiService.CreateResource", java.util.Map.of("TypeName", type,
+                "DesiredState", MAPPER.writeValueAsString(java.util.Map.of("Name", name, "Type", "String", "Value", "one"))));
+        String token = created.path("ProgressEvent").path("RequestToken").asText();
+        assertEquals(name, awaitIdentifier(token, "application/x-amz-json-1.0", ACCOUNT_A_AUTH));
+        try {
+            assertEquals("one", jsonCall("AmazonSSM.GetParameter", java.util.Map.of("Name", name))
+                    .path("Parameter").path("Value").asText());
+            jsonCall("AmazonSSM.PutParameter", java.util.Map.of("Name", name, "Type", "String", "Value", "external", "Overwrite", true));
+            JsonNode live = jsonCall("CloudApiService.GetResource", identity);
+            assertEquals("external", MAPPER.readTree(live.path("ResourceDescription").path("Properties").asText())
+                    .path("Value").asText());
+            jsonRequest("CloudApiService.UpdateResource", java.util.Map.of("TypeName", type, "Identifier", name,
+                    "PatchDocument", "[{\"op\":\"replace\",\"path\":\"/Value\",\"value\":\"not-written\"},"
+                            + "{\"op\":\"test\",\"path\":\"/Value\",\"value\":\"external\"}]"))
+                    .then().statusCode(400).body("__type", containsString("InvalidRequestException"));
+            assertEquals("external", jsonCall("AmazonSSM.GetParameter", java.util.Map.of("Name", name))
+                    .path("Parameter").path("Value").asText());
+            JsonNode updated = jsonCall("CloudApiService.UpdateResource", java.util.Map.of("TypeName", type, "Identifier", name,
+                    "PatchDocument", "[{\"op\":\"test\",\"path\":\"/Value\",\"value\":\"external\"},"
+                            + "{\"op\":\"replace\",\"path\":\"/Value\",\"value\":\"two\"},"
+                            + "{\"op\":\"add\",\"path\":\"/Tags/team\",\"value\":\"core\"}]"));
+            assertEquals("SUCCESS", updated.path("ProgressEvent").path("OperationStatus").asText());
+            assertEquals("two", jsonCall("AmazonSSM.GetParameter", java.util.Map.of("Name", name))
+                    .path("Parameter").path("Value").asText());
+            JsonNode listed = jsonCall("CloudApiService.ListResources", java.util.Map.of("TypeName", type, "MaxResults", 100));
+            assertTrue(listed.path("ResourceDescriptions").valueStream().anyMatch(r -> name.equals(r.path("Identifier").asText())));
+            JsonNode requests = jsonCall("CloudApiService.ListResourceRequests", java.util.Map.of(
+                    "ResourceRequestStatusFilter", java.util.Map.of("Operations", java.util.List.of("UPDATE")), "MaxResults", 100));
+            assertTrue(requests.path("ResourceRequestStatusSummaries").valueStream()
+                    .anyMatch(r -> updated.path("ProgressEvent").path("RequestToken").asText().equals(r.path("RequestToken").asText())));
+            jsonRequest("CloudApiService.CancelResourceRequest", java.util.Map.of("RequestToken", token))
+                    .then().statusCode(400).body("__type", containsString("ConcurrentModificationException"));
+            jsonRequest("CloudApiService.CancelResourceRequest", java.util.Map.of("RequestToken", "missing-token"))
+                    .then().statusCode(404).body("__type", containsString("RequestTokenNotFoundException"));
+            JsonNode deleted = jsonCall("CloudApiService.DeleteResource", identity);
+            assertEquals("SUCCESS", deleted.path("ProgressEvent").path("OperationStatus").asText());
+            jsonRequest("CloudApiService.GetResource", identity).then().statusCode(404);
+            jsonRequest("AmazonSSM.GetParameter", java.util.Map.of("Name", name)).then().statusCode(400)
+                    .body("__type", containsString("ParameterNotFound"));
+        } finally {
+            jsonRequest("AmazonSSM.DeleteParameter", java.util.Map.of("Name", name));
+        }
+    }
+
+    @Test
+    void cloudControlDiscoversAndLosesExternallyManagedParameters() throws Exception {
+        String name = "/cloudcontrol/external-parameter";
+        jsonCall("AmazonSSM.PutParameter", java.util.Map.of("Name", name, "Type", "String", "Value", "external"));
+        var identity = java.util.Map.of("TypeName", "AWS::SSM::Parameter", "Identifier", name);
+        try {
+            assertEquals(name, jsonCall("CloudApiService.GetResource", identity).path("ResourceDescription").path("Identifier").asText());
+        } finally {
+            jsonCall("AmazonSSM.DeleteParameter", java.util.Map.of("Name", name));
+        }
+        jsonRequest("CloudApiService.GetResource", identity).then().statusCode(404);
+    }
+
+    private io.restassured.response.Response jsonRequest(String action, Object body) throws JsonProcessingException {
+        String ct = "application/x-amz-json-1.0";
+        return given().config(config().encoderConfig(encoderConfig().encodeContentTypeAs(ct, TEXT)))
+                .contentType(ct).header("Authorization", ACCOUNT_A_AUTH).header("X-Amz-Target", action)
+                .body(MAPPER.writeValueAsString(body)).when().post("/");
+    }
+
+    private JsonNode jsonCall(String action, Object body) throws JsonProcessingException {
+        return MAPPER.readTree(jsonRequest(action, body).then().statusCode(200).extract().asString());
     }
 
     private String createVpcThroughCloudControl(String ct, String auth, String cidr) {

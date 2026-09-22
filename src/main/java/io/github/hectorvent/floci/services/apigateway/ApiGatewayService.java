@@ -43,6 +43,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -50,6 +51,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +59,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
@@ -767,6 +770,10 @@ public class ApiGatewayService {
         Map<String, String> variables = (Map<String, String>) request.get("variables");
         if (variables != null) stage.setVariables(variables);
 
+        @SuppressWarnings("unchecked")
+        Map<String, String> tags = (Map<String, String>) request.get("tags");
+        stage.setTags(ReservedTags.stripApiGatewayReservedTags(tags));
+
         if (Boolean.TRUE.equals(request.get("cacheClusterEnabled"))) {
             stage.setCacheClusterEnabled(true);
             stage.setCacheClusterSize((String) request.getOrDefault("cacheClusterSize", "0.5"));
@@ -891,6 +898,27 @@ public class ApiGatewayService {
         }
     }
 
+    public Map<String, String> getStageTags(String region, String apiId, String stageName) {
+        return new HashMap<>(getStage(region, apiId, stageName).getTags());
+    }
+
+    public void tagStage(String region, String apiId, String stageName, Map<String, String> tags) {
+        Stage stage = getStage(region, apiId, stageName);
+        ReservedTags.rejectApiGatewayReservedTagsOnUpdate(tags);
+        Map<String, String> merged = new HashMap<>(stage.getTags());
+        merged.putAll(tags);
+        stage.setTags(merged);
+        stageStore.put(stageKey(region, apiId, stageName), stage);
+    }
+
+    public void untagStage(String region, String apiId, String stageName, List<String> tagKeys) {
+        Stage stage = getStage(region, apiId, stageName);
+        Map<String, String> remaining = new HashMap<>(stage.getTags());
+        tagKeys.forEach(remaining::remove);
+        stage.setTags(remaining);
+        stageStore.put(stageKey(region, apiId, stageName), stage);
+    }
+
     public void deleteStage(String region, String apiId, String stageName) {
         getStage(region, apiId, stageName);
         stageStore.delete(stageKey(region, apiId, stageName));
@@ -905,8 +933,12 @@ public class ApiGatewayService {
         authorizer.setName((String) request.get("name"));
         authorizer.setType((String) request.get("type"));
         authorizer.setAuthorizerUri((String) request.get("authorizerUri"));
+        authorizer.setAuthType((String) request.get("authType"));
+        authorizer.setAuthorizerCredentials((String) request.get("authorizerCredentials"));
+        authorizer.setIdentityValidationExpression((String) request.get("identityValidationExpression"));
         authorizer.setIdentitySource((String) request.get("identitySource"));
-        authorizer.setAuthorizerResultTtlInSeconds(String.valueOf(request.getOrDefault("authorizerResultTtlInSeconds", "300")));
+        Object ttl = request.get("authorizerResultTtlInSeconds");
+        authorizer.setAuthorizerResultTtlInSeconds(validateAuthorizerTtl(ttl == null ? "300" : ttl.toString()));
         // COGNITO_USER_POOLS authorizers carry the pool ARNs; keep them so get-authorizer reflects them.
         if (request.get("providerARNs") instanceof List<?> arns) {
             List<String> providerArns = new ArrayList<>();
@@ -948,51 +980,63 @@ public class ApiGatewayService {
         String newIdentitySource = authorizer.getIdentitySource();
         String newTtl = authorizer.getAuthorizerResultTtlInSeconds();
         String newType = authorizer.getType();
+        String newAuthType = authorizer.getAuthType();
+        String newCredentials = authorizer.getAuthorizerCredentials();
+        String newValidationExpression = authorizer.getIdentityValidationExpression();
         if (patchOperations != null) {
-        for (Map<String, String> op : patchOperations) {
-            if (op == null) {
-                throw new AwsException("BadRequestException", "Invalid patch operation", 400);
-            }
-            String path = op.get("path");
-            String value = op.get("value");
-            String opType = op.get("op");
-            if (!"add".equals(opType) && !"replace".equals(opType)) {
-                throw new AwsException("BadRequestException", "Invalid operation", 400);
-            }
-            if (path == null || value == null) {
-                throw new AwsException("BadRequestException", "Missing path or value", 400);
-            }
-            if ("/type".equals(path)) {
-                newType = value;
-            } else if ("/name".equals(path)) {
-                newName = value;
-            } else if ("/authorizerUri".equals(path)) {
-                newAuthorizerUri = value;
-            } else if ("/identitySource".equals(path)) {
-                newIdentitySource = value;
-            } else if ("/authorizerResultTtlInSeconds".equals(path)) {
-                // Validate before accepting: the store hands back live objects, and an unparseable TTL
-                // would break serialisation on every later GetAuthorizer/GetAuthorizers.
-                String ttl = value.trim();
-                try {
-                    Integer.parseInt(ttl);
-                } catch (NumberFormatException e) {
-                    throw new AwsException("BadRequestException",
-                            "authorizerResultTtlInSeconds must be an integer", 400);
+            for (Map<String, String> op : patchOperations) {
+                if (op == null) {
+                    throw new AwsException("BadRequestException", "Invalid patch operation", 400);
                 }
-                newTtl = ttl;
-            } else {
-                throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
+                String path = op.get("path");
+                String value = op.get("value");
+                String opType = op.get("op");
+                boolean remove = "remove".equals(opType);
+                if (!"add".equals(opType) && !"replace".equals(opType) && !remove) {
+                    throw new AwsException("BadRequestException", "Invalid operation", 400);
+                }
+                if (path == null || (!remove && value == null)) {
+                    throw new AwsException("BadRequestException", "Missing path or value", 400);
+                }
+                if (remove && !"/identitySource".equals(path) && !"/authorizerResultTtlInSeconds".equals(path)) {
+                    throw new AwsException("BadRequestException", "Invalid operation", 400);
+                }
+                switch (path) {
+                    case "/type" -> newType = value;
+                    case "/name" -> newName = value;
+                    case "/authType" -> newAuthType = value;
+                    case "/authorizerUri" -> newAuthorizerUri = value;
+                    case "/identitySource" -> newIdentitySource = remove ? null : value;
+                    case "/authorizerCredentials" -> newCredentials = value;
+                    case "/identityValidationExpression" -> newValidationExpression = value;
+                    case "/authorizerResultTtlInSeconds" -> newTtl = remove ? "300" : validateAuthorizerTtl(value);
+                    default -> throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
+                }
             }
-        }
         }
         authorizer.setType(newType);
+        authorizer.setAuthType(newAuthType);
         authorizer.setName(newName);
         authorizer.setAuthorizerUri(newAuthorizerUri);
         authorizer.setIdentitySource(newIdentitySource);
         authorizer.setAuthorizerResultTtlInSeconds(newTtl);
+        authorizer.setAuthorizerCredentials(newCredentials);
+        authorizer.setIdentityValidationExpression(newValidationExpression);
         authorizerStore.put(authorizerKey(region, apiId, authorizerId), authorizer);
         return authorizer;
+    }
+
+    private static String validateAuthorizerTtl(String value) {
+        int ttl;
+        try {
+            ttl = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be an integer", 400);
+        }
+        if (ttl < 0 || ttl > 3600) {
+            throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be between 0 and 3600", 400);
+        }
+        return Integer.toString(ttl);
     }
 
     // ──────────────────────────── API Keys ────────────────────────────
@@ -2136,13 +2180,11 @@ public class ApiGatewayService {
         String stage = (String) request.get("stage");
 
         BasePathMapping mapping = new BasePathMapping(basePath, apiId, stage);
+        // New IDs use a separate namespace from the legacy path-encoded IDs.
+        mapping.setApiMappingId("a" + UUID.randomUUID().toString().replace("-", ""));
         synchronized (domainNameLock) {
-            getDomainName(region, domainName);
-            String key = mappingKey(region, domainName, basePath);
-            if (basePathMappingStore.get(key).isPresent()) {
-                throw new AwsException("ConflictException", "Base path already exists for this domain name", 409);
-            }
-            basePathMappingStore.put(key, mapping);
+            requireMappingPathAvailable(region, domainName, basePath, null);
+            basePathMappingStore.put(mappingKey(region, domainName, basePath), mapping);
         }
         LOG.infov("Created mapping for {0} path={1} -> API {2}", domainName, basePath, apiId);
         return mapping;
@@ -2164,15 +2206,19 @@ public class ApiGatewayService {
     }
 
     public BasePathMapping getBasePathMapping(String region, String domainName, String basePath) {
-        String path = (basePath == null || basePath.isEmpty() || "/" .equals(basePath)) ? "(none)" : basePath;
-        return basePathMappingStore.get(mappingKey(region, domainName, path))
-                .orElseThrow(() -> new AwsException("NotFoundException", "Base path mapping not found", 404));
+        synchronized (domainNameLock) {
+            String path = (basePath == null || basePath.isEmpty() || "/" .equals(basePath)) ? "(none)" : basePath;
+            return basePathMappingStore.get(mappingKey(region, domainName, path))
+                    .orElseThrow(() -> new AwsException("NotFoundException", "Base path mapping not found", 404));
+        }
     }
 
     public List<BasePathMapping> getBasePathMappings(String region, String domainName) {
-        getDomainName(region, domainName);
-        String prefix = region + "::" + domainName + "::";
-        return basePathMappingStore.scan(k -> k.startsWith(prefix));
+        synchronized (domainNameLock) {
+            getDomainName(region, domainName);
+            String prefix = region + "::" + domainName + "::";
+            return basePathMappingStore.scan(k -> k.startsWith(prefix));
+        }
     }
 
 
@@ -2185,26 +2231,89 @@ public class ApiGatewayService {
         }
     }
 
-    /**
-     * The mappings on a domain, keyed by the base path each record is stored under.
-     *
-     * <p>That path is the record's identity, and it is not always what the record reports:
-     * {@link BasePathMapping} normalises an empty base path to {@code (none)} in its constructor,
-     * so a record written before writes were canonicalised can sit under the key {@code ""} while
-     * its own field reads {@code (none)}. Anything identifying a record — an id derived from it, a
-     * delete aimed at it — has to use the key rather than the field.
-     */
+    /** Maps exact stored paths to records, preserving distinct legacy root spellings. */
     public Map<String, BasePathMapping> basePathMappingsByStoredPath(String region, String domainName) {
-        getDomainName(region, domainName);
-        String prefix = region + "::" + domainName + "::";
-        Map<String, BasePathMapping> byStoredPath = new LinkedHashMap<>();
-        for (String key : basePathMappingStore.keys()) {
-            if (key.startsWith(prefix)) {
-                basePathMappingStore.get(key)
-                        .ifPresent(mapping -> byStoredPath.put(key.substring(prefix.length()), mapping));
+        synchronized (domainNameLock) {
+            getDomainName(region, domainName);
+            String prefix = region + "::" + domainName + "::";
+            Map<String, BasePathMapping> byStoredPath = new LinkedHashMap<>();
+            for (String key : basePathMappingStore.keys()) {
+                if (key.startsWith(prefix)) {
+                    basePathMappingStore.get(key)
+                            .ifPresent(mapping -> byStoredPath.put(key.substring(prefix.length()), mapping));
+                }
             }
+            return byStoredPath;
         }
-        return byStoredPath;
+    }
+
+    static String legacyApiMappingId(String storedPath) {
+        return "m" + HexFormat.of().formatHex(
+                (storedPath == null ? "" : storedPath).getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String apiMappingId(String storedPath, BasePathMapping mapping) {
+        return mapping.getApiMappingId() == null ? legacyApiMappingId(storedPath) : mapping.getApiMappingId();
+    }
+
+    public record StoredMapping(String storedPath, BasePathMapping mapping) {}
+
+    public StoredMapping getApiMapping(String region, String domainName, String apiMappingId) {
+        synchronized (domainNameLock) {
+            return basePathMappingsByStoredPath(region, domainName).entrySet().stream()
+                    .filter(entry -> apiMappingId(entry.getKey(), entry.getValue()).equals(apiMappingId))
+                    .map(entry -> new StoredMapping(entry.getKey(), entry.getValue()))
+                    .findFirst()
+                    .orElseThrow(() -> new AwsException("NotFoundException",
+                            "Unable to find ApiMapping with ID " + apiMappingId, 404));
+        }
+    }
+
+    public void deleteApiMapping(String region, String domainName, String apiMappingId) {
+        synchronized (domainNameLock) {
+            StoredMapping found = getApiMapping(region, domainName, apiMappingId);
+            deleteBasePathMappingRecord(region, domainName, found.storedPath());
+        }
+    }
+
+    public StoredMapping updateApiMapping(String region, String domainName, String apiMappingId,
+                                          Map<String, Object> request, BiConsumer<String, String> validateTarget) {
+        synchronized (domainNameLock) {
+            StoredMapping found = getApiMapping(region, domainName, apiMappingId);
+            if (request == null || !(request.get("apiId") instanceof String apiId) || apiId.isBlank()) {
+                throw new AwsException("BadRequestException", "apiId is required", 400);
+            }
+            for (String field : List.of("stage", "apiMappingKey")) {
+                if (request.containsKey(field) && !(request.get(field) instanceof String)) {
+                    throw new AwsException("BadRequestException", field + " must be a string", 400);
+                }
+            }
+            String stage = request.containsKey("stage") ? (String) request.get("stage") : found.mapping().getStage();
+            String path = request.containsKey("apiMappingKey")
+                    ? canonicalBasePath((String) request.get("apiMappingKey")) : found.storedPath();
+            if (!path.equals(found.storedPath())) {
+                requireMappingPathAvailable(region, domainName, path, found.storedPath());
+            }
+            validateTarget.accept(apiId, stage);
+
+            BasePathMapping updated = new BasePathMapping(
+                    path.equals(found.storedPath()) ? found.mapping().getBasePath() : path, apiId, stage);
+            updated.setApiMappingId(apiMappingId(found.storedPath(), found.mapping()));
+            basePathMappingStore.put(mappingKey(region, domainName, path), updated);
+            if (!path.equals(found.storedPath())) {
+                basePathMappingStore.delete(mappingKey(region, domainName, found.storedPath()));
+            }
+            return new StoredMapping(path, updated);
+        }
+    }
+
+    private void requireMappingPathAvailable(String region, String domainName, String path, String currentPath) {
+        boolean taken = basePathMappingsByStoredPath(region, domainName).keySet().stream()
+                .anyMatch(existing -> !existing.equals(currentPath)
+                        && canonicalBasePath(existing).equals(canonicalBasePath(path)));
+        if (taken) {
+            throw new AwsException("ConflictException", "Base path already exists for this domain name", 409);
+        }
     }
 
     /**
@@ -2265,10 +2374,10 @@ public class ApiGatewayService {
             }
         }
 
-        mapping.setRestApiId(newRestApiId);
-        mapping.setStage(newStage);
-        basePathMappingStore.put(mappingKey(region, domainName, normalizedPath), mapping);
-        return mapping;
+        BasePathMapping updated = new BasePathMapping(mapping.getBasePath(), newRestApiId, newStage);
+        updated.setApiMappingId(apiMappingId(normalizedPath, mapping));
+        basePathMappingStore.put(mappingKey(region, domainName, normalizedPath), updated);
+        return updated;
     }
 
     // ──────────────────────────── Custom Domain Resolution ────────────────────────────
@@ -2309,7 +2418,10 @@ public class ApiGatewayService {
      */
     public BasePathMapping resolveBasePathMapping(String domainName, String requestPath) {
         // Get all mappings across all regions for this domain
-        List<BasePathMapping> allMappings = basePathMappingStore.scan(k -> k.contains("::" + domainName + "::"));
+        List<BasePathMapping> allMappings;
+        synchronized (domainNameLock) {
+            allMappings = basePathMappingStore.scan(k -> k.contains("::" + domainName + "::"));
+        }
 
         if (allMappings.isEmpty()) {
             return null;

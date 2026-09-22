@@ -11,13 +11,23 @@ import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactDomain;
+import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactPackage;
+import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactPackage.Version;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactRepository;
 import io.github.hectorvent.floci.services.codeartifact.model.ExternalConnection;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +55,8 @@ public class CodeArtifactService implements Resettable {
     private static final Set<String> PACKAGE_FORMATS =
             Set.of("npm", "pypi", "maven", "nuget", "generic", "ruby", "swift", "cargo");
     private static final Set<String> ENDPOINT_TYPES = Set.of("dualstack", "ipv4");
+    private static final Set<String> VERSION_STATUSES =
+            Set.of("Published", "Unfinished", "Unlisted", "Archived", "Disposed");
 
     private static final Pattern DOMAIN_NAME = Pattern.compile("[a-z][a-z0-9\\-]{0,48}[a-z0-9]");
     private static final Pattern REPOSITORY_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._\\-]{1,99}");
@@ -348,6 +360,522 @@ public class CodeArtifactService implements Resettable {
         r.setExternalConnections(connections);
         repositories.putForAccount(owner, key, r);
         return r;
+    }
+
+    public record PackageCoordinate(String region, String domain, String owner, String repository,
+                                    String format, String namespace, String name) {}
+    public record AuthorizationToken(String authorizationToken, long expiration) {}
+    public record AssetDownload(byte[] content, String name, String version, String revision) {}
+    public record VersionMutation(List<String> versions, Map<String, String> revisions, String expectedStatus,
+                                  String targetStatus, boolean allowOverwrite, boolean includeFromUpstream) {}
+
+    public synchronized AuthorizationToken getAuthorizationToken(String region, String domain, String domainOwner,
+                                                                  Long durationSeconds) {
+        validateDomainName(domain);
+        long duration = durationSeconds == null ? 43200 : durationSeconds;
+        if (duration < 900 || duration > 43200) {
+            throw validation("duration must be between 900 and 43200 seconds; session-bound duration 0 requires "
+                    + "an assumed-role session expiration.");
+        }
+        String owner = effectiveOwner(domainOwner);
+        CodeArtifactDomain stored = requireDomain(owner, domainKey(region, domain));
+        byte[] random = new byte[256];
+        new SecureRandom().nextBytes(random);
+        String token = Base64.getEncoder().encodeToString(random);
+        long now = Instant.now().getEpochSecond();
+        long expiration = now + duration;
+        Map<String, Long> tokens = new LinkedHashMap<>(stored.getAuthorizationTokens());
+        tokens.entrySet().removeIf(entry -> entry.getValue() <= now);
+        tokens.put(sha256(token.getBytes(StandardCharsets.UTF_8)), expiration);
+        stored.setAuthorizationTokens(tokens);
+        domains.putForAccount(owner, domainKey(region, domain), stored);
+        return new AuthorizationToken(token, expiration);
+    }
+
+    public boolean isAuthorizationTokenValid(String region, String domain, String domainOwner, String token) {
+        CodeArtifactDomain stored = requireDomain(effectiveOwner(domainOwner), domainKey(region, domain));
+        return token != null && stored.getAuthorizationTokens()
+                .getOrDefault(sha256(token.getBytes(StandardCharsets.UTF_8)), 0L) > Instant.now().getEpochSecond();
+    }
+
+    public synchronized Map<String, Object> publishPackageVersion(PackageCoordinate coordinate, String version,
+                                                                  String asset, byte[] content, String hash,
+                                                                  boolean unfinished) {
+        validatePackageCoordinate(coordinate);
+        if (!"generic".equals(coordinate.format())) {
+            throw validation("PublishPackageVersion supports only the generic format.");
+        }
+        validateComponent(version, "version", 255);
+        validateAssetName(asset);
+        if (content == null) {
+            content = new byte[0];
+        }
+        if (hash == null || !hash.matches("[a-f0-9]{64}") || !sha256(content).equals(hash)) {
+            throw validation("The asset SHA-256 does not match the supplied asset content.");
+        }
+        CodeArtifactRepository repository = packageRepository(coordinate);
+        CodeArtifactPackage pkg = repository.getPackages().get(packageKey(coordinate));
+        if (pkg == null) {
+            pkg = emptyPackage(coordinate);
+        }
+        if ("BLOCK".equals(pkg.restrictions().get("publish"))) {
+            throw new AwsException("AccessDeniedException", "Publishing is blocked for this package.", 403);
+        }
+        Version previous = pkg.versions().get(version);
+        if (previous != null && !"Unfinished".equals(previous.status())) {
+            throw conflict("Only Unfinished package versions can accept additional assets.");
+        }
+        Map<String, byte[]> assets = previous == null ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(previous.assets());
+        byte[] existingAsset = assets.get(asset);
+        if (existingAsset != null && !Arrays.equals(existingAsset, content)) {
+            throw conflict("An asset with this name and different content already exists in the package version.");
+        }
+        assets.put(asset, content.clone());
+        String revision = existingAsset == null ? newRevision() : previous.revision();
+        Version next = new Version(version, revision, unfinished ? "Unfinished" : "Published",
+                Instant.now().getEpochSecond(), coordinate.repository(), assets);
+        Map<String, Version> versions = new LinkedHashMap<>(pkg.versions());
+        versions.put(version, next);
+        savePackage(coordinate, repository, withVersions(pkg, versions));
+        Map<String, Object> result = versionIdentity(pkg, next);
+        result.put("status", next.status());
+        result.put("asset", assetSummary(asset, content));
+        return result;
+    }
+
+    public synchronized Map<String, Object> describePackage(PackageCoordinate coordinate) {
+        return Map.of("package", packageDescription(requirePackage(coordinate), false));
+    }
+
+    public synchronized Map<String, Object> deletePackage(PackageCoordinate coordinate) {
+        CodeArtifactRepository repository = packageRepository(coordinate);
+        CodeArtifactPackage pkg = requirePackage(repository, coordinate);
+        Map<String, CodeArtifactPackage> packages = new LinkedHashMap<>(repository.getPackages());
+        packages.remove(packageKey(coordinate));
+        repository.setPackages(packages);
+        saveRepository(coordinate, repository);
+        return Map.of("deletedPackage", packageDescription(pkg, true));
+    }
+
+    public synchronized Map<String, Object> putPackageOriginConfiguration(PackageCoordinate coordinate,
+                                                                         Map<String, String> restrictions) {
+        if (restrictions == null || restrictions.size() != 2
+                || !Set.of("ALLOW", "BLOCK").contains(restrictions.getOrDefault("publish", ""))
+                || !Set.of("ALLOW", "BLOCK").contains(restrictions.getOrDefault("upstream", ""))) {
+            throw validation("restrictions must specify publish and upstream as ALLOW or BLOCK.");
+        }
+        CodeArtifactRepository repository = packageRepository(coordinate);
+        CodeArtifactPackage pkg = repository.getPackages().getOrDefault(packageKey(coordinate), emptyPackage(coordinate));
+        savePackage(coordinate, repository, new CodeArtifactPackage(pkg.format(), pkg.namespace(), pkg.name(),
+                new LinkedHashMap<>(restrictions), pkg.versions()));
+        return Map.of("originConfiguration", Map.of("restrictions", restrictions));
+    }
+
+    public synchronized Map<String, Object> describePackageVersion(PackageCoordinate coordinate, String version) {
+        CodeArtifactPackage pkg = requirePackage(coordinate);
+        Version stored = requireVersion(pkg, version);
+        Map<String, Object> description = packageIdentity(pkg);
+        description.remove("package");
+        description.put("packageName", pkg.name());
+        description.put("displayName", pkg.name());
+        description.put("version", stored.version());
+        description.put("revision", stored.revision());
+        description.put("status", stored.status());
+        description.put("publishedTime", stored.publishedTime());
+        description.put("origin", versionOrigin(stored));
+        return Map.of("packageVersion", description);
+    }
+
+    public synchronized Map<String, Object> listPackages(PackageCoordinate coordinate, String prefix,
+                                                         String publish, String upstream,
+                                                         Integer maxResults, String nextToken) {
+        validateDomainName(coordinate.domain());
+        validateRepositoryName(coordinate.repository());
+        if (coordinate.format() != null && !PACKAGE_FORMATS.contains(coordinate.format())) {
+            throw validation("Invalid package format.");
+        }
+        if ((publish != null && !Set.of("ALLOW", "BLOCK").contains(publish))
+                || (upstream != null && !Set.of("ALLOW", "BLOCK").contains(upstream))) {
+            throw validation("publish and upstream must be ALLOW or BLOCK.");
+        }
+        CodeArtifactRepository repository = describeRepository(coordinate.region(), coordinate.domain(),
+                coordinate.owner(), coordinate.repository());
+        List<CodeArtifactPackage> matching = repository.getPackages().values().stream()
+                .filter(pkg -> coordinate.format() == null || coordinate.format().equals(pkg.format()))
+                .filter(pkg -> coordinate.namespace() == null || coordinate.namespace().equals(pkg.namespace()))
+                .filter(pkg -> prefix == null || pkg.name().startsWith(prefix))
+                .filter(pkg -> publish == null || publish.equals(pkg.restrictions().get("publish")))
+                .filter(pkg -> upstream == null || upstream.equals(pkg.restrictions().get("upstream")))
+                .toList();
+        PaginatedResult<CodeArtifactPackage> page = Pagination.paginate(matching,
+                pkg -> packageKey(pkg.format(), pkg.namespace(), pkg.name()), maxResults, nextToken,
+                100, 1000, "ValidationException");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("packages", page.items().stream().map(pkg -> packageDescription(pkg, true)).toList());
+        addNextToken(result, page.nextToken());
+        return result;
+    }
+
+    public synchronized Map<String, Object> listPackageVersions(PackageCoordinate coordinate, String status,
+                                                                String originType, String sortBy,
+                                                                Integer maxResults, String nextToken) {
+        CodeArtifactPackage pkg = requirePackage(coordinate);
+        if (status != null && !VERSION_STATUSES.contains(status)) {
+            throw validation("Invalid package version status.");
+        }
+        if (originType != null && !Set.of("INTERNAL", "EXTERNAL", "UNKNOWN").contains(originType)) {
+            throw validation("Invalid package version origin type.");
+        }
+        if (sortBy != null && !"PUBLISHED_TIME".equals(sortBy)) {
+            throw validation("sortBy must be PUBLISHED_TIME.");
+        }
+        List<Version> matching = pkg.versions().values().stream()
+                .filter(version -> status == null || status.equals(version.status()))
+                .filter(version -> originType == null || "INTERNAL".equals(originType)).toList();
+        PaginatedResult<Version> page = Pagination.paginate(matching,
+                version -> sortBy == null ? version.version()
+                        : String.format("%019d:%s", Long.MAX_VALUE - version.publishedTime(), version.version()),
+                maxResults, nextToken, 100, 1000, "ValidationException");
+        Map<String, Object> result = packageIdentity(pkg);
+        result.put("versions", page.items().stream().map(version -> Map.of("version", version.version(),
+                "revision", version.revision(), "status", version.status(), "origin", versionOrigin(version))).toList());
+        addNextToken(result, page.nextToken());
+        return result;
+    }
+
+    public synchronized Map<String, Object> listPackageVersionAssets(PackageCoordinate coordinate, String version,
+                                                                     Integer maxResults, String nextToken) {
+        CodeArtifactPackage pkg = requirePackage(coordinate);
+        Version stored = requireVersion(pkg, version);
+        PaginatedResult<String> page = Pagination.paginate(new ArrayList<>(stored.assets().keySet()),
+                name -> name, maxResults, nextToken, 100, 1000, "ValidationException");
+        Map<String, Object> result = versionIdentity(pkg, stored);
+        result.put("assets", page.items().stream().map(name -> assetSummary(name, stored.assets().get(name))).toList());
+        addNextToken(result, page.nextToken());
+        return result;
+    }
+
+    public synchronized AssetDownload getPackageVersionAsset(PackageCoordinate coordinate, String version,
+                                                              String asset, String revision) {
+        validateAssetName(asset);
+        Version stored = requireVersion(requirePackage(coordinate), version);
+        if (revision != null && !revision.equals(stored.revision())) {
+            throw conflict("The requested revision does not match the package version revision.");
+        }
+        byte[] content = stored.assets().get(asset);
+        if (content == null || "Disposed".equals(stored.status()) || "Archived".equals(stored.status())) {
+            throw notFound("The asset is not available for this package version.");
+        }
+        return new AssetDownload(content.clone(), asset, version, stored.revision());
+    }
+
+    public synchronized Map<String, Object> getPackageVersionReadme(PackageCoordinate coordinate, String version) {
+        requireVersion(requirePackage(coordinate), version);
+        throw notFound("The readme file of this package version is not found.");
+    }
+
+    public synchronized Map<String, Object> listPackageVersionDependencies(PackageCoordinate coordinate,
+                                                                           String version) {
+        CodeArtifactPackage pkg = requirePackage(coordinate);
+        Version stored = requireVersion(pkg, version);
+        Map<String, Object> result = versionIdentity(pkg, stored);
+        result.put("dependencies", List.of());
+        return result;
+    }
+
+    public synchronized Map<String, Object> mutatePackageVersions(PackageCoordinate coordinate, String operation,
+                                                                   VersionMutation request) {
+        validateVersionSelection(request, false);
+        if (request.expectedStatus() != null && !VERSION_STATUSES.contains(request.expectedStatus())) {
+            throw validation("Invalid expected package version status.");
+        }
+        if ("status".equals(operation) && (request.targetStatus() == null
+                || !Set.of("Published", "Unlisted", "Archived").contains(request.targetStatus()))) {
+            throw validation("targetStatus must be Published, Unlisted, or Archived.");
+        }
+        CodeArtifactRepository repository = packageRepository(coordinate);
+        CodeArtifactPackage pkg = requirePackage(repository, coordinate);
+        Map<String, Version> versions = new LinkedHashMap<>(pkg.versions());
+        Map<String, Object> successful = new LinkedHashMap<>();
+        Map<String, Object> failed = new LinkedHashMap<>();
+        for (String version : request.versions()) {
+            Version stored = versions.get(version);
+            String failure = versionFailure(stored, version, request);
+            if (failure == null && "status".equals(operation) && "Disposed".equals(stored.status())) {
+                failure = "NOT_ALLOWED";
+            }
+            if (failure != null) {
+                failed.put(version, versionError(failure));
+                continue;
+            }
+            String status = switch (operation) {
+                case "delete" -> "Deleted";
+                case "dispose" -> "Disposed";
+                case "status" -> request.targetStatus();
+                default -> throw validation("Unknown package version operation.");
+            };
+            if ("delete".equals(operation)) {
+                versions.remove(version);
+            } else {
+                versions.put(version, new Version(stored.version(), stored.revision(), status, stored.publishedTime(),
+                        stored.originRepository(), "dispose".equals(operation) ? Map.of() : stored.assets()));
+            }
+            successful.put(version, Map.of("revision", stored.revision(), "status", status));
+        }
+        if (!failed.isEmpty() && !"delete".equals(operation)) {
+            successful.keySet().forEach(version -> failed.put(version, versionError("SKIPPED")));
+            return Map.of("successfulVersions", Map.of(), "failedVersions", failed);
+        }
+        savePackage(coordinate, repository, withVersions(pkg, versions));
+        return Map.of("successfulVersions", successful, "failedVersions", failed);
+    }
+
+    public synchronized Map<String, Object> copyPackageVersions(PackageCoordinate source, String destination,
+                                                                VersionMutation request) {
+        validateVersionSelection(request, true);
+        validateRepositoryName(source.repository());
+        validateRepositoryName(destination);
+        if (source.repository().equals(destination)) {
+            throw validation("Source and destination repositories must be different.");
+        }
+        CodeArtifactRepository sourceRepository = packageRepository(source);
+        PackageCoordinate target = new PackageCoordinate(source.region(), source.domain(), source.owner(), destination,
+                source.format(), source.namespace(), source.name());
+        CodeArtifactRepository repository = packageRepository(target);
+        CodeArtifactPackage pkg = repository.getPackages().getOrDefault(packageKey(target), emptyPackage(target));
+        Map<String, Version> versions = new LinkedHashMap<>(pkg.versions());
+        Map<String, Object> successful = new LinkedHashMap<>();
+        Map<String, Object> failed = new LinkedHashMap<>();
+        List<String> selection = request.versions() == null ? new ArrayList<>(request.revisions().keySet())
+                : request.versions();
+        for (String version : selection) {
+            Version stored = findCopyVersion(source, sourceRepository, version, request.includeFromUpstream(),
+                    new HashSet<>());
+            String failure = versionFailure(stored, version, request);
+            if (failure == null && Set.of("Unfinished", "Disposed").contains(stored.status())) {
+                failure = "NOT_ALLOWED";
+            }
+            Version existing = versions.get(version);
+            if (failure == null && existing != null && sameAssets(existing, stored)) {
+                continue;
+            }
+            if (failure == null && existing != null && !request.allowOverwrite()) {
+                failure = "ALREADY_EXISTS";
+            }
+            if (failure != null) {
+                failed.put(version, versionError(failure));
+                continue;
+            }
+            Map<String, byte[]> assets = new LinkedHashMap<>();
+            stored.assets().forEach((name, content) -> assets.put(name, content.clone()));
+            versions.put(version, new Version(stored.version(), stored.revision(), stored.status(),
+                    stored.publishedTime(), stored.originRepository(), assets));
+            successful.put(version, Map.of("revision", stored.revision(), "status", stored.status()));
+        }
+        if (!failed.isEmpty()) {
+            successful.keySet().forEach(version -> failed.put(version, versionError("SKIPPED")));
+            return Map.of("successfulVersions", Map.of(), "failedVersions", failed);
+        }
+        if (!successful.isEmpty()) {
+            savePackage(target, repository, withVersions(pkg, versions));
+        }
+        return Map.of("successfulVersions", successful, "failedVersions", failed);
+    }
+
+    private static boolean sameAssets(Version left, Version right) {
+        return left.assets().keySet().equals(right.assets().keySet())
+                && left.assets().entrySet().stream()
+                .allMatch(entry -> Arrays.equals(entry.getValue(), right.assets().get(entry.getKey())));
+    }
+
+    private Version findCopyVersion(PackageCoordinate coordinate, CodeArtifactRepository repository, String version,
+                                    boolean includeUpstream, Set<String> visited) {
+        if (!visited.add(repository.getName())) {
+            return null;
+        }
+        CodeArtifactPackage pkg = repository.getPackages().get(packageKey(coordinate));
+        if (pkg != null && pkg.versions().containsKey(version)) {
+            return pkg.versions().get(version);
+        }
+        if (includeUpstream) {
+            for (String upstream : repository.getUpstreams()) {
+                CodeArtifactRepository upstreamRepository = describeRepository(coordinate.region(), coordinate.domain(),
+                        coordinate.owner(), upstream);
+                Version found = findCopyVersion(coordinate, upstreamRepository, version, true, visited);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void validateVersionSelection(VersionMutation request, boolean copy) {
+        List<String> selection = request.versions();
+        if (copy && selection != null && request.revisions() != null && !request.revisions().isEmpty()) {
+            throw validation("Specify either versions or versionRevisions, not both.");
+        }
+        if (selection == null && copy && request.revisions() != null) {
+            selection = new ArrayList<>(request.revisions().keySet());
+        }
+        if (selection == null || selection.isEmpty() || selection.size() > 100) {
+            throw validation("Between 1 and 100 package versions must be specified.");
+        }
+        selection.forEach(version -> validateComponent(version, "version", 255));
+        if (request.revisions() != null && !selection.containsAll(request.revisions().keySet())) {
+            throw validation("versionRevisions must refer to selected versions.");
+        }
+    }
+
+    private static String versionFailure(Version version, String name, VersionMutation request) {
+        if (version == null) {
+            return "NOT_FOUND";
+        }
+        String revision = request.revisions() == null ? null : request.revisions().get(name);
+        if (revision != null && !revision.equals(version.revision())) {
+            return "MISMATCHED_REVISION";
+        }
+        if (request.expectedStatus() != null && !request.expectedStatus().equals(version.status())) {
+            return "MISMATCHED_STATUS";
+        }
+        return null;
+    }
+
+    private static Map<String, String> versionError(String code) {
+        return Map.of("errorCode", code, "errorMessage", "Package version operation failed: " + code);
+    }
+
+    private CodeArtifactRepository packageRepository(PackageCoordinate coordinate) {
+        validatePackageCoordinate(coordinate);
+        return describeRepository(coordinate.region(), coordinate.domain(), coordinate.owner(), coordinate.repository());
+    }
+
+    private CodeArtifactPackage requirePackage(PackageCoordinate coordinate) {
+        return requirePackage(packageRepository(coordinate), coordinate);
+    }
+
+    private static CodeArtifactPackage requirePackage(CodeArtifactRepository repository, PackageCoordinate coordinate) {
+        CodeArtifactPackage pkg = repository.getPackages().get(packageKey(coordinate));
+        if (pkg == null) {
+            throw notFound("Package not found.");
+        }
+        return pkg;
+    }
+
+    private static Version requireVersion(CodeArtifactPackage pkg, String version) {
+        validateComponent(version, "version", 255);
+        Version stored = pkg.versions().get(version);
+        if (stored == null) {
+            throw notFound("Package version not found.");
+        }
+        return stored;
+    }
+
+    private void savePackage(PackageCoordinate coordinate, CodeArtifactRepository repository, CodeArtifactPackage pkg) {
+        Map<String, CodeArtifactPackage> packages = new LinkedHashMap<>(repository.getPackages());
+        packages.put(packageKey(coordinate), pkg);
+        repository.setPackages(packages);
+        saveRepository(coordinate, repository);
+    }
+
+    private void saveRepository(PackageCoordinate coordinate, CodeArtifactRepository repository) {
+        repositories.putForAccount(effectiveOwner(coordinate.owner()),
+                repositoryKey(coordinate.region(), coordinate.domain(), coordinate.repository()), repository);
+    }
+
+    private static CodeArtifactPackage emptyPackage(PackageCoordinate coordinate) {
+        return new CodeArtifactPackage(coordinate.format(), coordinate.namespace(), coordinate.name(),
+                Map.of("publish", "ALLOW", "upstream", "BLOCK"), Map.of());
+    }
+
+    private static CodeArtifactPackage withVersions(CodeArtifactPackage pkg, Map<String, Version> versions) {
+        return new CodeArtifactPackage(pkg.format(), pkg.namespace(), pkg.name(), pkg.restrictions(), versions);
+    }
+
+    private static void validatePackageCoordinate(PackageCoordinate coordinate) {
+        validateDomainName(coordinate.domain());
+        validateRepositoryName(coordinate.repository());
+        if (coordinate.format() == null || !PACKAGE_FORMATS.contains(coordinate.format())) {
+            throw validation("Invalid package format.");
+        }
+        validateComponent(coordinate.name(), "package", 255);
+        if (coordinate.namespace() != null || Set.of("generic", "maven", "swift").contains(coordinate.format())) {
+            validateComponent(coordinate.namespace(), "namespace", 255);
+        }
+    }
+
+    private static void validateComponent(String value, String field, int maxLength) {
+        if (value == null || value.isBlank() || value.length() > maxLength
+                || value.chars().anyMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c)
+                || c == '/' || c == '#')) {
+            throw validation(field + " is not a valid package identifier.");
+        }
+    }
+
+    private static void validateAssetName(String asset) {
+        if (asset == null || asset.isEmpty() || asset.length() > 255 || !asset.matches("\\P{C}+")) {
+            throw validation("asset must contain 1-255 non-control characters.");
+        }
+    }
+
+    private static String packageKey(PackageCoordinate coordinate) {
+        return packageKey(coordinate.format(), coordinate.namespace(), coordinate.name());
+    }
+
+    private static String packageKey(String format, String namespace, String name) {
+        String scope = namespace == null ? "" : namespace;
+        return format + ":" + scope.length() + ":" + scope + ":" + name;
+    }
+
+    private static Map<String, Object> packageIdentity(CodeArtifactPackage pkg) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("format", pkg.format());
+        if (pkg.namespace() != null) {
+            result.put("namespace", pkg.namespace());
+        }
+        result.put("package", pkg.name());
+        return result;
+    }
+
+    private static Map<String, Object> packageDescription(CodeArtifactPackage pkg, boolean summary) {
+        Map<String, Object> result = packageIdentity(pkg);
+        if (!summary) {
+            result.remove("package");
+            result.put("name", pkg.name());
+        }
+        result.put("originConfiguration", Map.of("restrictions", pkg.restrictions()));
+        return result;
+    }
+
+    private static Map<String, Object> versionIdentity(CodeArtifactPackage pkg, Version version) {
+        Map<String, Object> result = packageIdentity(pkg);
+        result.put("version", version.version());
+        result.put("versionRevision", version.revision());
+        return result;
+    }
+
+    private static Map<String, Object> versionOrigin(Version version) {
+        return Map.of("originType", "INTERNAL", "domainEntryPoint",
+                Map.of("repositoryName", version.originRepository()));
+    }
+
+    private static Map<String, Object> assetSummary(String name, byte[] content) {
+        return Map.of("name", name, "size", content.length, "hashes", Map.of("SHA-256", sha256(content)));
+    }
+
+    private static String sha256(byte[] content) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by the Java runtime", e);
+        }
+    }
+
+    private static void addNextToken(Map<String, Object> result, String nextToken) {
+        if (nextToken != null) {
+            result.put("nextToken", nextToken);
+        }
     }
 
     // -------------------------------------------------------------------- tags

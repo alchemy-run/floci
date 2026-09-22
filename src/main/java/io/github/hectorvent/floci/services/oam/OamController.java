@@ -8,21 +8,14 @@ import io.github.hectorvent.floci.services.oam.model.OamLink;
 import io.github.hectorvent.floci.services.oam.model.OamSink;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.DELETE;
-import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
-import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -142,23 +135,6 @@ public class OamController {
         return Response.ok(Map.of()).build();
     }
 
-    @GET @Path("/tags/{resourceArn:.+}")
-    public Response listTags(@PathParam("resourceArn") String resourceArn) {
-        return Response.ok(Map.of("Tags", service.tags(decode(resourceArn)))).build();
-    }
-
-    @PUT @Path("/tags/{resourceArn:.+}")
-    public Response tag(@PathParam("resourceArn") String resourceArn, Map<String, Object> request) {
-        service.tag(decode(resourceArn), stringMap(request.get("Tags")));
-        return Response.ok(Map.of()).build();
-    }
-
-    @DELETE @Path("/tags/{resourceArn:.+}")
-    public Response untag(@PathParam("resourceArn") String resourceArn, @QueryParam("tagKeys") List<String> tagKeys) {
-        service.untag(decode(resourceArn), tagKeys);
-        return Response.ok(Map.of()).build();
-    }
-
     private Map<String, Object> sinkBody(OamSink sink, boolean includeTags) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("Arn", sink.getArn()); out.put("Id", sink.getId()); out.put("Name", sink.getName());
@@ -182,7 +158,6 @@ public class OamController {
     }
 
     private String region(HttpHeaders headers) { return regionResolver.resolveRegion(headers); }
-    private static String decode(String value) { return URLDecoder.decode(value, StandardCharsets.UTF_8); }
     private static String string(Map<String, Object> request, String key) { Object v = request == null ? null : request.get(key); return v == null ? null : String.valueOf(v); }
     private static boolean boolDefaultTrue(Map<String, Object> request, String key) {
         Object value = request == null ? null : request.get(key);

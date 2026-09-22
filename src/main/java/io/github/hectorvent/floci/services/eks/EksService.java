@@ -67,12 +67,13 @@ public class EksService implements TagHandler, ResourceProvider {
     private final Ec2Service ec2Service;
     private final EksOidcService oidcService;
     private final EksAccessEntryService accessEntries;
+    private final EksPodIdentityService podIdentities;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
 
     @Inject
     public EksService(StorageFactory storageFactory, EmulatorConfig config,
             RegionResolver regionResolver, EksClusterManager clusterManager, Ec2Service ec2Service,
-            EksOidcService oidcService, EksAccessEntryService accessEntries) {
+            EksOidcService oidcService, EksAccessEntryService accessEntries, EksPodIdentityService podIdentities) {
         this.storage = storageFactory.create("eks", "eks-clusters.json",
                 new TypeReference<Map<String, Cluster>>() {
                 });
@@ -88,6 +89,7 @@ public class EksService implements TagHandler, ResourceProvider {
         this.ec2Service = ec2Service;
         this.oidcService = oidcService;
         this.accessEntries = accessEntries;
+        this.podIdentities = podIdentities;
     }
 
     @PostConstruct
@@ -309,27 +311,33 @@ public class EksService implements TagHandler, ResourceProvider {
     }
 
     public Cluster describeCluster(String name) {
-        return storage.get(name)
+        return storage.get(name).filter(this::inRequestRegion)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "No cluster found for name: " + name, 404));
+    }
+
+    private boolean inRequestRegion(Cluster cluster) {
+        String region = cluster.getArn() == null ? config.defaultRegion() : AwsArnUtils.parse(cluster.getArn()).region();
+        return regionResolver.getRegion().equals(region);
     }
 
     public List<String> listClusters() {
         return storage.scan(k -> true).stream()
+                .filter(this::inRequestRegion)
                 .map(Cluster::getName)
+                .sorted()
                 .collect(Collectors.toList());
     }
 
     public Cluster deleteCluster(String name) {
-        Cluster cluster = storage.get(name)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "No cluster found for name: " + name, 404));
+        Cluster cluster = describeCluster(name);
 
         cluster.setStatus(ClusterStatus.DELETING);
         if (!config.services().eks().mock()) {
             clusterManager.stopCluster(cluster);
         }
         accessEntries.deleteClusterEntries(cluster);
+        podIdentities.deleteClusterAssociations(cluster);
         storage.delete(name);
         oidcService.deleteKey(name);
         return cluster;
@@ -501,40 +509,73 @@ public class EksService implements TagHandler, ResourceProvider {
     }
 
     @Override
-    public void tagResource(String region, String resourceArn, Map<String, String> tags) {
-        String clusterName = extractClusterName(resourceArn);
-        Cluster cluster = storage.get(clusterName)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource not found: " + resourceArn, 404));
+    public int tagResourceSuccessStatus() {
+        return 200;
+    }
 
+    @Override
+    public int untagResourceSuccessStatus() {
+        return 200;
+    }
+
+    @Override
+    public void tagResource(String region, String resourceArn, Map<String, String> tags) {
+        Cluster cluster = taggedCluster(region, resourceArn);
+        if (resourceArn.contains(":podidentityassociation/")) {
+            podIdentities.tag(cluster, associationId(resourceArn), tags, null);
+            return;
+        }
         if (cluster.getTags() == null) {
             cluster.setTags(new HashMap<>());
         }
         cluster.getTags().putAll(tags);
-        storage.put(clusterName, cluster);
+        storage.put(cluster.getName(), cluster);
     }
 
     @Override
     public void untagResource(String region, String resourceArn, List<String> tagKeys) {
-        String clusterName = extractClusterName(resourceArn);
-        Cluster cluster = storage.get(clusterName)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource not found: " + resourceArn, 404));
-
+        Cluster cluster = taggedCluster(region, resourceArn);
+        if (resourceArn.contains(":podidentityassociation/")) {
+            podIdentities.tag(cluster, associationId(resourceArn), null, tagKeys);
+            return;
+        }
         if (cluster.getTags() != null && tagKeys != null) {
             tagKeys.forEach(cluster.getTags()::remove);
         }
-        storage.put(clusterName, cluster);
+        storage.put(cluster.getName(), cluster);
     }
 
     @Override
     public Map<String, String> listTags(String region, String resourceArn) {
-        String clusterName = extractClusterName(resourceArn);
-        Cluster cluster = storage.get(clusterName)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource not found: " + resourceArn, 404));
-
+        Cluster cluster = taggedCluster(region, resourceArn);
+        if (resourceArn.contains(":podidentityassociation/")) {
+            return podIdentities.describe(cluster, associationId(resourceArn)).tags();
+        }
         return cluster.getTags() != null ? cluster.getTags() : Map.of();
+    }
+
+    private Cluster taggedCluster(String region, String resourceArn) {
+        String[] arn = resourceArn == null ? new String[0] : resourceArn.split(":", 6);
+        if (arn.length != 6 || !"arn".equals(arn[0]) || !"eks".equals(arn[2])) {
+            throw new AwsException("InvalidParameterException", "Invalid EKS resource ARN", 400);
+        }
+        String[] resource = arn[5].split("/", -1);
+        boolean association = resource.length == 3 && "podidentityassociation".equals(resource[0]);
+        if ((!association && !(resource.length == 2 && "cluster".equals(resource[0])))
+                || !arn[3].equals(region == null ? regionResolver.getRegion() : region)
+                || !arn[4].equals(regionResolver.getAccountId())) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
+        }
+        Cluster cluster = describeCluster(resource[1]);
+        String expected = association ? podIdentities.describe(cluster, resource[2]).associationArn() : cluster.getArn();
+        if (!resourceArn.equals(expected)) {
+            throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
+        }
+        return cluster;
+    }
+
+    private static String associationId(String resourceArn) {
+        return resourceArn.substring(resourceArn.lastIndexOf('/') + 1);
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags) {
@@ -547,16 +588,6 @@ public class EksService implements TagHandler, ResourceProvider {
 
     public Map<String, String> listTagsForResource(String resourceArn) {
         return listTags(null, resourceArn);
-    }
-
-    private String extractClusterName(String resourceArn) {
-        // arn:aws:eks:us-east-1:000000000000:cluster/my-cluster
-        int idx = resourceArn.lastIndexOf('/');
-        if (idx < 0 || idx == resourceArn.length() - 1) {
-            throw new AwsException("InvalidParameterException",
-                    "Invalid resource ARN: " + resourceArn, 400);
-        }
-        return resourceArn.substring(idx + 1);
     }
 
     /**

@@ -56,6 +56,7 @@ class RdsParameterGroupCopyResetIntegrationTest {
                 .formParam("Parameters.member.1.ParameterValue", "250")
                 .formParam("Parameters.member.2.ParameterName", "log_min_duration_statement")
                 .formParam("Parameters.member.2.ParameterValue", "500")
+                .formParam("Parameters.member.2.ApplyMethod", "pending-reboot")
         .when().post("/").then().statusCode(200);
 
         // The source may be named by ARN, as the API reference allows.
@@ -153,7 +154,7 @@ class RdsParameterGroupCopyResetIntegrationTest {
         query("ResetDBParameterGroup")
                 .formParam("DBParameterGroupName", TARGET_PG)
                 .formParam("Parameters.Parameter.1.ParameterName", "max_connections")
-                .formParam("Parameters.Parameter.1.ApplyMethod", "immediate")
+                .formParam("Parameters.Parameter.1.ApplyMethod", "pending-reboot")
         .when().post("/")
         .then()
             .statusCode(200)
@@ -165,8 +166,18 @@ class RdsParameterGroupCopyResetIntegrationTest {
         .when().post("/")
         .then()
             .statusCode(200)
-            .body(not(containsString("<ParameterName>max_connections</ParameterName>")))
+            .body(containsString("<ParameterName>max_connections</ParameterName>"))
+            .body(containsString("<ParameterValue>LEAST({DBInstanceClassMemory/9531392},5000)</ParameterValue>"))
+            .body(containsString("<Source>engine-default</Source>"))
             .body(containsString("<ParameterName>log_min_duration_statement</ParameterName>"));
+
+        query("DescribeDBParameters")
+                .formParam("DBParameterGroupName", TARGET_PG)
+                .formParam("Source", "user")
+        .when().post("/").then().statusCode(200)
+            .body(not(containsString("<ParameterName>max_connections</ParameterName>")))
+            .body(containsString("<ParameterName>log_min_duration_statement</ParameterName>"))
+            .body(containsString("<ApplyMethod>pending-reboot</ApplyMethod>"));
 
         query("ResetDBParameterGroup")
                 .formParam("DBParameterGroupName", TARGET_PG)
@@ -180,6 +191,14 @@ class RdsParameterGroupCopyResetIntegrationTest {
         .when().post("/")
         .then()
             .statusCode(200)
+            .body(containsString("<ParameterName>work_mem</ParameterName><ParameterValue>4096</ParameterValue>"))
+            .body(containsString("<Source>engine-default</Source>"))
+            .body(not(containsString("<Source>user</Source>")));
+
+        query("DescribeDBParameters")
+                .formParam("DBParameterGroupName", TARGET_PG)
+                .formParam("Source", "user")
+        .when().post("/").then().statusCode(200)
             .body(not(containsString("<ParameterName>")));
 
         query("ResetDBParameterGroup")

@@ -45,7 +45,7 @@ class MskControllerTest {
     @BeforeEach
     void setUp() {
         mskService = Mockito.mock(MskService.class);
-        controller = new MskController(mskService);
+        controller = new MskController(mskService, new ObjectMapper());
     }
 
     private static MskConfiguration legacyConfiguration() throws Exception {

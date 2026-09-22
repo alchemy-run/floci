@@ -25,6 +25,15 @@ public class CodeArtifactRepository {
     private Map<String, String> tags = new LinkedHashMap<>();
     private String policyDocument;
     private String policyRevision;
+    private Map<String, CodeArtifactPackage> packages = new LinkedHashMap<>();
+
+    public Map<String, CodeArtifactPackage> getPackages() {
+        return Collections.unmodifiableMap(packages);
+    }
+
+    public void setPackages(Map<String, CodeArtifactPackage> packages) {
+        this.packages = packages;
+    }
 
     public String getName() {
         return name;

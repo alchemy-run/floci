@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.acm;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
@@ -10,8 +11,19 @@ import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.services.acm.model.*;
-import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.services.acm.model.Certificate;
+import io.github.hectorvent.floci.services.acm.model.CertificateOptions;
+import io.github.hectorvent.floci.services.acm.model.CertificateStatus;
+import io.github.hectorvent.floci.services.acm.model.CertificateType;
+import io.github.hectorvent.floci.services.acm.model.DomainValidation;
+import io.github.hectorvent.floci.services.acm.model.IdempotencyTokenEntry;
+import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
+import io.github.hectorvent.floci.services.acm.model.ListResult;
+import io.github.hectorvent.floci.services.acm.model.ResourceRecord;
+import io.github.hectorvent.floci.services.acm.model.RevocationReason;
+import io.github.hectorvent.floci.services.acm.model.ValidationMethod;
+import io.github.hectorvent.floci.services.route53.Route53Service;
+import io.github.hectorvent.floci.services.route53.model.HostedZone;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -21,12 +33,26 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
-import java.util.*;
-import java.util.LinkedHashSet;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -54,6 +80,7 @@ public class AcmService implements ResourceProvider {
     private final FlociCertificateAuthority certificateAuthority;
     private final RegionResolver regionResolver;
     private final int validationWaitSeconds;
+    private final Route53Service route53Service;
     private final AtomicInteger accountDaysBeforeExpiry = new AtomicInteger(45);
     private final AtomicBoolean securityWarningLogged = new AtomicBoolean(false);
 
@@ -72,23 +99,30 @@ public class AcmService implements ResourceProvider {
     @Inject
     public AcmService(StorageFactory factory, CertificateGenerator certificateGenerator,
                       FlociCertificateAuthority certificateAuthority, EmulatorConfig config,
-                      RegionResolver regionResolver) {
+                      RegionResolver regionResolver, Route53Service route53Service) {
         this(factory.create("acm", "acm-certificates.json",
                 new TypeReference<Map<String, Certificate>>() {}),
             certificateGenerator,
             certificateAuthority,
             regionResolver,
-            config.services().acm().validationWaitSeconds());
+            config.services().acm().validationWaitSeconds(), route53Service);
     }
 
     AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
                FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
                int validationWaitSeconds) {
+        this(store, certificateGenerator, certificateAuthority, regionResolver, validationWaitSeconds, null);
+    }
+
+    AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
+               FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
+               int validationWaitSeconds, Route53Service route53Service) {
         this.store = store;
         this.certificateGenerator = certificateGenerator;
         this.certificateAuthority = certificateAuthority;
         this.regionResolver = regionResolver;
         this.validationWaitSeconds = validationWaitSeconds;
+        this.route53Service = route53Service;
     }
 
     /**
@@ -145,6 +179,8 @@ public class AcmService implements ResourceProvider {
         String certId = UUID.randomUUID().toString();
         String arn = buildCertificateArn(region, certId);
 
+        ValidationMethod method = validationMethod != null ? validationMethod : ValidationMethod.DNS;
+
         // Determine certificate type and initial status
         CertificateType type;
         CertificateStatus status;
@@ -153,11 +189,10 @@ public class AcmService implements ResourceProvider {
             status = CertificateStatus.ISSUED;
         } else {
             type = CertificateType.AMAZON_ISSUED;
-            // A negative wait disables automatic validation; zero issues immediately.
-            status = validationWaitSeconds == 0 ? CertificateStatus.ISSUED : CertificateStatus.PENDING_VALIDATION;
+            // DNS requires proof of ownership; the configured wait only simulates email approval.
+            status = method == ValidationMethod.EMAIL && validationWaitSeconds == 0
+                ? CertificateStatus.ISSUED : CertificateStatus.PENDING_VALIDATION;
         }
-
-        ValidationMethod method = validationMethod != null ? validationMethod : ValidationMethod.DNS;
 
         // A server leaf signed by the local CA, so Certificate plus CertificateChain from
         // GetCertificate validate the way an ACM certificate and its chain do on AWS.
@@ -236,7 +271,12 @@ public class AcmService implements ResourceProvider {
     // ============ GetCertificate ============
 
     public Certificate getCertificate(String certificateArn, String region) {
-        return getCertificateByArn(certificateArn, region);
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
+            throw new AwsException("RequestInProgressException",
+                "The certificate request is in progress. The certificate body is not yet available.", 400);
+        }
+        return cert;
     }
 
     // ============ ListCertificates ============
@@ -502,9 +542,9 @@ public class AcmService implements ResourceProvider {
      * Lists certificates matching an optional predicate, with the same
      * cursor pagination as {@link #listCertificates}.
      */
-    public ListResult searchCertificates(java.util.function.Predicate<Certificate> filter,
+    public ListResult searchCertificates(Predicate<Certificate> filter,
                                          String region, int maxItems, String nextToken) {
-        java.util.function.Predicate<Certificate> predicate = filter != null ? filter : c -> true;
+        Predicate<Certificate> predicate = filter != null ? filter : c -> true;
         int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
         String lastArn = decodeToken(nextToken);
 
@@ -730,23 +770,36 @@ public class AcmService implements ResourceProvider {
         return settleValidation(cert, region);
     }
 
-    /**
-     * Brings a stored certificate in line on read. A PENDING_VALIDATION certificate whose configured
-     * validation wait has passed is issued, since nothing else moves it along; and a certificate
-     * that has been issued (status ISSUED, or IssuedAt set on one revoked or expired since) reports
-     * SUCCESS for every domain, which also repairs records stored by earlier releases as ISSUED
-     * with pending entries. A certificate revoked before it was ever issued keeps its pending
-     * entries. Changes are stored, which is what a client polling ACM observes.
-     */
+    /** Settles domain validation on reads and persists issuance for subsequent consumers. */
     private Certificate settleValidation(Certificate cert, String region) {
         boolean changed = false;
-        if (validationWaitSeconds >= 0 && cert.getStatus() == CertificateStatus.PENDING_VALIDATION
-                && cert.getCreatedAt() != null
-                && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds))) {
-            cert.setStatus(CertificateStatus.ISSUED);
-            cert.setIssuedAt(Instant.now());
-            LOG.debugv("Certificate {0} issued after the validation wait", cert.getArn());
-            changed = true;
+        if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
+            boolean validated;
+            if (cert.getValidationMethod() == ValidationMethod.DNS) {
+                List<HostedZone> zones = route53Service != null
+                    ? route53Service.listHostedZones(null, 0) : List.of();
+                List<DomainValidation> validations = cert.getDomainValidationOptions().stream()
+                    .map(validation -> new DomainValidation(validation.domainName(), validation.validationDomain(),
+                        hasValidationRecord(validation.resourceRecord(), zones) ? "SUCCESS" : "PENDING_VALIDATION",
+                        validation.validationMethod(), validation.resourceRecord(), validation.validationEmails()))
+                    .toList();
+                if (!validations.equals(cert.getDomainValidationOptions())) {
+                    cert.setDomainValidationOptions(validations);
+                    changed = true;
+                }
+                validated = !validations.isEmpty()
+                    && validations.stream().allMatch(validation -> "SUCCESS".equals(validation.validationStatus()));
+            } else {
+                validated = cert.getValidationMethod() == ValidationMethod.EMAIL && validationWaitSeconds >= 0
+                    && cert.getCreatedAt() != null
+                    && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds));
+            }
+            if (validated) {
+                cert.setStatus(CertificateStatus.ISSUED);
+                cert.setIssuedAt(Instant.now());
+                LOG.debugv("Certificate {0} issued after domain validation", cert.getArn());
+                changed = true;
+            }
         }
         boolean issued = cert.getStatus() == CertificateStatus.ISSUED || cert.getIssuedAt() != null;
         if (issued && !cert.getDomainValidationOptions().stream()
@@ -761,6 +814,41 @@ public class AcmService implements ResourceProvider {
             store.put(regionKey(region, cert.extractCertificateId()), cert);
         }
         return cert;
+    }
+
+    private boolean hasValidationRecord(ResourceRecord record, List<HostedZone> zones) {
+        if (record == null || !"CNAME".equals(record.type())) {
+            return false;
+        }
+        String name = normalizeDnsName(record.name());
+        String value = normalizeDnsName(record.value());
+        for (HostedZone zone : zones) {
+            String zoneName = normalizeDnsName(zone.getName());
+            if (zone.isPrivateZone() || !(name.equals(zoneName) || name.endsWith("." + zoneName))) {
+                continue;
+            }
+            try {
+                if (route53Service.listResourceRecordSets(zone.getId(), null, null, 0).stream()
+                        .filter(recordSet -> "CNAME".equals(recordSet.getType())
+                            && normalizeDnsName(recordSet.getName()).equals(name)
+                            && recordSet.getRecords() != null)
+                        .flatMap(recordSet -> recordSet.getRecords().stream())
+                        .anyMatch(answer -> normalizeDnsName(answer.getValue()).equals(value))) {
+                    return true;
+                }
+            } catch (AwsException exception) {
+                if (!"NoSuchHostedZone".equals(exception.getErrorCode())) {
+                    throw exception;
+                }
+                LOG.debugv("Hosted zone {0} was deleted during certificate validation", zone.getId());
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeDnsName(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".") ? normalized : normalized + ".";
     }
 
     /**

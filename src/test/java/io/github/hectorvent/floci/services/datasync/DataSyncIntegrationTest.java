@@ -8,6 +8,10 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.time.Duration;
+
+import static org.awaitility.Awaitility.await;
+
 import static io.github.hectorvent.floci.testing.RestAssuredJsonUtils.awsAction;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.emptyIterable;
@@ -629,11 +633,19 @@ class DataSyncIntegrationTest {
 
     @Test
     @Order(40)
-    void taskExecutionOperationsAreNotEmulated() {
-        awsAction(TARGET, "StartTaskExecution", "{\"TaskArn\": \"" + taskArn + "\"}")
-                .then()
-                .statusCode(400)
-                .body("__type", equalTo("UnknownOperationException"));
+    void unsupportedTransferBackendReportsAnExecutionError() {
+        String executionArn = awsAction(TARGET, "StartTaskExecution", "{\"TaskArn\": \"" + taskArn + "\"}")
+                .then().statusCode(200).extract().path("TaskExecutionArn");
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                awsAction(TARGET, "DescribeTaskExecution", "{\"TaskExecutionArn\":\"" + executionArn + "\"}")
+                        .then().statusCode(200)
+                        .body("Status", equalTo("ERROR"))
+                        .body("Result.ErrorCode", equalTo("UnsupportedBackend"))
+                        .body("BytesTransferred", equalTo(0)));
+        awsAction(TARGET, "ListTaskExecutions", "{\"TaskArn\":\"" + taskArn + "\"}")
+                .then().statusCode(200).body("TaskExecutions.TaskExecutionArn", hasItem(executionArn));
+        awsAction(TARGET, "CancelTaskExecution", "{\"TaskExecutionArn\":\"" + executionArn + "\"}")
+                .then().statusCode(400).body("__type", equalTo("InvalidRequestException"));
     }
 
     @Test

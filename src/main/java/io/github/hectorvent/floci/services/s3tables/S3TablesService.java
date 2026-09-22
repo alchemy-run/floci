@@ -69,7 +69,7 @@ public class S3TablesService {
     public synchronized void deleteTableBucket(String tableBucketArn, String region) {
         TableBucket bucket = getTableBucket(tableBucketArn, region);
         if (!bucket.getNamespaces().isEmpty()) {
-            throw conflict("The table bucket is not empty.");
+            throw badRequest("The table bucket is not empty.");
         }
         store.delete(storageKey(region, bucket.getName()));
     }
@@ -119,16 +119,24 @@ public class S3TablesService {
         if (namespace.getTables().containsKey(name)) {
             throw conflict("The table already exists.");
         }
-        S3Table table = new S3Table(name, bucket.getArn() + "/table/" + name, namespaceName, format,
+        String tableId = UUID.randomUUID().toString();
+        S3Table table = new S3Table(name, bucket.getArn() + "/table/" + tableId, namespaceName, format,
                 versionToken(), metadataLocation(metadata), now(), regionResolver.getAccountId(), metadata,
                 encryptionConfiguration, storageClassConfiguration, tags);
+        table.setWarehouseLocation("s3://" + tableId + "--table-s3");
         namespace.getTables().put(name, table);
         persist(bucket, region);
         return table;
     }
 
     public synchronized S3Table getTable(String tableBucketArn, String namespaceName, String name, String region) {
-        return getTable(getTableBucket(tableBucketArn, region), namespaceName, name);
+        TableBucket bucket = getTableBucket(tableBucketArn, region);
+        return ensureWarehouseLocation(bucket, getTable(bucket, namespaceName, name), region);
+    }
+
+    public synchronized S3Table getTableByArn(String tableArn, String region) {
+        TableBucket bucket = bucketForResource(tableArn, region);
+        return ensureWarehouseLocation(bucket, tableByArn(bucket, tableArn), region);
     }
 
     public synchronized List<S3Table> listTables(String tableBucketArn, String namespaceName, String prefix, String region) {
@@ -144,9 +152,14 @@ public class S3TablesService {
     }
 
     public synchronized void deleteTable(String tableBucketArn, String namespaceName, String name, String region) {
+        deleteTable(tableBucketArn, namespaceName, name, null, region);
+    }
+
+    public synchronized void deleteTable(String tableBucketArn, String namespaceName, String name,
+                                         String versionToken, String region) {
         TableBucket bucket = getTableBucket(tableBucketArn, region);
         Namespace namespace = getNamespace(bucket, namespaceName);
-        getTable(bucket, namespaceName, name);
+        assertCurrentToken(getTable(bucket, namespaceName, name), versionToken);
         namespace.getTables().remove(name);
         persist(bucket, region);
     }
@@ -168,7 +181,6 @@ public class S3TablesService {
         sourceNamespace.getTables().remove(name);
         table.setNamespace(targetNamespaceName);
         table.setName(targetName);
-        table.setArn(bucket.getArn() + "/table/" + targetName);
         touch(table);
         targetNamespace.getTables().put(targetName, table);
         persist(bucket, region);
@@ -183,6 +195,7 @@ public class S3TablesService {
         TableBucket bucket = getTableBucket(tableBucketArn, region);
         S3Table table = getTable(bucket, namespaceName, name);
         assertCurrentToken(table, versionToken);
+        ensureWarehouseLocation(bucket, table, region);
         table.setMetadataLocation(metadataLocation);
         touch(table);
         persist(bucket, region);
@@ -282,6 +295,79 @@ public class S3TablesService {
     public synchronized Map<String, Object> getTableMaintenanceConfigurations(String tableBucketArn, String namespaceName,
                                                                    String name, String region) {
         return new LinkedHashMap<>(getTable(tableBucketArn, namespaceName, name, region).getMaintenanceConfigurations());
+    }
+
+    public synchronized Map<String, Map<String, String>> getTableMaintenanceJobStatus(
+            String tableBucketArn, String namespaceName, String name, String region) {
+        TableBucket bucket = getTableBucket(tableBucketArn, region);
+        S3Table table = getTable(bucket, namespaceName, name);
+        Map<String, Map<String, String>> statuses = new LinkedHashMap<>();
+        for (String type : List.of("icebergCompaction", "icebergSnapshotManagement", "icebergUnreferencedFileRemoval")) {
+            Object configuration = "icebergUnreferencedFileRemoval".equals(type)
+                    ? bucket.getMaintenanceConfigurations().get(type)
+                    : table.getMaintenanceConfigurations().get(type);
+            boolean disabled = configuration instanceof Map<?, ?> value && "disabled".equals(value.get("status"));
+            // Configuration is persisted; no background maintenance jobs have run in this emulator.
+            statuses.put(type, Map.of("status", disabled ? "Disabled" : "Not_Yet_Run"));
+        }
+        return statuses;
+    }
+
+    public synchronized Map<String, String> listTagsForResource(String resourceArn, String region) {
+        TableBucket bucket = bucketForResource(resourceArn, region);
+        return new LinkedHashMap<>(resourceTags(bucket, resourceArn));
+    }
+
+    public synchronized void tagResource(String resourceArn, Map<String, String> tags, String region) {
+        if (tags == null || tags.isEmpty()) {
+            throw badRequest("tags must not be empty.");
+        }
+        TableBucket bucket = bucketForResource(resourceArn, region);
+        resourceTags(bucket, resourceArn).putAll(tags);
+        persist(bucket, region);
+    }
+
+    public synchronized void untagResource(String resourceArn, List<String> tagKeys, String region) {
+        if (tagKeys == null || tagKeys.isEmpty()) {
+            throw badRequest("tagKeys must not be empty.");
+        }
+        TableBucket bucket = bucketForResource(resourceArn, region);
+        Map<String, String> tags = resourceTags(bucket, resourceArn);
+        tagKeys.forEach(tags::remove);
+        persist(bucket, region);
+    }
+
+    private TableBucket bucketForResource(String resourceArn, String region) {
+        if (resourceArn == null) {
+            throw badRequest("A resource ARN is required.");
+        }
+        int tableSeparator = resourceArn.indexOf("/table/");
+        return getTableBucket(tableSeparator < 0 ? resourceArn : resourceArn.substring(0, tableSeparator), region);
+    }
+
+    private Map<String, String> resourceTags(TableBucket bucket, String resourceArn) {
+        return bucket.getArn().equals(resourceArn) ? bucket.getTags() : tableByArn(bucket, resourceArn).getTags();
+    }
+
+    private S3Table tableByArn(TableBucket bucket, String tableArn) {
+        List<S3Table> matches = bucket.getNamespaces().values().stream()
+                .flatMap(namespace -> namespace.getTables().values().stream())
+                .filter(table -> table.getArn().equals(tableArn)).toList();
+        if (matches.isEmpty()) {
+            throw notFound("The table does not exist.");
+        }
+        if (matches.size() > 1) {
+            throw conflict("The table ARN is ambiguous in stored legacy data. Address the table by namespace and name.");
+        }
+        return matches.getFirst();
+    }
+
+    private S3Table ensureWarehouseLocation(TableBucket bucket, S3Table table, String region) {
+        if (table.getWarehouseLocation() == null) {
+            table.setWarehouseLocation("s3://" + UUID.randomUUID() + "--table-s3");
+            persist(bucket, region);
+        }
+        return table;
     }
 
     private Namespace getNamespace(TableBucket bucket, String name) {

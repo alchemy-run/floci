@@ -8,6 +8,7 @@ public class Parameter {
     private String parameterValue;
     private String description;
     private String dataType;
+    private String source;
 
     public Parameter() {}
 
@@ -21,6 +22,20 @@ public class Parameter {
         this.parameterValue = parameterValue;
         this.description = description;
         this.dataType = dataType;
+    }
+
+    public String getSource() {
+        if (source != null) {
+            return source;
+        }
+        // Older persisted parameters have no source field.
+        return ClusterParameterGroup.defaultParameters().stream().anyMatch(parameter ->
+                parameter.getParameterName().equals(parameterName)
+                        && parameter.getParameterValue().equals(parameterValue)) ? "engine-default" : "user";
+    }
+
+    public void setSource(String source) {
+        this.source = source;
     }
 
     public String getParameterName() {

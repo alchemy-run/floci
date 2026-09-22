@@ -376,14 +376,36 @@ public class Ec2QueryHandler {
             String deviceIndex = p.getFirst(prefix + "DeviceIndex");
             String subnetId = p.getFirst(prefix + "SubnetId");
             Boolean associate = parseOptionalBoolean(p.getFirst(prefix + "AssociatePublicIpAddress"));
+            String privateIp = p.getFirst(prefix + "PrivateIpAddress");
+            for (int j = 1; p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress") != null; j++) {
+                if (Boolean.TRUE.equals(parseOptionalBoolean(p.getFirst(prefix + "PrivateIpAddresses." + j + ".Primary")))) {
+                    String primary = p.getFirst(prefix + "PrivateIpAddresses." + j + ".PrivateIpAddress");
+                    if (privateIp != null && !privateIp.equals(primary)) {
+                        throw new AwsException("InvalidParameterCombination", "Conflicting primary private addresses", 400);
+                    }
+                    privateIp = primary;
+                }
+            }
+            String interfaceId = p.getFirst(prefix + "NetworkInterfaceId");
             List<String> groups = new ArrayList<>();
             groups.addAll(getStaticList(p, prefix + "SecurityGroupId"));
             groups.addAll(getStaticList(p, prefix + "GroupId"));
             groups.addAll(getStaticList(p, prefix + "Groups"));
-            if (deviceIndex == null && subnetId == null && associate == null && groups.isEmpty()) {
+            if (deviceIndex == null && subnetId == null && associate == null && groups.isEmpty()
+                    && privateIp == null && interfaceId == null) {
                 break;
             }
-            PrimaryNetworkInterface parsed = new PrimaryNetworkInterface(subnetId, groups, associate);
+            int index;
+            try {
+                index = deviceIndex == null ? 0 : Integer.parseInt(deviceIndex);
+                if (index < 0) {
+                    throw new NumberFormatException("negative device index");
+                }
+            } catch (NumberFormatException e) {
+                throw new AwsException("InvalidParameterValue", "Invalid network interface DeviceIndex", 400);
+            }
+            PrimaryNetworkInterface parsed = new PrimaryNetworkInterface(subnetId, groups, associate,
+                    privateIp, interfaceId, index);
             if (first == null) {
                 first = parsed;
             }
@@ -417,9 +439,10 @@ public class Ec2QueryHandler {
         return "true".equalsIgnoreCase(value) || "1".equals(value);
     }
 
-    record PrimaryNetworkInterface(String subnetId, List<String> securityGroupIds, Boolean associatePublicIpAddress) {
+    record PrimaryNetworkInterface(String subnetId, List<String> securityGroupIds, Boolean associatePublicIpAddress,
+                                   String privateIpAddress, String networkInterfaceId, int deviceIndex) {
         static PrimaryNetworkInterface empty() {
-            return new PrimaryNetworkInterface(null, List.of(), null);
+            return new PrimaryNetworkInterface(null, List.of(), null, null, null, 0);
         }
     }
 
@@ -796,12 +819,20 @@ public class Ec2QueryHandler {
         }
         // floci-kt9: override-default-eni hands RunInstances a pre-existing standalone ENI as
         // the instance's primary interface (network_interface { network_interface_id = ... }).
-        String networkInterfaceId = p.getFirst("NetworkInterface.1.NetworkInterfaceId");
-        int networkInterfaceDeviceIndex = parseIntParam(p, "NetworkInterface.1.DeviceIndex", 0);
         String clientToken = p.getFirst("ClientToken");
         List<String> sgIds = getList(p, "SecurityGroupId");
         Boolean associatePublicIpAddress = parseOptionalBoolean(p.getFirst("AssociatePublicIpAddress"));
         PrimaryNetworkInterface primaryInterface = parsePrimaryNetworkInterface(p);
+        String networkInterfaceId = primaryInterface.networkInterfaceId();
+        int networkInterfaceDeviceIndex = primaryInterface.deviceIndex();
+        String privateIpAddress = p.getFirst("PrivateIpAddress");
+        if (privateIpAddress != null && primaryInterface.privateIpAddress() != null) {
+            throw new AwsException("InvalidParameterCombination",
+                    "PrivateIpAddress cannot be combined with a network interface private address", 400);
+        }
+        if (privateIpAddress == null) {
+            privateIpAddress = primaryInterface.privateIpAddress();
+        }
         if (primaryInterface.subnetId() != null) {
             subnetId = primaryInterface.subnetId();
         }
@@ -881,7 +912,8 @@ public class Ec2QueryHandler {
         Reservation res = service.runInstances(region, imageId, instanceType, minCount, maxCount,
                 keyName, sgIds, subnetId, clientToken, instanceTags, userData, iamInstanceProfileArn,
                 associatePublicIpAddress, networkInterfaceId, networkInterfaceDeviceIndex, null, metadataOptions,
-                creditSpecificationCpuCredits, userDataEncoded, Boolean.parseBoolean(p.getFirst("DryRun")));
+                creditSpecificationCpuCredits, userDataEncoded, Boolean.parseBoolean(p.getFirst("DryRun")),
+                privateIpAddress);
 
         if (!networkInterfaceTags.isEmpty()) {
             List<String> eniIds = new ArrayList<>();
@@ -3184,32 +3216,21 @@ public class Ec2QueryHandler {
     private Response handleRevokeSecurityGroupIngress(MultivaluedMap<String, String> p, String region) {
         String groupId = p.getFirst("GroupId");
         List<IpPermission> perms = parseIpPermissions(p, "IpPermissions");
-        service.revokeSecurityGroupIngress(region, groupId, perms);
+        service.revokeSecurityGroupIngress(region, groupId, perms, getList(p, "SecurityGroupRuleId"));
         return booleanResponse("RevokeSecurityGroupIngress");
     }
 
     private Response handleRevokeSecurityGroupEgress(MultivaluedMap<String, String> p, String region) {
         String groupId = p.getFirst("GroupId");
         List<IpPermission> perms = parseIpPermissions(p, "IpPermissions");
-        service.revokeSecurityGroupEgress(region, groupId, perms);
+        service.revokeSecurityGroupEgress(region, groupId, perms, getList(p, "SecurityGroupRuleId"));
         return booleanResponse("RevokeSecurityGroupEgress");
     }
 
     private Response handleDescribeSecurityGroupRules(MultivaluedMap<String, String> p, String region) {
         Map<String, List<String>> filters = getFilters(p);
-        // The AWS SDK sends the security group id as a filter with name "group-id". Rule ids can
-        // arrive as the SecurityGroupRuleId.N parameter or the "security-group-rule-id" filter;
-        // filters are conjunctive with parameters, so intersect rather than union when both appear.
-        List<String> paramRuleIds = getList(p, "SecurityGroupRuleId");
-        List<String> filterRuleIds = filters.getOrDefault("security-group-rule-id", List.of());
-        List<String> ruleIds = paramRuleIds.isEmpty() || filterRuleIds.isEmpty()
-                ? (paramRuleIds.isEmpty() ? filterRuleIds : paramRuleIds)
-                : paramRuleIds.stream().filter(filterRuleIds::contains).toList();
-        boolean unsatisfiable = !paramRuleIds.isEmpty() && !filterRuleIds.isEmpty() && ruleIds.isEmpty();
-        List<String> groupIds = filters.getOrDefault("group-id", List.of());
-        List<SecurityGroupRule> rules = unsatisfiable
-                ? List.of()
-                : service.describeSecurityGroupRules(region, groupIds, ruleIds);
+        List<SecurityGroupRule> rules = service.describeSecurityGroupRules(
+                region, getList(p, "SecurityGroupRuleId"), filters);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeSecurityGroupRulesResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -3225,12 +3246,23 @@ public class Ec2QueryHandler {
         String groupId = p.getFirst("GroupId");
         List<Map<String, String>> updates = new ArrayList<>();
         for (int i = 1; ; i++) {
-            String ruleId = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleId");
-            if (ruleId == null) break;
+            String prefix = "SecurityGroupRule." + i + ".";
+            String ruleId = p.getFirst(prefix + "SecurityGroupRuleId");
+            if (ruleId == null) {
+                if (p.keySet().stream().anyMatch(name -> name.startsWith(prefix))) {
+                    throw new AwsException("MissingParameter", "SecurityGroupRuleId is required", 400);
+                }
+                break;
+            }
             Map<String, String> update = new LinkedHashMap<>();
             update.put("SecurityGroupRuleId", ruleId);
-            String desc = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest.Description");
-            if (desc != null) update.put("Description", desc);
+            for (String field : List.of("Description", "IpProtocol", "FromPort", "ToPort",
+                    "CidrIpv4", "CidrIpv6", "PrefixListId", "ReferencedGroupId")) {
+                String value = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRule." + field);
+                if (value != null) {
+                    update.put(field, value);
+                }
+            }
             updates.add(update);
         }
         service.modifySecurityGroupRules(region, groupId, updates);

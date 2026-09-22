@@ -4,19 +4,31 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.backup.model.*;
+import io.github.hectorvent.floci.services.backup.model.BackupJob;
+import io.github.hectorvent.floci.services.backup.model.BackupPlan;
+import io.github.hectorvent.floci.services.backup.model.BackupRule;
+import io.github.hectorvent.floci.services.backup.model.BackupSelection;
+import io.github.hectorvent.floci.services.backup.model.BackupVault;
+import io.github.hectorvent.floci.services.backup.model.Lifecycle;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.*;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
+import jakarta.ws.rs.core.UriInfo;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -24,8 +36,6 @@ import java.util.Map;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class BackupController {
-
-    private static final Logger LOG = Logger.getLogger(BackupController.class);
 
     private final BackupService service;
     private final RegionResolver regionResolver;
@@ -65,7 +75,9 @@ public class BackupController {
     public Response describeBackupVault(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(service.describeBackupVault(vaultName, region)).build();
+        ObjectNode vault = objectMapper.valueToTree(service.describeBackupVault(vaultName, region));
+        vault.remove(List.of("AccessPolicy", "SNSTopicArn", "BackupVaultEvents"));
+        return Response.ok(vault).build();
     }
 
     @DELETE
@@ -84,31 +96,64 @@ public class BackupController {
         List<BackupVault> vaults = service.listBackupVaults(region);
         ObjectNode out = objectMapper.createObjectNode();
         ArrayNode list = out.putArray("BackupVaultList");
-        vaults.forEach(list::addPOJO);
+        for (BackupVault vault : vaults) {
+            ObjectNode item = objectMapper.valueToTree(vault);
+            item.remove(List.of("AccessPolicy", "SNSTopicArn", "BackupVaultEvents"));
+            list.add(item);
+        }
         return Response.ok(out).build();
     }
 
-    // Notification configuration is an optional, never-configured aspect of a vault in the
-    // emulator. Per the AWS Backup API, GetBackupVaultNotifications returns
-    // ResourceNotFoundException (HTTP 400) when no notification configuration exists for the
-    // vault. We mirror that exact error contract so SDK clients see the documented
-    // "not configured" signal rather than an empty 200 or a generic 400 they can't interpret.
     @GET
     @Path("/backup-vaults/{backupVaultName}/notification-configuration")
-    public Response getBackupVaultNotifications(@PathParam("backupVaultName") String vaultName) {
-        throw new AwsException("ResourceNotFoundException",
-                "No notification configuration found for backup vault: " + vaultName, 400);
+    public Response getBackupVaultNotifications(@Context HttpHeaders headers,
+                                                @PathParam("backupVaultName") String vaultName) {
+        return Response.ok(service.getVaultNotifications(vaultName, regionResolver.resolveRegion(headers))).build();
     }
 
-    // Access policy is an optional, never-configured aspect of a vault in the emulator. Per the
-    // AWS Backup API, GetBackupVaultAccessPolicy returns ResourceNotFoundException (HTTP 400)
-    // when no policy exists for the vault. We mirror that exact error contract so SDK clients
-    // see the documented "not configured" signal rather than an empty 200 or a generic 400.
+    @PUT
+    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
+    public Response putBackupVaultNotifications(@Context HttpHeaders headers,
+                                                @PathParam("backupVaultName") String vaultName, String body) throws IOException {
+        JsonNode request = objectMapper.readTree(body);
+        service.putVaultNotifications(vaultName, textOrNull(request, "SNSTopicArn"),
+                readStringList(request.path("BackupVaultEvents")), regionResolver.resolveRegion(headers));
+        return Response.ok().build();
+    }
+
+    @DELETE
+    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
+    public Response deleteBackupVaultNotifications(@Context HttpHeaders headers,
+                                                   @PathParam("backupVaultName") String vaultName) {
+        service.deleteVaultNotifications(vaultName, regionResolver.resolveRegion(headers));
+        return Response.ok().build();
+    }
+
     @GET
     @Path("/backup-vaults/{backupVaultName}/access-policy")
-    public Response getBackupVaultAccessPolicy(@PathParam("backupVaultName") String vaultName) {
-        throw new AwsException("ResourceNotFoundException",
-                "No access policy found for backup vault: " + vaultName, 400);
+    public Response getBackupVaultAccessPolicy(@Context HttpHeaders headers,
+                                               @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(Map.of("BackupVaultName", vaultName,
+                "BackupVaultArn", service.describeBackupVault(vaultName, region).getBackupVaultArn(),
+                "Policy", service.getVaultPolicy(vaultName, region))).build();
+    }
+
+    @PUT
+    @Path("/backup-vaults/{backupVaultName}/access-policy")
+    public Response putBackupVaultAccessPolicy(@Context HttpHeaders headers,
+                                               @PathParam("backupVaultName") String vaultName, String body) throws IOException {
+        service.putVaultPolicy(vaultName, textOrNull(objectMapper.readTree(body), "Policy"),
+                regionResolver.resolveRegion(headers));
+        return Response.ok().build();
+    }
+
+    @DELETE
+    @Path("/backup-vaults/{backupVaultName}/access-policy")
+    public Response deleteBackupVaultAccessPolicy(@Context HttpHeaders headers,
+                                                  @PathParam("backupVaultName") String vaultName) {
+        service.deleteVaultPolicy(vaultName, regionResolver.resolveRegion(headers));
+        return Response.ok().build();
     }
 
     // ── Plan ───────────────────────────────────────────────────────────────────
@@ -124,6 +169,7 @@ public class BackupController {
         String creatorRequestId = textOrNull(req, "CreatorRequestId");
 
         BackupPlan plan = service.createBackupPlan(planName, rules, creatorRequestId, region);
+        service.tagResource(plan.getBackupPlanArn(), readStringMap(req, "BackupPlanTags"));
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("BackupPlanId", plan.getBackupPlanId());
@@ -206,6 +252,10 @@ public class BackupController {
 
         BackupSelection sel = service.createBackupSelection(planId, selectionName, iamRoleArn,
                 resources, notResources, creatorRequestId);
+        BackupSelection input = objectMapper.treeToValue(selNode, BackupSelection.class);
+        sel.setListOfTags(input.getListOfTags());
+        sel.setConditions(input.getConditions());
+        service.saveSelection(sel);
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("SelectionId", sel.getSelectionId());
@@ -228,6 +278,10 @@ public class BackupController {
         selBody.put("IamRoleArn", sel.getIamRoleArn());
         selBody.set("Resources", objectMapper.valueToTree(sel.getResources()));
         selBody.set("NotResources", objectMapper.valueToTree(sel.getNotResources()));
+        selBody.set("ListOfTags", objectMapper.valueToTree(sel.getListOfTags()));
+        if (sel.getConditions() != null) {
+            selBody.set("Conditions", objectMapper.valueToTree(sel.getConditions()));
+        }
         return Response.ok(out).build();
     }
 
@@ -277,67 +331,156 @@ public class BackupController {
         out.put("BackupJobId", job.getBackupJobId());
         out.put("BackupVaultArn", job.getBackupVaultArn());
         out.put("CreationDate", job.getCreationDate());
-        out.put("RecoveryPointArn", "");
         return Response.status(200).entity(out).build();
     }
 
     @GET
     @Path("/backup-jobs/{backupJobId}")
-    public Response describeBackupJob(@PathParam("backupJobId") String jobId) {
-        return Response.ok(service.describeBackupJob(jobId)).build();
+    public Response describeBackupJob(@Context HttpHeaders headers, @PathParam("backupJobId") String jobId) {
+        return Response.ok(service.describeBackupJob(jobId, regionResolver.resolveRegion(headers))).build();
     }
 
     @POST
     @Path("/backup-jobs/{backupJobId}")
-    public Response stopBackupJob(@PathParam("backupJobId") String jobId) {
-        service.stopBackupJob(jobId);
+    public Response stopBackupJob(@Context HttpHeaders headers, @PathParam("backupJobId") String jobId) {
+        service.stopBackupJob(jobId, regionResolver.resolveRegion(headers));
         return Response.noContent().build();
     }
 
     @GET
     @Path("/backup-jobs/")
-    public Response listBackupJobs(@QueryParam("byBackupVaultName") String byVaultName,
-                                    @QueryParam("byState") String byState,
-                                    @QueryParam("byResourceArn") String byResourceArn,
-                                    @QueryParam("byResourceType") String byResourceType) {
-        List<BackupJob> jobs = service.listBackupJobs(byVaultName, byState, byResourceArn, byResourceType);
-        ObjectNode out = objectMapper.createObjectNode();
-        ArrayNode list = out.putArray("BackupJobs");
-        jobs.forEach(list::addPOJO);
-        return Response.ok(out).build();
+    public Response listBackupJobs(@Context HttpHeaders headers, @Context UriInfo uri) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(service.page("BackupJobs", service.listBackupJobs(region), query(uri), region)).build();
     }
 
     // ── Recovery Point ─────────────────────────────────────────────────────────
 
     @GET
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
     public Response describeRecoveryPoint(@Context HttpHeaders headers,
                                            @PathParam("backupVaultName") String vaultName,
                                            @PathParam("recoveryPointArn") String recoveryPointArn) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(service.describeRecoveryPoint(vaultName, recoveryPointArn, region)).build();
+        ObjectNode point = objectMapper.valueToTree(service.describeRecoveryPoint(vaultName, recoveryPointArn, region));
+        point.remove("RestoreMetadata");
+        return Response.ok(point).build();
     }
 
     @GET
     @Path("/backup-vaults/{backupVaultName}/recovery-points/")
-    public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers,
+    public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers, @Context UriInfo uri,
                                                      @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
-        List<RecoveryPoint> points = service.listRecoveryPointsByBackupVault(vaultName, region);
-        ObjectNode out = objectMapper.createObjectNode();
-        ArrayNode list = out.putArray("RecoveryPoints");
-        points.forEach(list::addPOJO);
-        return Response.ok(out).build();
+        return Response.ok(service.page("RecoveryPoints", service.listRecoveryPointsByBackupVault(vaultName, region),
+                query(uri), region)).build();
     }
 
     @DELETE
-    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}")
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}")
     public Response deleteRecoveryPoint(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName,
                                          @PathParam("recoveryPointArn") String recoveryPointArn) {
         String region = regionResolver.resolveRegion(headers);
         service.deleteRecoveryPoint(vaultName, recoveryPointArn, region);
         return Response.noContent().build();
+    }
+
+    @GET
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}/restore-metadata")
+    public Response getRecoveryPointRestoreMetadata(@Context HttpHeaders headers,
+                                                    @PathParam("backupVaultName") String vaultName,
+                                                    @PathParam("recoveryPointArn") String arn) {
+        return Response.ok(service.getRecoveryPointRestoreMetadata(vaultName, arn,
+                regionResolver.resolveRegion(headers))).build();
+    }
+
+    @GET
+    @Path("/restore-jobs")
+    public Response listRestoreJobs(@Context HttpHeaders headers, @Context UriInfo uri) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(service.page("RestoreJobs", service.listRestoreJobs(region), query(uri), region)).build();
+    }
+
+    @GET
+    @Path("/restore-jobs/{restoreJobId}")
+    public Response describeRestoreJob(@Context HttpHeaders headers, @PathParam("restoreJobId") String id) {
+        Map<String, Object> job = new HashMap<>(service.describeRestoreJob(id, regionResolver.resolveRegion(headers)));
+        job.remove("Metadata");
+        job.remove("Region");
+        return Response.ok(job).build();
+    }
+
+    @GET
+    @Path("/restore-jobs/{restoreJobId}/metadata")
+    public Response getRestoreJobMetadata(@Context HttpHeaders headers, @PathParam("restoreJobId") String id) {
+        return Response.ok(service.getRestoreJobMetadata(id, regionResolver.resolveRegion(headers))).build();
+    }
+
+    @PUT
+    @Path("/restore-jobs/{restoreJobId}/validations")
+    public Response putRestoreValidationResult(@Context HttpHeaders headers, @PathParam("restoreJobId") String id,
+                                               String body) throws IOException {
+        JsonNode request = objectMapper.readTree(body);
+        service.putRestoreValidationResult(id, textOrNull(request, "ValidationStatus"),
+                textOrNull(request, "ValidationStatusMessage"), regionResolver.resolveRegion(headers));
+        return Response.ok().build();
+    }
+
+    @PUT
+    @Path("/restore-jobs")
+    public Response startRestoreJob(@Context HttpHeaders headers, String body) throws IOException {
+        return Response.ok(service.startRestoreJob(textOrNull(objectMapper.readTree(body), "RecoveryPointArn"),
+                regionResolver.resolveRegion(headers))).build();
+    }
+
+    @GET
+    @Path("/copy-jobs")
+    public Response listCopyJobs(@Context HttpHeaders headers, @Context UriInfo uri) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(service.page("CopyJobs", service.listCopyJobs(region), query(uri), region)).build();
+    }
+
+    @GET
+    @Path("/copy-jobs/{copyJobId}")
+    public Response describeCopyJob(@Context HttpHeaders headers, @PathParam("copyJobId") String id) {
+        return Response.ok(Map.of("CopyJob", service.describeCopyJob(id, regionResolver.resolveRegion(headers)))).build();
+    }
+
+    @PUT
+    @Path("/copy-jobs")
+    public Response startCopyJob(@Context HttpHeaders headers, String body) throws IOException {
+        JsonNode request = objectMapper.readTree(body);
+        return Response.ok(service.startCopyJob(textOrNull(request, "SourceBackupVaultName"),
+                textOrNull(request, "RecoveryPointArn"), regionResolver.resolveRegion(headers))).build();
+    }
+
+    @GET
+    @Path("/resources")
+    public Response listProtectedResources(@Context HttpHeaders headers, @Context UriInfo uri) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(service.page("Results", service.listProtectedResources(region), query(uri), region)).build();
+    }
+
+    @GET
+    @Path("/resources/{resourceArn: .+}/recovery-points")
+    public Response listRecoveryPointsByResource(@Context HttpHeaders headers, @Context UriInfo uri,
+                                                 @PathParam("resourceArn") String arn) {
+        String region = regionResolver.resolveRegion(headers);
+        return Response.ok(service.page("RecoveryPoints", service.listRecoveryPointsByResource(arn, region),
+                query(uri), region)).build();
+    }
+
+    @GET
+    @Path("/resources/{resourceArn: .+}")
+    public Response describeProtectedResource(@Context HttpHeaders headers, @PathParam("resourceArn") String arn) {
+        return Response.ok(service.describeProtectedResource(arn, regionResolver.resolveRegion(headers))).build();
+    }
+
+    private static Map<String, String> query(UriInfo uri) {
+        Map<String, String> query = new HashMap<>();
+        uri.getQueryParameters().forEach((key, values) -> query.put(key, values.getFirst()));
+        return query;
     }
 
     // ── Untag (POST /untag/{arn} with body — distinct from shared DELETE /tags pattern) ──
@@ -374,7 +517,7 @@ public class BackupController {
     private Map<String, String> readStringMap(JsonNode node, String field) {
         JsonNode mapNode = node.path(field);
         if (mapNode.isMissingNode() || mapNode.isNull()) {
-            return new java.util.HashMap<>();
+            return new HashMap<>();
         }
         return objectMapper.convertValue(mapNode, Map.class);
     }

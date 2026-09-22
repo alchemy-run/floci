@@ -5,7 +5,12 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
@@ -39,6 +44,116 @@ class BedrockAgentCoreToolsIntegrationTest {
     private static String browserId;
     private static String profileId;
     private static String codeInterpreterId;
+
+    @ParameterizedTest
+    @CsvSource({
+            "browsers,browserArn,202",
+            "browser-profiles,profileArn,200",
+            "code-interpreters,codeInterpreterArn,202"
+    })
+    void tagsFollowToolLifecycle(String path, String arnField, int status) {
+        String arn = createTaggedTool(path, arnField, status, "tagLife");
+        String id = arn.substring(arn.lastIndexOf('/') + 1);
+        try {
+            given().get("/tags/" + arn).then().statusCode(200)
+                    .body("tags", equalTo(Map.of("env", "test", "alchemy::id", "Tool")));
+
+            given().contentType("application/json")
+                    .body(Map.of("tags", Map.of("env", "prod", "team/name", "core")))
+                    .post("/tags/" + arn).then().statusCode(204);
+            given().get("/tags/" + arn).then().statusCode(200)
+                    .body("tags", equalTo(Map.of("env", "prod", "alchemy::id", "Tool", "team/name", "core")));
+
+            given().queryParam("tagKeys", "env", "team/name", "absent")
+                    .delete("/tags/" + arn).then().statusCode(204);
+            given().queryParam("tagKeys", "env").delete("/tags/" + arn).then().statusCode(204);
+            given().get("/tags/" + arn).then().statusCode(200)
+                    .body("tags", equalTo(Map.of("alchemy::id", "Tool")));
+            given().queryParam("tagKeys", "alchemy::id").delete("/tags/" + arn).then().statusCode(204);
+            given().get("/tags/" + arn).then().statusCode(200).body("tags", equalTo(Map.of()));
+            given().get("/" + path + "/" + id).then().statusCode(200)
+                    .body("status", equalTo("READY")).body("tags", nullValue());
+        } finally {
+            given().queryParam("clientToken", "tag-lifecycle-delete-token-000000000001")
+                    .delete("/" + path + "/" + id).then().statusCode(status);
+        }
+        assertTagOperationsFail(arn, 404, "ResourceNotFoundException");
+        given().get("/" + path + "/" + id).then().statusCode(404);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "browsers,browserArn,202",
+            "browser-profiles,profileArn,200",
+            "code-interpreters,codeInterpreterArn,202"
+    })
+    void toolTaggingValidatesTagsAndResourceIdentity(String path, String arnField, int status) {
+        String arn = createTaggedTool(path, arnField, status, "tagValidation");
+        String id = arn.substring(arn.lastIndexOf('/') + 1);
+        try {
+            for (String foreign : List.of(
+                    arn.replace(":000000000000:", ":111111111111:"),
+                    arn.replace(":us-east-1:", ":eu-west-1:"),
+                    arn.replace("arn:aws:", "arn:aws-cn:"))) {
+                assertTagOperationsFail(foreign, 404, "ResourceNotFoundException");
+            }
+            for (String malformed : List.of(arn + ":ignored", arn + "/ignored",
+                    arn.substring(0, arn.lastIndexOf('/') + 1))) {
+                assertTagOperationsFail(malformed, 400, "ValidationException");
+            }
+            for (String body : List.of("{}", "[]", "{\"tags\":[]}", "{\"tags\":null}",
+                    "{\"tags\":{\"env\":123}}", "{\"tags\":{\"env\":null}}",
+                    "{\"tags\":{\"\":\"invalid\"}}", "{\"tags\":{\"env\":\"invalid*\"}}")) {
+                given().contentType("application/json").body(body).post("/tags/" + arn)
+                        .then().statusCode(400).body("__type", equalTo("ValidationException"));
+            }
+            Map<String, String> extraTags = new LinkedHashMap<>();
+            for (int i = 0; i < 49; i++) {
+                extraTags.put("key" + i, "value");
+            }
+            given().contentType("application/json").body(Map.of("tags", extraTags))
+                    .post("/tags/" + arn).then().statusCode(400)
+                    .body("__type", equalTo("ValidationException"));
+            for (String key : List.of("", "invalid*", "k".repeat(129))) {
+                given().queryParam("tagKeys", "env", key).delete("/tags/" + arn)
+                        .then().statusCode(400).body("__type", equalTo("ValidationException"));
+            }
+            given().contentType("application/json").body(Map.of("tags", Map.of("env", "v".repeat(257))))
+                    .post("/tags/" + arn).then().statusCode(400)
+                    .body("__type", equalTo("ValidationException"));
+            given().get("/tags/" + arn).then().statusCode(200)
+                    .body("tags", equalTo(Map.of("env", "test", "alchemy::id", "Tool")));
+        } finally {
+            given().delete("/" + path + "/" + id).then().statusCode(status);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"browser-custom", "browser-profile", "code-interpreter-custom"})
+    void tagOperationsOnMissingToolsReturnNotFound(String type) {
+        assertTagOperationsFail("arn:aws:bedrock-agentcore:us-east-1:000000000000:"
+                + type + "/" + UNKNOWN_ID, 404, "ResourceNotFoundException");
+    }
+
+    private String createTaggedTool(String path, String arnField, int status, String name) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("name", name + SUFFIX);
+        request.put("tags", Map.of("env", "test", "alchemy::id", "Tool"));
+        if (!"browser-profiles".equals(path)) {
+            request.put("networkConfiguration", Map.of("networkMode",
+                    "browsers".equals(path) ? "PUBLIC" : "SANDBOX"));
+        }
+        return given().contentType("application/json").body(request).put("/" + path)
+                .then().statusCode(status).extract().path(arnField);
+    }
+
+    private void assertTagOperationsFail(String arn, int status, String code) {
+        given().get("/tags/" + arn).then().statusCode(status).body("__type", equalTo(code));
+        given().contentType("application/json").body(Map.of("tags", Map.of("env", "stolen")))
+                .post("/tags/" + arn).then().statusCode(status).body("__type", equalTo(code));
+        given().queryParam("tagKeys", "env").delete("/tags/" + arn)
+                .then().statusCode(status).body("__type", equalTo(code));
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Browsers

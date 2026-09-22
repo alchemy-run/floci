@@ -13,6 +13,7 @@ public class Snapshot {
     private String masterUsername;
     private String masterPassword;
     private String sqlDump;
+    private int manualSnapshotRetentionPeriod = -1;
 
     public Snapshot() {}
 
@@ -79,6 +80,14 @@ public class Snapshot {
 
     public void setMasterPassword(String masterPassword) {
         this.masterPassword = masterPassword;
+    }
+
+    public int getManualSnapshotRetentionPeriod() {
+        return manualSnapshotRetentionPeriod;
+    }
+
+    public void setManualSnapshotRetentionPeriod(int manualSnapshotRetentionPeriod) {
+        this.manualSnapshotRetentionPeriod = manualSnapshotRetentionPeriod;
     }
 
     public String getSqlDump() {

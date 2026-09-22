@@ -21,6 +21,7 @@ public class DestinationConfiguration {
         private String s3Bucket;
         private String s3Prefix;
         private String s3Region;
+        private String s3BucketOwner;
         private S3OutputConfigurations s3OutputConfigurations;
 
         public String getS3Bucket() { return s3Bucket; }
@@ -31,6 +32,9 @@ public class DestinationConfiguration {
 
         public String getS3Region() { return s3Region; }
         public void setS3Region(String v) { this.s3Region = v; }
+
+        public String getS3BucketOwner() { return s3BucketOwner; }
+        public void setS3BucketOwner(String v) { this.s3BucketOwner = v; }
 
         public S3OutputConfigurations getS3OutputConfigurations() { return s3OutputConfigurations; }
         public void setS3OutputConfigurations(S3OutputConfigurations v) { this.s3OutputConfigurations = v; }

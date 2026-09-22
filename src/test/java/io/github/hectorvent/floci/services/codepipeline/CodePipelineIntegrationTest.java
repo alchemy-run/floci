@@ -31,6 +31,138 @@ class CodePipelineIntegrationTest {
     }
 
     @Test
+    void invalidStageAndActionTargetsReturnModeledErrors() {
+        String pipelineName = "invalid-stage-targets";
+        String missingId = "00000000-0000-0000-0000-000000000000";
+        post("CreatePipeline", approvalPipeline(pipelineName, "SUPERSEDED")).then().statusCode(200);
+        try {
+            post("RetryStageExecution", """
+                    {"pipelineName":"%s","stageName":"Approve","pipelineExecutionId":"%s",
+                     "retryMode":"FAILED_ACTIONS"}
+                    """.formatted(pipelineName, missingId)).then().statusCode(400)
+                    .body("__type", containsString("NotLatestPipelineExecutionException"));
+            post("RollbackStage", """
+                    {"pipelineName":"%s","stageName":"Approve","targetPipelineExecutionId":"%s"}
+                    """.formatted(pipelineName, missingId)).then().statusCode(400)
+                    .body("__type", containsString("PipelineExecutionNotFoundException"));
+            post("OverrideStageCondition", """
+                    {"pipelineName":"%s","stageName":"Approve","pipelineExecutionId":"%s",
+                     "conditionType":"BEFORE_ENTRY"}
+                    """.formatted(pipelineName, missingId)).then().statusCode(400)
+                    .body("__type", containsString("ConditionNotOverridableException"));
+            post("PutActionRevision", """
+                    {"pipelineName":"%s","stageName":"Approve","actionName":"Missing",
+                     "actionRevision":{"revisionId":"revision","revisionChangeId":"change","created":1}}
+                    """.formatted(pipelineName)).then().statusCode(400)
+                    .body("__type", containsString("ActionNotFoundException"));
+            post("ListDeployActionExecutionTargets", """
+                    {"pipelineName":"%s","actionExecutionId":"%s"}
+                    """.formatted(pipelineName, missingId)).then().statusCode(400)
+                    .body("__type", containsString("ActionExecutionNotFoundException"));
+            for (String operation : List.of("RetryStageExecution", "RollbackStage", "OverrideStageCondition")) {
+                post(operation, """
+                        {"pipelineName":"%s","stageName":"Missing","pipelineExecutionId":"%s",
+                         "targetPipelineExecutionId":"%s","retryMode":"FAILED_ACTIONS",
+                         "conditionType":"BEFORE_ENTRY"}
+                        """.formatted(pipelineName, missingId, missingId)).then().statusCode(400)
+                        .body("__type", containsString("StageNotFoundException"));
+            }
+            post("ListPipelineExecutions", """
+                    {"pipelineName":"%s"}
+                    """.formatted(pipelineName)).then().statusCode(200)
+                    .body("pipelineExecutionSummaries", hasSize(0));
+        } finally {
+            post("DeletePipeline", """
+                    {"name":"%s"}
+                    """.formatted(pipelineName)).then().statusCode(200);
+        }
+    }
+
+    @Test
+    void unknownJobsAndActionTypesReturnModeledErrors() {
+        String missingId = "00000000-0000-0000-0000-000000000000";
+        for (String operation : List.of("GetJobDetails", "PutJobSuccessResult", "PutJobFailureResult", "AcknowledgeJob")) {
+            post(operation, """
+                    {"jobId":"%s","nonce":"%s","failureDetails":{"type":"JobFailed","message":"failed"}}
+                    """.formatted(missingId, missingId)).then().statusCode(400)
+                    .body("__type", containsString("JobNotFoundException"));
+        }
+        post("PollForJobs", """
+                {"actionTypeId":{"category":"Build","owner":"Custom","provider":"MissingWorker","version":"1"}}
+                """).then().statusCode(400).body("__type", containsString("ActionTypeNotFoundException"));
+    }
+
+    @Test
+    void retryPreservesExecutionIdentityAndDoesNotRerunSuccessfulActions() throws Exception {
+        String pipelineName = "retry-stage-identity";
+        post("CreatePipeline", approvalPipeline(pipelineName, "SUPERSEDED")).then().statusCode(200);
+        String executionId = startExecution(pipelineName);
+        String token = waitForApprovalToken(pipelineName);
+        post("RetryStageExecution", """
+                {"pipelineName":"%s","stageName":"Approve","pipelineExecutionId":"%s","retryMode":"ALL_ACTIONS"}
+                """.formatted(pipelineName, executionId)).then().statusCode(400)
+                .body("__type", containsString("StageNotRetryableException"));
+        post("RollbackStage", """
+                {"pipelineName":"%s","stageName":"Approve","targetPipelineExecutionId":"%s"}
+                """.formatted(pipelineName, executionId)).then().statusCode(400)
+                .body("__type", containsString("UnableToRollbackStageException"));
+        post("PutApprovalResult", """
+                {"pipelineName":"%s","stageName":"Approve","actionName":"ManualApproval","token":"%s",
+                 "result":{"status":"Approved","summary":"first stage complete"}}
+                """.formatted(pipelineName, token)).then().statusCode(200);
+        String secondToken = waitForStageApprovalToken(pipelineName, 1);
+        post("PutApprovalResult", """
+                {"pipelineName":"%s","stageName":"Complete","actionName":"ManualApprovalComplete","token":"%s",
+                 "result":{"status":"Rejected","summary":"retry this stage"}}
+                """.formatted(pipelineName, secondToken)).then().statusCode(200);
+        waitForExecution(pipelineName, executionId, "Failed");
+        Instant deadline = Instant.now().plusSeconds(5);
+        Response retried;
+        do {
+            retried = post("RetryStageExecution", """
+                    {"pipelineName":"%s","stageName":"Complete","pipelineExecutionId":"%s","retryMode":"FAILED_ACTIONS"}
+                    """.formatted(pipelineName, executionId));
+            if (retried.statusCode() != 400 || !retried.asString().contains("ConflictException")) {
+                break;
+            }
+            Thread.sleep(50);
+        } while (Instant.now().isBefore(deadline));
+        retried.then().statusCode(200).body("pipelineExecutionId", equalTo(executionId));
+        String retryToken = waitForStageApprovalToken(pipelineName, 1);
+        post("PutApprovalResult", """
+                {"pipelineName":"%s","stageName":"Complete","actionName":"ManualApprovalComplete","token":"%s",
+                 "result":{"status":"Approved","summary":"retry complete"}}
+                """.formatted(pipelineName, retryToken)).then().statusCode(200);
+        waitForExecution(pipelineName, executionId, "Succeeded");
+        post("ListPipelineExecutions", """
+                {"pipelineName":"%s"}
+                """.formatted(pipelineName)).then().statusCode(200).body("pipelineExecutionSummaries", hasSize(1));
+        post("ListActionExecutions", """
+                {"pipelineName":"%s"}
+                """.formatted(pipelineName)).then().statusCode(200)
+                .body("actionExecutionDetails.findAll { it.actionName == 'ManualApproval' }", hasSize(1))
+                .body("actionExecutionDetails.findAll { it.actionName == 'ManualApprovalComplete' }", hasSize(2));
+        post("DeletePipeline", """
+                {"name":"%s"}
+                """.formatted(pipelineName)).then().statusCode(200);
+    }
+
+    private String waitForStageApprovalToken(String pipelineName, int stageIndex) throws Exception {
+        Instant deadline = Instant.now().plusSeconds(5);
+        do {
+            String token = post("GetPipelineState", """
+                    {"name":"%s"}
+                    """.formatted(pipelineName)).jsonPath()
+                    .getString("stageStates[%d].actionStates[0].latestExecution.token".formatted(stageIndex));
+            if (token != null) {
+                return token;
+            }
+            Thread.sleep(50);
+        } while (Instant.now().isBefore(deadline));
+        throw new AssertionError("Approval token was not issued");
+    }
+
+    @Test
     void getPipelineReturnsCurrentStructureAndMetadata() {
         String pipelineName = "get-pipeline-it";
         post("CreatePipeline", pipeline(pipelineName, """
@@ -183,7 +315,8 @@ class CodePipelineIntegrationTest {
                         },
                         "configuration": {
                             "S3Bucket": "codepipeline-source",
-                            "S3ObjectKey": "source.zip"
+                            "S3ObjectKey": "source.zip",
+                            "PollForSourceChanges": "false"
                         },
                         "outputArtifacts": [{"name": "SourceOutput"}],
                         "runOrder": 1
@@ -281,6 +414,7 @@ class CodePipelineIntegrationTest {
                 .statusCode(200)
                 .body("actionExecutionDetails", hasSize(2));
 
+        putObject("codepipeline-source", "source.zip", "new source must not be used for rollback");
         String rollbackExecutionId = post("RollbackStage", """
                 {
                     "pipelineName": "%s",
@@ -294,6 +428,13 @@ class CodePipelineIntegrationTest {
                 .extract().path("pipelineExecutionId");
 
         waitForExecution(pipelineName, rollbackExecutionId, "Succeeded");
+        given().get("/codepipeline-destination/deployed.zip").then().statusCode(200)
+                .body(equalTo("pipeline artifact"));
+        post("ListActionExecutions", """
+                {"pipelineName":"%s","filter":{"pipelineExecutionId":"%s"}}
+                """.formatted(pipelineName, rollbackExecutionId)).then().statusCode(200)
+                .body("actionExecutionDetails", hasSize(1))
+                .body("actionExecutionDetails[0].stageName", equalTo("Deploy"));
 
         post("GetPipelineExecution", """
                 {"pipelineName": "%s", "pipelineExecutionId": "%s"}
@@ -302,7 +443,9 @@ class CodePipelineIntegrationTest {
                 .statusCode(200)
                 .body("pipelineExecution.executionType", equalTo("ROLLBACK"))
                 .body("pipelineExecution.rollbackMetadata.rollbackTargetPipelineExecutionId", equalTo(executionId))
-                .body("pipelineExecution.rollbackTargetPipelineExecutionId", nullValue());
+                .body("pipelineExecution.rollbackTargetPipelineExecutionId", nullValue())
+                .body("pipelineExecution.resumeStageName", nullValue())
+                .body("pipelineExecution.retryFailedActionsOnly", nullValue());
 
         post("TagResource", """
                 {
@@ -824,6 +967,20 @@ class CodePipelineIntegrationTest {
         Response poll = waitForJob();
         String jobId = poll.path("jobs[0].id");
         String nonce = poll.path("jobs[0].nonce");
+        poll.then().body("jobs[0].accountId", equalTo("000000000000"))
+                .body("jobs[0].data.pipelineContext.stage.name", equalTo("Build"))
+                .body("jobs[0].data.pipelineContext.action.name", equalTo("WorkerBuild"))
+                .body("jobs[0].data.actionTypeId.provider", equalTo("FlociWorker"));
+        post("GetJobDetails", """
+                {"jobId":"%s"}
+                """.formatted(jobId)).then().statusCode(200)
+                .body("jobDetails.id", equalTo(jobId))
+                .body("jobDetails.accountId", equalTo("000000000000"))
+                .body("jobDetails.nonce", nullValue());
+        post("AcknowledgeJob", """
+                {"jobId":"%s","nonce":"invalid-nonce"}
+                """.formatted(jobId)).then().statusCode(400)
+                .body("__type", containsString("InvalidNonceException"));
 
         post("AcknowledgeJob", """
                 {"jobId": "%s", "nonce": "%s"}
@@ -845,6 +1002,14 @@ class CodePipelineIntegrationTest {
                 """.formatted(jobId)).then().statusCode(200);
 
         waitForExecution(pipelineName, executionId, "Succeeded");
+        post("PutJobSuccessResult", """
+                {"jobId":"%s"}
+                """.formatted(jobId)).then().statusCode(400)
+                .body("__type", containsString("InvalidJobStateException"));
+        post("PutJobFailureResult", """
+                {"jobId":"%s","failureDetails":{"type":"JobFailed","message":"already complete"}}
+                """.formatted(jobId)).then().statusCode(400)
+                .body("__type", containsString("InvalidJobStateException"));
 
         post("DeleteCustomActionType", """
                 {"category": "Build", "provider": "FlociWorker", "version": "1"}

@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.RequestScopes;
+import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncAgent;
@@ -13,24 +17,39 @@ import io.github.hectorvent.floci.services.datasync.model.DataSyncLocation;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncLocationType;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncTaggable;
 import io.github.hectorvent.floci.services.datasync.model.DataSyncTask;
+import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.s3.model.CopyObjectOptions;
+import io.github.hectorvent.floci.services.s3.model.S3Object;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 /**
- * AWS DataSync management plane.
+ * AWS DataSync management and local S3 transfer execution.
  *
  * <p>Agents report {@code ONLINE} and tasks {@code AVAILABLE} from the moment they are
  * created, so SDK and Terraform waiters finish on their first poll. Every
@@ -41,7 +60,7 @@ import java.util.function.Function;
  * back.
  */
 @ApplicationScoped
-public class DataSyncService {
+public class DataSyncService implements Resettable {
 
     private static final Logger LOG = Logger.getLogger(DataSyncService.class);
 
@@ -68,20 +87,49 @@ public class DataSyncService {
 
     private final StorageBackend<String, DataSyncAgent> agents;
     private final StorageBackend<String, DataSyncLocation> locations;
-    private final StorageBackend<String, DataSyncTask> tasks;
+    private final AccountAwareStorageBackend<DataSyncTask> tasks;
+    private final AccountAwareStorageBackend<ObjectNode> executions;
     private final RegionResolver regionResolver;
     private final ObjectMapper mapper;
+    private final S3Service s3;
+    private final ExecutorService executor;
+    private final RequestContext requestContext;
+    private final Map<String, FutureTask<Void>> workers = new HashMap<>();
+    private boolean stopping;
 
     @Inject
-    public DataSyncService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper) {
+    public DataSyncService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper,
+                           S3Service s3, RequestContext requestContext) {
+        this(storageFactory, regionResolver, mapper, s3, Executors.newVirtualThreadPerTaskExecutor(), requestContext);
+    }
+
+    DataSyncService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper,
+                    S3Service s3, ExecutorService executor, RequestContext requestContext) {
         this.agents = storageFactory.create("datasync", "datasync-agents.json",
                 new TypeReference<Map<String, DataSyncAgent>>() {});
         this.locations = storageFactory.create("datasync", "datasync-locations.json",
                 new TypeReference<Map<String, DataSyncLocation>>() {});
         this.tasks = storageFactory.create("datasync", "datasync-tasks.json",
                 new TypeReference<Map<String, DataSyncTask>>() {});
+        this.executions = storageFactory.create("datasync", "datasync-executions.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.regionResolver = regionResolver;
         this.mapper = mapper;
+        this.s3 = s3;
+        this.executor = executor;
+        this.requestContext = requestContext;
+        for (AccountAwareStorageBackend.AccountEntry<ObjectNode> entry : executions.scanAllAccountEntries(key -> true)) {
+            if (!terminal(entry.value())) {
+                failExecution(entry.value(), "Interrupted", "The emulator stopped before the transfer completed.");
+                executions.putForAccount(entry.accountId(), entry.key(), entry.value());
+            }
+        }
+        for (AccountAwareStorageBackend.AccountEntry<DataSyncTask> entry : tasks.scanAllAccountEntries(key -> true)) {
+            if ("RUNNING".equals(entry.value().getStatus())) {
+                entry.value().setStatus(TASK_STATUS_AVAILABLE);
+                tasks.putForAccount(entry.accountId(), entry.key(), entry.value());
+            }
+        }
     }
 
     /** A page of list results plus the token that resumes after it, or {@code null} at the end. */
@@ -255,13 +303,14 @@ public class DataSyncService {
         return task;
     }
 
-    public DataSyncTask getTask(String taskArn) {
+    public synchronized DataSyncTask getTask(String taskArn) {
         requireArn(taskArn, "TaskArn");
+        requireScope(taskArn, regionResolver.getRegion(), "Task");
         return tasks.get(taskArn).orElseThrow(() -> new AwsException("InvalidRequestException",
                 "Task " + taskArn + " is not found.", 400));
     }
 
-    public DataSyncTask updateTask(JsonNode request) {
+    public synchronized DataSyncTask updateTask(JsonNode request) {
         String taskArn = requiredText(request, "TaskArn", "UpdateTask");
         DataSyncTask task = getTask(taskArn);
 
@@ -295,15 +344,23 @@ public class DataSyncService {
         return task;
     }
 
-    public void deleteTask(String taskArn) {
+    public synchronized void deleteTask(String taskArn) {
         getTask(taskArn);
+        for (ObjectNode execution : executions.scan(key -> key.startsWith(taskArn + "/execution/"))) {
+            String arn = execution.path("TaskExecutionArn").asText();
+            FutureTask<Void> worker = workers.remove(arn);
+            if (worker != null) {
+                worker.cancel(true);
+            }
+            executions.delete(arn);
+        }
         tasks.delete(taskArn);
         LOG.infov("Deleted DataSync task: {0}", taskArn);
     }
 
     public Page<DataSyncTask> listTasks(JsonNode filters, String nextToken, int maxResults) {
         List<DataSyncTask> all = new ArrayList<>();
-        for (DataSyncTask task : tasks.scan(key -> true)) {
+        for (DataSyncTask task : tasks.scan(key -> scopeMatches(key, regionResolver.getRegion()))) {
             if (matchesTaskFilters(task, filters)) {
                 all.add(task);
             }
@@ -312,26 +369,582 @@ public class DataSyncService {
         return paginate(all, DataSyncTask::getTaskArn, nextToken, maxResults);
     }
 
+    // ---- Executions ----
+
+    public synchronized ObjectNode startTaskExecution(JsonNode request, String region) {
+        if (stopping) {
+            throw new AwsException("InternalException", "The emulator is shutting down.", 500);
+        }
+        for (String field : List.of("ManifestConfig", "TaskReportConfig")) {
+            if (request.hasNonNull(field)) {
+                throw invalid(field + " is not supported for local transfers.");
+            }
+        }
+        for (String field : List.of("Includes", "Excludes", "Tags")) {
+            if (request.has(field) && !request.get(field).isArray()) {
+                throw invalid(field + " must be an array.");
+            }
+        }
+        String taskArn = requiredText(request, "TaskArn", "StartTaskExecution");
+        requireScope(taskArn, region, "Task");
+        DataSyncTask task = getTask(taskArn);
+        ObjectNode options = (ObjectNode) task.getOptions().deepCopy();
+        JsonNode overrides = request.get("OverrideOptions");
+        if (overrides != null) {
+            if (!overrides.isObject()) {
+                throw invalid("OverrideOptions must be an object.");
+            }
+            overrides.properties().forEach(member -> options.set(member.getKey(), member.getValue().deepCopy()));
+        }
+        requireSupportedVerifyMode(options.path("VerifyMode").asText(), taskModeOf(task));
+        validateBandwidth(options.path("BytesPerSecond"));
+        validateTransferOptions(options);
+        if (!Set.of("ENABLED", "DISABLED").contains(options.path("TaskQueueing").asText())) {
+            throw invalid("TaskQueueing must be ENABLED or DISABLED.");
+        }
+        if (TASK_MODE_ENHANCED.equals(taskModeOf(task)) && options.path("BytesPerSecond").asLong() != -1) {
+            throw invalid("BytesPerSecond is not supported for ENHANCED tasks.");
+        }
+        boolean running = executions.scan(key -> key.startsWith(taskArn + "/execution/")).stream()
+                .anyMatch(execution -> !terminal(execution));
+        if (running && "DISABLED".equals(options.path("TaskQueueing").asText())) {
+            throw invalid("Task already has an active execution and TaskQueueing is DISABLED.");
+        }
+        ObjectNode execution = mapper.createObjectNode();
+        String arn = taskArn + "/execution/exec-" + randomResourceId();
+        execution.put("TaskExecutionArn", arn);
+        execution.put("TaskMode", taskModeOf(task));
+        execution.put("Status", running ? "QUEUED" : "LAUNCHING");
+        execution.put("StartTime", epochSeconds());
+        execution.set("Options", options);
+        execution.set("Includes", filterList(request.has("Includes") ? request.get("Includes") : task.getIncludes()));
+        execution.set("Excludes", filterList(request.has("Excludes") ? request.get("Excludes") : task.getExcludes()));
+        execution.set("Tags", request.has("Tags") ? request.get("Tags").deepCopy() : mapper.createArrayNode());
+        execution.put("BytesTransferred", 0L);
+        execution.put("BytesWritten", 0L);
+        execution.put("FilesTransferred", 0L);
+        execution.put("FilesSkipped", 0L);
+        execution.put("FilesDeleted", 0L);
+        execution.put("FilesVerified", 0L);
+        ObjectNode result = execution.putObject("Result");
+        result.put("PrepareStatus", "PENDING");
+        result.put("TransferStatus", "PENDING");
+        result.put("VerifyStatus", "PENDING");
+        executions.put(arn, execution);
+        task.setStatus("RUNNING");
+        tasks.put(taskArn, task);
+        if (!running) {
+            launch(execution, regionResolver.getAccountId());
+        }
+        return execution.deepCopy();
+    }
+
+    public synchronized ObjectNode describeTaskExecution(String arn, String region) {
+        return execution(arn, region).deepCopy();
+    }
+
+    public synchronized Page<ObjectNode> listTaskExecutions(String taskArn, String nextToken, int maxResults,
+                                                           String region) {
+        if (taskArn != null) {
+            requireScope(taskArn, region, "Task");
+            getTask(taskArn);
+        }
+        List<ObjectNode> all = executions.scan(key -> scopeMatches(key, region)
+                && (taskArn == null || key.startsWith(taskArn + "/execution/")));
+        all.sort(Comparator.comparing(node -> node.path("TaskExecutionArn").asText()));
+        if (nextToken != null && all.stream().noneMatch(node -> nextToken.equals(node.path("TaskExecutionArn").asText()))) {
+            throw invalid("Invalid NextToken.");
+        }
+        return paginate(all.stream().map(ObjectNode::deepCopy).toList(),
+                node -> node.path("TaskExecutionArn").asText(), nextToken, maxResults);
+    }
+
+    public synchronized String currentTaskExecutionArn(String taskArn) {
+        return executions.scan(key -> key.startsWith(taskArn + "/execution/")).stream()
+                .filter(node -> !terminal(node) && !"QUEUED".equals(node.path("Status").asText()))
+                .map(node -> node.path("TaskExecutionArn").asText()).findFirst().orElse(null);
+    }
+
+    public synchronized void updateTaskExecution(JsonNode request, String region) {
+        String arn = requiredText(request, "TaskExecutionArn", "UpdateTaskExecution");
+        ObjectNode execution = execution(arn, region);
+        if (terminal(execution) || "QUEUED".equals(execution.path("Status").asText())) {
+            throw invalid("The task execution is not running.");
+        }
+        JsonNode options = request.path("Options");
+        if (!options.isObject() || options.size() != 1 || !options.has("BytesPerSecond")) {
+            throw invalid("Only Options.BytesPerSecond can be updated for a running task execution.");
+        }
+        if (TASK_MODE_ENHANCED.equals(execution.path("TaskMode").asText())) {
+            throw invalid("BytesPerSecond cannot be updated for an ENHANCED task execution.");
+        }
+        validateBandwidth(options.get("BytesPerSecond"));
+        ((ObjectNode) execution.get("Options")).set("BytesPerSecond", options.get("BytesPerSecond"));
+        executions.put(arn, execution);
+    }
+
+    public synchronized void cancelTaskExecution(String arn, String region) {
+        ObjectNode execution = execution(arn, region);
+        if (terminal(execution)) {
+            throw invalid("The task execution has already completed.");
+        }
+        FutureTask<Void> worker = workers.remove(arn);
+        if (worker != null) {
+            worker.cancel(true);
+        }
+        failExecution(execution, "Cancelled", "Task execution cancelled by the user.");
+        executions.put(arn, execution);
+        advanceTask(taskArnOf(arn), regionResolver.getAccountId());
+    }
+
+    private ObjectNode execution(String arn, String region) {
+        requireArn(arn, "TaskExecutionArn");
+        requireScope(arn, region, "Task execution");
+        return executions.get(arn).orElseThrow(() -> invalid("Task execution " + arn + " is not found."));
+    }
+
+    private void launch(ObjectNode execution, String account) {
+        String arn = execution.path("TaskExecutionArn").asText();
+        execution.put("Status", "LAUNCHING");
+        executions.putForAccount(account, arn, execution);
+        FutureTask<Void> worker = new FutureTask<>(() -> {
+            RequestScopes.runAs(account, () -> {
+                String previousRegion = requestContext.getRegion();
+                requestContext.setRegion(arn.split(":", 6)[3]);
+                try {
+                    transfer(arn, account);
+                } finally {
+                    requestContext.setRegion(previousRegion);
+                }
+            });
+            return null;
+        });
+        workers.put(arn, worker);
+        executor.execute(worker);
+    }
+
+    private void transfer(String arn, String account) {
+        try {
+            DataSyncTask task;
+            ObjectNode snapshot;
+            synchronized (this) {
+                snapshot = activeExecution(arn, account).deepCopy();
+                task = tasks.getForAccount(account, taskArnOf(arn)).orElseThrow(CancellationException::new);
+                setExecutionStatus(arn, account, "PREPARING", "PrepareStatus");
+            }
+            DataSyncLocation source = getLocation(task.getSourceLocationArn());
+            DataSyncLocation destination = getLocation(task.getDestinationLocationArn());
+            if (source.getLocationType() != DataSyncLocationType.S3 || destination.getLocationType() != DataSyncLocationType.S3) {
+                throw new AwsException("UnsupportedBackend", "Only local S3-to-S3 transfers are supported.", 400);
+            }
+            if (task.getManifestConfig() != null || task.getTaskReportConfig() != null) {
+                throw new AwsException("UnsupportedConfiguration", "Manifests and task reports are not supported for local transfers.", 400);
+            }
+            String sourceBucket = s3BucketName(source.getConfiguration().path("S3BucketArn").asText());
+            String destinationBucket = s3BucketName(destination.getConfiguration().path("S3BucketArn").asText());
+            Set<String> ownedBuckets = new HashSet<>();
+            s3.listBuckets().forEach(bucket -> ownedBuckets.add(bucket.getName()));
+            if (!ownedBuckets.contains(sourceBucket) || !ownedBuckets.contains(destinationBucket)) {
+                throw new AwsException("LocationAccessTestFailed", "Source and destination buckets must exist in the task's account.", 400);
+            }
+            String sourcePrefix = s3Prefix(source);
+            String destinationPrefix = s3Prefix(destination);
+            if (sourceBucket.equals(destinationBucket)
+                    && (sourcePrefix.startsWith(destinationPrefix) || destinationPrefix.startsWith(sourcePrefix))) {
+                throw invalid("Source and destination S3 prefixes must not overlap.");
+            }
+            JsonNode options = snapshot.path("Options");
+            if (!"OFF".equals(options.path("LogLevel").asText())) {
+                throw new AwsException("UnsupportedConfiguration", "CloudWatch transfer logging is not supported.", 400);
+            }
+            List<Pattern> includes = patterns(snapshot.path("Includes"));
+            List<Pattern> excludes = patterns(snapshot.path("Excludes"));
+            List<S3Object> objects = listObjects(sourceBucket, sourcePrefix).stream()
+                    .filter(object -> selected(object.getKey().substring(sourcePrefix.length()), includes, excludes)).toList();
+            synchronized (this) {
+                ObjectNode execution = activeExecution(arn, account);
+                execution.put("EstimatedFilesToTransfer", objects.size());
+                execution.put("EstimatedBytesToTransfer", objects.stream().mapToLong(S3Object::getSize).sum());
+                ((ObjectNode) execution.get("Result")).put("PrepareStatus", "SUCCESS");
+                setExecutionStatus(arn, account, "TRANSFERRING", "TransferStatus");
+            }
+            Set<String> expectedKeys = new HashSet<>();
+            List<S3Object> verify = new ArrayList<>();
+            for (S3Object object : objects) {
+                String key = destinationPrefix + object.getKey().substring(sourcePrefix.length());
+                expectedKeys.add(key);
+                boolean exists = s3.objectExists(destinationBucket, key);
+                boolean skip = exists && ("NEVER".equals(options.path("OverwriteMode").asText())
+                        || ("CHANGED".equals(options.path("TransferMode").asText())
+                        && sameObject(object, s3.headObject(destinationBucket, key), options)));
+                if (skip) {
+                    synchronized (this) {
+                        increment(activeExecution(arn, account), "FilesSkipped", 1);
+                        saveExecution(arn, account);
+                    }
+                    if ("POINT_IN_TIME_CONSISTENT".equals(options.path("VerifyMode").asText())) {
+                        verify.add(object);
+                    }
+                    continue;
+                }
+                throttle(arn, account, object.getSize());
+                synchronized (this) {
+                    ObjectNode execution = activeExecution(arn, account);
+                    CopyObjectOptions copy = new CopyObjectOptions()
+                            .withStorageClass(destination.getConfiguration().path("S3StorageClass").asText("STANDARD"));
+                    if ("NONE".equals(options.path("ObjectTags").asText())) {
+                        copy.withTaggingDirective("REPLACE").withReplacementTagging(Map.of());
+                    }
+                    S3Object copied = s3.copyObject(sourceBucket, object.getKey(), destinationBucket, key, copy);
+                    increment(execution, "BytesTransferred", copied.getSize());
+                    increment(execution, "BytesWritten", copied.getSize());
+                    increment(execution, "FilesTransferred", 1);
+                    saveExecution(arn, account);
+                }
+                verify.add(object);
+            }
+            if ("REMOVE".equals(options.path("PreserveDeletedFiles").asText())) {
+                for (S3Object object : listObjects(destinationBucket, destinationPrefix)) {
+                    if (!expectedKeys.contains(object.getKey())
+                            && selected(object.getKey().substring(destinationPrefix.length()), includes, excludes)) {
+                        synchronized (this) {
+                            ObjectNode execution = activeExecution(arn, account);
+                            s3.deleteObject(destinationBucket, object.getKey());
+                            increment(execution, "FilesDeleted", 1);
+                            saveExecution(arn, account);
+                        }
+                    }
+                }
+            }
+            synchronized (this) {
+                ((ObjectNode) activeExecution(arn, account).get("Result")).put("TransferStatus", "SUCCESS");
+                setExecutionStatus(arn, account, "VERIFYING", "VerifyStatus");
+            }
+            if (!"NONE".equals(options.path("VerifyMode").asText())) {
+                for (S3Object object : verify) {
+                    synchronized (this) {
+                        activeExecution(arn, account);
+                    }
+                    verifyObject(sourceBucket, object.getKey(), destinationBucket,
+                            destinationPrefix + object.getKey().substring(sourcePrefix.length()));
+                    synchronized (this) {
+                        increment(activeExecution(arn, account), "FilesVerified", 1);
+                        saveExecution(arn, account);
+                    }
+                }
+            }
+            synchronized (this) {
+                ObjectNode execution = activeExecution(arn, account);
+                ((ObjectNode) execution.get("Result")).put("VerifyStatus",
+                        "NONE".equals(options.path("VerifyMode").asText()) ? "PENDING" : "SUCCESS");
+                execution.put("Status", "SUCCESS");
+                execution.put("EndTime", epochSeconds());
+                executions.putForAccount(account, arn, execution);
+            }
+        } catch (CancellationException cancelled) {
+            LOG.debugv("DataSync execution stopped: {0}", arn);
+            recordFailure(arn, account, "Cancelled", "The task execution was cancelled.");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            recordFailure(arn, account, "Interrupted", "The task execution was interrupted.");
+        } catch (AwsException failure) {
+            recordFailure(arn, account, failure.getErrorCode(), failure.getMessage());
+        } catch (IOException | RuntimeException failure) {
+            LOG.errorv(failure, "DataSync execution failed: {0}", arn);
+            recordFailure(arn, account, "TransferFailed", failure.getMessage());
+        } finally {
+            synchronized (this) {
+                workers.remove(arn);
+                advanceTask(taskArnOf(arn), account);
+            }
+        }
+    }
+
+    private synchronized void recordFailure(String arn, String account, String code, String message) {
+        executions.getForAccount(account, arn).filter(node -> !terminal(node)).ifPresent(node -> {
+            failExecution(node, code, message);
+            executions.putForAccount(account, arn, node);
+        });
+    }
+
+    private void advanceTask(String taskArn, String account) {
+        if (stopping) {
+            return;
+        }
+        DataSyncTask task = tasks.getForAccount(account, taskArn).orElse(null);
+        if (task == null) {
+            return;
+        }
+        List<ObjectNode> pending = executions.scanForAccount(account, key -> key.startsWith(taskArn + "/execution/")).stream()
+                .filter(node -> !terminal(node)).sorted(Comparator.comparingDouble(node -> node.path("StartTime").asDouble())).toList();
+        if (pending.stream().noneMatch(node -> workers.containsKey(node.path("TaskExecutionArn").asText())) && !pending.isEmpty()) {
+            launch(pending.getFirst(), account);
+        }
+        task.setStatus(pending.isEmpty() ? TASK_STATUS_AVAILABLE : "RUNNING");
+        tasks.putForAccount(account, taskArn, task);
+    }
+
+    private ObjectNode activeExecution(String arn, String account) {
+        ObjectNode execution = executions.getForAccount(account, arn).orElseThrow(CancellationException::new);
+        if (terminal(execution) || Thread.currentThread().isInterrupted()) {
+            throw new CancellationException();
+        }
+        return execution;
+    }
+
+    private void saveExecution(String arn, String account) {
+        executions.putForAccount(account, arn, activeExecution(arn, account));
+    }
+
+    private void setExecutionStatus(String arn, String account, String status, String phase) {
+        ObjectNode execution = activeExecution(arn, account);
+        execution.put("Status", status);
+        ((ObjectNode) execution.get("Result")).put(phase, "PENDING");
+        saveExecution(arn, account);
+    }
+
+    private void throttle(String arn, String account, long bytes) throws InterruptedException {
+        double remaining = bytes;
+        while (remaining > 0) {
+            long rate;
+            synchronized (this) {
+                rate = activeExecution(arn, account).path("Options").path("BytesPerSecond").asLong(-1);
+            }
+            if (rate == -1) {
+                return;
+            }
+            long delay = Math.min(100, Math.max(1, (long) Math.ceil(remaining * 1000 / rate)));
+            long before = System.nanoTime();
+            Thread.sleep(delay);
+            remaining -= rate * ((System.nanoTime() - before) / 1_000_000_000.0);
+        }
+    }
+
+    private List<S3Object> listObjects(String bucket, String prefix) {
+        List<S3Object> result = new ArrayList<>();
+        String token = null;
+        do {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new CancellationException();
+            }
+            S3Service.ListObjectsResult page = s3.listObjectsWithPrefixes(bucket, prefix, null, 1000, token, null);
+            result.addAll(page.objects());
+            token = page.isTruncated() ? page.nextContinuationToken() : null;
+        } while (token != null);
+        return result;
+    }
+
+    private void verifyObject(String sourceBucket, String sourceKey, String destinationBucket, String destinationKey)
+            throws IOException {
+        try (InputStream source = s3.openObjectStream(sourceBucket, sourceKey, null);
+             InputStream destination = s3.openObjectStream(destinationBucket, destinationKey, null)) {
+            byte[] sourceBytes;
+            do {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException();
+                }
+                sourceBytes = source.readNBytes(65536);
+                if (!Arrays.equals(sourceBytes, destination.readNBytes(65536))) {
+                    throw new AwsException("VerificationFailed", "Destination content differs for " + destinationKey, 400);
+                }
+            } while (sourceBytes.length > 0);
+        }
+    }
+
+    private static boolean sameObject(S3Object source, S3Object destination, JsonNode options) {
+        return source.getSize() == destination.getSize() && Objects.equals(source.getETag(), destination.getETag())
+                && Objects.equals(source.getMetadata(), destination.getMetadata())
+                && Objects.equals(source.getContentType(), destination.getContentType())
+                && ("NONE".equals(options.path("ObjectTags").asText()) || Objects.equals(source.getTags(), destination.getTags()));
+    }
+
+    private static String s3Prefix(DataSyncLocation location) {
+        String directory = subdirectory(location.getConfiguration());
+        return "/".equals(directory) ? "" : directory.substring(1) + "/";
+    }
+
+    private static List<Pattern> patterns(JsonNode filters) {
+        List<Pattern> patterns = new ArrayList<>();
+        for (JsonNode filter : filters) {
+            if (!"SIMPLE_PATTERN".equals(filter.path("FilterType").asText()) || filter.path("Value").asText().contains("\\")) {
+                throw invalid("Only SIMPLE_PATTERN filters without escape sequences are supported.");
+            }
+            for (String pattern : filter.path("Value").asText().split("\\|")) {
+                patterns.add(Pattern.compile(String.join(".*", Arrays.stream(pattern.split("\\*", -1))
+                        .map(Pattern::quote).toList()), Pattern.DOTALL));
+            }
+        }
+        return patterns;
+    }
+
+    private static boolean selected(String key, List<Pattern> includes, List<Pattern> excludes) {
+        String path = "/" + key;
+        return (includes.isEmpty() || includes.stream().anyMatch(pattern -> matchesPath(pattern, path)))
+                && excludes.stream().noneMatch(pattern -> matchesPath(pattern, path));
+    }
+
+    private static boolean matchesPath(Pattern pattern, String path) {
+        if (pattern.matcher(path).matches()) {
+            return true;
+        }
+        for (int slash = path.indexOf('/', 1); slash >= 0; slash = path.indexOf('/', slash + 1)) {
+            if (pattern.matcher(path.substring(0, slash)).matches()
+                    || pattern.matcher(path.substring(0, slash + 1)).matches()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void validateTransferOptions(JsonNode options) {
+        Map<String, Set<String>> supported = Map.of(
+                "VerifyMode", Set.of("NONE", "ONLY_FILES_TRANSFERRED", "POINT_IN_TIME_CONSISTENT"),
+                "TransferMode", Set.of("ALL", "CHANGED"), "OverwriteMode", Set.of("ALWAYS", "NEVER"),
+                "PreserveDeletedFiles", Set.of("PRESERVE", "REMOVE"), "ObjectTags", Set.of("NONE", "PRESERVE"));
+        supported.forEach((key, values) -> {
+            if (!values.contains(options.path(key).asText())) {
+                throw invalid("Unsupported " + key + " option.");
+            }
+        });
+    }
+
+    private static void validateBandwidth(JsonNode value) {
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || (value.asLong() != -1 && value.asLong() <= 0)) {
+            throw invalid("BytesPerSecond must be -1 or a positive integer.");
+        }
+    }
+
+    private static void increment(ObjectNode execution, String field, long amount) {
+        execution.put(field, execution.path(field).asLong() + amount);
+    }
+
+    private static boolean terminal(ObjectNode execution) {
+        return Set.of("SUCCESS", "ERROR").contains(execution.path("Status").asText());
+    }
+
+    private static void failExecution(ObjectNode execution, String code, String message) {
+        ObjectNode result = (ObjectNode) execution.get("Result");
+        String phase = switch (execution.path("Status").asText()) {
+            case "TRANSFERRING" -> "TransferStatus";
+            case "VERIFYING" -> "VerifyStatus";
+            default -> "PrepareStatus";
+        };
+        result.put(phase, "ERROR");
+        result.put("ErrorCode", code);
+        result.put("ErrorDetail", message);
+        execution.put("Status", "ERROR");
+        execution.put("EndTime", epochSeconds());
+    }
+
+    private static String taskArnOf(String executionArn) {
+        return executionArn.substring(0, executionArn.indexOf("/execution/"));
+    }
+
+    private boolean scopeMatches(String arn, String region) {
+        String[] parts = arn.split(":", 6);
+        return parts.length == 6 && "datasync".equals(parts[2]) && region.equals(parts[3])
+                && regionResolver.getAccountId().equals(parts[4]);
+    }
+
+    private void requireScope(String arn, String region, String kind) {
+        if (arn == null || !scopeMatches(arn, region)) {
+            throw invalid(kind + " " + arn + " is not found.");
+        }
+    }
+
+    private static AwsException invalid(String message) {
+        return new AwsException("InvalidRequestException", message, 400);
+    }
+
+    private static double epochSeconds() {
+        return Instant.now().toEpochMilli() / 1000.0;
+    }
+
+    @Override
+    public synchronized void beforeReset() {
+        stopping = true;
+        workers.values().forEach(worker -> worker.cancel(true));
+        workers.clear();
+    }
+
+    @Override
+    public synchronized void clear() {
+        beforeReset();
+        agents.clear();
+        locations.clear();
+        tasks.clear();
+        executions.clear();
+    }
+
+    @Override
+    public synchronized void afterReset() {
+        stopping = false;
+    }
+
+    @PreDestroy
+    synchronized void stopExecutions() {
+        stopping = true;
+        workers.values().forEach(worker -> worker.cancel(true));
+        workers.clear();
+        for (AccountAwareStorageBackend.AccountEntry<ObjectNode> entry : executions.scanAllAccountEntries(key -> true)) {
+            if (!terminal(entry.value())) {
+                recordFailure(entry.key(), entry.accountId(), "Interrupted", "The emulator is shutting down.");
+                String taskArn = taskArnOf(entry.key());
+                tasks.getForAccount(entry.accountId(), taskArn).ifPresent(task -> {
+                    task.setStatus(TASK_STATUS_AVAILABLE);
+                    tasks.putForAccount(entry.accountId(), taskArn, task);
+                });
+            }
+        }
+        executor.shutdownNow();
+    }
+
     // ---- Tags ----
 
-    public Map<String, String> listTagsForResource(String resourceArn) {
+    public synchronized Map<String, String> listTagsForResource(String resourceArn) {
+        requireArn(resourceArn, "ResourceArn");
+        if (resourceArn.contains("/execution/")) {
+            return tagsOf(execution(resourceArn, regionResolver.getRegion()).path("Tags"));
+        }
         return new LinkedHashMap<>(findTaggable(resourceArn).getTags());
     }
 
-    public void tagResource(String resourceArn, Map<String, String> tags) {
+    public synchronized void tagResource(String resourceArn, Map<String, String> tags) {
+        requireArn(resourceArn, "ResourceArn");
+        if (resourceArn.contains("/execution/")) {
+            Map<String, String> merged = listTagsForResource(resourceArn);
+            merged.putAll(tags);
+            saveExecutionTags(resourceArn, merged);
+            return;
+        }
         DataSyncTaggable resource = findTaggable(resourceArn);
         resource.getTags().putAll(tags);
         persist(resourceArn, resource);
     }
 
-    public void untagResource(String resourceArn, List<String> tagKeys) {
+    public synchronized void untagResource(String resourceArn, List<String> tagKeys) {
+        requireArn(resourceArn, "ResourceArn");
+        if (resourceArn.contains("/execution/")) {
+            Map<String, String> tags = listTagsForResource(resourceArn);
+            tagKeys.forEach(tags::remove);
+            saveExecutionTags(resourceArn, tags);
+            return;
+        }
         DataSyncTaggable resource = findTaggable(resourceArn);
         tagKeys.forEach(resource.getTags()::remove);
         persist(resourceArn, resource);
     }
 
+    private void saveExecutionTags(String arn, Map<String, String> tags) {
+        ObjectNode execution = execution(arn, regionResolver.getRegion());
+        execution.putArray("Tags");
+        tags.forEach((key, value) -> execution.withArray("Tags").addObject().put("Key", key).put("Value", value));
+        executions.put(arn, execution);
+    }
+
     private DataSyncTaggable findTaggable(String resourceArn) {
         requireArn(resourceArn, "ResourceArn");
+        requireScope(resourceArn, regionResolver.getRegion(), "Resource");
         return agents.get(resourceArn).<DataSyncTaggable>map(agent -> agent)
                 .or(() -> locations.get(resourceArn).map(location -> location))
                 .or(() -> tasks.get(resourceArn).map(task -> task))

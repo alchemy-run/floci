@@ -26,8 +26,8 @@ import java.util.Map;
  * actually requires a signed caller rather than merely a well-formed {@code Credential=} value.
  *
  * <p>Scoped narrowly to this one endpoint: header-signed only (AppSync's SDKs never presign this
- * call), signing service {@code "appsync"} (not {@code execute-api}), and a fixed canonical path of
- * {@code /v1/apis/{apiId}/graphql} with no query string, since that is the endpoint's entire shape.
+ * call), signing service {@code "appsync"} (not {@code execute-api}), and the original HTTP path
+ * before virtual-host routing rewrites {@code /graphql} to {@code /v1/apis/{apiId}/graphql}.
  * Modeled on {@code ExecuteApiSigV4Authorizer} and {@code SigV4Validator}, which cannot be reused
  * directly: both hardcode a different signing service name.
  *
@@ -74,9 +74,10 @@ public class IamAuthValidator {
             CallerContext caller = iamService.resolveCallerContext(accessKeyId);
             if (caller != null) {
                 String resource = requestArn(info.region(), info.accountId(), apiId);
-                IamPolicyEvaluator.Decision decision = iamPolicyEvaluator.evaluate(
-                        caller, null, "appsync:GraphQL", resource, null);
-                if (decision == IamPolicyEvaluator.Decision.DENY) {
+                // Field grants need not allow this API-wide ARN; field fetchers enforce the full policy.
+                IamPolicyEvaluator.SimulationDecision decision = iamPolicyEvaluator.simulatePrincipalPolicy(
+                        caller, "appsync:GraphQL", resource, null);
+                if (decision == IamPolicyEvaluator.SimulationDecision.EXPLICIT_DENY) {
                     throw AppSyncAuth.unauthorized();
                 }
             }
@@ -125,7 +126,7 @@ public class IamAuthValidator {
         }
         checkSessionToken(accessKeyId, info.requestHeaders());
         try {
-            String canonicalUri = "/v1/apis/" + apiId + "/graphql";
+            String canonicalUri = info.requestPath() == null ? "/v1/apis/" + apiId + "/graphql" : info.requestPath();
             String payloadHash = SigV4RequestValidator.sha256Hex(info.rawBody().getBytes(StandardCharsets.UTF_8));
             String canonicalHeaders = canonicalHeaders(signed.signedHeaders(), info.requestHeaders());
             String canonicalRequest = "POST\n" + canonicalUri + "\n\n"

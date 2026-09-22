@@ -13,6 +13,7 @@ import io.github.hectorvent.floci.services.ec2.model.PrefixListEntry;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InternetGateway;
 import io.github.hectorvent.floci.services.ec2.model.IpPermission;
+import io.github.hectorvent.floci.services.ec2.model.IpRange;
 import io.github.hectorvent.floci.services.ec2.model.UserIdGroupPair;
 import io.github.hectorvent.floci.services.ec2.model.Image;
 import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
@@ -122,6 +123,94 @@ class Ec2ServicePersistenceTest {
                 restarted.getManagedPrefixListEntries(REGION, created.getPrefixListId(), 1L);
         assertEquals(1, firstVersion.size(), "earlier version must survive restart");
         assertEquals("corporate", firstVersion.getFirst().getDescription());
+    }
+
+    @Test
+    void modifiedRuleDescriptionSurvivesRestartOnBothDescribeSurfaces(@TempDir Path dir) {
+        Ec2Service service = newService(dir);
+        Vpc vpc = service.createVpc(REGION, "10.0.0.0/16", false);
+        String groupId = service.createSecurityGroup(REGION, "description", "description", vpc.getVpcId())
+                .getGroupId();
+        String ruleId = service.describeSecurityGroupRules(REGION, List.of(groupId), List.of())
+                .getFirst().getSecurityGroupRuleId();
+
+        for (String description : List.of("all outbound", "")) {
+            service.modifySecurityGroupRules(REGION, groupId, List.of(
+                    Map.of("SecurityGroupRuleId", ruleId, "Description", description)));
+            service = newService(dir);
+            List<SecurityGroupRule> rules = service.describeSecurityGroupRules(REGION, List.of(groupId), List.of());
+            assertEquals(1, rules.size());
+            assertEquals(ruleId, rules.getFirst().getSecurityGroupRuleId());
+            assertEquals(description, rules.getFirst().getDescription());
+            SecurityGroup group = service.describeSecurityGroups(REGION, List.of(groupId), List.of(), Map.of())
+                    .getFirst();
+            assertEquals(description, group.getIpPermissionsEgress().getFirst().getIpRanges()
+                    .getFirst().getDescription());
+        }
+    }
+
+    @Test
+    void modifiedRevokedAndDeletedSecurityGroupRulesStayConsistentAfterRestart(@TempDir Path dir) {
+        Ec2Service first = newService(dir);
+        String groupId = first.createSecurityGroup(REGION, "rule-lifecycle", "rules", null).getGroupId();
+        String defaultId = first.describeSecurityGroupRules(REGION, List.of(groupId), List.of())
+                .getFirst().getSecurityGroupRuleId();
+        IpPermission permission = new IpPermission();
+        permission.setIpProtocol("6");
+        permission.setFromPort(443);
+        permission.setToPort(443);
+        permission.getIpRanges().add(new IpRange("10.1.0.7/16", "modified"));
+        permission.getIpRanges().add(new IpRange("10.2.0.7/16", "retained"));
+        List<SecurityGroupRule> rules = first.authorizeSecurityGroupIngress(REGION, groupId, List.of(permission));
+        String ruleId = rules.getFirst().getSecurityGroupRuleId();
+        String retainedId = rules.get(1).getSecurityGroupRuleId();
+        first.createTags(REGION, List.of(groupId, defaultId, ruleId, retainedId), List.of(new Tag("owner", "test")));
+        first.modifySecurityGroupRules(REGION, groupId, List.of(Map.of("SecurityGroupRuleId", ruleId,
+                "IpProtocol", "17", "FromPort", "53", "ToPort", "54", "CidrIpv6", "2001:db8::/64")));
+
+        Ec2Service modified = newService(dir);
+        SecurityGroupRule saved = modified.describeSecurityGroupRules(REGION, List.of(groupId), List.of(ruleId))
+                .getFirst();
+        assertEquals("udp", saved.getIpProtocol());
+        assertEquals("2001:db8::/64", saved.getCidrIpv6());
+        assertEquals(53, saved.getFromPort());
+        assertEquals(54, saved.getToPort());
+        assertEquals("test", saved.getTags().getFirst().getValue());
+        SecurityGroup group = modified.describeSecurityGroups(REGION, List.of(groupId), List.of(), Map.of()).getFirst();
+        assertEquals(2, group.getIpPermissions().size());
+        assertEquals("2001:db8::/64", group.getIpPermissions().stream()
+                .filter(p -> "udp".equals(p.getIpProtocol())).findFirst().orElseThrow()
+                .getIpv6Ranges().getFirst().getCidrIpv6());
+        assertEquals("10.2.0.0/16", group.getIpPermissions().stream()
+                .filter(p -> "tcp".equals(p.getIpProtocol())).findFirst().orElseThrow()
+                .getIpRanges().getFirst().getCidrIp());
+        modified.revokeSecurityGroupIngress(REGION, groupId, List.of(), List.of(ruleId));
+
+        Ec2Service revokedById = newService(dir);
+        assertEquals("InvalidSecurityGroupRuleId.NotFound", assertThrows(AwsException.class, () ->
+                revokedById.describeSecurityGroupRules(REGION, List.of(groupId), List.of(ruleId))).getErrorCode());
+        assertEquals(List.of(), revokedById.resourceTags(ruleId));
+        IpPermission remaining = revokedById.describeSecurityGroups(REGION, List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions().getFirst();
+        revokedById.revokeSecurityGroupIngress(REGION, groupId, List.of(remaining));
+
+        Ec2Service revokedByPermission = newService(dir);
+        assertEquals("InvalidSecurityGroupRuleId.NotFound", assertThrows(AwsException.class, () ->
+                revokedByPermission.describeSecurityGroupRules(REGION, List.of(groupId), List.of(retainedId)))
+                .getErrorCode());
+        assertEquals(List.of(), revokedByPermission.resourceTags(retainedId));
+        assertEquals(List.of(), revokedByPermission.describeSecurityGroups(REGION, List.of(groupId), List.of(), Map.of())
+                .getFirst().getIpPermissions());
+        revokedByPermission.deleteSecurityGroup(REGION, groupId);
+
+        Ec2Service deleted = newService(dir);
+        assertEquals(List.of(), deleted.describeSecurityGroupRules(REGION, List.of(groupId), List.of()));
+        assertEquals(List.of(), deleted.resourceTags(defaultId));
+        assertEquals(List.of(), deleted.resourceTags(groupId));
+        assertEquals("InvalidSecurityGroupRuleId.NotFound", assertThrows(AwsException.class, () ->
+                deleted.describeSecurityGroupRules(REGION, List.of(groupId), List.of(defaultId))).getErrorCode());
+        assertEquals("InvalidGroup.NotFound", assertThrows(AwsException.class, () ->
+                deleted.describeSecurityGroups(REGION, List.of(groupId), List.of(), Map.of())).getErrorCode());
     }
 
     @Test

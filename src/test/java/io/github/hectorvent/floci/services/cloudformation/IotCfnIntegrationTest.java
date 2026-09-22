@@ -212,7 +212,8 @@ class IotCfnIntegrationTest {
 
         given().when().get("/things/" + THING).then().statusCode(404);
         given().when().get("/policies/" + POLICY).then().statusCode(404);
-        given().when().get("/rules/" + RULE).then().statusCode(404);
+        given().when().get("/rules/" + RULE).then().statusCode(401)
+                .body("__type", equalTo("UnauthorizedException"));
     }
 
     private static ValidatableResponse receiveMessage(String queueUrl) {

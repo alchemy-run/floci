@@ -1,6 +1,9 @@
 package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.cognito.CognitoService;
@@ -33,9 +36,8 @@ import java.util.function.Supplier;
  * the displaced one once the update commits or restores it on rollback, as CloudFormation does.
  *
  * <p>{@code AWS::Cognito::UserPoolDomain}: the physical id is the domain name, as in AWS, and
- * {@code Fn::GetAtt CloudFrontDistribution} is the CloudFront name a custom domain's DNS alias
- * points at. A prefix domain has no distribution of its own in Floci, so for one the attribute is
- * empty rather than the literal {@code LogicalId.CloudFrontDistribution} an unset attribute yields.
+ * {@code Fn::GetAtt CloudFrontDistribution} is the distribution name returned by
+ * {@code DescribeUserPoolDomain} for both custom and prefix domains.
  * {@code Routing} (regional failover) is accepted and ignored; nothing in the emulator fails over.
  */
 @ApplicationScoped
@@ -43,6 +45,8 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
 
     private static final Logger LOG = Logger.getLogger(CognitoCfnProvisioner.class);
     private static final String NOT_FOUND = "ResourceNotFoundException";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String DOMAIN_SNAPSHOT = CfnRollback.COGNITO_DOMAIN_UPDATE_SNAPSHOT_ATTR;
 
     private static final String USER_POOL = "AWS::Cognito::UserPool";
     private static final String USER_POOL_CLIENT = "AWS::Cognito::UserPoolClient";
@@ -81,8 +85,6 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
                 provisionUserPoolClient(r, props, ctx);
                 ReplacementCleanup.record(r, ctx, attributesBefore);
             }
-            // The domain replaces and removes its predecessor within the provision itself, since the
-            // domain name is unique across pools, so it keeps no cleanup record.
             case USER_POOL_DOMAIN -> provisionUserPoolDomain(r, props, ctx);
             default -> throw new IllegalStateException("CognitoCfnProvisioner cannot handle " + r.getResourceType());
         }
@@ -96,6 +98,13 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
     public void delete(StackResource resource, String region) {
         if (!USER_POOL_DOMAIN.equals(resource.getResourceType())) {
             delete(resource.getResourceType(), resource.getPhysicalId(), region);
+            return;
+        }
+        ObjectNode snapshot = domainSnapshot(resource);
+        if (snapshot != null) {
+            deleteDomainReplacement(snapshot);
+            cognitoService.deleteUserPoolDomain(snapshotDomain(snapshot, "prior"));
+            resource.getAttributes().remove(DOMAIN_SNAPSHOT);
             return;
         }
         String userPoolId = resource.getAttributes() == null ? null : resource.getAttributes().get("UserPoolId");
@@ -142,22 +151,82 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
 
     @Override
     public UpdateCleanupResult completeUpdate(StackResource resource) {
+        // DeleteStack calls this too; failed rollback snapshots must survive until delete.
+        if ("UPDATE_COMPLETE".equals(resource.getStatus())) {
+            clearDomainUpdate(resource);
+        }
         return ReplacementCleanup.complete(resource, this::delete);
     }
 
     @Override
     public void clearUpdate(StackResource resource) {
+        clearDomainUpdate(resource);
         ReplacementCleanup.clear(resource);
     }
 
-    /**
-     * A replacement is undone through the cleanup record. Without one the entity was updated in
-     * place, and putting that back needs a snapshot this provisioner does not keep, so the engine
-     * reports it as not rolled back, as it did for the switch.
-     */
+    private void clearDomainUpdate(StackResource resource) {
+        ObjectNode snapshot = domainSnapshot(resource);
+        if (snapshot != null) {
+            if (!snapshot.path("complete").asBoolean()) {
+                throw new IllegalStateException("Cannot commit an incomplete Cognito domain rename");
+            }
+            resource.getAttributes().remove(DOMAIN_SNAPSHOT);
+        }
+    }
+
+    @Override
+    public boolean retainsFailedUpdateState(StackResource resource) {
+        return resource.getAttributes().containsKey(DOMAIN_SNAPSHOT);
+    }
+
+    @Override
+    public boolean hasPendingRollbackCleanup(StackResource resource) {
+        return resource.getAttributes().containsKey(DOMAIN_SNAPSHOT);
+    }
+
     @Override
     public boolean rollbackUpdate(StackResource resource) {
-        return ReplacementCleanup.rollback(resource, this::delete);
+        ObjectNode snapshot = domainSnapshot(resource);
+        if (snapshot == null) {
+            return ReplacementCleanup.rollback(resource, this::delete);
+        }
+        deleteDomainReplacement(snapshot);
+        UserPoolDomain prior = snapshotDomain(snapshot, "prior");
+        cognitoService.restoreUserPoolDomain(prior);
+        Map<String, String> attributes = new HashMap<>();
+        snapshot.path("attributes").fields().forEachRemaining(e -> attributes.put(e.getKey(), e.getValue().asText()));
+        resource.setAttributes(attributes);
+        resource.setPhysicalId(prior.getDomain());
+        return true;
+    }
+
+    private void deleteDomainReplacement(ObjectNode snapshot) {
+        if (snapshot.has("target")) {
+            cognitoService.deleteUserPoolDomain(snapshotDomain(snapshot, "target"));
+        }
+    }
+
+    private static UserPoolDomain snapshotDomain(ObjectNode snapshot, String field) {
+        try {
+            return MAPPER.treeToValue(snapshot.get(field), UserPoolDomain.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Invalid Cognito domain snapshot", e);
+        }
+    }
+
+    private static ObjectNode domainSnapshot(StackResource resource) {
+        String raw = resource.getAttributes() == null ? null : resource.getAttributes().get(DOMAIN_SNAPSHOT);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            if (MAPPER.readTree(raw) instanceof ObjectNode snapshot) {
+                return snapshot;
+            }
+            throw new IllegalStateException("Cognito domain snapshot must be an object");
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Invalid Cognito domain snapshot", e);
+        }
     }
 
     private void provisionUserPool(StackResource r, JsonNode props, ProvisionContext ctx) {
@@ -287,16 +356,34 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
         Map<String, Object> customDomainConfig = resolveCustomDomainConfig(props, ctx);
         Integer managedLoginVersion = resolveManagedLoginVersion(props, ctx);
 
-        // Domain and UserPoolId are createOnly in the schema: a change to either replaces the
-        // domain, and the prior one is removed once the new one exists. Domain names are unique
-        // across pools, so a change to UserPoolId alone fails on the create, as it does on AWS,
-        // where CloudFormation also creates the replacement before deleting the original. Anything
-        // else, a renewed certificate or another managed login version, is applied in place so the
-        // CloudFront distribution a DNS alias points at survives, as on AWS.
+        if (r.getAttributes().containsKey(DOMAIN_SNAPSHOT)) {
+            throw new IllegalStateException("Cognito domain rename still needs rollback or commit");
+        }
+        // A same-pool, same-type rename must free the pool's domain slot first. A pool transfer
+        // with the same name still fails uniqueness validation; ordinary updates keep the distribution.
         UserPoolDomain existing = ctx.isUpdate() ? findExisting(ctx.priorPhysicalId()) : null;
         UserPoolDomain provisioned;
         if (existing != null && ctx.reusesPriorEntity(domain) && userPoolId.equals(existing.getUserPoolId())) {
             provisioned = cognitoService.updateUserPoolDomain(domain, userPoolId, customDomainConfig, managedLoginVersion);
+        } else if (existing != null && !ctx.reusesPriorEntity(domain)
+                && userPoolId.equals(existing.getUserPoolId())
+                && existing.isCustomDomain() == (customDomainConfig != null)) {
+            if ("Retain".equals(r.getUpdateReplacePolicy())) {
+                throw new AwsException("ValidationError",
+                        "Cannot rename a same-pool Cognito domain with UpdateReplacePolicy Retain", 400);
+            }
+            ObjectNode snapshot = MAPPER.createObjectNode();
+            snapshot.set("prior", MAPPER.valueToTree(existing));
+            snapshot.set("attributes", MAPPER.valueToTree(r.getAttributes()));
+            r.getAttributes().put(DOMAIN_SNAPSHOT, snapshot.toString());
+            cognitoService.deleteUserPoolDomain(snapshotDomain(snapshot, "prior"));
+            provisioned = cognitoService.createUserPoolDomain(domain, userPoolId, customDomainConfig,
+                    managedLoginVersion, candidate -> {
+                        snapshot.set("target", MAPPER.valueToTree(candidate));
+                        r.getAttributes().put(DOMAIN_SNAPSHOT, snapshot.toString());
+                    });
+            snapshot.put("complete", true);
+            r.getAttributes().put(DOMAIN_SNAPSHOT, snapshot.toString());
         } else {
             provisioned = cognitoService.createUserPoolDomain(domain, userPoolId, customDomainConfig, managedLoginVersion);
             if (existing != null) {

@@ -25,6 +25,7 @@ import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InstanceState;
 import io.github.hectorvent.floci.services.ec2.model.Placement;
+import io.vertx.core.json.JsonObject;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -655,13 +656,17 @@ public class EksClusterManager {
     }
 
     private static byte[] tarSingleFile(String entryName, String content) {
+        return tarSingleFile(entryName, content, 0644);
+    }
+
+    private static byte[] tarSingleFile(String entryName, String content, int mode) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] data = content.getBytes(StandardCharsets.UTF_8);
             try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
                 TarArchiveEntry entry = new TarArchiveEntry(entryName);
                 entry.setSize(data.length);
-                entry.setMode(0644);
+                entry.setMode(mode);
                 tar.putArchiveEntry(entry);
                 tar.write(data);
                 tar.closeArchiveEntry();
@@ -732,47 +737,61 @@ public class EksClusterManager {
     }
 
     void configureLinkLocalMetadataEndpoint(Cluster cluster, String containerId) {
-        if (!config.services().eks().imds()) {
+        if (!config.services().eks().imds() || metadataServer == null) {
             return;
         }
+        Instance nodeInstance = null;
+        String capability = null;
+        boolean configured = false;
         try {
             String accountId = cluster.getAccountId() != null
                     ? cluster.getAccountId()
                     : regionResolver.getAccountId();
             String region = clusterRegion(cluster);
-
             ContainerIps containerIps = resolveContainerIps(containerId);
-            Instance nodeInstance = synthesizeClusterNodeInstance(cluster, containerIps.primaryIp(), region, accountId);
-            clusterNodeInstances.put(clusterResourceName(cluster), nodeInstance);
-
-            if (metadataServer != null) {
-                metadataServer.reconcileContainerAddresses(containerIps.allIps(), nodeInstance);
-            }
+            nodeInstance = synthesizeClusterNodeInstance(cluster, containerIps.primaryIp(), region, accountId);
+            nodeInstance.setDockerContainerId(containerId);
 
             ContainerExecResult install = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.installCommand(), 180);
+                    Ec2MetadataProxy.authenticatedInstallCommand(), 180);
             if (install.exitCode() != 0) {
                 LOG.warnv("Could not install IMDS proxy dependencies for EKS cluster {0}: {1}",
                         cluster.getName(), install.summary());
                 return;
             }
 
-            String flociHost = dockerHostResolver.resolve();
-            int imdsPort = config.services().ec2().imdsPort();
-
+            capability = metadataServer.registerProxy(nodeInstance);
+            String proxyConfig = new JsonObject()
+                    .put("host", dockerHostResolver.resolve())
+                    .put("port", config.services().ec2().imdsPort())
+                    .put("capability", capability).encode();
+            copyMetadataFile(containerId, "floci-imds-proxy.py", Ec2MetadataProxy.authenticatedProxyScript(), 0700);
+            copyMetadataFile(containerId, "floci-imds-proxy.json.next", proxyConfig, 0600);
             ContainerExecResult start = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.startCommand(flociHost, imdsPort), 30);
+                    Ec2MetadataProxy.authenticatedStartCommand(nodeInstance.getInstanceId()), 30);
             if (start.exitCode() != 0) {
                 LOG.warnv("Could not start link-local IMDS proxy for EKS cluster {0}: {1}",
                         cluster.getName(), start.summary());
                 return;
             }
-
+            clusterNodeInstances.put(clusterResourceName(cluster), nodeInstance);
+            configured = true;
             LOG.infov("Configured link-local IMDS endpoint for EKS cluster {0}", cluster.getName());
         } catch (Exception e) {
             LOG.warnv("Could not configure link-local IMDS endpoint for EKS cluster {0}: {1}",
                     cluster.getName(), e.getMessage());
+        } finally {
+            if (!configured && capability != null) {
+                metadataServer.unregisterProxy(nodeInstance, capability);
+            }
         }
+    }
+
+    private void copyMetadataFile(String containerId, String name, String content, int mode) {
+        lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
+                .withTarInputStream(new ByteArrayInputStream(tarSingleFile(name, content, mode)))
+                .withRemotePath("/var/lib")
+                .exec();
     }
 
     void unregisterMetadataEndpoint(Cluster cluster) {

@@ -88,6 +88,54 @@ class IamAuthValidatorTest {
     }
 
     @Test
+    void fieldScopedGrantAuthenticatesWithoutApiWidePermission() throws Exception {
+        String policy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"appsync:GraphQL",
+                "Resource":"arn:aws:appsync:us-east-1:000000000000:apis/api-1/types/*/fields/*"}]}
+                """;
+        when(iamService.resolveCallerContext("AKIAGOOD")).thenReturn(CallerContext.of(List.of(policy)));
+        when(iamService.resolveCallerArn("AKIAGOOD"))
+                .thenReturn(Optional.of("arn:aws:iam::000000000000:role/execution"));
+        Map<String, String> signed = AppSyncRequestSigner.signedHeaders(
+                "api-1", HOST, BODY, "AKIAGOOD", "good-secret", REGION, Instant.now());
+
+        Map<String, Object> identity = validator.validateRequest(
+                authorization(signed), "api-1", infoWith(signed));
+
+        assertEquals("AKIAGOOD", identity.get("user"));
+        assertFalse(validator.isFieldDenied("AKIAGOOD",
+                IamAuthValidator.fieldArn(REGION, "000000000000", "api-1", "Query", "hello")));
+        assertTrue(validator.isFieldDenied("AKIAGOOD",
+                IamAuthValidator.fieldArn(REGION, "000000000000", "api-2", "Query", "hello")));
+    }
+
+    @Test
+    void fieldScopedGrantKeepsImplicitAndExplicitFieldDenials() throws Exception {
+        String policy = """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"appsync:GraphQL",
+                   "Resource":"arn:aws:appsync:us-east-1:000000000000:apis/api-1/types/Query/fields/hello"},
+                  {"Effect":"Deny","Action":"appsync:GraphQL",
+                   "Resource":"arn:aws:appsync:us-east-1:000000000000:apis/api-1/types/Query/fields/secret"}
+                ]}
+                """;
+        when(iamService.resolveCallerContext("AKIAGOOD")).thenReturn(CallerContext.of(List.of(policy)));
+        when(iamService.resolveCallerArn("AKIAGOOD"))
+                .thenReturn(Optional.of("arn:aws:iam::000000000000:role/execution"));
+        Map<String, String> signed = AppSyncRequestSigner.signedHeaders(
+                "api-1", HOST, BODY, "AKIAGOOD", "good-secret", REGION, Instant.now());
+
+        validator.validateRequest(authorization(signed), "api-1", infoWith(signed));
+
+        assertFalse(validator.isFieldDenied("AKIAGOOD",
+                IamAuthValidator.fieldArn(REGION, "000000000000", "api-1", "Query", "hello")));
+        assertTrue(validator.isFieldDenied("AKIAGOOD",
+                IamAuthValidator.fieldArn(REGION, "000000000000", "api-1", "Query", "other")));
+        assertTrue(validator.isFieldDenied("AKIAGOOD",
+                IamAuthValidator.fieldArn(REGION, "000000000000", "api-1", "Query", "secret")));
+    }
+
+    @Test
     void knownRequestDenyThrows401() throws Exception {
         when(iamService.resolveCallerContext("AKIDDENY")).thenReturn(CallerContext.of(List.of(DENY)));
         Map<String, String> signed = AppSyncRequestSigner.signedHeaders(

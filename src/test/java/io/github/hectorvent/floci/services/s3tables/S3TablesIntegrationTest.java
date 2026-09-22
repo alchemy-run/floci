@@ -18,6 +18,8 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -35,6 +37,8 @@ class S3TablesIntegrationTest {
     private static final String ENCODED_BUCKET_ARN = URLEncoder.encode(BUCKET_ARN, StandardCharsets.UTF_8);
 
     private String versionToken;
+    private String tableArn;
+    private String warehouseLocation;
 
     @BeforeAll
     static void configureRestAssured() {
@@ -82,7 +86,7 @@ class S3TablesIntegrationTest {
                         {
                           "name": "%s",
                           "format": "ICEBERG",
-                          "metadata": { "iceberg": { "metadataLocation": "s3://warehouse/events/metadata/v1.json" } }
+                          "metadata": { "iceberg": { "schema": { "fields": [{ "name": "id", "type": "long" }] } } }
                         }
                         """.formatted(TABLE_NAME))
         .when()
@@ -90,10 +94,39 @@ class S3TablesIntegrationTest {
         .then()
                 .statusCode(200)
                 .contentType(containsString(JSON_CONTENT_TYPE))
-                .body("tableARN", equalTo(BUCKET_ARN + "/table/" + TABLE_NAME))
+                .body("tableARN", startsWith(BUCKET_ARN + "/table/"))
                 .body("versionToken", not(""))
                 .extract()
                 .path("versionToken");
+
+        tableArn = given()
+                .queryParam("tableBucketARN", BUCKET_ARN)
+                .queryParam("namespace", NAMESPACE)
+                .queryParam("name", TABLE_NAME)
+        .when()
+                .get("/get-table")
+        .then()
+                .statusCode(200)
+                .body("warehouseLocation", startsWith("s3://"))
+                .body("versionToken", equalTo(versionToken))
+                .body("$", not(hasKey("metadataLocation")))
+                .extract().path("tableARN");
+        warehouseLocation = given()
+                .queryParam("tableArn", tableArn)
+        .when()
+                .get("/get-table")
+        .then()
+                .statusCode(200)
+                .body("tableARN", equalTo(tableArn))
+                .extract().path("warehouseLocation");
+        given()
+                .urlEncodingEnabled(false)
+        .when()
+                .get("/tables/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE + "/" + TABLE_NAME + "/metadata-location")
+        .then()
+                .statusCode(200)
+                .body("warehouseLocation", equalTo(warehouseLocation))
+                .body("versionToken", equalTo(versionToken));
     }
 
     @Test
@@ -196,5 +229,140 @@ class S3TablesIntegrationTest {
         .then()
                 .statusCode(200)
                 .body("configuration.icebergCompaction.status", equalTo("enabled"));
+    }
+
+    @Test
+    @Order(6)
+    void maintenanceJobStatusReportsNoInventedRunsAndTracksDisabledConfiguration() {
+        String path = "/tables/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE + "/" + TABLE_NAME;
+        given()
+                .urlEncodingEnabled(false)
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260921/us-east-1/s3tables/aws4_request, "
+                        + "SignedHeaders=host, Signature=test")
+        .when()
+                .get(path + "/maintenance-job-status")
+        .then()
+                .statusCode(200)
+                .contentType(containsString(JSON_CONTENT_TYPE))
+                .body("tableARN", equalTo(tableArn))
+                .body("status.icebergCompaction.status", equalTo("Not_Yet_Run"))
+                .body("status.icebergSnapshotManagement.status", equalTo("Not_Yet_Run"))
+                .body("status.icebergUnreferencedFileRemoval.status", equalTo("Not_Yet_Run"))
+                .body("status.icebergCompaction", not(hasKey("lastRunTimestamp")))
+                .body("status.icebergCompaction", not(hasKey("failureMessage")));
+        given()
+                .urlEncodingEnabled(false)
+                .contentType(JSON_CONTENT_TYPE)
+                .body("{\"value\":{\"status\":\"disabled\"}}")
+        .when()
+                .put(path + "/maintenance/icebergCompaction")
+        .then()
+                .statusCode(200);
+        given()
+                .urlEncodingEnabled(false)
+        .when()
+                .get(path + "/maintenance-job-status")
+        .then()
+                .statusCode(200)
+                .body("status.icebergCompaction.status", equalTo("Disabled"))
+                .body("status.icebergCompaction", not(hasKey("lastRunTimestamp")));
+        given()
+                .urlEncodingEnabled(false)
+        .when()
+                .get("/tables/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE + "/missing/maintenance-job-status")
+        .then()
+                .statusCode(404)
+                .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    @Order(7)
+    void tagsAndConditionalDeletionUseTheAwsWireContract() {
+        String tagPath = "/tag/" + URLEncoder.encode(tableArn, StandardCharsets.UTF_8);
+        given()
+                .urlEncodingEnabled(false)
+                .contentType(JSON_CONTENT_TYPE)
+                .body("{\"tags\":{\"owner\":\"analytics\",\"remove\":\"yes\"}}")
+        .when()
+                .post(tagPath)
+        .then()
+                .statusCode(200);
+        given()
+                .urlEncodingEnabled(false)
+        .when()
+                .delete(tagPath + "?tagKeys=remove&tagKeys=absent")
+        .then()
+                .statusCode(204);
+        given()
+                .urlEncodingEnabled(false)
+        .when()
+                .get(tagPath)
+        .then()
+                .statusCode(200)
+                .body("tags.owner", equalTo("analytics"))
+                .body("tags", not(hasKey("remove")));
+
+        given()
+                .urlEncodingEnabled(false)
+        .when()
+                .delete("/buckets/" + ENCODED_BUCKET_ARN)
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("BadRequestException"));
+        given()
+                .urlEncodingEnabled(false)
+        .when()
+                .delete("/tables/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE + "/" + TABLE_NAME + "?versionToken=stale")
+        .then()
+                .statusCode(409)
+                .body("__type", equalTo("ConflictException"));
+        String currentWarehouse = given()
+                .urlEncodingEnabled(false)
+        .when()
+                .get("/tables/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE + "/" + TABLE_NAME + "/metadata-location")
+        .then()
+                .statusCode(200)
+                .body("versionToken", equalTo(versionToken))
+                .extract().path("warehouseLocation");
+        assertEquals(warehouseLocation, currentWarehouse);
+    }
+
+    @Test
+    @Order(8)
+    void maintenanceAndTagsRejectOtherAccountsAndRegions() {
+        String maintenancePath = "/tables/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE + "/" + TABLE_NAME
+                + "/maintenance-job-status";
+        String tagPath = "/tag/" + URLEncoder.encode(tableArn, StandardCharsets.UTF_8);
+        for (String scope : new String[]{"111111111111/20260921/us-east-1", "000000000000/20260921/eu-west-1"}) {
+            String authorization = "AWS4-HMAC-SHA256 Credential=" + scope
+                    + "/s3tables/aws4_request, SignedHeaders=host, Signature=test";
+            given().urlEncodingEnabled(false).header("Authorization", authorization)
+                    .when().get(maintenancePath)
+                    .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+            given().urlEncodingEnabled(false).header("Authorization", authorization)
+                    .when().get(tagPath)
+                    .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+            given().urlEncodingEnabled(false).header("Authorization", authorization)
+                    .contentType(JSON_CONTENT_TYPE).body("{\"tags\":{\"owner\":\"other\"}}")
+                    .when().post(tagPath)
+                    .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        }
+        given().urlEncodingEnabled(false).when().get(tagPath)
+                .then().statusCode(200).body("tags.owner", equalTo("analytics"));
+    }
+
+    @Test
+    @Order(9)
+    void explicitChildDeletionAllowsParentCleanup() {
+        String tablePath = "/tables/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE + "/" + TABLE_NAME;
+        given().urlEncodingEnabled(false).when().delete(tablePath).then().statusCode(204);
+        given().urlEncodingEnabled(false).when().get(tablePath + "/maintenance-job-status")
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().urlEncodingEnabled(false).when().get("/tag/" + URLEncoder.encode(tableArn, StandardCharsets.UTF_8))
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+        given().urlEncodingEnabled(false).when().delete("/namespaces/" + ENCODED_BUCKET_ARN + "/" + NAMESPACE)
+                .then().statusCode(204);
+        given().urlEncodingEnabled(false).when().delete("/buckets/" + ENCODED_BUCKET_ARN)
+                .then().statusCode(204);
     }
 }

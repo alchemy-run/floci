@@ -1,6 +1,9 @@
 package com.floci.test;
 
 import org.junit.jupiter.api.*;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.kafka.KafkaClient;
 import software.amazon.awssdk.services.kafka.model.*;
 
@@ -8,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("MSK (Managed Streaming for Kafka)")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -31,6 +35,53 @@ class MskTest {
                 } catch (Exception ignored) {}
             }
             kafka.close();
+        }
+    }
+
+    @Test
+    void missingClusterTopicOperationsUseTypedSdkErrors() {
+        String missingArn = "arn:aws:kafka:us-east-1:000000000000:cluster/missing-sdk-topics/"
+                + "00000000-0000-0000-0000-000000000000-1";
+        assertThatThrownBy(() -> kafka.listTopics(r -> r.clusterArn(missingArn)))
+                .isInstanceOfSatisfying(NotFoundException.class, error -> assertThat(error.statusCode()).isEqualTo(404));
+        assertThatThrownBy(() -> kafka.describeTopic(r -> r.clusterArn(missingArn).topicName("probe")))
+                .isInstanceOfSatisfying(NotFoundException.class, error -> assertThat(error.statusCode()).isEqualTo(404));
+        assertThatThrownBy(() -> kafka.createTopic(r -> r.clusterArn(missingArn).topicName("probe").partitionCount(1)))
+                .isInstanceOfSatisfying(BadRequestException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(400);
+                    assertThat(error.invalidParameter()).isEqualTo("replicationFactor");
+                });
+        assertThatThrownBy(() -> kafka.createTopic(r -> r.clusterArn(missingArn).topicName("probe")
+                .partitionCount(1).replicationFactor(1)))
+                .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void signedTopicReadsRespectAccountAndRegionOwnership() {
+        String ownedArn = kafka.createCluster(r -> r.clusterName("sdk-topic-ownership")
+                .kafkaVersion("3.6.1").numberOfBrokerNodes(1)
+                .brokerNodeGroupInfo(b -> b.instanceType("kafka.m5.large").clientSubnets("subnet-12345")))
+                .clusterArn();
+        try (KafkaClient otherAccount = KafkaClient.builder()
+                    .endpointOverride(TestFixtures.endpoint()).region(Region.US_EAST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("111111111111", "test")))
+                    .build();
+             KafkaClient otherRegion = KafkaClient.builder()
+                    .endpointOverride(TestFixtures.endpoint()).region(Region.EU_WEST_1)
+                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                    .build()) {
+            for (KafkaClient foreign : List.of(otherAccount, otherRegion)) {
+                assertThatThrownBy(() -> foreign.listTopics(r -> r.clusterArn(ownedArn)))
+                        .isInstanceOf(NotFoundException.class);
+                assertThatThrownBy(() -> foreign.describeTopic(r -> r.clusterArn(ownedArn).topicName("probe")))
+                        .isInstanceOf(NotFoundException.class);
+                assertThatThrownBy(() -> foreign.createTopic(r -> r.clusterArn(ownedArn).topicName("probe")
+                        .partitionCount(1).replicationFactor(1)))
+                        .isInstanceOf(NotFoundException.class);
+            }
+            assertThat(kafka.describeCluster(r -> r.clusterArn(ownedArn)).clusterInfo().clusterArn()).isEqualTo(ownedArn);
+        } finally {
+            kafka.deleteCluster(r -> r.clusterArn(ownedArn));
         }
     }
 

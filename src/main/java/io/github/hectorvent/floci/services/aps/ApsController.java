@@ -1,17 +1,19 @@
 package io.github.hectorvent.floci.services.aps;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.aps.ApsService.ConfigurationKind;
 import io.github.hectorvent.floci.services.aps.model.PrometheusWorkspace;
 import io.github.hectorvent.floci.services.aps.model.RuleGroupsNamespace;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -23,13 +25,16 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Amazon Managed Service for Prometheus (Smithy restJson1, SigV4 scope {@code aps}) — the
- * workspace lifecycle (create/describe/list/delete plus alias update) and rule groups namespaces
- * (create/describe/list/put/delete). Tagging goes through the shared
+ * workspace lifecycle, rule and alert definitions, logging, policies, and anomaly detector metadata.
+ * Configuration storage does not enable rule evaluation, alert delivery, or anomaly execution.
+ * Tagging goes through the shared
  * {@code /tags/{resourceArn}} dispatcher, which routes {@code arn:aws:aps:...} to
  * {@link ApsService}'s TagHandler implementation.
  *
@@ -51,6 +56,29 @@ public class ApsController {
         this.service = service;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
+    }
+
+    @GET
+    @Path("/scraperconfiguration")
+    public Response getDefaultScraperConfiguration() {
+        String configuration = """
+                global:
+                  scrape_interval: 30s
+                scrape_configs:
+                  - job_name: kubernetes-apiservers
+                    kubernetes_sd_configs:
+                      - role: endpoints
+                    scheme: https
+                    tls_config:
+                      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+                    relabel_configs:
+                      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+                        action: keep
+                        regex: default;kubernetes;https
+                """;
+        return Response.ok(Map.of("configuration",
+                Base64.getEncoder().encodeToString(configuration.getBytes(StandardCharsets.UTF_8)))).build();
     }
 
     @POST
@@ -193,6 +221,150 @@ public class ApsController {
         return Response.status(202).build();
     }
 
+    @GET
+    @Path("/scrapers/{scraperId}")
+    public Response describeScraper(@Context HttpHeaders headers, @PathParam("scraperId") String scraperId) {
+        return Response.ok(Map.of("scraper", service.describeScraper(regionResolver.resolveRegion(headers), scraperId))).build();
+    }
+
+    @GET
+    @Path("/workspaces/{workspaceId}/{configurationPath:alertmanager/definition|logging/query|logging}")
+    public Response describeConfiguration(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                          @PathParam("configurationPath") String configurationPath) {
+        ConfigurationKind kind = configurationKind(configurationPath);
+        return Response.ok(Map.of(kind.responseKey(),
+                service.describeConfiguration(regionResolver.resolveRegion(headers), workspaceId, kind))).build();
+    }
+
+    @POST
+    @Path("/workspaces/{workspaceId}/{configurationPath:alertmanager/definition|logging/query|logging}")
+    public Response createConfiguration(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                        @PathParam("configurationPath") String configurationPath, Map<String, Object> request) {
+        return configurationMutation(headers, workspaceId, configurationKind(configurationPath), request, true);
+    }
+
+    @PUT
+    @Path("/workspaces/{workspaceId}/{configurationPath:alertmanager/definition|logging/query|logging}")
+    public Response updateConfiguration(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                        @PathParam("configurationPath") String configurationPath, Map<String, Object> request) {
+        return configurationMutation(headers, workspaceId, configurationKind(configurationPath), request, false);
+    }
+
+    @DELETE
+    @Path("/workspaces/{workspaceId}/{configurationPath:alertmanager/definition|logging/query|logging}")
+    public Response deleteConfiguration(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                        @PathParam("configurationPath") String configurationPath) {
+        service.deleteConfiguration(regionResolver.resolveRegion(headers), workspaceId,
+                configurationKind(configurationPath), null);
+        return Response.status(202).build();
+    }
+
+    @GET
+    @Path("/workspaces/{workspaceId}/configuration")
+    public Response describeWorkspaceConfiguration(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId) {
+        return Response.ok(Map.of(ConfigurationKind.WORKSPACE.responseKey(), service.describeConfiguration(
+                regionResolver.resolveRegion(headers), workspaceId, ConfigurationKind.WORKSPACE))).build();
+    }
+
+    @PATCH
+    @Path("/workspaces/{workspaceId}/configuration")
+    public Response updateWorkspaceConfiguration(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                                 Map<String, Object> request) {
+        return configurationMutation(headers, workspaceId, ConfigurationKind.WORKSPACE, request, false);
+    }
+
+    @GET
+    @Path("/workspaces/{workspaceId}/policy")
+    public Response describeResourcePolicy(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId) {
+        return Response.ok(service.describeConfiguration(regionResolver.resolveRegion(headers), workspaceId,
+                ConfigurationKind.POLICY)).build();
+    }
+
+    @PUT
+    @Path("/workspaces/{workspaceId}/policy")
+    public Response putResourcePolicy(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                      Map<String, Object> request) {
+        ObjectNode policy = service.writeConfiguration(regionResolver.resolveRegion(headers), workspaceId,
+                ConfigurationKind.POLICY, request, false);
+        policy.remove("policyDocument");
+        return Response.status(202).entity(policy).build();
+    }
+
+    @DELETE
+    @Path("/workspaces/{workspaceId}/policy")
+    public Response deleteResourcePolicy(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                         @QueryParam("revisionId") String revisionId) {
+        service.deleteConfiguration(regionResolver.resolveRegion(headers), workspaceId, ConfigurationKind.POLICY, revisionId);
+        return Response.status(202).build();
+    }
+
+    @POST
+    @Path("/workspaces/{workspaceId}/anomalydetectors")
+    public Response createAnomalyDetector(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                          Map<String, Object> request) {
+        return Response.status(202).entity(detectorMutation(service.createAnomalyDetector(
+                regionResolver.resolveRegion(headers), workspaceId, request))).build();
+    }
+
+    @GET
+    @Path("/workspaces/{workspaceId}/anomalydetectors")
+    public Response listAnomalyDetectors(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                        @QueryParam("alias") String alias, @QueryParam("maxResults") String maxResults,
+                                        @QueryParam("nextToken") String nextToken) {
+        PaginatedResult<ObjectNode> result = service.listAnomalyDetectors(regionResolver.resolveRegion(headers),
+                workspaceId, alias, Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("anomalyDetectors", objectMapper.valueToTree(result.items()));
+        if (result.nextToken() != null) {
+            response.put("nextToken", result.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/workspaces/{workspaceId}/anomalydetectors/{anomalyDetectorId}")
+    public Response describeAnomalyDetector(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                            @PathParam("anomalyDetectorId") String detectorId) {
+        return Response.ok(Map.of("anomalyDetector", service.describeAnomalyDetector(
+                regionResolver.resolveRegion(headers), workspaceId, detectorId))).build();
+    }
+
+    @PUT
+    @Path("/workspaces/{workspaceId}/anomalydetectors/{anomalyDetectorId}")
+    public Response putAnomalyDetector(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                       @PathParam("anomalyDetectorId") String detectorId, Map<String, Object> request) {
+        return Response.status(202).entity(detectorMutation(service.putAnomalyDetector(
+                regionResolver.resolveRegion(headers), workspaceId, detectorId, request))).build();
+    }
+
+    @DELETE
+    @Path("/workspaces/{workspaceId}/anomalydetectors/{anomalyDetectorId}")
+    public Response deleteAnomalyDetector(@Context HttpHeaders headers, @PathParam("workspaceId") String workspaceId,
+                                          @PathParam("anomalyDetectorId") String detectorId) {
+        service.deleteAnomalyDetector(regionResolver.resolveRegion(headers), workspaceId, detectorId);
+        return Response.status(202).build();
+    }
+
+    private ObjectNode detectorMutation(ObjectNode description) {
+        return description.retain("anomalyDetectorId", "arn", "status", "tags");
+    }
+
+    private Response configurationMutation(HttpHeaders headers, String workspaceId, ConfigurationKind kind,
+                                           Map<String, Object> request, boolean create) {
+        ObjectNode configuration = service.writeConfiguration(regionResolver.resolveRegion(headers), workspaceId,
+                kind, request, create);
+        return Response.status(202).entity(Map.of("status", configuration.get("status"))).build();
+    }
+
+    private ConfigurationKind configurationKind(String path) {
+        return switch (path) {
+            case "alertmanager/definition" -> ConfigurationKind.ALERT_MANAGER;
+            case "logging" -> ConfigurationKind.LOGGING;
+            case "logging/query" -> ConfigurationKind.QUERY_LOGGING;
+            default -> throw new AwsException("ValidationException", "Unknown workspace configuration", 400);
+        };
+    }
+
     private ObjectNode toNamespaceMutationResponse(RuleGroupsNamespace namespace) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("name", namespace.getName());
@@ -216,6 +388,7 @@ public class ApsController {
     private ObjectNode namespaceStatusNode(RuleGroupsNamespace namespace) {
         ObjectNode status = objectMapper.createObjectNode();
         status.put("statusCode", namespace.getStatus());
+        status.put("statusReason", "Rule definition stored only; local Prometheus does not evaluate these rules.");
         return status;
     }
 

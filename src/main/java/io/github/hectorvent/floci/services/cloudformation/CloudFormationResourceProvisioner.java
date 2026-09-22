@@ -217,7 +217,17 @@ public class CloudFormationResourceProvisioner {
                                    CloudFormationTemplateEngine engine, String region, String accountId,
                                    String stackName, String existingPhysicalId,
                                    Map<String, String> existingAttributes, Consumer<StackEvent> progress) {
+        return provision(logicalId, resourceType, properties, engine, region, accountId, stackName,
+                existingPhysicalId, existingAttributes, progress, null);
+    }
+
+    public StackResource provision(String logicalId, String resourceType, JsonNode properties,
+                                   CloudFormationTemplateEngine engine, String region, String accountId,
+                                   String stackName, String existingPhysicalId,
+                                   Map<String, String> existingAttributes, Consumer<StackEvent> progress,
+                                   String updateReplacePolicy) {
         StackResource resource = new StackResource();
+        resource.setUpdateReplacePolicy(updateReplacePolicy);
         resource.setLogicalId(logicalId);
         resource.setResourceType(resourceType);
         resource.setPhysicalId(existingPhysicalId);

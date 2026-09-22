@@ -29,7 +29,8 @@
 
 ## Emulation Behavior
 
-- **Public validation:** `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS=0` issues public certificates immediately, matching upstream's default. A positive value starts at `PENDING_VALIDATION` and converges on a read after the delay. Set a negative value, such as `-1`, to retain the fork's unvalidated-certificate workflow: public certificates stay pending, and `GetCertificate` returns `RequestInProgressException`. No DNS or email approval is performed. Issued certificates report `ValidationStatus: SUCCESS` for every domain.
+- **DNS validation:** Public DNS certificates remain `PENDING_VALIDATION` until every validation CNAME matches a record in a public Floci Route 53 zone. External DNS providers are not queried. Reads observe the records and persist issuance; `GetCertificate` returns `RequestInProgressException` while validation is pending. Issued certificates report `ValidationStatus: SUCCESS` for every domain.
+- **Email validation:** Email approval is simulated. `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS=0` issues immediately, a positive value issues on a read after the delay, and a negative value leaves the certificate pending. This setting does not bypass DNS validation.
 - **Private / imported certificates are `ISSUED` immediately:** providing `CertificateAuthorityArn` or calling `ImportCertificate` produces an issued cert that `GetCertificate` / `ExportCertificate` can read.
 - **Validation Artefacts:** `DomainValidationOptions` follows the validation method as on AWS. `DNS` validation carries the `ResourceRecord` CNAME to publish; `EMAIL` validation carries no record but `ValidationEmails`, the five conventional mailboxes (`admin@`, `administrator@`, `hostmaster@`, `postmaster@`, `webmaster@`) of the `ValidationDomain`, which is the domain itself (wildcard stripped) or the one given in the request's `DomainValidationOptions`. An option naming a domain that is not on the certificate, or a `ValidationDomain` that is not the domain or one of its parents, is rejected with `InvalidDomainValidationOptionsException`. Real ACM also mails the WHOIS contacts, which Floci cannot know.
 - **Real Cryptography:** Certificates are generated with real RSA/EC keys and valid X.509 structure
@@ -47,7 +48,7 @@
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_ACM_ENABLED` | `true` | Enable or disable the service |
-| `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS` | `0` | Public validation delay in seconds: `0` issues immediately, positive values issue on a read after the delay, negative values leave certificates pending |
+| `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS` | `0` | Simulated email-validation delay: `0` issues immediately, positive values issue on a read after the delay, negative values leave email certificates pending. DNS certificates require matching Route 53 records. |
 
 ## Examples
 

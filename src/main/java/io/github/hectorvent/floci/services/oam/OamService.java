@@ -110,6 +110,9 @@ public class OamService {
             throw new AwsException("ServiceQuotaExceededException", "A source account can have at most five links.", 429);
         }
         OamSink sink = getSinkAcrossAccounts(sinkIdentifier);
+        if (regionResolver.getAccountId().equals(sink.getOwnerAccountId())) {
+            throw invalid("The sink and link cannot be in the same account.");
+        }
         if (!region.equals(sink.getRegion())) throw invalid("The sink must be in the same Region as the link.");
         authorizeLinkAction(sink, regionResolver.getAccountId(), resourceTypes, "oam:CreateLink");
         boolean duplicate = listLinks(region).stream().anyMatch(l -> sink.getArn().equals(l.getSinkArn()));

@@ -61,7 +61,7 @@ public class SecurityGroupFirewallManager {
 
     @PostConstruct
     void quarantineSurvivingNamespaces() {
-        if (!enabled()) {
+        if (!enabled() && config.services().ec2().mock()) {
             return;
         }
         try {
@@ -93,6 +93,12 @@ public class SecurityGroupFirewallManager {
         if (!enabled()) {
             throw new IllegalStateException("Security-group enforcement is disabled");
         }
+        return createNetworkNamespace(service, resourceId, accountId, region, dockerNetwork, portBindings);
+    }
+
+    /** A private namespace is also required for overlapping VPC address translation without SG enforcement. */
+    public Namespace createNetworkNamespace(String service, String resourceId, String accountId, String region,
+                                            Optional<String> dockerNetwork, Map<Integer, Integer> portBindings) {
         Info daemon = dockerClient.infoCmd().exec();
         if (!"linux".equalsIgnoreCase(daemon.getOsType())) {
             throw new IllegalStateException("Security-group enforcement requires a Linux Docker daemon");
@@ -109,6 +115,8 @@ public class SecurityGroupFirewallManager {
         ContainerBuilder.Builder builder = containerBuilder.newContainer(config.network().securityGroupEnforcement().helperImage())
                 .withName(name)
                 .withDockerNetwork(dockerNetwork)
+                .withEmbeddedDns()
+                .withHostDockerInternalOnLinux()
                 .withEntrypoint(List.of("sh", "-c"))
                 .withCmd(List.of("exec sleep 2147483647"))
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(service, resourceId, accountId, region))
@@ -141,8 +149,11 @@ public class SecurityGroupFirewallManager {
         }
         String image = containerBuilder.resolveImage(configured);
         try {
-            dockerClient.inspectImageCmd(image).exec();
-            return;
+            var current = dockerClient.inspectImageCmd(image).exec().getConfig();
+            if (current != null && current.getLabels() != null
+                    && "2".equals(current.getLabels().get("io.floci.network-helper.version"))) {
+                return;
+            }
         } catch (NotFoundException missing) {
             // Build the versioned Floci recipe in the daemon used for workloads.
         }
@@ -174,6 +185,15 @@ public class SecurityGroupFirewallManager {
     /** Registers only after the default-deny table exists, before workload startup. */
     public synchronized void register(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
                                       Map<String, List<String>> prefixLists) {
+        register(endpoint, helperId, prefixLists, true);
+    }
+
+    public synchronized void registerNetworkEndpoint(SecurityGroupNftCompiler.Endpoint endpoint, String helperId) {
+        register(endpoint, helperId, Map.of(), false);
+    }
+
+    private void register(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
+                          Map<String, List<String>> prefixLists, boolean enforceSecurityGroups) {
         if (endpoints.values().stream().map(ProtectedEndpoint::endpoint)
                 .anyMatch(existing -> !existing.eniId().equals(endpoint.eniId())
                         && existing.transportAddress().equals(endpoint.transportAddress()))) {
@@ -181,7 +201,7 @@ public class SecurityGroupFirewallManager {
             throw new IllegalStateException("Two managed ENIs share a Docker transport address");
         }
         ProtectedEndpoint previous = endpoints.put(endpoint.eniId(),
-                new ProtectedEndpoint(endpoint, helperId, Map.copyOf(prefixLists)));
+                new ProtectedEndpoint(endpoint, helperId, Map.copyOf(prefixLists), enforceSecurityGroups));
         try {
             reconcileAll();
         } catch (RuntimeException e) {
@@ -196,11 +216,27 @@ public class SecurityGroupFirewallManager {
     }
 
     public synchronized void unregister(String eniId) {
-        ProtectedEndpoint removed = endpoints.remove(eniId);
-        if (removed != null) {
-            lifecycleManager.removeIfExists(removed.helperId());
-            reconcileAll();
+        ProtectedEndpoint current = endpoints.get(eniId);
+        if (current != null) {
+            unregister(eniId, current.helperId());
         }
+    }
+
+    /** A delayed instance cleanup must not remove a successor reusing the same standalone ENI. */
+    public synchronized void unregister(String eniId, String expectedHelperId) {
+        ProtectedEndpoint current = endpoints.get(eniId);
+        if (current == null || !current.helperId().equals(expectedHelperId)) {
+            return;
+        }
+        lifecycleManager.removeIfExists(current.helperId());
+        try {
+            dockerClient.inspectContainerCmd(current.helperId()).exec();
+            throw new IllegalStateException("EC2 namespace removal is not confirmed");
+        } catch (NotFoundException removed) {
+            // Only a confirmed absence releases this endpoint's identity.
+        }
+        endpoints.remove(eniId, current);
+        reconcileAll();
     }
 
     public synchronized void updateGroups(String eniId, Set<String> groupIds,
@@ -219,7 +255,7 @@ public class SecurityGroupFirewallManager {
         SecurityGroupNftCompiler.Endpoint updated = new SecurityGroupNftCompiler.Endpoint(
                 identity.accountId(), identity.region(), identity.vpcId(), identity.eniId(),
                 identity.logicalAddress(), identity.transportAddress(), Set.copyOf(groupIds), attached);
-        endpoints.put(eniId, new ProtectedEndpoint(updated, current.helperId(), Map.copyOf(prefixLists)));
+        endpoints.put(eniId, new ProtectedEndpoint(updated, current.helperId(), Map.copyOf(prefixLists), current.enforceSecurityGroups()));
         reconcileAll();
     }
 
@@ -241,8 +277,9 @@ public class SecurityGroupFirewallManager {
                 .map(ProtectedEndpoint::endpoint).toList();
         for (ProtectedEndpoint protectedEndpoint : new ArrayList<>(endpoints.values())) {
             try {
-                String rules = SecurityGroupNftCompiler.compile(protectedEndpoint.endpoint(), peers,
-                        protectedEndpoint.prefixLists());
+                String rules = protectedEndpoint.enforceSecurityGroups()
+                        ? SecurityGroupNftCompiler.compile(protectedEndpoint.endpoint(), peers, protectedEndpoint.prefixLists())
+                        : SecurityGroupNftCompiler.compileNetworkOnly(protectedEndpoint.endpoint(), peers);
                 apply(protectedEndpoint.helperId(), rules);
             } catch (RuntimeException e) {
                 endpoints.values().forEach(endpoint -> quarantine(endpoint.helperId()));
@@ -257,7 +294,7 @@ public class SecurityGroupFirewallManager {
         for (Map.Entry<String, ProtectedEndpoint> entry : new ArrayList<>(endpoints.entrySet())) {
             ProtectedEndpoint current = entry.getValue();
             SecurityGroupNftCompiler.Endpoint identity = current.endpoint();
-            if (!region.equals(identity.region())) {
+            if (!current.enforceSecurityGroups() || !region.equals(identity.region())) {
                 continue;
             }
             List<SecurityGroup> attached = identity.groupIds().stream().map(groups::get).toList();
@@ -269,7 +306,7 @@ public class SecurityGroupFirewallManager {
                     identity.accountId(), identity.region(), identity.vpcId(), identity.eniId(),
                     identity.logicalAddress(), identity.transportAddress(), identity.groupIds(), attached);
             endpoints.put(entry.getKey(), new ProtectedEndpoint(updated, current.helperId(),
-                    Map.copyOf(prefixLists)));
+                    Map.copyOf(prefixLists), current.enforceSecurityGroups()));
         }
         reconcileAll();
     }
@@ -359,5 +396,5 @@ public class SecurityGroupFirewallManager {
 
     public record Namespace(String helperId, String transportAddress) {}
     private record ProtectedEndpoint(SecurityGroupNftCompiler.Endpoint endpoint, String helperId,
-                                     Map<String, List<String>> prefixLists) {}
+                                     Map<String, List<String>> prefixLists, boolean enforceSecurityGroups) {}
 }

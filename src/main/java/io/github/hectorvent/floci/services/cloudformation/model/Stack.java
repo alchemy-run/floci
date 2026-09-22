@@ -35,6 +35,13 @@ public class Stack {
     private Map<String, ChangeSet> changeSets = new LinkedHashMap<>();
     private Map<String, String> tags = new LinkedHashMap<>();
     private boolean enableTerminationProtection = false;
+    private Map<String, StackDriftDetection> driftDetections = new LinkedHashMap<>();
+    private Map<String, Map<String, String>> resourceSignals = new LinkedHashMap<>();
+
+    public Map<String, StackDriftDetection> getDriftDetections() { return driftDetections; }
+    public void setDriftDetections(Map<String, StackDriftDetection> value) { driftDetections = value; }
+    public Map<String, Map<String, String>> getResourceSignals() { return resourceSignals; }
+    public void setResourceSignals(Map<String, Map<String, String>> value) { resourceSignals = value; }
 
     public String getStackId() { return stackId; }
     public void setStackId(String stackId) { this.stackId = stackId; }

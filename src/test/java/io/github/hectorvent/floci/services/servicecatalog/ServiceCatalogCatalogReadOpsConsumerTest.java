@@ -237,7 +237,7 @@ class ServiceCatalogCatalogReadOpsConsumerTest {
         String sourceId = createProduct("ab-copy-source");
         String sourceArn = call("DescribeProductAsAdmin", "{\"Id\":\"" + sourceId + "\"}")
                 .then().statusCode(200)
-                .extract().path("ProductViewDetail.ProductViewSummary.ARN");
+                .extract().path("ProductViewDetail.ProductARN");
 
         String token = call("CopyProduct", "{\"SourceProductArn\":\"" + sourceArn
                 + "\",\"TargetProductName\":\"ab-copy-target\"}")
@@ -258,7 +258,7 @@ class ServiceCatalogCatalogReadOpsConsumerTest {
         String sourceId = createProduct("ab-copy-keepname");
         String sourceArn = call("DescribeProductAsAdmin", "{\"Id\":\"" + sourceId + "\"}")
                 .then().statusCode(200)
-                .extract().path("ProductViewDetail.ProductViewSummary.ARN");
+                .extract().path("ProductViewDetail.ProductARN");
         call("CopyProduct", "{\"SourceProductArn\":\"" + sourceArn + "\"}")
         .then()
             .statusCode(200)

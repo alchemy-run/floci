@@ -12,8 +12,13 @@ import io.github.hectorvent.floci.services.redshift.model.Cluster;
 import io.github.hectorvent.floci.services.redshift.model.ClusterParameterGroup;
 import io.github.hectorvent.floci.services.redshift.model.ClusterSubnetGroup;
 import io.github.hectorvent.floci.services.redshift.model.Endpoint;
+import io.github.hectorvent.floci.services.redshift.model.EventSubscription;
+import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.redshift.model.Parameter;
 import io.github.hectorvent.floci.services.redshift.model.Snapshot;
+import io.github.hectorvent.floci.services.redshift.model.RedshiftEvent;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.rds.proxy.PasswordValidator;
 import io.github.hectorvent.floci.services.redshift.proxy.RedshiftProxyManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +36,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
@@ -49,6 +55,7 @@ class RedshiftServiceTest {
     private DockerHostResolver dockerHostResolver;
     private RedshiftCredentialBroker credentialBroker;
     private RedshiftService service;
+    private Ec2Service ec2Service;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -88,15 +95,42 @@ class RedshiftServiceTest {
         regionResolver = new RegionResolver("us-east-1", "111111111111");
 
         credentialBroker = new RedshiftCredentialBroker();
+        ec2Service = mock(Ec2Service.class);
+        AccountAwareStorageBackend<RedshiftEvent> eventBackend = mock(AccountAwareStorageBackend.class);
+        when(sf.<RedshiftEvent>create(eq("redshift"), eq("redshift-events.json"), any())).thenReturn(eventBackend);
 
+        AccountAwareStorageBackend<EventSubscription> subscriptions = mock(AccountAwareStorageBackend.class);
+        when(sf.<EventSubscription>create(eq("redshift"), eq("redshift-event-subscriptions.json"), any())).thenReturn(subscriptions);
         service = new RedshiftService(sf, cm, config, regionResolver, proxyManager, dockerHostResolver,
-                credentialBroker);
+                credentialBroker, ec2Service, mock(SnsService.class));
     }
 
     /** Absolute dump path as {@code createSnapshot} now stores it: under {@code <persistentPath>/redshift-dumps/<accountId>}. */
     private static String dumpPath(String snapshotId) {
         return Paths.get("target/test-data", "redshift-dumps", "111111111111", snapshotId + ".sql")
                 .toAbsolutePath().normalize().toString();
+    }
+
+    @Test
+    void databaseRevisionListingPaginatesObservedClusters() {
+        List<Cluster> clusters = new ArrayList<>();
+        for (int i = 0; i < 21; i++) {
+            Cluster cluster = new Cluster();
+            cluster.setClusterIdentifier("revision-cluster-" + i);
+            clusters.add(cluster);
+        }
+        when(clusterBackend.scan(any())).thenReturn(clusters);
+        RedshiftService.Page<Cluster> first = service.describeClusterDbRevisions(null, 20, null);
+        assertEquals(20, first.items().size());
+        assertNotNull(first.marker());
+        RedshiftService.Page<Cluster> last = service.describeClusterDbRevisions(null, 20, first.marker());
+        assertEquals(1, last.items().size());
+        assertNull(last.marker());
+        assertTrue(first.items().stream().noneMatch(last.items()::contains));
+        assertThrows(AwsException.class, () -> service.describeClusterDbRevisions(null, 101, null));
+        assertThrows(AwsException.class, () -> service.describeClusterDbRevisions(null, 20, "invalid"));
+        assertEquals("ClusterNotFound", assertThrows(AwsException.class,
+                () -> service.describeClusterDbRevisions("missing", 20, null)).getErrorCode());
     }
 
     @Test
@@ -1062,6 +1096,8 @@ class RedshiftServiceTest {
     @Test
     void testCreateClusterSubnetGroup() {
         when(subnetGroupBackend.get("my-subnet-group")).thenReturn(Optional.empty());
+        when(ec2Service.describeSubnets("us-east-1", List.of("subnet-1", "subnet-2"), Map.of()))
+                .thenReturn(List.of(subnet("subnet-1", "vpc-123"), subnet("subnet-2", "vpc-123")));
 
         ClusterSubnetGroup group = service.createClusterSubnetGroup(
                 "my-subnet-group", "test group", "vpc-123", List.of("subnet-1", "subnet-2"));
@@ -1096,6 +1132,8 @@ class RedshiftServiceTest {
         ClusterSubnetGroup group = new ClusterSubnetGroup("my-group", "old", "vpc-1", List.of("subnet-1"));
         when(subnetGroupBackend.get("my-group")).thenReturn(Optional.of(group));
 
+        when(ec2Service.describeSubnets("us-east-1", List.of("subnet-2", "subnet-3"), Map.of()))
+                .thenReturn(List.of(subnet("subnet-2", "vpc-1"), subnet("subnet-3", "vpc-1")));
         ClusterSubnetGroup updated = service.modifyClusterSubnetGroup("my-group", "new", List.of("subnet-2", "subnet-3"));
 
         assertEquals("new", updated.getDescription());
@@ -1119,6 +1157,59 @@ class RedshiftServiceTest {
         when(subnetGroupBackend.get("missing")).thenReturn(Optional.empty());
 
         assertThrows(AwsException.class, () -> service.deleteClusterSubnetGroup("missing"));
+    }
+
+    private static Subnet subnet(String id, String vpc) {
+        Subnet subnet = new Subnet();
+        subnet.setSubnetId(id);
+        subnet.setVpcId(vpc);
+        return subnet;
+    }
+
+    @Test
+    void subnetGroupRejectsMixedVpcsBeforePersisting() {
+        when(ec2Service.describeSubnets("us-east-1", List.of("subnet-a", "subnet-b"), Map.of()))
+                .thenReturn(List.of(subnet("subnet-a", "vpc-a"), subnet("subnet-b", "vpc-b")));
+        AwsException error = assertThrows(AwsException.class, () -> service.createClusterSubnetGroup(
+                "mixed-vpcs", "invalid", null, List.of("subnet-a", "subnet-b")));
+        assertEquals("InvalidSubnet", error.getErrorCode());
+        verify(subnetGroupBackend, never()).put(anyString(), any());
+    }
+
+    @Test
+    void copySnapshotRequiresRealSourceDataAndDoesNotPersistFailedCopies() {
+        Snapshot missingData = new Snapshot("copy-source", "cluster", "available", 5439, "admin");
+        when(snapshotBackend.get("copy-source")).thenReturn(Optional.of(missingData));
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.copyClusterSnapshot("copy-source", null, "copy-target", null));
+        assertEquals("InvalidClusterSnapshotState", error.getErrorCode());
+        verify(snapshotBackend, never()).put(eq("copy-target"), any());
+    }
+
+    @Test
+    void copySnapshotOwnsAnIndependentDumpAndPreservesCredentials() throws Exception {
+        Path original = Path.of(dumpPath("copy-source-data"));
+        Path copied = Path.of(dumpPath("copy-target-data"));
+        Files.createDirectories(original.getParent());
+        Files.writeString(original, "CREATE TABLE retained (value integer); INSERT INTO retained VALUES (42);");
+        Snapshot source = new Snapshot("copy-source-data", "cluster", "available", 5439, "admin", original.toString());
+        source.setMasterPassword("retained-password");
+        source.setTags(Map.of("owner", "test"));
+        when(snapshotBackend.get("copy-source-data")).thenReturn(Optional.of(source));
+        try {
+            Snapshot result = service.copyClusterSnapshot("copy-source-data", "cluster", "copy-target-data", 7);
+            assertEquals(Files.readString(original), Files.readString(copied));
+            assertEquals("retained-password", result.getMasterPassword());
+            assertEquals(7, result.getManualSnapshotRetentionPeriod());
+            result.getTags().put("owner", "copy");
+            assertEquals("test", source.getTags().get("owner"));
+            service.deleteSnapshot("copy-source-data");
+            assertTrue(Files.exists(copied));
+            verify(snapshotBackend).put("copy-target-data", result);
+        } finally {
+            Files.deleteIfExists(original);
+            Files.deleteIfExists(copied);
+        }
     }
 
     private static String extractResourceId(String arn) {

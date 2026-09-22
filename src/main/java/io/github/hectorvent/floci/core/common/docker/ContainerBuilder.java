@@ -140,6 +140,7 @@ public class ContainerBuilder {
         private String user;
         private final List<String> groupAdd = new ArrayList<>();
         private final List<String> dnsServers = new ArrayList<>();
+        private boolean sourceHostMapping;
         private final List<DeviceRequest> deviceRequests = new ArrayList<>();
 
         Builder(String image, EmulatorConfig config, DockerHostResolver dockerHostResolver,
@@ -347,6 +348,15 @@ public class ContainerBuilder {
             return this;
         }
 
+        /** Adds a host mapping unless the caller already supplied that hostname. */
+        public Builder withDefaultExtraHost(String hostname, String ip) {
+            if (extraHosts.stream().noneMatch(entry -> entry.regionMatches(true, 0, hostname + ":", 0,
+                    hostname.length() + 1))) {
+                withExtraHost(hostname, ip);
+            }
+            return this;
+        }
+
         /**
          * Adds a single Docker label. Merged over the default floci-aws labels at
          * container creation; a per-spec label wins on key conflicts.
@@ -546,17 +556,23 @@ public class ContainerBuilder {
 
         /**
          * Injects Floci's embedded DNS server into the container so virtual-hosted
-         * S3 hostnames (my-bucket.localhost.floci.io) resolve to Floci's Docker
-         * network IP. No-op when the embedded DNS server is not running.
+         * S3 hostnames (my-bucket.localhost.floci.io) resolve to Floci's advertised
+         * container-reachable IP. No-op when the embedded DNS server is not running.
          *
          * <p>When {@code floci.dns.container-fallback-enabled} is set, the configured public
          * fallback resolvers are appended after Floci's IP so the container's own resolver can
          * fall through for public hostnames if Floci's embedded forwarder cannot answer.
+         * Source-mode DNS replaces explicit and fallback resolvers to keep AWS names local;
+         * the embedded forwarder still resolves unrelated names through its upstreams.
          */
         public Builder withEmbeddedDns() {
             embeddedDnsServer.getServerIp().ifPresent(flociIp -> {
+                if (embeddedDnsServer.isSourceMode()) {
+                    dnsServers.clear();
+                    sourceHostMapping = true;
+                }
                 dnsServers.add(flociIp);
-                if (config.dns().containerFallbackEnabled()) {
+                if (!embeddedDnsServer.isSourceMode() && config.dns().containerFallbackEnabled()) {
                     for (String fallback : config.dns().containerFallbackServers()) {
                         if (fallback != null && !fallback.isBlank() && !dnsServers.contains(fallback.trim())) {
                             dnsServers.add(fallback.trim());
@@ -579,6 +595,9 @@ public class ContainerBuilder {
          * Builds the immutable ContainerSpec.
          */
         public ContainerSpec build() {
+            if (sourceHostMapping) {
+                withDefaultExtraHost("host.docker.internal", "host-gateway");
+            }
             return new ContainerSpec(
                     image,
                     name,

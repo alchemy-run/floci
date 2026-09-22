@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.rds;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import io.github.hectorvent.floci.services.rds.model.DbCluster;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
@@ -54,6 +55,117 @@ class RdsQueryHandlerTest {
         docDbHandler = mock(DocDbQueryHandler.class);
         neptuneHandler = mock(NeptuneQueryHandler.class);
         handler = new RdsQueryHandler(service, config, docDbHandler, neptuneHandler);
+    }
+
+    @Test
+    void describeDbEngineVersionsUsesCatalogFiltersAndDefaults() {
+        doCallRealMethod().when(service).describeDbEngineVersions(any(), any(), any(), anyBoolean(), anyBoolean(), anyMap());
+        MultivaluedMap<String, String> p = params();
+        p.add("Engine", "postgres");
+        p.add("DefaultOnly", "true");
+        Response response = handler.handle("DescribeDBEngineVersions", p);
+        String body = (String) response.getEntity();
+        assertEquals(200, response.getStatus());
+        assertEquals(List.of("DBEngineVersion"), XmlParser.childElementNames(body, "DBEngineVersions"));
+        assertEquals(List.of("16.3"), XmlParser.extractAll(body, "EngineVersion"));
+        assertEquals(List.of("postgres16"), XmlParser.extractAll(body, "DBParameterGroupFamily"));
+        assertFalse(body.contains("<Marker>"));
+        assertTrue(body.contains("<DBEngineVersionDescription>PostgreSQL 16.3</DBEngineVersionDescription>"));
+
+        p.putSingle("DefaultOnly", "false");
+        p.add("Filters.Filter.1.Name", "engine-version");
+        p.add("Filters.Filter.1.Values.Value.1", "16.3");
+        p.add("Filters.Filter.1.Values.Value.2", "16.13");
+        p.add("Filters.Filter.2.Name", "db-parameter-group-family");
+        p.add("Filters.Filter.2.Values.Value.1", "postgres16");
+        body = (String) handler.handle("DescribeDBEngineVersions", p).getEntity();
+        assertEquals(List.of("16.13", "16.3"), XmlParser.extractAll(body, "EngineVersion"));
+        p.putSingle("DBParameterGroupFamily", "mysql8.4");
+        body = (String) handler.handle("DescribeDBEngineVersions", p).getEntity();
+        assertTrue(XmlParser.extractAll(body, "EngineVersion").isEmpty());
+    }
+
+    @Test
+    void describeDbEngineVersionsPaginatesAndRejectsInvalidRequests() {
+        doCallRealMethod().when(service).describeDbEngineVersions(any(), any(), any(), anyBoolean(), anyBoolean(), anyMap());
+        MultivaluedMap<String, String> p = params();
+        p.add("MaxRecords", "20");
+        String first = (String) handler.handle("DescribeDBEngineVersions", p).getEntity();
+        assertEquals(20, XmlParser.extractGroups(first, "DBEngineVersion").size());
+        String marker = XmlParser.extractFirst(first, "Marker", null);
+        assertNotNull(marker);
+        p.putSingle("Marker", marker);
+        String last = (String) handler.handle("DescribeDBEngineVersions", p).getEntity();
+        assertFalse(XmlParser.extractGroups(last, "DBEngineVersion").isEmpty());
+        assertFalse(last.contains("<Marker>"));
+        assertEquals(RdsEngineCatalog.describe(null, null, null, false, false, Map.of()).size(),
+                20 + XmlParser.extractGroups(last, "DBEngineVersion").size());
+
+        p.putSingle("Marker", "-1");
+        assertEquals(400, handler.handle("DescribeDBEngineVersions", p).getStatus());
+        p.remove("Marker");
+        for (String invalid : List.of("19", "101", "not-a-number")) {
+            p.putSingle("MaxRecords", invalid);
+            assertEquals(400, handler.handle("DescribeDBEngineVersions", p).getStatus());
+        }
+        p.remove("MaxRecords");
+        p.add("IncludeAll", "true");
+        p.add("DefaultOnly", "true");
+        Response invalidFlags = handler.handle("DescribeDBEngineVersions", p);
+        assertEquals(400, invalidFlags.getStatus());
+        assertEquals("InvalidParameterCombination",
+                XmlParser.extractFirst((String) invalidFlags.getEntity(), "Code", null));
+    }
+
+    @Test
+    void describeDbEngineVersionsIncludesDeprecatedOnlyWhenRequested() {
+        doCallRealMethod().when(service).describeDbEngineVersions(any(), any(), any(), anyBoolean(), anyBoolean(), anyMap());
+        MultivaluedMap<String, String> p = params();
+        p.add("Filters.member.1.Name", "status");
+        p.add("Filters.member.1.Values.member.1", "deprecated");
+        String body = (String) handler.handle("DescribeDBEngineVersions", p).getEntity();
+        assertTrue(XmlParser.extractAll(body, "EngineVersion").isEmpty());
+        p.add("IncludeAll", "true");
+        body = (String) handler.handle("DescribeDBEngineVersions", p).getEntity();
+        assertEquals(List.of("9.6.24"), XmlParser.extractAll(body, "EngineVersion"));
+        p.putSingle("Filters.member.1.Name", "not-a-filter");
+        assertEquals(400, handler.handle("DescribeDBEngineVersions", p).getStatus());
+    }
+
+    @Test
+    void describeDbParametersFiltersBeforePaginationAndKeepsMetadata() {
+        DbParameterGroup group = new DbParameterGroup("paged", "postgres16", "paged parameters");
+        for (int i = 0; i < 25; i++) {
+            group.getParameters().put("extension.parameter_" + i, "value<&" + i);
+        }
+        group.getParameters().put("work_mem", "8192");
+        group.getParameterApplyMethods().put("work_mem", "pending-reboot");
+        when(service.getDbParameterGroup("paged", null)).thenReturn(group);
+        doCallRealMethod().when(service).describeDbParameters(eq("paged"), any(), isNull());
+        MultivaluedMap<String, String> p = params();
+        p.add("DBParameterGroupName", "paged");
+        p.add("Source", "user");
+        p.add("MaxRecords", "20");
+        String body = (String) handler.handle("DescribeDBParameters", p).getEntity();
+        assertEquals(20, XmlParser.extractGroups(body, "Parameter").size());
+        assertEquals(List.of("user"), XmlParser.extractAll(body, "Source").stream().distinct().toList());
+        assertTrue(body.contains("value&lt;&amp;"));
+        p.add("Marker", XmlParser.extractFirst(body, "Marker", null));
+        body = (String) handler.handle("DescribeDBParameters", p).getEntity();
+        assertEquals(6, XmlParser.extractGroups(body, "Parameter").size());
+        assertFalse(body.contains("<Marker>"));
+        Map<String, String> workMem = XmlParser.extractGroups(body, "Parameter").stream()
+                .filter(parameter -> "work_mem".equals(parameter.get("ParameterName"))).findFirst().orElseThrow();
+        assertEquals("dynamic", workMem.get("ApplyType"));
+        assertEquals("pending-reboot", workMem.get("ApplyMethod"));
+        assertEquals("8192", workMem.get("ParameterValue"));
+        p.remove("Marker");
+        p.putSingle("Source", "engine-default");
+        body = (String) handler.handle("DescribeDBParameters", p).getEntity();
+        assertEquals(4, XmlParser.extractGroups(body, "Parameter").size());
+        assertFalse(XmlParser.extractAll(body, "ParameterName").contains("work_mem"));
+        p.putSingle("Source", "invalid");
+        assertEquals(400, handler.handle("DescribeDBParameters", p).getStatus());
     }
 
     @Test
@@ -445,14 +557,14 @@ class RdsQueryHandlerTest {
         DbClusterParameterGroup clusterParameterGroup = new DbClusterParameterGroup(
                 "cpg1", "aurora-postgresql16", "cluster parameter group");
         when(service.modifyDbSubnetGroup(
-                "custom-group", List.of("subnet-a", "subnet-b"), "us-west-2"))
+                "custom-group", null, List.of("subnet-a", "subnet-b"), "us-west-2"))
                 .thenReturn(subnetGroup);
         when(service.listDbParameterGroups(null, "us-west-2"))
                 .thenReturn(List.of(parameterGroup));
-        when(service.getDbParameterGroup("pg1", "us-west-2"))
-                .thenReturn(parameterGroup);
+        when(service.describeDbParameters("pg1", null, "us-west-2"))
+                .thenReturn(RdsParameterCatalog.describe(parameterGroup, null));
         when(service.modifyDbParameterGroup(
-                "pg1", Map.of("max_connections", "200"), "us-west-2"))
+                "pg1", Map.of("max_connections", "200"), Map.of(), "us-west-2"))
                 .thenReturn(parameterGroup);
         when(service.listDbClusterParameterGroups(null, "us-west-2"))
                 .thenReturn(List.of(clusterParameterGroup));
@@ -488,12 +600,12 @@ class RdsQueryHandlerTest {
         handler.handle("DeleteDBClusterParameterGroup", clusterParameterParams, "us-west-2");
 
         verify(service).modifyDbSubnetGroup(
-                "custom-group", List.of("subnet-a", "subnet-b"), "us-west-2");
+                "custom-group", null, List.of("subnet-a", "subnet-b"), "us-west-2");
         verify(service).deleteDbSubnetGroup("custom-group", "us-west-2");
         verify(service).listDbParameterGroups(null, "us-west-2");
         verify(service).modifyDbParameterGroup(
-                "pg1", Map.of("max_connections", "200"), "us-west-2");
-        verify(service).getDbParameterGroup("pg1", "us-west-2");
+                "pg1", Map.of("max_connections", "200"), Map.of(), "us-west-2");
+        verify(service).describeDbParameters("pg1", null, "us-west-2");
         verify(service).deleteDbParameterGroup("pg1", "us-west-2");
         verify(service).listDbClusterParameterGroups(null, "us-west-2");
         verify(service).modifyDbClusterParameterGroup(
@@ -678,6 +790,22 @@ class RdsQueryHandlerTest {
     }
 
     // ──────────────────────────── DBParameterGroups XML tag ──────────────────────
+
+    @Test
+    void describeDbParameterGroupsDistinguishesMissingNameFromEmptyList() {
+        when(service.listDbParameterGroups(null, null)).thenReturn(List.of());
+        Response empty = handler.handle("DescribeDBParameterGroups", params());
+        assertEquals(200, empty.getStatus());
+        assertTrue(((String) empty.getEntity()).contains("<DBParameterGroups></DBParameterGroups>"));
+        assertFalse(((String) empty.getEntity()).contains("<Marker>"));
+        when(service.listDbParameterGroups("missing", null)).thenThrow(
+                new AwsException("DBParameterGroupNotFound", "Parameter group not found.", 404));
+        MultivaluedMap<String, String> p = params();
+        p.add("DBParameterGroupName", "missing");
+        Response missing = handler.handle("DescribeDBParameterGroups", p);
+        assertEquals(404, missing.getStatus());
+        assertEquals("DBParameterGroupNotFound", XmlParser.extractFirst((String) missing.getEntity(), "Code", null));
+    }
 
     @Test
     void describeDbParameterGroups_usesDBParameterGroupTag() {
@@ -868,7 +996,7 @@ class RdsQueryHandlerTest {
 
     @Test
     void modifyDbSubnetGroup_passesSubnetMembersToService() {
-        when(service.modifyDbSubnetGroup("sample-db-subnets", List.of("subnet-new-a", "subnet-new-b"), null))
+        when(service.modifyDbSubnetGroup("sample-db-subnets", null, List.of("subnet-new-a", "subnet-new-b"), null))
                 .thenReturn(new DbSubnetGroup(
                         "sample-db-subnets", "test", "vpc-123", List.of("subnet-new-a", "subnet-new-b"),
                         Map.of("subnet-new-a", "us-east-1a", "subnet-new-b", "us-east-1b")));
@@ -879,7 +1007,7 @@ class RdsQueryHandlerTest {
         p.add("SubnetIds.SubnetIdentifier.2", "subnet-new-b");
         Response response = handler.handle("ModifyDBSubnetGroup", p);
 
-        verify(service).modifyDbSubnetGroup("sample-db-subnets", List.of("subnet-new-a", "subnet-new-b"), null);
+        verify(service).modifyDbSubnetGroup("sample-db-subnets", null, List.of("subnet-new-a", "subnet-new-b"), null);
         String body = (String) response.getEntity();
         assertEquals(200, response.getStatus());
         assertTrue(body.contains("<DBSubnetGroupName>sample-db-subnets</DBSubnetGroupName>"));
@@ -914,7 +1042,7 @@ class RdsQueryHandlerTest {
     void modifyDbParameterGroup_ignoresParametersWithoutValue() {
         DbParameterGroup group = new DbParameterGroup("pg1", "postgres15", "test group");
         when(service.modifyDbParameterGroup(
-                eq("pg1"), eq(java.util.Map.of("max_connections", "200")), isNull()))
+                eq("pg1"), eq(Map.of("max_connections", "200")), eq(Map.of()), isNull()))
                 .thenReturn(group);
 
         MultivaluedMap<String, String> p = params();
@@ -925,14 +1053,15 @@ class RdsQueryHandlerTest {
         handler.handle("ModifyDBParameterGroup", p);
 
         verify(service).modifyDbParameterGroup(
-                "pg1", java.util.Map.of("max_connections", "200"), null);
+                "pg1", Map.of("max_connections", "200"), Map.of(), null);
     }
 
     @Test
     void modifyDbParameterGroup_acceptsDistilledParameterXmlNamePrefix() {
         DbParameterGroup group = new DbParameterGroup("pg1", "mysql8.4", "test group");
-        when(service.modifyDbParameterGroup(eq("pg1"), eq(java.util.Map.of(
-                "time_zone", "Australia/Sydney", "max_connections", "150")), isNull()))
+        when(service.modifyDbParameterGroup(eq("pg1"), eq(Map.of(
+                "time_zone", "Australia/Sydney", "max_connections", "150")),
+                eq(Map.of("time_zone", "immediate")), isNull()))
                 .thenReturn(group);
 
         MultivaluedMap<String, String> p = params();
@@ -944,8 +1073,8 @@ class RdsQueryHandlerTest {
         p.add("Parameters.Parameter.2.ParameterValue", "150");
         handler.handle("ModifyDBParameterGroup", p);
 
-        verify(service).modifyDbParameterGroup("pg1", java.util.Map.of(
-                "time_zone", "Australia/Sydney", "max_connections", "150"), null);
+        verify(service).modifyDbParameterGroup("pg1", Map.of(
+                "time_zone", "Australia/Sydney", "max_connections", "150"), Map.of("time_zone", "immediate"), null);
     }
 
     @Test
@@ -968,7 +1097,8 @@ class RdsQueryHandlerTest {
     void describeDbParameters_returnsUserSourceParameters() {
         DbParameterGroup group = new DbParameterGroup("pg1", "mysql8.4", "test group");
         group.getParameters().put("time_zone", "Australia/Sydney");
-        when(service.getDbParameterGroup("pg1", null)).thenReturn(group);
+        when(service.describeDbParameters("pg1", "user", null))
+                .thenReturn(RdsParameterCatalog.describe(group, "user"));
 
         MultivaluedMap<String, String> p = params();
         p.add("DBParameterGroupName", "pg1");

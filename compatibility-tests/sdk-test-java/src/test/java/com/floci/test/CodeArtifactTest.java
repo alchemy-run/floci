@@ -2,11 +2,16 @@ package com.floci.test;
 
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.*;
+import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.codeartifact.CodeartifactClient;
 import software.amazon.awssdk.services.codeartifact.model.*;
 // Explicit import: this file's Tag usage is the CodeArtifact model type, not JUnit's @Tag.
 import software.amazon.awssdk.services.codeartifact.model.Tag;
 
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -217,6 +222,108 @@ class CodeArtifactTest {
                 .repository(STORE_REPO)
                 .externalConnection("public:npmjs"));
         assertThat(disassoc.repository().externalConnections()).isEmpty();
+    }
+
+    @Test
+    @Order(70)
+    @DisplayName("Authorization tokens use the duration query parameter and numeric expiration")
+    void authorizationTokenDuration() {
+        Instant before = Instant.now();
+        GetAuthorizationTokenResponse token = codeArtifact.getAuthorizationToken(r -> r
+                .domain(DOMAIN).durationSeconds(900L));
+        assertThat(token.authorizationToken()).hasSizeGreaterThan(100);
+        assertThat(token.expiration()).isBetween(before.plusSeconds(899), Instant.now().plusSeconds(901));
+        assertThat(codeArtifact.getAuthorizationToken(r -> r.domain(DOMAIN)).expiration())
+                .isBetween(before.plusSeconds(43199), Instant.now().plusSeconds(43201));
+        assertThatThrownBy(() -> codeArtifact.getAuthorizationToken(r -> r.domain(DOMAIN).durationSeconds(899L)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(() -> codeArtifact.getAuthorizationToken(r -> r.domain("missing-token-domain")))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    @Order(71)
+    @DisplayName("Generic package bytes survive publish, inspect, copy, dispose and delete")
+    void genericPackageLifecycle() throws Exception {
+        String namespace = "compat";
+        String packageName = "binary-package";
+        byte[] content = new byte[] {0, 1, 2, (byte) 255, 10, 13};
+        String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+        PublishPackageVersionRequest publish = PublishPackageVersionRequest.builder()
+                .domain(DOMAIN).repository(REPO).format(PackageFormat.GENERIC).namespace(namespace)
+                .packageValue(packageName).packageVersion("1.0.0").assetName("artifact.bin")
+                .assetSHA256(hash).build();
+        PublishPackageVersionResponse published = codeArtifact.publishPackageVersion(publish, RequestBody.fromBytes(content));
+        assertThat(published.status()).isEqualTo(PackageVersionStatus.PUBLISHED);
+        assertThat(published.asset().size()).isEqualTo(content.length);
+        assertThat(published.asset().hashesAsStrings()).containsEntry("SHA-256", hash);
+        assertThatThrownBy(() -> codeArtifact.publishPackageVersion(publish, RequestBody.fromBytes(content)))
+                .isInstanceOf(ConflictException.class);
+
+        assertThat(codeArtifact.describePackage(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName)).packageValue().name())
+                .isEqualTo(packageName);
+        assertThat(codeArtifact.describePackageVersion(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName).packageVersion("1.0.0"))
+                .packageVersion().revision()).isEqualTo(published.versionRevision());
+        assertThat(codeArtifact.listPackages(r -> r.domain(DOMAIN).repository(REPO)).packages())
+                .extracting(PackageSummary::packageValue).contains(packageName);
+        assertThat(codeArtifact.listPackageVersions(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName)).versions())
+                .extracting(PackageVersionSummary::version).contains("1.0.0");
+        assertThat(codeArtifact.listPackageVersionAssets(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName).packageVersion("1.0.0"))
+                .assets()).extracting(AssetSummary::name).contains("artifact.bin");
+        ResponseBytes<GetPackageVersionAssetResponse> downloaded = codeArtifact.getPackageVersionAssetAsBytes(r -> r
+                .domain(DOMAIN).repository(REPO).format(PackageFormat.GENERIC).namespace(namespace)
+                .packageValue(packageName).packageVersion("1.0.0").asset("artifact.bin"));
+        assertThat(downloaded.asByteArray()).isEqualTo(content);
+        assertThat(downloaded.response().assetName()).isEqualTo("artifact.bin");
+        assertThat(downloaded.response().packageVersionRevision()).isEqualTo(published.versionRevision());
+        assertThatThrownBy(() -> codeArtifact.getPackageVersionReadme(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName).packageVersion("1.0.0")))
+                .isInstanceOf(ResourceNotFoundException.class);
+        assertThat(codeArtifact.listPackageVersionDependencies(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName).packageVersion("1.0.0"))
+                .dependencies()).isEmpty();
+
+        PublishPackageVersionResponse unfinished = codeArtifact.publishPackageVersion(publish.toBuilder()
+                .packageVersion("2.0.0").unfinished(true).build(), RequestBody.fromBytes(content));
+        assertThat(unfinished.status()).isEqualTo(PackageVersionStatus.UNFINISHED);
+        assertThat(codeArtifact.updatePackageVersionsStatus(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName)
+                .versions("2.0.0").targetStatus(PackageVersionStatus.PUBLISHED)).successfulVersions())
+                .containsKey("2.0.0");
+        assertThat(codeArtifact.putPackageOriginConfiguration(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName)
+                .restrictions(PackageOriginRestrictions.builder().publish(AllowPublish.ALLOW)
+                        .upstream(AllowUpstream.BLOCK).build())).originConfiguration().restrictions().upstream())
+                .isEqualTo(AllowUpstream.BLOCK);
+
+        assertThat(codeArtifact.copyPackageVersions(r -> r.domain(DOMAIN).sourceRepository(REPO)
+                .destinationRepository(STORE_REPO).format(PackageFormat.GENERIC).namespace(namespace)
+                .packageValue(packageName).versions("1.0.0")).successfulVersions()).containsKey("1.0.0");
+        assertThat(codeArtifact.getPackageVersionAssetAsBytes(r -> r.domain(DOMAIN).repository(STORE_REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName)
+                .packageVersion("1.0.0").asset("artifact.bin")).asByteArray()).isEqualTo(content);
+        assertThat(codeArtifact.disposePackageVersions(r -> r.domain(DOMAIN).repository(STORE_REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName).versions("1.0.0"))
+                .successfulVersions().get("1.0.0").status()).isEqualTo(PackageVersionStatus.DISPOSED);
+        assertThatThrownBy(() -> codeArtifact.getPackageVersionAssetAsBytes(r -> r.domain(DOMAIN)
+                .repository(STORE_REPO).format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName)
+                .packageVersion("1.0.0").asset("artifact.bin"))).isInstanceOf(ResourceNotFoundException.class);
+        assertThat(codeArtifact.getPackageVersionAssetAsBytes(r -> r.domain(DOMAIN).repository(REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName)
+                .packageVersion("1.0.0").asset("artifact.bin")).asByteArray()).isEqualTo(content);
+        assertThat(codeArtifact.deletePackageVersions(r -> r.domain(DOMAIN).repository(STORE_REPO)
+                .format(PackageFormat.GENERIC).namespace(namespace).packageValue(packageName).versions("1.0.0"))
+                .successfulVersions()).containsKey("1.0.0");
+        assertThat(codeArtifact.deletePackage(r -> r.domain(DOMAIN).repository(STORE_REPO).format(PackageFormat.GENERIC)
+                .namespace(namespace).packageValue(packageName)).deletedPackage().packageValue()).isEqualTo(packageName);
+        assertThat(codeArtifact.listPackages(r -> r.domain(DOMAIN).repository(STORE_REPO)).packages())
+                .extracting(PackageSummary::packageValue).doesNotContain(packageName);
+        codeArtifact.deletePackage(r -> r.domain(DOMAIN).repository(REPO).format(PackageFormat.GENERIC)
+                .namespace(namespace).packageValue(packageName));
     }
 
     @Test

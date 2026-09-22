@@ -11,7 +11,6 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.util.UUID;
 import java.util.List;
 
 @ApplicationScoped
@@ -35,9 +34,9 @@ public class ServiceCatalogJsonHandler {
                 case "DescribePortfolio" -> portfolioResponse(service.describePortfolio(text(request, "Id")));
                 case "ListPortfolios" -> listPortfolios(region, accountId);
                 case "DeletePortfolio" -> empty(() -> service.deletePortfolio(text(request, "Id")));
-                case "CreateProduct" -> productResponse(service.createProduct(request, region, accountId));
+                case "CreateProduct" -> createProductResponse(service.createProduct(request, region, accountId));
                 case "UpdateProduct" -> productResponse(service.updateProduct(text(request, "Id"), request));
-                case "DescribeProductAsAdmin" -> productResponse(service.describeProduct(text(request, "Id")));
+                case "DescribeProductAsAdmin" -> productResponse(service.describeProduct(request));
                 case "SearchProductsAsAdmin" -> listProducts();
                 case "SearchProducts" -> searchProducts(request, region, accountId);
                 case "ListProvisioningArtifacts" -> provisioningArtifacts(text(request, "ProductId"));
@@ -152,7 +151,12 @@ public class ServiceCatalogJsonHandler {
     }
 
     private Response portfolioResponse(ObjectNode portfolio) {
-        return Response.ok(objectMapper.createObjectNode().set("PortfolioDetail", portfolio)).build();
+        ObjectNode response = objectMapper.createObjectNode();
+        ObjectNode detail = portfolio.deepCopy();
+        detail.remove(List.of("Tags", "IdempotencyToken", "AcceptLanguage"));
+        response.set("PortfolioDetail", detail);
+        response.set("Tags", portfolio.has("Tags") ? portfolio.get("Tags") : objectMapper.createArrayNode());
+        return Response.ok(response).build();
     }
 
     private Response listProducts() {
@@ -174,23 +178,16 @@ public class ServiceCatalogJsonHandler {
         ObjectNode product = service.describeProduct(productId);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode artifacts = response.putArray("ProvisioningArtifactDetails");
-        JsonNode ids = product.path("ProvisioningArtifactIds");
-        JsonNode names = product.path("ProvisioningArtifactNames");
-        for (int i = 0; i < ids.size(); i++) {
-            artifacts.add(objectMapper.createObjectNode().put("Id", ids.get(i).asText())
-                    .put("Name", i < names.size() ? names.get(i).asText() : "")
-                    .put("Active", true).put("Type", "CLOUD_FORMATION_TEMPLATE"));
-        }
+        service.provisioningArtifacts(product).forEach(artifact -> {
+            artifact.remove("Info");
+            artifacts.add(artifact);
+        });
         return Response.ok(response).build();
     }
 
     private Response provisionProduct(JsonNode request, String region, String accountId) {
         ObjectNode detail = service.provisionProduct(request, region, accountId);
-        ObjectNode record = objectMapper.createObjectNode();
-        record.put("RecordId", "rec-" + UUID.randomUUID().toString().replace("-", "").substring(0, 16));
-        record.put("ProvisionedProductId", detail.path("Id").asText());
-        record.put("Status", "SUCCEEDED");
-        record.put("CreatedTime", System.currentTimeMillis() / 1000.0);
+        ObjectNode record = service.describeRecord(detail.path("LastRecordId").asText());
         return Response.ok(objectMapper.createObjectNode().set("RecordDetail", record)).build();
     }
 
@@ -205,22 +202,45 @@ public class ServiceCatalogJsonHandler {
     private Response productResponse(ObjectNode product) {
         ObjectNode response = objectMapper.createObjectNode();
         response.set("ProductViewDetail", productView(product));
-        ArrayNode artifacts = response.putArray("ProvisioningArtifactDetails");
-        JsonNode ids = product.path("ProvisioningArtifactIds");
-        JsonNode names = product.path("ProvisioningArtifactNames");
-        for (int i = 0; i < ids.size(); i++) {
-            artifacts.add(objectMapper.createObjectNode().put("Id", ids.get(i).asText())
-                    .put("Name", i < names.size() ? names.get(i).asText() : "")
-                    .put("Active", true).put("Type", "CLOUD_FORMATION_TEMPLATE"));
+        response.set("Tags", product.has("Tags") ? product.get("Tags") : objectMapper.createArrayNode());
+        ArrayNode artifacts = response.putArray("ProvisioningArtifactSummaries");
+        service.provisioningArtifacts(product).forEach(artifact -> {
+            artifact.remove(List.of("Info", "Active", "Guidance", "Type"));
+            artifacts.add(artifact);
+        });
+        return Response.ok(response).build();
+    }
+
+    private Response createProductResponse(ObjectNode product) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("ProductViewDetail", productView(product));
+        response.set("Tags", product.has("Tags") ? product.get("Tags") : objectMapper.createArrayNode());
+        List<ObjectNode> artifacts = service.provisioningArtifacts(product);
+        if (!artifacts.isEmpty()) {
+            ObjectNode artifact = artifacts.getFirst();
+            artifact.remove("Info");
+            response.set("ProvisioningArtifactDetail", artifact);
         }
         return Response.ok(response).build();
     }
 
     private ObjectNode productView(ObjectNode product) {
-        ObjectNode summary = product.deepCopy();
+        ObjectNode summary = objectMapper.createObjectNode();
+        for (String field : List.of("Id", "Name", "Owner", "Distributor", "SupportDescription",
+                "SupportEmail", "SupportUrl")) {
+            if (product.has(field)) {
+                summary.set(field, product.get(field));
+            }
+        }
         summary.put("ProductId", product.path("Id").asText());
+        summary.put("Type", product.path("Type").asText(product.path("ProductType").asText("CLOUD_FORMATION_TEMPLATE")));
+        if (product.has("Description")) {
+            summary.set("ShortDescription", product.get("Description"));
+        }
         ObjectNode view = objectMapper.createObjectNode();
         view.set("ProductViewSummary", summary);
+        view.set("ProductARN", product.path("ARN"));
+        view.set("CreatedTime", product.path("CreatedTime"));
         view.put("Status", "AVAILABLE");
         return view;
     }
@@ -259,11 +279,7 @@ public class ServiceCatalogJsonHandler {
     }
 
     private Response describeProductForUser(JsonNode request) {
-        String id = text(request, "Id");
-        if (id == null || id.isBlank()) {
-            id = text(request, "Name");
-        }
-        ObjectNode product = service.describeProduct(id);
+        ObjectNode product = service.describeProduct(request);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("ProductViewSummary", productView(product).path("ProductViewSummary"));
         ArrayNode artifacts = response.putArray("ProvisioningArtifacts");
@@ -306,39 +322,12 @@ public class ServiceCatalogJsonHandler {
     }
 
     private Response describeProvisioningArtifact(JsonNode request) {
-        String artifactId = text(request, "ProvisioningArtifactId");
-        String productId = text(request, "ProductId");
-        String artifactName = text(request, "ProvisioningArtifactName");
-        ObjectNode product = service.describeProduct(productId != null ? productId : artifactId);
-        JsonNode ids = product.path("ProvisioningArtifactIds");
-        JsonNode names = product.path("ProvisioningArtifactNames");
-        int index = -1;
-        if (artifactId != null) {
-            for (int i = 0; i < ids.size(); i++) {
-                if (artifactId.equals(ids.get(i).asText())) {
-                    index = i;
-                    break;
-                }
-            }
-        } else if (artifactName != null) {
-            for (int i = 0; i < names.size(); i++) {
-                if (artifactName.equals(names.get(i).asText())) {
-                    index = i;
-                    break;
-                }
-            }
-        }
-        if (index < 0) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Unknown provisioning artifact: " + (artifactId != null ? artifactId : artifactName), 400);
-        }
-        ObjectNode detail = objectMapper.createObjectNode();
-        detail.put("Id", ids.get(index).asText());
-        detail.put("Name", index < names.size() ? names.get(index).asText() : "");
-        detail.put("Type", "CLOUD_FORMATION_TEMPLATE");
-        detail.put("CreatedTime", product.path("CreatedTime").asDouble());
-        detail.put("Active", true);
+        ObjectNode detail = service.describeProvisioningArtifact(request);
         ObjectNode response = objectMapper.createObjectNode();
+        JsonNode info = detail.remove("Info");
+        if (info != null) {
+            response.set("Info", info);
+        }
         response.set("ProvisioningArtifactDetail", detail);
         response.put("Status", "AVAILABLE");
         return Response.ok(response).build();
@@ -472,25 +461,8 @@ public class ServiceCatalogJsonHandler {
     }
 
     private Response describeProvisioningParameters(JsonNode request) {
-        ObjectNode product = service.describeProvisioningParameters(request);
         ObjectNode response = objectMapper.createObjectNode();
-        JsonNode storedParams = product.path("ProvisioningArtifactParameters");
-        if (storedParams.isArray() && !storedParams.isEmpty()) {
-            ArrayNode params = response.putArray("ProvisioningArtifactParameters");
-            for (JsonNode param : storedParams) {
-                ObjectNode p = objectMapper.createObjectNode();
-                if (param.has("Name")) {
-                    p.put("ParameterKey", param.get("Name").asText());
-                }
-                if (param.has("Description")) {
-                    p.put("Description", param.get("Description").asText());
-                }
-                if (param.has("Type")) {
-                    p.put("ParameterType", param.get("Type").asText());
-                }
-                params.add(p);
-            }
-        }
+        response.set("ProvisioningArtifactParameters", service.describeProvisioningParameters(request));
         return Response.ok(response).build();
     }
 
@@ -536,9 +508,9 @@ public class ServiceCatalogJsonHandler {
     }
 
     private Response getProvisionedProductOutputs(JsonNode request) {
-        service.getProvisionedProductOutputs(request);
         ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("Outputs");
+        ArrayNode outputs = response.putArray("Outputs");
+        service.getProvisionedProductOutputs(request).forEach(outputs::add);
         return Response.ok(response).build();
     }
 
@@ -675,17 +647,7 @@ public class ServiceCatalogJsonHandler {
     private Response listRecordHistory() {
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode details = response.putArray("RecordDetails");
-        service.listRecordHistory().forEach(product -> {
-            ObjectNode record = objectMapper.createObjectNode();
-            record.put("ProvisionedProductId", product.path("Id").asText());
-            record.put("ProvisionedProductName", product.path("Name").asText());
-            record.put("ProvisionedProductType", product.path("Type").asText());
-            record.put("ProductId", product.path("ProductId").asText());
-            record.put("ProvisioningArtifactId", product.path("ProvisioningArtifactId").asText());
-            record.put("CreatedTime", product.path("CreatedTime").asDouble());
-            record.put("Status", "SUCCEEDED");
-            details.add(record);
-        });
+        service.listRecordHistory().forEach(details::add);
         return Response.ok(response).build();
     }
 
@@ -858,17 +820,7 @@ public class ServiceCatalogJsonHandler {
     }
 
     private Response terminateProvisionedProduct(JsonNode request, String region, String accountId) {
-        ObjectNode product = service.terminateProvisionedProduct(request, region, accountId);
-        ObjectNode record = objectMapper.createObjectNode();
-        record.put("RecordId", product.path("RecordId").asText());
-        record.put("ProvisionedProductId", product.path("Id").asText());
-        record.put("ProvisionedProductName", product.path("Name").asText());
-        record.put("ProductId", product.path("ProductId").asText());
-        record.put("ProvisioningArtifactId", product.path("ProvisioningArtifactId").asText());
-        record.put("Status", "SUCCEEDED");
-        record.put("CreatedTime", product.path("CreatedTime").asDouble(0.0));
-        record.put("UpdatedTime", product.path("UpdatedTime").asDouble(0.0));
-        record.put("RecordType", "TERMINATE_PROVISIONED_PRODUCT");
+        ObjectNode record = service.terminateProvisionedProduct(request, region, accountId);
         return Response.ok(objectMapper.createObjectNode().set("RecordDetail", record)).build();
     }
 

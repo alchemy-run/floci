@@ -32,12 +32,22 @@ class CloudControlServiceTest {
         CloudFormationResourceProvisioner provisioner = mock(CloudFormationResourceProvisioner.class);
         StackResource resource = new StackResource();
         resource.setPhysicalId("vpc-account-a");
+        resource.setStatus("CREATE_COMPLETE");
         resource.setAttributes(Map.of("VpcId", "vpc-account-a"));
+        Ec2Service ec2 = mock(Ec2Service.class);
+        Vpc vpc = new Vpc();
+        vpc.setVpcId("vpc-account-a");
+        when(ec2.describeVpcs("us-east-1", List.of(), Map.of())).thenReturn(List.of(vpc));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            when(ec2.describeVpcs("us-east-1", List.of(), Map.of())).thenReturn(List.of());
+            return null;
+        }).when(provisioner).deleteStandalone("AWS::EC2::VPC", "vpc-account-a", "us-east-1",
+                "111111111111", Map.of("VpcId", "vpc-account-a"));
         when(provisioner.provisionStandalone(org.mockito.ArgumentMatchers.eq("AWS::EC2::VPC"),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("us-east-1"),
                 org.mockito.ArgumentMatchers.eq("111111111111"))).thenReturn(resource);
         CloudControlService service = new CloudControlService(
-                mock(S3Service.class), mock(Ec2Service.class), mock(IamService.class), provisioner,
+                mock(S3Service.class), ec2, mock(IamService.class), provisioner,
                 new ObjectMapper());
 
         CloudControlService.ProgressEvent pending = service.createResource(
@@ -48,9 +58,18 @@ class CloudControlServiceTest {
             completed = service.requestStatus("111111111111", pending.requestToken());
         }
         assertEquals("SUCCESS", completed.operationStatus());
+        assertEquals(1, service.listRequests("us-east-1", "111111111111", List.of("CREATE"), List.of("SUCCESS")).size());
+        assertTrue(service.listRequests("us-west-2", "111111111111", List.of(), List.of()).isEmpty());
+        assertTrue(service.listRequests("us-east-1", "222222222222", List.of(), List.of()).isEmpty());
+        assertThrows(AwsException.class, () -> service.requestStatus("us-west-2", "111111111111", pending.requestToken()));
+        assertEquals("ConcurrentModificationException", assertThrows(AwsException.class,
+                () -> service.cancelRequest("us-east-1", "111111111111", pending.requestToken())).getErrorCode());
+        assertEquals("RequestTokenNotFoundException", assertThrows(AwsException.class,
+                () -> service.cancelRequest("us-east-1", "111111111111", "missing")).getErrorCode());
         assertEquals("vpc-account-a", service.getResource("us-east-1", "111111111111",
                 "AWS::EC2::VPC", "vpc-account-a").identifier());
         assertThrows(AwsException.class, () -> service.requestStatus("222222222222", pending.requestToken()));
+        when(ec2.describeVpcs("us-east-1", List.of(), Map.of())).thenReturn(List.of());
         assertThrows(AwsException.class, () -> service.getResource("us-east-1", "222222222222",
                 "AWS::EC2::VPC", "vpc-account-a"));
 
@@ -61,11 +80,13 @@ class CloudControlServiceTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap());
 
+        when(ec2.describeVpcs("us-east-1", List.of(), Map.of())).thenReturn(List.of(vpc));
         CloudControlService.ProgressEvent deleted = service.deleteResource(
                 "us-east-1", "111111111111", "AWS::EC2::VPC", "vpc-account-a");
         assertEquals("SUCCESS", deleted.operationStatus());
         verify(provisioner).deleteStandalone("AWS::EC2::VPC", "vpc-account-a", "us-east-1",
                 "111111111111", Map.of("VpcId", "vpc-account-a"));
+        service.shutdown();
     }
 
     @Test
@@ -73,6 +94,11 @@ class CloudControlServiceTest {
         CloudFormationResourceProvisioner provisioner = mock(CloudFormationResourceProvisioner.class);
         StackResource resource = new StackResource();
         resource.setPhysicalId("igw-persisted");
+        resource.setStatus("CREATE_COMPLETE");
+        Ec2Service ec2 = mock(Ec2Service.class);
+        var gateway = new io.github.hectorvent.floci.services.ec2.model.InternetGateway();
+        gateway.setInternetGatewayId("igw-persisted");
+        when(ec2.describeInternetGateways("us-east-1", List.of(), Map.of())).thenReturn(List.of(gateway));
         when(provisioner.provisionStandalone(org.mockito.ArgumentMatchers.eq("AWS::EC2::InternetGateway"),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("us-east-1"),
                 org.mockito.ArgumentMatchers.eq("111111111111"))).thenReturn(resource);
@@ -81,7 +107,7 @@ class CloudControlServiceTest {
         AccountAwareStorageBackend<CloudControlService.PersistedCreatedResource> created =
                 AccountAwareStorageBackend.inMemory("000000000000");
         CloudControlService first = new CloudControlService(
-                mock(S3Service.class), mock(Ec2Service.class), mock(IamService.class), provisioner,
+                mock(S3Service.class), ec2, mock(IamService.class), provisioner,
                 new ObjectMapper(), requests, created);
         CloudControlService.ProgressEvent pending = first.createResource("us-east-1", "111111111111",
                 "AWS::EC2::InternetGateway", "{}");
@@ -91,15 +117,39 @@ class CloudControlServiceTest {
             completed = first.requestStatus("111111111111", pending.requestToken());
         }
         CloudControlService restarted = new CloudControlService(
-                mock(S3Service.class), mock(Ec2Service.class), mock(IamService.class), provisioner,
+                mock(S3Service.class), ec2, mock(IamService.class), provisioner,
                 new ObjectMapper(), requests, created);
 
         assertEquals("SUCCESS", restarted.requestStatus("111111111111", pending.requestToken()).operationStatus());
         assertEquals("igw-persisted", restarted.getResource("us-east-1", "111111111111",
                 "AWS::EC2::InternetGateway", "igw-persisted").identifier());
         assertThrows(AwsException.class, () -> restarted.requestStatus("222222222222", pending.requestToken()));
+        when(ec2.describeInternetGateways("us-east-1", List.of(), Map.of())).thenReturn(List.of());
         assertThrows(AwsException.class, () -> restarted.getResource("us-east-1", "222222222222",
                 "AWS::EC2::InternetGateway", "igw-persisted"));
+        assertThrows(AwsException.class, () -> restarted.getResource("us-east-1", "111111111111",
+                "AWS::EC2::InternetGateway", "igw-persisted"));
+        first.shutdown();
+        restarted.shutdown();
+    }
+
+    @Test
+    void restartDoesNotInventSuccessOrReplayAnInterruptedCreate() {
+        var requestStore = AccountAwareStorageBackend.<CloudControlService.PersistedRequest>inMemory("000000000000");
+        var createdStore = AccountAwareStorageBackend.<CloudControlService.PersistedCreatedResource>inMemory("000000000000");
+        var event = new CloudControlService.ProgressEvent("AWS::EC2::VPC", null, "interrupted",
+                "CREATE", "IN_PROGRESS", null, null, "000000000000");
+        requestStore.putForAccount("000000000000", "interrupted",
+                new CloudControlService.PersistedRequest(event, "us-east-1", "{}", 1));
+        var provisioner = mock(CloudFormationResourceProvisioner.class);
+        var service = new CloudControlService(mock(S3Service.class), mock(Ec2Service.class), mock(IamService.class),
+                provisioner, new ObjectMapper(), requestStore, createdStore);
+        try {
+            assertEquals("FAILED", service.requestStatus("interrupted").operationStatus());
+            org.mockito.Mockito.verifyNoInteractions(provisioner);
+        } finally {
+            service.shutdown();
+        }
     }
 
     @Test

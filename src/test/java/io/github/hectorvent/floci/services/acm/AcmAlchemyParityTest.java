@@ -2,13 +2,10 @@ package io.github.hectorvent.floci.services.acm;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
-import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Base64;
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -18,21 +15,51 @@ import static org.hamcrest.Matchers.*;
  * {@code UnknownOperationException}: search, options sync, renew, resend, revoke.
  */
 @QuarkusTest
-@TestProfile(AcmAlchemyParityTest.PendingValidationProfile.class)
 class AcmAlchemyParityTest {
-
-    public static class PendingValidationProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.acm.validation-wait-seconds", "-1");
-        }
-    }
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
 
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    @Test
+    void unvalidatedDnsCertificateRemainsPendingAndGetReturnsTypedError() {
+        String arn = requestCertificate("""
+            { "DomainName": "unvalidated.example.com", "ValidationMethod": "DNS" }
+            """);
+        try {
+            for (int attempt = 0; attempt < 3; attempt++) {
+                given()
+                    .header("X-Amz-Target", "CertificateManager.DescribeCertificate")
+                    .contentType(ACM_CONTENT_TYPE)
+                    .body("{\"CertificateArn\":\"" + arn + "\"}")
+                .when().post("/")
+                .then()
+                    .statusCode(200)
+                    .body("Certificate.Status", equalTo("PENDING_VALIDATION"))
+                    .body("Certificate.IssuedAt", nullValue())
+                    .body("Certificate.DomainValidationOptions.ValidationStatus",
+                            everyItem(equalTo("PENDING_VALIDATION")));
+
+                given()
+                    .header("X-Amz-Target", "CertificateManager.GetCertificate")
+                    .contentType(ACM_CONTENT_TYPE)
+                    .body("{\"CertificateArn\":\"" + arn + "\"}")
+                .when().post("/")
+                .then()
+                    .statusCode(400)
+                    .body("__type", equalTo("RequestInProgressException"))
+                    .body("Certificate", nullValue());
+            }
+        } finally {
+            given()
+                .header("X-Amz-Target", "CertificateManager.DeleteCertificate")
+                .contentType(ACM_CONTENT_TYPE)
+                .body("{\"CertificateArn\":\"" + arn + "\"}")
+            .when().post("/").then().statusCode(200);
+        }
     }
 
     @Test

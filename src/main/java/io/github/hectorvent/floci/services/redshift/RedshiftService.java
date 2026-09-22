@@ -1,48 +1,56 @@
 package io.github.hectorvent.floci.services.redshift;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-import io.github.hectorvent.floci.services.rds.proxy.PasswordValidator;
-import io.github.hectorvent.floci.services.redshift.proxy.RedshiftProxyManager;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
+import io.github.hectorvent.floci.services.rds.proxy.PasswordValidator;
 import io.github.hectorvent.floci.services.redshift.container.RedshiftContainerHandle;
 import io.github.hectorvent.floci.services.redshift.container.RedshiftContainerManager;
-import io.github.hectorvent.floci.services.redshift.model.Integration;
-import java.time.Instant;
-import java.time.format.DateTimeFormatter;
-import java.util.UUID;
-import java.util.regex.Pattern;
 import io.github.hectorvent.floci.services.redshift.model.Cluster;
 import io.github.hectorvent.floci.services.redshift.model.ClusterParameterGroup;
 import io.github.hectorvent.floci.services.redshift.model.ClusterSubnetGroup;
 import io.github.hectorvent.floci.services.redshift.model.Endpoint;
+import io.github.hectorvent.floci.services.redshift.model.EventSubscription;
+import io.github.hectorvent.floci.services.redshift.model.Integration;
 import io.github.hectorvent.floci.services.redshift.model.Parameter;
+import io.github.hectorvent.floci.services.redshift.model.RedshiftEvent;
 import io.github.hectorvent.floci.services.redshift.model.Snapshot;
+import io.github.hectorvent.floci.services.redshift.proxy.RedshiftProxyManager;
+import io.github.hectorvent.floci.services.sns.SnsService;
+import io.quarkus.runtime.StartupEvent;
+import io.vertx.core.json.JsonObject;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
-import com.fasterxml.jackson.core.type.TypeReference;
-import io.quarkus.runtime.StartupEvent;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class RedshiftService {
@@ -52,6 +60,9 @@ public class RedshiftService {
     private final AccountAwareStorageBackend<Snapshot> snapshots;
     private final AccountAwareStorageBackend<ClusterParameterGroup> parameterGroups;
     private final AccountAwareStorageBackend<ClusterSubnetGroup> subnetGroups;
+    private final AccountAwareStorageBackend<RedshiftEvent> events;
+    private final AccountAwareStorageBackend<EventSubscription> eventSubscriptions;
+    private final SnsService snsService;
     private static final int MIN_INTEGRATION_RECORDS = 20;
     private static final int MAX_INTEGRATION_RECORDS = 100;
     private static final int MAX_INTEGRATION_DESCRIPTION = 1000;
@@ -68,6 +79,7 @@ public class RedshiftService {
     private final RedshiftProxyManager proxyManager;
     private final DockerHostResolver dockerHostResolver;
     private final RedshiftCredentialBroker credentialBroker;
+    private final Ec2Service ec2Service;
     // Proxy ports currently handed out, so allocateProxyPort never double-assigns within this JVM.
     private final Set<Integer> usedPorts = ConcurrentHashMap.newKeySet();
 
@@ -75,18 +87,23 @@ public class RedshiftService {
     public RedshiftService(StorageFactory storageFactory, RedshiftContainerManager containerManager,
                             EmulatorConfig config, RegionResolver regionResolver,
                             RedshiftProxyManager proxyManager, DockerHostResolver dockerHostResolver,
-                            RedshiftCredentialBroker credentialBroker) {
+                            RedshiftCredentialBroker credentialBroker, Ec2Service ec2Service, SnsService snsService) {
         this.clusters = storageFactory.create("redshift", "redshift-clusters.json", new TypeReference<Map<String, Cluster>>() {});
         this.snapshots = storageFactory.create("redshift", "redshift-snapshots.json", new TypeReference<Map<String, Snapshot>>() {});
         this.parameterGroups = storageFactory.create("redshift", "redshift-parameter-groups.json", new TypeReference<Map<String, ClusterParameterGroup>>() {});
         this.subnetGroups = storageFactory.create("redshift", "redshift-subnet-groups.json", new TypeReference<Map<String, ClusterSubnetGroup>>() {});
         this.integrations = storageFactory.create("redshift", "redshift-integrations.json", new TypeReference<Map<String, Integration>>() {});
+        this.events = storageFactory.create("redshift", "redshift-events.json", new TypeReference<Map<String, RedshiftEvent>>() {});
+        this.eventSubscriptions = storageFactory.create("redshift", "redshift-event-subscriptions.json",
+                new TypeReference<Map<String, EventSubscription>>() {});
+        this.snsService = snsService;
         this.containerManager = containerManager;
         this.config = config;
         this.regionResolver = regionResolver;
         this.proxyManager = proxyManager;
         this.dockerHostResolver = dockerHostResolver;
         this.credentialBroker = credentialBroker;
+        this.ec2Service = ec2Service;
     }
 
     // Recreate Docker containers for persisted clusters on app restart (across every account, not just default)
@@ -214,6 +231,7 @@ public class RedshiftService {
 
         clusters.put(identifier, cluster);
         clusters.flush();
+        recordEvent(identifier, "cluster", "Cluster created.");
         return cluster;
     }
 
@@ -384,6 +402,256 @@ public class RedshiftService {
         throw new AwsException("IntegrationNotFoundFault", "The requested integration doesn't exist.", 404);
     }
 
+    public record Page<T>(List<T> items, String marker) {}
+
+    private static <T> Page<T> page(List<T> items, Integer maxRecords, String marker, Function<T, String> key) {
+        int pageSize = resolveMaxRecords(maxRecords);
+        int from = 0;
+        if (marker != null) {
+            while (from < items.size() && !marker.equals(key.apply(items.get(from)))) {
+                from++;
+            }
+            if (from == items.size()) {
+                throw new AwsException("InvalidParameterValue", "Invalid Marker specified.", 400);
+            }
+            from++;
+        }
+        List<T> result = items.subList(from, Math.min(from + pageSize, items.size()));
+        return new Page<>(List.copyOf(result), from + pageSize < items.size() ? key.apply(result.getLast()) : null);
+    }
+
+    public Page<Cluster> describeClusterDbRevisions(String identifier, Integer maxRecords, String marker) {
+        return page(describeClusters(identifier).stream()
+                .sorted(Comparator.comparing(Cluster::getClusterIdentifier)).toList(),
+                maxRecords, marker, Cluster::getClusterIdentifier);
+    }
+
+    public synchronized EventSubscription createEventSubscription(String name, String topicArn, String sourceType,
+            List<String> sourceIds, List<String> categories, String severity, Boolean enabled, Map<String, String> tags) {
+        if (name == null || name.length() > 255 || !name.matches("[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*")) {
+            throw new AwsException("InvalidParameterValue", "Invalid SubscriptionName.", 400);
+        }
+        String key = subscriptionKey(name);
+        if (eventSubscriptions.get(key).isPresent()) {
+            throw new AwsException("SubscriptionAlreadyExist", "Subscription " + name + " already exists.", 400);
+        }
+        validateSubscription(topicArn, sourceType, sourceIds, categories, severity);
+        EventSubscription subscription = new EventSubscription(name, regionResolver.getRegion(),
+                regionResolver.getAccountId(), topicArn, "active", Instant.now().toString(), sourceType,
+                sourceIds, categories, severity, enabled == null || enabled, tags);
+        eventSubscriptions.put(key, subscription);
+        eventSubscriptions.flush();
+        return subscription;
+    }
+
+    public synchronized EventSubscription modifyEventSubscription(String name, String topicArn, String sourceType,
+            List<String> sourceIds, List<String> categories, String severity, Boolean enabled) {
+        EventSubscription previous = getEventSubscription(name);
+        String desiredTopic = topicArn == null ? previous.snsTopicArn() : topicArn;
+        String desiredType = sourceType == null ? previous.sourceType() : sourceType;
+        List<String> desiredIds = sourceIds == null ? previous.sourceIds() : sourceIds;
+        List<String> desiredCategories = categories == null ? previous.eventCategories() : categories;
+        String desiredSeverity = severity == null ? previous.severity() : severity;
+        validateSubscription(desiredTopic, desiredType, desiredIds, desiredCategories, desiredSeverity);
+        EventSubscription updated = new EventSubscription(previous.name(), previous.region(), previous.customerAwsId(),
+                desiredTopic, "active", previous.creationTime(), desiredType, desiredIds, desiredCategories,
+                desiredSeverity, enabled == null ? previous.enabled() : enabled, previous.tags());
+        eventSubscriptions.put(subscriptionKey(name), updated);
+        eventSubscriptions.flush();
+        return updated;
+    }
+
+    public synchronized void deleteEventSubscription(String name) {
+        getEventSubscription(name);
+        eventSubscriptions.delete(subscriptionKey(name));
+        eventSubscriptions.flush();
+    }
+
+    public synchronized Page<EventSubscription> describeEventSubscriptions(String name, Integer maxRecords,
+            String marker, List<String> tagKeys, List<String> tagValues) {
+        List<EventSubscription> candidates = name == null
+                ? eventSubscriptions.scan(key -> key.startsWith(regionResolver.getRegion() + ":"))
+                : List.of(getEventSubscription(name));
+        List<EventSubscription> matching = candidates.stream()
+                .filter(subscription -> subscription.tags().entrySet().stream().anyMatch(tag ->
+                        (tagKeys.isEmpty() || tagKeys.contains(tag.getKey()))
+                                && (tagValues.isEmpty() || tagValues.contains(tag.getValue())))
+                        || tagKeys.isEmpty() && tagValues.isEmpty())
+                .sorted(Comparator.comparing(EventSubscription::name)).toList();
+        Page<EventSubscription> result = page(matching, maxRecords, marker, EventSubscription::name);
+        List<EventSubscription> observed = result.items().stream().map(subscription -> {
+            String status = subscriptionTopicStatus(subscription);
+            if (!status.equals(subscription.status())) {
+                subscription = subscription.withStatus(status);
+                eventSubscriptions.put(subscriptionKey(subscription.name()), subscription);
+            }
+            return subscription;
+        }).toList();
+        eventSubscriptions.flush();
+        return new Page<>(observed, result.marker());
+    }
+
+    private String subscriptionKey(String name) {
+        return regionResolver.getRegion() + ":" + name;
+    }
+
+    private EventSubscription getEventSubscription(String name) {
+        return eventSubscriptions.get(subscriptionKey(name)).orElseThrow(() ->
+                new AwsException("SubscriptionNotFound", "Subscription " + name + " not found.", 404));
+    }
+
+    private void validateSubscription(String topicArn, String sourceType, List<String> sourceIds,
+                                      List<String> categories, String severity) {
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(topicArn == null ? "" : topicArn);
+        } catch (IllegalArgumentException exception) {
+            throw new AwsException("SNSInvalidTopic", "SnsTopicArn must be an SNS topic ARN.", 400);
+        }
+        if (!"sns".equals(arn.service()) || !regionResolver.getRegion().equals(arn.region())
+                || arn.resource().endsWith(".fifo")) {
+            throw new AwsException("SNSInvalidTopic", "SnsTopicArn must identify a standard topic in this region.", 400);
+        }
+        try {
+            snsService.getTopicAttributes(topicArn, regionResolver.getRegion());
+        } catch (AwsException exception) {
+            switch (exception.getErrorCode()) {
+                case "NotFound" -> throw new AwsException("SNSTopicArnNotFound", "The SNS topic does not exist.", 404);
+                case "AuthorizationError" -> throw new AwsException("SNSNoAuthorization", exception.getMessage(), 400);
+                default -> throw exception;
+            }
+        }
+        if (sourceType != null && !Set.of("cluster", "cluster-parameter-group", "cluster-security-group",
+                "cluster-snapshot", "scheduled-action").contains(sourceType)) {
+            throw new AwsException("InvalidParameterValue", "Invalid SourceType: " + sourceType, 400);
+        }
+        if (!sourceIds.isEmpty() && sourceType == null) {
+            throw new AwsException("InvalidParameterCombination", "SourceType is required with SourceIds.", 400);
+        }
+        for (String id : sourceIds) {
+            boolean exists = switch (sourceType) {
+                case "cluster" -> clusters.get(id).isPresent();
+                case "cluster-parameter-group" -> parameterGroups.get(id).isPresent();
+                case "cluster-snapshot" -> snapshots.get(id).isPresent();
+                default -> false;
+            };
+            if (!exists) {
+                throw new AwsException("SourceNotFound", "Event source " + id + " not found.", 404);
+            }
+        }
+        for (String category : categories) {
+            if (!Set.of("configuration", "management", "monitoring", "security", "pending").contains(category)) {
+                throw new AwsException("SubscriptionCategoryNotFound", "Unknown event category: " + category, 404);
+            }
+        }
+        if (severity != null && !Set.of("INFO", "ERROR").contains(severity)) {
+            throw new AwsException("SubscriptionSeverityNotFound", "Unknown severity: " + severity, 404);
+        }
+    }
+
+    private String subscriptionTopicStatus(EventSubscription subscription) {
+        try {
+            snsService.getTopicAttributes(subscription.snsTopicArn(), subscription.region());
+            return "active";
+        } catch (AwsException exception) {
+            return switch (exception.getErrorCode()) {
+                case "NotFound" -> "topic-not-exist";
+                case "AuthorizationError" -> "no-permission";
+                default -> throw exception;
+            };
+        }
+    }
+
+    private synchronized void publishEvent(RedshiftEvent event) {
+        for (EventSubscription subscription : eventSubscriptions.scan(key -> key.startsWith(event.region() + ":"))) {
+            if (!subscription.enabled()
+                    || subscription.sourceType() != null && !subscription.sourceType().equals(event.sourceType())
+                    || !subscription.sourceIds().isEmpty() && !subscription.sourceIds().contains(event.sourceIdentifier())
+                    || !subscription.eventCategories().isEmpty() && !subscription.eventCategories().contains("management")
+                    || "ERROR".equals(subscription.severity())) {
+                continue;
+            }
+            try {
+                String status = subscriptionTopicStatus(subscription);
+                if ("active".equals(status)) {
+                    String message = new JsonObject().put("Event Source", event.sourceType())
+                            .put("Event Time", event.date()).put("Source ID", event.sourceIdentifier())
+                            .put("Event ID", event.id()).put("Event Message", event.message()).encode();
+                    snsService.publish(subscription.snsTopicArn(), null, message,
+                            "Amazon Redshift Event Notification", event.region());
+                }
+                if (!status.equals(subscription.status())) {
+                    eventSubscriptions.put(subscriptionKey(subscription.name()), subscription.withStatus(status));
+                }
+            } catch (RuntimeException exception) {
+                // Notification failures cannot roll back a completed resource operation.
+                LOG.warnv(exception, "Failed to publish Redshift event {0} to subscription {1}", event.id(), subscription.name());
+            }
+        }
+        eventSubscriptions.flush();
+    }
+
+    private void recordEvent(String identifier, String sourceType, String message) {
+        Instant now = Instant.now();
+        String id = UUID.randomUUID().toString();
+        RedshiftEvent recorded = new RedshiftEvent(id, regionResolver.getRegion(), identifier, sourceType, message, now.toString());
+        events.put(id, recorded);
+        Instant oldest = now.minusSeconds(14L * 24 * 60 * 60);
+        for (RedshiftEvent event : events.scan(key -> true)) {
+            if (Instant.parse(event.date()).isBefore(oldest)) {
+                events.delete(event.id());
+            }
+        }
+        events.flush();
+        publishEvent(recorded);
+    }
+
+    public record EventPage(List<RedshiftEvent> events, String marker) {}
+
+    public EventPage describeEvents(String identifier, String sourceType, Instant startTime, Instant endTime,
+                                    Integer duration, Integer maxRecords, String marker) {
+        if (sourceType != null && !Set.of("cluster", "cluster-parameter-group", "cluster-security-group",
+                "cluster-snapshot", "scheduled-action").contains(sourceType)) {
+            throw new AwsException("InvalidParameterValue", "Invalid SourceType: " + sourceType, 400);
+        }
+        if (identifier != null && sourceType == null) {
+            throw new AwsException("InvalidParameterCombination", "SourceType is required with SourceIdentifier.", 400);
+        }
+        if (duration != null && (duration < 0 || duration > 20160)) {
+            throw new AwsException("InvalidParameterValue", "Duration must be between 0 and 20160 minutes.", 400);
+        }
+        if (startTime != null && duration != null) {
+            throw new AwsException("InvalidParameterCombination", "StartTime and Duration cannot both be specified.", 400);
+        }
+        Instant end = endTime == null ? Instant.now() : endTime;
+        Instant start = startTime == null ? end.minusSeconds((duration == null ? 60L : duration) * 60L) : startTime;
+        if (start.isAfter(end)) {
+            throw new AwsException("InvalidParameterValue", "StartTime must not be after EndTime.", 400);
+        }
+        int pageSize = resolveMaxRecords(maxRecords);
+        List<RedshiftEvent> matching = events.scan(key -> true).stream()
+                .filter(event -> regionResolver.getRegion().equals(event.region()))
+                .filter(event -> identifier == null || identifier.equals(event.sourceIdentifier()))
+                .filter(event -> sourceType == null || sourceType.equals(event.sourceType()))
+                .filter(event -> !Instant.parse(event.date()).isBefore(start) && !Instant.parse(event.date()).isAfter(end))
+                .sorted(Comparator.comparing((RedshiftEvent event) -> Instant.parse(event.date()))
+                        .thenComparing(RedshiftEvent::id))
+                .toList();
+        int from = 0;
+        if (marker != null) {
+            while (from < matching.size() && !marker.equals(matching.get(from).id())) {
+                from++;
+            }
+            if (from == matching.size()) {
+                throw new AwsException("InvalidParameterValue", "Invalid Marker specified.", 400);
+            }
+            from++;
+        }
+        List<RedshiftEvent> page = matching.subList(from, Math.min(from + pageSize, matching.size()));
+        String next = from + pageSize < matching.size() ? page.getLast().id() : null;
+        return new EventPage(List.copyOf(page), next);
+    }
+
     public List<Cluster> describeClusters(String identifier) {
         if (identifier != null) {
             Optional<Cluster> cluster = clusters.get(identifier);
@@ -417,6 +685,7 @@ public class RedshiftService {
         credentialBroker.revokeCluster(clusters.accountId(), identifier);
 
         cluster.setClusterStatus("deleting");
+        recordEvent(identifier, "cluster", "Cluster deleted.");
         return cluster;
     }
 
@@ -452,6 +721,7 @@ public class RedshiftService {
 
         clusters.put(clusterIdentifier, cluster);
         clusters.flush();
+        recordEvent(clusterIdentifier, "cluster", "Cluster modified.");
         return cluster;
     }
 
@@ -543,6 +813,7 @@ public class RedshiftService {
 
         clusters.put(clusterIdentifier, cluster);
         clusters.flush();
+        recordEvent(clusterIdentifier, "cluster", "Cluster rebooted.");
         return cluster;
     }
 
@@ -583,7 +854,7 @@ public class RedshiftService {
         return Paths.get(storedPath).toAbsolutePath().normalize().startsWith(dir);
     }
 
-    public Snapshot createSnapshot(String snapshotIdentifier, String clusterIdentifier) {
+    public synchronized Snapshot createSnapshot(String snapshotIdentifier, String clusterIdentifier) {
         validateSnapshotIdentifier(snapshotIdentifier);
         Optional<Cluster> clusterOpt = clusters.get(clusterIdentifier);
         if (clusterOpt.isEmpty()) {
@@ -625,7 +896,59 @@ public class RedshiftService {
 
         snapshots.put(snapshotIdentifier, snapshot);
         snapshots.flush();
+        recordEvent(snapshotIdentifier, "cluster-snapshot", "Cluster snapshot created.");
         return snapshot;
+    }
+
+    public synchronized Snapshot copyClusterSnapshot(String sourceIdentifier, String sourceClusterIdentifier,
+                                                      String targetIdentifier, Integer retentionPeriod) {
+        validateSnapshotIdentifier(sourceIdentifier);
+        validateSnapshotIdentifier(targetIdentifier);
+        Snapshot source = snapshots.get(sourceIdentifier)
+                .filter(snapshot -> sourceClusterIdentifier == null
+                        || sourceClusterIdentifier.equals(snapshot.getClusterIdentifier()))
+                .orElseThrow(() -> new AwsException("ClusterSnapshotNotFound",
+                        "Snapshot " + sourceIdentifier + " not found", 404));
+        if (snapshots.get(targetIdentifier).isPresent()) {
+            throw new AwsException("ClusterSnapshotAlreadyExists", "Snapshot " + targetIdentifier + " already exists", 400);
+        }
+        if (!"available".equals(source.getStatus())) {
+            throw new AwsException("InvalidClusterSnapshotState", "Source snapshot is not available.", 400);
+        }
+        int retention = retentionPeriod == null ? -1 : retentionPeriod;
+        if (retention != -1 && (retention < 1 || retention > 3653)) {
+            throw new AwsException("InvalidParameterValue", "ManualSnapshotRetentionPeriod must be -1 or between 1 and 3653.", 400);
+        }
+        if (!isTrustedDumpPath(source.getSqlDump()) || !Files.isRegularFile(Path.of(source.getSqlDump()))) {
+            throw new AwsException("InvalidClusterSnapshotState", "Source snapshot data is unavailable.", 400);
+        }
+        Path target = accountDumpDir().resolve(targetIdentifier + ".sql");
+        Path temporary = null;
+        try {
+            Files.createDirectories(accountDumpDir());
+            temporary = Files.createTempFile(accountDumpDir(), "snapshot-copy-", ".sql");
+            Files.copy(Path.of(source.getSqlDump()), temporary, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException exception) {
+            throw new AwsException("InternalFailure", "Failed to copy snapshot data: " + exception.getMessage(), 500);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException exception) {
+                    LOG.warnv(exception, "Failed to clean up temporary snapshot copy {0}", temporary);
+                }
+            }
+        }
+        Snapshot copy = new Snapshot(targetIdentifier, source.getClusterIdentifier(), "available", source.getPort(),
+                source.getMasterUsername(), target.toString());
+        copy.setMasterPassword(source.getMasterPassword());
+        copy.setTags(new LinkedHashMap<>(source.getTags()));
+        copy.setManualSnapshotRetentionPeriod(retention);
+        snapshots.put(targetIdentifier, copy);
+        snapshots.flush();
+        recordEvent(targetIdentifier, "cluster-snapshot", "Cluster snapshot copied.");
+        return copy;
     }
 
     public List<Snapshot> describeSnapshots(String snapshotIdentifier, String clusterIdentifier) {
@@ -652,7 +975,7 @@ public class RedshiftService {
         return snapshots.get(snapshotIdentifier);
     }
 
-    public Snapshot deleteSnapshot(String snapshotIdentifier) {
+    public synchronized Snapshot deleteSnapshot(String snapshotIdentifier) {
         Optional<Snapshot> snapshotOpt = snapshots.get(snapshotIdentifier);
         if (snapshotOpt.isEmpty()) {
             throw new AwsException("ClusterSnapshotNotFound", "Snapshot " + snapshotIdentifier + " not found", 404);
@@ -668,6 +991,7 @@ public class RedshiftService {
             }
         }
         snapshot.setStatus("deleted");
+        recordEvent(snapshotIdentifier, "cluster-snapshot", "Cluster snapshot deleted.");
         return snapshot;
     }
 
@@ -763,6 +1087,7 @@ public class RedshiftService {
 
         clusters.put(clusterIdentifier, cluster);
         clusters.flush();
+        recordEvent(clusterIdentifier, "cluster", "Cluster restored from snapshot.");
         return cluster;
     }
 
@@ -776,6 +1101,7 @@ public class RedshiftService {
         ClusterParameterGroup group = new ClusterParameterGroup(parameterGroupName, parameterGroupFamily, description);
         parameterGroups.put(parameterGroupName, group);
         parameterGroups.flush();
+        recordEvent(parameterGroupName, "cluster-parameter-group", "Cluster parameter group created.");
         return group;
     }
 
@@ -801,6 +1127,42 @@ public class RedshiftService {
         return group.getParameters();
     }
 
+    public List<Parameter> describeClusterParameters(String parameterGroupName, String source) {
+        if (source != null && !Set.of("user", "engine-default", "system").contains(source)) {
+            throw new AwsException("InvalidParameterValue", "Invalid parameter source: " + source, 400);
+        }
+        return describeClusterParameters(parameterGroupName).stream()
+                .filter(parameter -> source == null || source.equals(parameter.getSource()))
+                .toList();
+    }
+
+    public synchronized ClusterParameterGroup resetClusterParameterGroup(
+            String parameterGroupName, boolean resetAllParameters, List<Parameter> parameters) {
+        ClusterParameterGroup group = parameterGroups.get(parameterGroupName)
+                .orElseThrow(() -> new AwsException("ClusterParameterGroupNotFound",
+                        "Cluster parameter group " + parameterGroupName + " not found", 404));
+        if (!resetAllParameters && parameters.isEmpty()) {
+            throw new AwsException("InvalidParameterCombination", "Specify Parameters or ResetAllParameters.", 400);
+        }
+        if (resetAllParameters && !parameters.isEmpty()) {
+            throw new AwsException("InvalidParameterCombination", "Parameters cannot accompany ResetAllParameters.", 400);
+        }
+        List<Parameter> defaults = ClusterParameterGroup.defaultParameters();
+        if (resetAllParameters) {
+            group.setParameters(defaults);
+        } else {
+            List<String> names = parameters.stream().map(Parameter::getParameterName).toList();
+            List<Parameter> current = new ArrayList<>(group.getParameters());
+            current.removeIf(parameter -> names.contains(parameter.getParameterName()));
+            defaults.stream().filter(parameter -> names.contains(parameter.getParameterName())).forEach(current::add);
+            group.setParameters(current);
+        }
+        parameterGroups.put(parameterGroupName, group);
+        parameterGroups.flush();
+        recordEvent(parameterGroupName, "cluster-parameter-group", "Cluster parameter group reset.");
+        return group;
+    }
+
     public synchronized ClusterParameterGroup modifyClusterParameterGroup(
             String parameterGroupName, List<Parameter> updates) {
         ClusterParameterGroup group = parameterGroups.get(parameterGroupName)
@@ -809,12 +1171,14 @@ public class RedshiftService {
 
         List<Parameter> current = new ArrayList<>(group.getParameters());
         for (Parameter update : updates) {
+            update.setSource("user");
             boolean matched = false;
             for (int i = 0; i < current.size(); i++) {
                 Parameter existing = current.get(i);
                 if (existing.getParameterName().equals(update.getParameterName())) {
                     // Preserve metadata (description, dataType) from existing parameter if not provided in update
                     existing.setParameterValue(update.getParameterValue());
+                    existing.setSource("user");
                     if (update.getDescription() != null) {
                         existing.setDescription(update.getDescription());
                     }
@@ -832,6 +1196,7 @@ public class RedshiftService {
         group.setParameters(current);
         parameterGroups.put(parameterGroupName, group);
         parameterGroups.flush();
+        recordEvent(parameterGroupName, "cluster-parameter-group", "Cluster parameter group modified.");
         return group;
     }
 
@@ -843,6 +1208,7 @@ public class RedshiftService {
         ClusterParameterGroup group = groupOpt.get();
         parameterGroups.delete(parameterGroupName);
         parameterGroups.flush();
+        recordEvent(parameterGroupName, "cluster-parameter-group", "Cluster parameter group deleted.");
         return group;
     }
 
@@ -852,16 +1218,41 @@ public class RedshiftService {
         if (subnetGroups.get(name).isPresent()) {
             throw new AwsException("ClusterSubnetGroupAlreadyExists", "Cluster subnet group " + name + " already exists", 400);
         }
-        ClusterSubnetGroup group = new ClusterSubnetGroup(name, description, vpcId, subnetIds);
+        String observedVpc = subnetVpc(subnetIds);
+        if (vpcId != null && !vpcId.equals(observedVpc)) {
+            throw new AwsException("InvalidSubnet", "Subnets must belong to the specified VPC.", 400);
+        }
+        ClusterSubnetGroup group = new ClusterSubnetGroup(name, description, observedVpc, subnetIds);
         subnetGroups.put(name, group);
         subnetGroups.flush();
         return group;
     }
 
+    private String subnetVpc(List<String> subnetIds) {
+        if (subnetIds == null || subnetIds.isEmpty()) {
+            throw new AwsException("InvalidParameterValue", "SubnetIds must not be empty.", 400);
+        }
+        List<Subnet> observed;
+        try {
+            observed = ec2Service.describeSubnets(regionResolver.getRegion(), subnetIds, Map.of());
+        } catch (AwsException exception) {
+            if (!"InvalidSubnetID.NotFound".equals(exception.getErrorCode())) {
+                throw exception;
+            }
+            throw new AwsException("InvalidSubnet", "One or more subnets do not exist.", 400);
+        }
+        List<String> vpcs = observed.stream().map(Subnet::getVpcId).distinct().toList();
+        if (vpcs.size() != 1 || observed.stream().map(Subnet::getSubnetId).distinct().count()
+                != subnetIds.stream().distinct().count()) {
+            throw new AwsException("InvalidSubnet", "Subnets must exist in a single VPC.", 400);
+        }
+        return vpcs.getFirst();
+    }
+
     public List<ClusterSubnetGroup> describeClusterSubnetGroups(String name) {
         if (name != null && !name.isBlank()) {
             ClusterSubnetGroup group = subnetGroups.get(name)
-                    .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFound", "Cluster subnet group " + name + " not found", 404));
+                    .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 404));
             return List.of(group);
         }
         return subnetGroups.scan(k -> true);
@@ -869,13 +1260,16 @@ public class RedshiftService {
 
     public synchronized ClusterSubnetGroup modifyClusterSubnetGroup(String name, String description, List<String> subnetIds) {
         ClusterSubnetGroup group = subnetGroups.get(name)
-                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFound", "Cluster subnet group " + name + " not found", 404));
+                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 404));
+        String observedVpc = subnetVpc(subnetIds);
+        if (group.getVpcId() != null && !group.getVpcId().equals(observedVpc)) {
+            throw new AwsException("InvalidSubnet", "Subnets must remain in the subnet group's VPC.", 400);
+        }
         if (description != null) {
             group.setDescription(description);
         }
-        if (subnetIds != null && !subnetIds.isEmpty()) {
-            group.setSubnetIds(subnetIds);
-        }
+        group.setVpcId(observedVpc);
+        group.setSubnetIds(subnetIds);
         subnetGroups.put(name, group);
         subnetGroups.flush();
         return group;
@@ -883,7 +1277,7 @@ public class RedshiftService {
 
     public ClusterSubnetGroup deleteClusterSubnetGroup(String name) {
         ClusterSubnetGroup group = subnetGroups.get(name)
-                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFound", "Cluster subnet group " + name + " not found", 404));
+                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 404));
         subnetGroups.delete(name);
         subnetGroups.flush();
         return group;
@@ -943,6 +1337,12 @@ public class RedshiftService {
             for (ClusterSubnetGroup g : subnetGroups.scan(k -> true)) {
                 addTaggedResources(result, subnetGroupArn(g.getClusterSubnetGroupName()),
                         "subnetgroup", g.getTags(), tagKeysFilter);
+            }
+        }
+        if (resourceType == null || "eventsubscription".equalsIgnoreCase(resourceType)) {
+            for (EventSubscription subscription : eventSubscriptions.scan(key -> key.startsWith(regionResolver.getRegion() + ":"))) {
+                addTaggedResources(result, regionResolver.buildArn("redshift", subscription.region(),
+                        "eventsubscription:" + subscription.name()), "eventsubscription", subscription.tags(), tagKeysFilter);
             }
         }
         return result;
@@ -1046,11 +1446,21 @@ public class RedshiftService {
             }
             case "subnetgroup" -> {
                 ClusterSubnetGroup group = subnetGroups.get(id)
-                        .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFound", "Cluster subnet group " + id + " not found", 404));
+                        .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + id + " not found", 404));
                 yield new TagHandle(group.getTags(), updated -> {
                     group.setTags(updated);
                     subnetGroups.put(id, group);
                     subnetGroups.flush();
+                });
+            }
+            case "eventsubscription" -> {
+                if (!regionResolver.getRegion().equals(arn.region()) || !regionResolver.getAccountId().equals(arn.accountId())) {
+                    throw new AwsException("SubscriptionNotFound", "Subscription " + id + " not found.", 404);
+                }
+                EventSubscription subscription = getEventSubscription(id);
+                yield new TagHandle(subscription.tags(), updated -> {
+                    eventSubscriptions.put(subscriptionKey(id), subscription.withTags(updated));
+                    eventSubscriptions.flush();
                 });
             }
             default -> throw new AwsException("InvalidParameterValue",

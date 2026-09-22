@@ -197,9 +197,10 @@ class KinesisAnalyticsV2JsonHandlerTest {
         describe.put("ApplicationName", "demo");
         ObjectNode detail = (ObjectNode) entity(handler.handle("DescribeApplication", describe, REGION))
                 .get("ApplicationDetail");
-        // No code configured, so ApplicationConfigurationDescription isn't built at all — matches how
-        // EnvironmentPropertyDescriptions is also only ever echoed when the app has code.
-        assertThat(detail.has("ApplicationConfigurationDescription"), is(false));
+        assertThat(detail.path("ApplicationConfigurationDescription")
+                .path("ApplicationSnapshotConfigurationDescription").path("SnapshotsEnabled").asBoolean(), is(true));
+        assertThat(detail.path("ApplicationConfigurationDescription")
+                .has("ApplicationCodeConfigurationDescription"), is(false));
     }
 
     @Test

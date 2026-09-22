@@ -134,6 +134,36 @@ class RdsParameterGroupTagIntegrationTest {
     }
 
     @Test
+    @Order(3)
+    void namedDescribeReportsMissingRatherThanAnEmptyCollection() {
+        query("DescribeDBParameterGroups")
+                .formParam("DBParameterGroupName", "tag-test-never-created")
+        .when().post("/").then().statusCode(404)
+            .body(containsString("<Code>DBParameterGroupNotFound</Code>"));
+    }
+
+    @Test
+    @Order(3)
+    void parameterResetPreservesGroupTagsAndIdentity() {
+        query("ModifyDBParameterGroup")
+                .formParam("DBParameterGroupName", PG)
+                .formParam("Parameters.Parameter.1.ParameterName", "work_mem")
+                .formParam("Parameters.Parameter.1.ParameterValue", "8192")
+                .formParam("Parameters.Parameter.1.ApplyMethod", "immediate")
+        .when().post("/").then().statusCode(200);
+        query("ResetDBParameterGroup")
+                .formParam("DBParameterGroupName", PG)
+                .formParam("ResetAllParameters", "true")
+        .when().post("/").then().statusCode(200);
+        query("DescribeDBParameterGroups").formParam("DBParameterGroupName", PG)
+        .when().post("/").then().statusCode(200)
+            .body(containsString("<DBParameterGroupArn>" + PG_ARN + "</DBParameterGroupArn>"));
+        query("ListTagsForResource").formParam("ResourceName", PG_ARN)
+        .when().post("/").then().statusCode(200)
+            .body(containsString("<Key>team</Key><Value>data</Value>"));
+    }
+
+    @Test
     @Order(4)
     void cleanUp() {
         query("DeleteDBParameterGroup")

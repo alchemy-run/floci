@@ -1,8 +1,14 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.services.acm.model.Certificate;
+import io.github.hectorvent.floci.services.acm.model.DomainValidation;
+import io.github.hectorvent.floci.services.route53.Route53Service;
+import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
+import io.github.hectorvent.floci.services.route53.model.ResourceRecordSet;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.JsonPath;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -19,7 +25,9 @@ import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPublicKey;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static io.restassured.RestAssured.given;
@@ -34,6 +42,12 @@ class AcmIntegrationTest {
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
     private static String createdCertificateArn;
     private static String ecCertificateArn;
+
+    @Inject
+    Route53Service route53;
+
+    @Inject
+    AcmService acm;
 
     @BeforeAll
     static void configureRestAssured() {
@@ -217,6 +231,54 @@ class AcmIntegrationTest {
             .body("__type", equalTo("ValidationException"));
     }
 
+    @Test
+    @Order(9)
+    void publicCertificateRequiresDnsValidationBeforeIssuance() {
+        given()
+            .header("X-Amz-Target", "CertificateManager.GetCertificate")
+            .contentType(ACM_CONTENT_TYPE)
+            .body("{\"CertificateArn\":\"" + createdCertificateArn + "\"}")
+        .when().post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("RequestInProgressException"));
+
+        validateDnsCertificate(createdCertificateArn);
+        validateDnsCertificate(ecCertificateArn);
+    }
+
+    private void validateDnsCertificate(String arn) {
+        Certificate certificate = acm.describeCertificate(arn, "us-east-1");
+        String zoneId = route53.createHostedZone(certificate.getDomainName(), arn, null, null)
+                .zone().getId();
+        List<Map<String, Object>> changes = new ArrayList<>();
+        for (DomainValidation validation : certificate.getDomainValidationOptions()) {
+            ResourceRecordSet recordSet = new ResourceRecordSet();
+            recordSet.setName(validation.resourceRecord().name());
+            recordSet.setType("CNAME");
+            recordSet.setTtl(60L);
+            recordSet.setRecords(List.of(new ResourceRecord(validation.resourceRecord().value())));
+            changes.add(Map.of("action", "UPSERT", "rrs", recordSet));
+        }
+        route53.changeResourceRecordSets(zoneId, changes, null);
+        try {
+            given()
+                .header("X-Amz-Target", "CertificateManager.DescribeCertificate")
+                .contentType(ACM_CONTENT_TYPE)
+                .body("{\"CertificateArn\":\"" + arn + "\"}")
+            .when().post("/")
+            .then()
+                .statusCode(200)
+                .body("Certificate.Status", equalTo("ISSUED"))
+                .body("Certificate.DomainValidationOptions.ValidationStatus", everyItem(equalTo("SUCCESS")));
+        } finally {
+            route53.changeResourceRecordSets(zoneId, changes.stream()
+                    .map(change -> Map.<String, Object>of("action", "DELETE", "rrs", change.get("rrs")))
+                    .toList(), null);
+            route53.deleteHostedZone(zoneId);
+        }
+    }
+
     // ==================== User Story 2: DescribeCertificate ====================
 
     @Test
@@ -272,7 +334,7 @@ class AcmIntegrationTest {
     @Test
     @Order(12)
     void getCertificate() throws Exception {
-        var response = getCertificatePems(createdCertificateArn);
+        JsonPath response = getCertificatePems(createdCertificateArn);
 
         X509Certificate leaf = assertLeafChainsToLocalCa(response.getString("Certificate"),
                 response.getString("CertificateChain"));
@@ -388,7 +450,7 @@ class AcmIntegrationTest {
             .statusCode(200)
             .extract().jsonPath().getString("CertificateArn");
 
-        var response = getCertificatePems(arn);
+        JsonPath response = getCertificatePems(arn);
 
         assertLeafChainsToLocalCa(response.getString("Certificate"), response.getString("CertificateChain"));
     }
@@ -396,7 +458,7 @@ class AcmIntegrationTest {
     @Test
     @Order(17)
     void ecCertificateKeepsItsKeyAlgorithmAndChainsToTheSameCa() throws Exception {
-        var response = getCertificatePems(ecCertificateArn);
+        JsonPath response = getCertificatePems(ecCertificateArn);
 
         X509Certificate leaf = assertLeafChainsToLocalCa(response.getString("Certificate"),
                 response.getString("CertificateChain"));

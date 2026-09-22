@@ -9,6 +9,8 @@ public class DetectiveMember {
     private String accountId;
     private String emailAddress;
     private String status;
+    private String invitationType = "ORGANIZATION";
+    private String invitedTime;
 
     public DetectiveMember() {
     }
@@ -19,6 +21,10 @@ public class DetectiveMember {
         this.status = status;
     }
 
+    public String getInvitationType() { return invitationType; }
+    public void setInvitationType(String invitationType) { this.invitationType = invitationType; }
+    public String getInvitedTime() { return invitedTime; }
+    public void setInvitedTime(String invitedTime) { this.invitedTime = invitedTime; }
     public String getAccountId() { return accountId; }
     public void setAccountId(String accountId) { this.accountId = accountId; }
     public String getEmailAddress() { return emailAddress; }

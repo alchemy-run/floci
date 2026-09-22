@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -110,6 +111,38 @@ final class CloudFrontOriginHttpClient implements AutoCloseable {
                 .disableCookieManagement()
                 .setRoutePlanner(new DefaultRoutePlanner(DefaultSchemePortResolver.INSTANCE))
                 .build();
+    }
+
+    static boolean isLocalDevOrigin(String authority) {
+        if (authority == null) {
+            return false;
+        }
+        try {
+            URI parsed = URI.create("http://" + authority);
+            return authority.equals(parsed.getRawAuthority())
+                    && parsed.getRawUserInfo() == null
+                    && parsed.getHost() != null
+                    && Set.of("localhost", "127.0.0.1", "[::1]").contains(parsed.getHost().toLowerCase(Locale.ROOT))
+                    && parsed.getPort() > 0 && parsed.getPort() <= 65535;
+        } catch (IllegalArgumentException ignored) {
+            // Malformed authorities never receive the local-origin exception.
+            return false;
+        }
+    }
+
+    static CloudFrontOriginHttpClient forLocalDevOrigin(String authority, String targetHost) {
+        return forLocalDevOrigin(SystemDefaultDnsResolver.INSTANCE, authority, targetHost);
+    }
+
+    static CloudFrontOriginHttpClient forLocalDevOrigin(DnsResolver resolver, String authority, String targetHost) {
+        if (!isLocalDevOrigin(authority)) {
+            throw new IllegalArgumentException("A local dev origin requires a loopback host and explicit port");
+        }
+        String originHost = CloudFrontServingController.normalizeOriginHost(authority);
+        String target = CloudFrontServingController.normalizeHost(targetHost);
+        // Isolated from the public-origin pool; only the emulator's selected host is reachable.
+        return new CloudFrontOriginHttpClient(
+                new LocalDevDnsResolver(resolver, target, !originHost.equals(target)), List.of(target));
     }
 
     HttpResponse<byte[]> send(HttpRequest request, HttpResponse.BodyHandler<byte[]> bodyHandler)
@@ -201,6 +234,34 @@ final class CloudFrontOriginHttpClient implements AutoCloseable {
         @Override
         public HttpClient.Version version() {
             return HttpClient.Version.HTTP_1_1;
+        }
+    }
+
+    private record LocalDevDnsResolver(DnsResolver delegate, String targetHost, boolean translated)
+            implements DnsResolver {
+
+        @Override
+        public InetAddress[] resolve(String host) throws UnknownHostException {
+            if (!targetHost.equals(CloudFrontServingController.normalizeHost(host))) {
+                throw new UnknownHostException("Host is outside the local dev origin");
+            }
+            InetAddress[] addresses = delegate.resolve(host);
+            if (addresses == null || addresses.length == 0) {
+                throw new UnknownHostException("Local dev origin host has no addresses: " + targetHost);
+            }
+            for (InetAddress address : addresses) {
+                boolean allowed = address.isLoopbackAddress()
+                        || (translated && (address.isSiteLocalAddress() || !SsrfProtection.isBlockedAddress(address)));
+                if (!allowed) {
+                    throw new UnknownHostException("Local dev origin host resolves to a blocked address: " + targetHost);
+                }
+            }
+            return addresses.clone();
+        }
+
+        @Override
+        public String resolveCanonicalHostname(String host) {
+            return CloudFrontServingController.normalizeHost(host);
         }
     }
 
