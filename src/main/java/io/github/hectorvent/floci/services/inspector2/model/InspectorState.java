@@ -3,6 +3,9 @@ package io.github.hectorvent.floci.services.inspector2.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class InspectorState {
@@ -19,6 +22,8 @@ public class InspectorState {
     private boolean autoEnableLambda;
     private boolean autoEnableLambdaCode;
     private boolean autoEnableCodeRepository;
+    private String deepInspectionStatus = "DEACTIVATED";
+    private Map<String, InspectorFilter> filters = new LinkedHashMap<>();
 
     public InspectorState() {
     }
@@ -49,6 +54,11 @@ public class InspectorState {
     public void setAutoEnableLambdaCode(boolean value) { autoEnableLambdaCode = value; }
     public boolean isAutoEnableCodeRepository() { return autoEnableCodeRepository; }
     public void setAutoEnableCodeRepository(boolean value) { autoEnableCodeRepository = value; }
+
+    public String getDeepInspectionStatus() { return deepInspectionStatus; }
+    public void setDeepInspectionStatus(String value) { deepInspectionStatus = value; }
+    public Map<String, InspectorFilter> getFilters() { return filters; }
+    public void setFilters(Map<String, InspectorFilter> filters) { this.filters = filters; }
 
     public String resourceStatus(String resourceType) {
         return switch (resourceType) {

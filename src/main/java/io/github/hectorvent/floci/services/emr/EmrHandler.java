@@ -34,11 +34,16 @@ public class EmrHandler {
 
     private final EmrService service;
     private final ObjectMapper objectMapper;
+    private final EmrReleaseCatalog releaseCatalog;
+    private final EmrStudioService studios;
 
     @Inject
-    public EmrHandler(EmrService service, ObjectMapper objectMapper) {
+    public EmrHandler(EmrService service, ObjectMapper objectMapper,
+                      EmrReleaseCatalog releaseCatalog, EmrStudioService studios) {
         this.service = service;
         this.objectMapper = objectMapper;
+        this.releaseCatalog = releaseCatalog;
+        this.studios = studios;
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -67,8 +72,23 @@ public class EmrHandler {
                 case "DescribeSecurityConfiguration" -> handleDescribeSecurityConfiguration(request);
                 case "DeleteSecurityConfiguration" -> handleDeleteSecurityConfiguration(request);
                 case "ListSecurityConfigurations" -> handleListSecurityConfigurations();
-                case "AddTags" -> handleAddTags(request);
-                case "RemoveTags" -> handleRemoveTags(request);
+                case "ListReleaseLabels" -> Response.ok(releaseCatalog.listReleaseLabels(request, region)).build();
+                case "DescribeReleaseLabel" -> Response.ok(releaseCatalog.describeReleaseLabel(request, region)).build();
+                case "ListSupportedInstanceTypes" -> Response.ok(releaseCatalog.listSupportedInstanceTypes(request, region)).build();
+                case "CreateStudio" -> Response.ok(studios.create(request, region)).build();
+                case "DescribeStudio" -> Response.ok(objectMapper.createObjectNode()
+                        .set("Studio", studios.describe(text(request, "StudioId"), region))).build();
+                case "ListStudios" -> Response.ok(studios.list(request, region)).build();
+                case "UpdateStudio" -> {
+                    studios.update(request, region);
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "DeleteStudio" -> {
+                    studios.delete(text(request, "StudioId"), region);
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "AddTags" -> handleAddTags(request, region);
+                case "RemoveTags" -> handleRemoveTags(request, region);
                 default -> Response.status(400)
                         .entity(new AwsErrorResponse("InvalidRequestException",
                                 "Operation " + action + " is not supported."))
@@ -312,13 +332,23 @@ public class EmrHandler {
 
     // ──────────────────────────── Tags ────────────────────────────
 
-    private Response handleAddTags(JsonNode request) {
-        service.addTags(text(request, "ResourceId"), parseTags(request.path("Tags")));
+    private Response handleAddTags(JsonNode request, String region) {
+        String id = text(request, "ResourceId");
+        if (id != null && id.startsWith("es-")) {
+            studios.addTags(id, request.path("Tags"), region);
+        } else {
+            service.addTags(id, parseTags(request.path("Tags")));
+        }
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleRemoveTags(JsonNode request) {
-        service.removeTags(text(request, "ResourceId"), stringList(request.path("TagKeys")));
+    private Response handleRemoveTags(JsonNode request, String region) {
+        String id = text(request, "ResourceId");
+        if (id != null && id.startsWith("es-")) {
+            studios.removeTags(id, stringList(request.path("TagKeys")), region);
+        } else {
+            service.removeTags(id, stringList(request.path("TagKeys")));
+        }
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 

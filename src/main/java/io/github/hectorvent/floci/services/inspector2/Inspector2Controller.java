@@ -2,10 +2,14 @@ package io.github.hectorvent.floci.services.inspector2;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.SigV4CredentialScope;
+import io.github.hectorvent.floci.services.inspector2.model.InspectorFilter;
 import io.github.hectorvent.floci.services.inspector2.model.InspectorState;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -34,6 +38,55 @@ public class Inspector2Controller {
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
         this.requestContext = requestContext;
+    }
+
+    @POST
+    @Path("/filters/create")
+    public Response createFilter(@Context HttpHeaders headers, String body) {
+        String arn = service.createFilter(region(headers), requestContext.getAccountId(), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("arn", arn)).build();
+    }
+
+    @POST
+    @Path("/filters/update")
+    public Response updateFilter(@Context HttpHeaders headers, String body) {
+        String arn = service.updateFilter(region(headers), requestContext.getAccountId(), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("arn", arn)).build();
+    }
+
+    @POST
+    @Path("/filters/delete")
+    public Response deleteFilter(@Context HttpHeaders headers, String body) {
+        String arn = service.deleteFilter(region(headers), requestContext.getAccountId(), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("arn", arn)).build();
+    }
+
+    @POST
+    @Path("/filters/list")
+    public Response listFilters(@Context HttpHeaders headers, String body) {
+        PaginatedResult<InspectorFilter> page = service.listFilters(
+                region(headers), requestContext.getAccountId(), parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("filters", objectMapper.valueToTree(page.items()));
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/ec2deepinspectionconfiguration/get")
+    public Response getEc2DeepInspectionConfiguration(@Context HttpHeaders headers, String body) {
+        parse(body);
+        return Response.ok(service.getEc2DeepInspectionConfiguration(
+                region(headers), requestContext.getAccountId())).build();
+    }
+
+    @POST
+    @Path("/cis/scan-configuration/list")
+    public Response listCisScanConfigurations(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.listCisScanConfigurations(
+                region(headers), requestContext.getAccountId(), parse(body))).build();
     }
 
     @POST
@@ -187,14 +240,25 @@ public class Inspector2Controller {
     }
 
     private String region(HttpHeaders headers) {
+        String signingService = SigV4CredentialScope.serviceName(headers.getHeaderString("Authorization"))
+                .orElse("inspector2");
+        if (!"inspector2".equals(signingService)) {
+            throw new AwsException("AuthorizationHeaderMalformed",
+                    "The credential scope must specify inspector2.", 400);
+        }
         return regionResolver.resolveRegion(headers);
     }
 
     private JsonNode parse(String body) {
+        JsonNode request;
         try {
-            return objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
         } catch (Exception e) {
             throw new WebApplicationException(JsonErrorResponseUtils.createSerializationErrorResponse());
         }
+        if (request == null || !request.isObject()) {
+            throw new AwsException("ValidationException", "Request must be a JSON object.", 400);
+        }
+        return request;
     }
 }

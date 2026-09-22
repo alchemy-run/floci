@@ -10,7 +10,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.startsWith;
@@ -52,6 +54,58 @@ class EmrIntegrationTest {
                     .body("__type", equalTo("InvalidRequestException"))
                     .body("message", equalTo("Security configuration with name missing-security-config-contract does not exist"));
         }
+    }
+
+    @Test
+    void releaseCatalogSupportsFilteringAndPagination() {
+        String token = call("ListReleaseLabels", "{\"MaxResults\":1}")
+                .then().statusCode(200)
+                .body("ReleaseLabels", contains("emr-7.5.0"))
+                .body("NextToken", notNullValue())
+                .extract().path("NextToken");
+        call("ListReleaseLabels", "{\"MaxResults\":1,\"NextToken\":\"" + token + "\"}")
+                .then().statusCode(200)
+                .body("ReleaseLabels", contains("emr-6.15.0"));
+        call("ListReleaseLabels", "{\"Filters\":{\"Prefix\":\"emr-7.\",\"Application\":\"Spark\"}}")
+                .then().statusCode(200).body("ReleaseLabels", contains("emr-7.5.0"));
+        call("ListReleaseLabels", "{\"Filters\":{\"Application\":\"not-an-application\"}}")
+                .then().statusCode(200).body("ReleaseLabels", hasSize(0));
+        call("DescribeReleaseLabel", "{\"ReleaseLabel\":\"emr-7.5.0\"}")
+                .then().statusCode(200)
+                .body("ReleaseLabel", equalTo("emr-7.5.0"))
+                .body("Applications.Name", hasItem("Spark"))
+                .body("Applications.find { it.Name == 'Spark' }.Version", equalTo("3.5.2-amzn-0"));
+        call("ListSupportedInstanceTypes", "{\"ReleaseLabel\":\"emr-7.5.0\"}")
+                .then().statusCode(200)
+                .body("SupportedInstanceTypes.Type", hasItem("m5.xlarge"))
+                .body("SupportedInstanceTypes.find { it.Type == 'm5.xlarge' }.VCPU", equalTo(4))
+                .body("SupportedInstanceTypes.find { it.Type == 'm5.xlarge' }.MemoryGB", equalTo(16));
+    }
+
+    @Test
+    void invalidCatalogInputsReturnServiceErrors() {
+        for (String action : new String[] {"DescribeReleaseLabel", "ListSupportedInstanceTypes"}) {
+            call(action, "{\"ReleaseLabel\":\"emr-999.0.0\"}")
+                    .then().statusCode(400).body("__type", equalTo("InvalidRequestException"));
+            call(action, "{}")
+                    .then().statusCode(400).body("__type", equalTo("InvalidRequestException"));
+        }
+        call("ListReleaseLabels", "{\"MaxResults\":0}")
+                .then().statusCode(400).body("__type", equalTo("InvalidRequestException"));
+        call("ListReleaseLabels", "{\"NextToken\":\"not-a-cursor\"}")
+                .then().statusCode(400).body("__type", equalTo("InvalidRequestException"));
+    }
+
+    @Test
+    void missingStudiosReturnAwsNotFoundMessage() {
+        for (String action : new String[] {"DescribeStudio", "UpdateStudio", "DeleteStudio"}) {
+            call(action, "{\"StudioId\":\"es-AAAAAAAAAAAAAAAAAAAAAAAAA\"}")
+                    .then().statusCode(400)
+                    .body("__type", equalTo("InvalidRequestException"))
+                    .body("message", equalTo("Studio does not exist."));
+        }
+        call("AddTags", "{\"ResourceId\":\"es-AAAAAAAAAAAAAAAAAAAAAAAAA\",\"Tags\":[]}")
+                .then().statusCode(400).body("message", equalTo("Studio does not exist."));
     }
 
     @Test
