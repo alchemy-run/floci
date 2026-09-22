@@ -120,20 +120,6 @@ public class BatchController {
     }
 
     @POST
-    @Path("/v1/describejobs")
-    public Response describeJobs(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.describeJobs(request)).build());
-    }
-
-    @POST
-    @Path("/v1/listjobs")
-    public Response listJobs(@Context HttpHeaders headers, String body) {
-        return handle(headers, body, (request, region) ->
-                Response.ok(service.listJobs(request)).build());
-    }
-
-    @POST
     @Path("/v1/canceljob")
     public Response cancelJob(@Context HttpHeaders headers, String body) {
         return handle(headers, body, (request, region) ->
@@ -145,6 +131,20 @@ public class BatchController {
     public Response terminateJob(@Context HttpHeaders headers, String body) {
         return handle(headers, body, (request, region) ->
                 Response.ok(service.terminateJob(request)).build());
+    }
+
+    @POST
+    @Path("/v1/describejobs")
+    public Response describeJobs(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.describeJobs(request)).build());
+    }
+
+    @POST
+    @Path("/v1/listjobs")
+    public Response listJobs(@Context HttpHeaders headers, String body) {
+        return handle(headers, body, (request, region) ->
+                Response.ok(service.listJobs(request)).build());
     }
 
     @POST

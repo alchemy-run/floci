@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -1060,6 +1062,147 @@ class DynamoDbJsonHandlerTest {
                 + "ProjectionType is ALL, but NonKeyAttributes is specified", ex.getMessage());
     }
 
+    @Test
+    void updateTableDropsADefinitionNoKeyUses() throws Exception {
+        handler.handle("CreateTable", json("""
+                {
+                    "TableName": "Drops",
+                    "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+                    "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+                    "BillingMode": "PAY_PER_REQUEST"
+                }
+                """), "eu-west-1");
+
+        Response response = handler.handle("UpdateTable", json("""
+                {
+                    "TableName": "Drops",
+                    "AttributeDefinitions": [
+                        {"AttributeName": "g1", "AttributeType": "S"},
+                        {"AttributeName": "extraUnused", "AttributeType": "S"}
+                    ],
+                    "GlobalSecondaryIndexUpdates": [{"Create": {
+                        "IndexName": "gsi1",
+                        "KeySchema": [{"AttributeName": "g1", "KeyType": "HASH"}],
+                        "Projection": {"ProjectionType": "KEYS_ONLY"}
+                    }}]
+                }
+                """), "eu-west-1");
+
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        assertEquals(List.of("g1", "pk"), sortedAttributeNames(body.get("TableDescription")));
+    }
+
+    @Test
+    void updateTableDeletingAGsiPrunesOnlyThatIndexKeyAttribute() throws Exception {
+        handler.handle("CreateTable", json("""
+                {
+                    "TableName": "Prunes",
+                    "KeySchema": [
+                        {"AttributeName": "pk", "KeyType": "HASH"},
+                        {"AttributeName": "sk", "KeyType": "RANGE"}
+                    ],
+                    "AttributeDefinitions": [
+                        {"AttributeName": "pk", "AttributeType": "S"},
+                        {"AttributeName": "sk", "AttributeType": "S"},
+                        {"AttributeName": "gsiSk", "AttributeType": "S"}
+                    ],
+                    "BillingMode": "PAY_PER_REQUEST",
+                    "GlobalSecondaryIndexes": [{
+                        "IndexName": "gsi1",
+                        "KeySchema": [
+                            {"AttributeName": "pk", "KeyType": "HASH"},
+                            {"AttributeName": "gsiSk", "KeyType": "RANGE"}
+                        ],
+                        "Projection": {"ProjectionType": "KEYS_ONLY"}
+                    }]
+                }
+                """), "eu-west-1");
+
+        Response response = handler.handle("UpdateTable", json("""
+                {
+                    "TableName": "Prunes",
+                    "GlobalSecondaryIndexUpdates": [{"Delete": {"IndexName": "gsi1"}}]
+                }
+                """), "eu-west-1");
+
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        assertEquals(List.of("pk", "sk"), sortedAttributeNames(body.get("TableDescription")));
+    }
+
+    @Test
+    void updateTableDeletingAGsiKeepsTheAttributesAnLsiStillUses() throws Exception {
+        handler.handle("CreateTable", json("""
+                {
+                    "TableName": "SharedKeys",
+                    "KeySchema": [
+                        {"AttributeName": "pk", "KeyType": "HASH"},
+                        {"AttributeName": "sk", "KeyType": "RANGE"}
+                    ],
+                    "AttributeDefinitions": [
+                        {"AttributeName": "pk", "AttributeType": "S"},
+                        {"AttributeName": "sk", "AttributeType": "S"},
+                        {"AttributeName": "lsiSk", "AttributeType": "N"},
+                        {"AttributeName": "gsiSk", "AttributeType": "S"}
+                    ],
+                    "BillingMode": "PAY_PER_REQUEST",
+                    "LocalSecondaryIndexes": [{
+                        "IndexName": "lsi1",
+                        "KeySchema": [
+                            {"AttributeName": "pk", "KeyType": "HASH"},
+                            {"AttributeName": "lsiSk", "KeyType": "RANGE"}
+                        ],
+                        "Projection": {"ProjectionType": "KEYS_ONLY"}
+                    }],
+                    "GlobalSecondaryIndexes": [{
+                        "IndexName": "gsi1",
+                        "KeySchema": [
+                            {"AttributeName": "pk", "KeyType": "HASH"},
+                            {"AttributeName": "gsiSk", "KeyType": "RANGE"}
+                        ],
+                        "Projection": {"ProjectionType": "KEYS_ONLY"}
+                    }]
+                }
+                """), "eu-west-1");
+
+        Response response = handler.handle("UpdateTable", json("""
+                {
+                    "TableName": "SharedKeys",
+                    "GlobalSecondaryIndexUpdates": [{"Delete": {"IndexName": "gsi1"}}]
+                }
+                """), "eu-west-1");
+
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        assertEquals(List.of("lsiSk", "pk", "sk"), sortedAttributeNames(body.get("TableDescription")));
+    }
+
+    @Test
+    void updateTableRejectsAnIndexKeyOnlyTheStoredDefinitionsCarry() {
+        createUsersTable("eu-west-1");
+        AwsException ex = expectValidationException("UpdateTable", json("""
+                {
+                    "TableName": "Users",
+                    "AttributeDefinitions": [{"AttributeName": "g3", "AttributeType": "S"}],
+                    "GlobalSecondaryIndexUpdates": [{"Create": {
+                        "IndexName": "gsiSharedPk",
+                        "KeySchema": [
+                            {"AttributeName": "userId", "KeyType": "HASH"},
+                            {"AttributeName": "g3", "KeyType": "RANGE"}
+                        ],
+                        "Projection": {"ProjectionType": "KEYS_ONLY"}
+                    }}]
+                }
+                """));
+        assertEquals("Attribute: userId is not defined in AttributeDefinitions", ex.getMessage());
+    }
+
+    private List<String> sortedAttributeNames(JsonNode tableDescription) {
+        List<String> names = new ArrayList<>();
+        tableDescription.path("AttributeDefinitions")
+                .forEach(definition -> names.add(definition.path("AttributeName").asText()));
+        names.sort(Comparator.naturalOrder());
+        return names;
+    }
+
     // Checked against real DynamoDB: the projection is validated before the table lookup.
     @Test
     void updateTableValidatesGsiProjectionBeforeTableLookup() {
@@ -1623,6 +1766,24 @@ class DynamoDbJsonHandlerTest {
         assertEquals(NESTING_MESSAGE, ex.getMessage());
     }
 
+    @Test
+    void updateItemRejectsAValueThatLeavesALeafAtLevel33UnderANestedPath() throws Exception {
+        createUsersTable("eu-west-1");
+        ObjectNode create = updateUserRequest();
+        create.put("UpdateExpression", "SET parent = :empty");
+        ObjectNode emptyMap = mapper.createObjectNode();
+        emptyMap.putObject("M");
+        create.set("ExpressionAttributeValues", mapper.createObjectNode().set(":empty", emptyMap));
+        handler.handle("UpdateItem", create, "eu-west-1");
+
+        ObjectNode request = updateUserRequest();
+        request.put("UpdateExpression", "SET parent.deep = :deep");
+        request.set("ExpressionAttributeValues", mapper.createObjectNode().set(":deep", nestedMaps(31)));
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("UpdateItem", request, "eu-west-1"));
+        assertEquals("Nesting Levels have exceeded supported limits", ex.getMessage());
+    }
+
     private ObjectNode transactWrite(String action, ObjectNode op) {
         op.put("TableName", "Users");
         var member = mapper.createObjectNode();
@@ -1959,21 +2120,95 @@ class DynamoDbJsonHandlerTest {
     }
 
     @Test
+    void transactGetItemsKeepsOnlyTheProjectedAttributes() throws Exception {
+        seedTransactGetItem();
+        ObjectNode get = mapper.createObjectNode();
+        get.put("TableName", "Users");
+        get.set("Key", item("userId", "u1"));
+        get.put("ProjectionExpression", "#k");
+        get.set("ExpressionAttributeNames", mapper.createObjectNode().put("#k", "keep"));
+        ObjectNode request = mapper.createObjectNode();
+        request.set("TransactItems", mapper.createArrayNode().add(mapper.createObjectNode().set("Get", get)));
+
+        Response response = handler.handle("TransactGetItems", request, "eu-west-1");
+
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        JsonNode returned = body.get("Responses").get(0).get("Item");
+        assertEquals(1, returned.size());
+        assertEquals("stay", returned.get("keep").get("S").asText());
+    }
+
+    @Test
+    void transactGetItemsLeavesAMissingKeyWithoutAnItemUnderAProjection() throws Exception {
+        seedTransactGetItem();
+        ObjectNode get = mapper.createObjectNode();
+        get.put("TableName", "Users");
+        get.set("Key", item("userId", "absent"));
+        get.put("ProjectionExpression", "keep");
+        ObjectNode request = mapper.createObjectNode();
+        request.set("TransactItems", mapper.createArrayNode().add(mapper.createObjectNode().set("Get", get)));
+
+        Response response = handler.handle("TransactGetItems", request, "eu-west-1");
+
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        assertEquals(200, response.getStatus());
+        assertFalse(body.get("Responses").get(0).has("Item"));
+    }
+
+    @Test
+    void transactGetItemsOmitsItemWhenTheProjectionMatchesNothing() throws Exception {
+        seedTransactGetItem();
+        ObjectNode get = mapper.createObjectNode();
+        get.put("TableName", "Users");
+        get.set("Key", item("userId", "u1"));
+        get.put("ProjectionExpression", "#x");
+        get.set("ExpressionAttributeNames", mapper.createObjectNode().put("#x", "doesNotExist"));
+        ObjectNode request = mapper.createObjectNode();
+        request.set("TransactItems", mapper.createArrayNode().add(mapper.createObjectNode().set("Get", get)));
+
+        Response response = handler.handle("TransactGetItems", request, "eu-west-1");
+
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        assertFalse(body.get("Responses").get(0).has("Item"));
+    }
+
+    private void seedTransactGetItem() throws Exception {
+        createUsersTable("eu-west-1");
+        ObjectNode putRequest = mapper.createObjectNode();
+        putRequest.put("TableName", "Users");
+        putRequest.set("Item", item("userId", "u1", "keep", "stay"));
+        handler.handle("PutItem", putRequest, "eu-west-1");
+    }
+
+    @Test
     void executeStatementRejectsATooDeepParameter() {
         createUsersTable("eu-west-1");
         var request = mapper.createObjectNode();
         request.put("Statement", "UPDATE \"Users\" SET deep=? WHERE userId=?");
-        request.set("Parameters", mapper.createArrayNode().add(nestedMaps(32)).add(attributeValue("S", "u1")));
+        request.set("Parameters", mapper.createArrayNode().add(nestedMaps(33)).add(attributeValue("S", "u1")));
 
         var ex = assertThrows(AwsException.class,
                 () -> handler.handle("ExecuteStatement", request, "eu-west-1"));
         assertEquals("ValidationException", ex.getErrorCode());
-        assertEquals("Nesting Levels have exceeded supported limits", ex.getMessage());
+        assertEquals("Nesting Levels have exceeded supported limits: "
+                + "Attributes in the item have nested levels beyond supported limit", ex.getMessage());
     }
 
     @Test
-    void executeTransactionCancelsOnATooDeepParameterWithThatStatementsReason() throws Exception {
+    void executeStatementReadsAParameterWithALeafAtLevel33() throws Exception {
         createUsersTable("eu-west-1");
+        ObjectNode request = mapper.createObjectNode();
+        request.put("Statement", "SELECT * FROM \"Users\" WHERE userId=? AND deep=?");
+        request.set("Parameters", mapper.createArrayNode().add(attributeValue("S", "u1")).add(nestedMaps(32)));
+
+        Response response = handler.handle("ExecuteStatement", request, "eu-west-1");
+        assertEquals(200, response.getStatus());
+    }
+
+    @Test
+    void executeTransactionCancelsOnAnItemLeftTooDeepWithThatStatementsReason() throws Exception {
+        createUsersTable("eu-west-1");
+        service.putItem("Users", item("userId", "u1"), "eu-west-1");
         var fine = mapper.createObjectNode();
         fine.put("Statement", "UPDATE \"Users\" SET x=? WHERE userId=?");
         fine.set("Parameters", mapper.createArrayNode().add(attributeValue("S", "x")).add(attributeValue("S", "u1")));

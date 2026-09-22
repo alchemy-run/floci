@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.apigatewayv2.proxy;
 
+import io.github.hectorvent.floci.core.common.SsrfProtection;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Integration;
 import org.jboss.logging.Logger;
 
@@ -12,10 +13,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -271,6 +274,21 @@ public class HttpProxyInvoker {
 
     private final RequestParameterMapper mapper = new RequestParameterMapper(new ContextValueResolver());
 
+    @FunctionalInterface
+    interface HostResolver {
+        InetAddress[] resolve(String host) throws UnknownHostException;
+    }
+
+    private final HostResolver resolver;
+
+    public HttpProxyInvoker() {
+        this(InetAddress::getAllByName);
+    }
+
+    HttpProxyInvoker(HostResolver resolver) {
+        this.resolver = resolver;
+    }
+
     public ProxyResult invoke(Integration integration, RequestContext ctx) {
         return invoke(integration, ctx, ProxyOptions.DEFAULTS);
     }
@@ -308,9 +326,9 @@ public class HttpProxyInvoker {
 
         // 5. Build java.net.http.HttpRequest
         String finalUrl = buildFinalUrl(builder);
-        if (hasHeader(builder, "Host") && finalUrl.startsWith("http://")) {
+        if (finalUrl.startsWith("http://") && (hasHeader(builder, "Host") || isNamedHost(finalUrl))) {
             try {
-                return invokeHttpWithHostOverride(finalUrl, method, builder, options.timeout());
+                return invokeHttpPinned(finalUrl, method, builder, options.timeout());
             } catch (Exception e) {
                 LOG.warnv("HTTP_PROXY backend call failed: {0}", e.getMessage());
                 return errorResult("Bad Gateway: " + e.getMessage());
@@ -346,6 +364,7 @@ public class HttpProxyInvoker {
         }
 
         try {
+            resolveNonMetadataTarget(hrb.build().uri().getHost());
             HttpResponse<byte[]> resp =
                     clientFor(options).send(hrb.build(), HttpResponse.BodyHandlers.ofByteArray());
             Map<String, List<String>> respHeaders = new LinkedHashMap<>();
@@ -358,6 +377,18 @@ public class HttpProxyInvoker {
             LOG.warnv("HTTP_PROXY backend call failed: {0}", e.getMessage());
             return errorResult("Bad Gateway: " + e.getMessage());
         }
+    }
+
+    private InetAddress[] resolveNonMetadataTarget(String host) throws IOException {
+        if (host == null || host.isBlank()) {
+            throw new IOException("integration URI has no host");
+        }
+        return SsrfProtection.rejectMetadataAddresses(resolver.resolve(host), host);
+    }
+
+    private static boolean isNamedHost(String url) {
+        String host = URI.create(url).getHost();
+        return host != null && !host.startsWith("[") && !host.matches("[0-9.]+");
     }
 
     private static boolean hasHeader(ProxyRequestBuilder builder, String headerName) {
@@ -373,8 +404,8 @@ public class HttpProxyInvoker {
         return null;
     }
 
-    private static ProxyResult invokeHttpWithHostOverride(String finalUrl, String method,
-                                                          ProxyRequestBuilder builder, Duration timeout)
+    private ProxyResult invokeHttpPinned(String finalUrl, String method,
+                                         ProxyRequestBuilder builder, Duration timeout)
             throws IOException {
         URI uri = URI.create(finalUrl);
         int port = uri.getPort() == -1 ? 80 : uri.getPort();
@@ -386,15 +417,20 @@ public class HttpProxyInvoker {
             path += "?" + uri.getRawQuery();
         }
 
+        InetAddress[] targets = resolveNonMetadataTarget(uri.getHost());
+        String hostHeader = firstHeader(builder, "Host");
+        if (hostHeader == null) {
+            hostHeader = uri.getRawAuthority();
+        }
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(uri.getHost(), port), 10_000);
+            socket.connect(new InetSocketAddress(targets[0], port), 10_000);
             socket.setSoTimeout((int) Math.min(timeout.toMillis(), Integer.MAX_VALUE));
 
             OutputStream out = socket.getOutputStream();
             byte[] body = builder.body() == null ? new byte[0] : builder.body();
             StringBuilder request = new StringBuilder()
                     .append(method.toUpperCase(Locale.ROOT)).append(' ').append(path).append(" HTTP/1.1\r\n")
-                    .append("Host: ").append(firstHeader(builder, "Host")).append("\r\n")
+                    .append("Host: ").append(hostHeader).append("\r\n")
                     .append("Connection: close\r\n");
             for (Map.Entry<String, List<String>> header : builder.headers().entrySet()) {
                 String name = header.getKey();
@@ -414,11 +450,11 @@ public class HttpProxyInvoker {
             out.write(body);
             out.flush();
 
-            return readRawHttpResponse(socket.getInputStream());
+            return readRawHttpResponse(socket.getInputStream(), method);
         }
     }
 
-    private static ProxyResult readRawHttpResponse(InputStream input) throws IOException {
+    private static ProxyResult readRawHttpResponse(InputStream input, String method) throws IOException {
         ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();
         int previous3 = -1;
         int previous2 = -1;
@@ -462,7 +498,11 @@ public class HttpProxyInvoker {
                 headers.computeIfAbsent(name, k -> new java.util.ArrayList<>()).add(value);
             }
         }
-        byte[] body = transferEncoding != null && transferEncoding.toLowerCase(Locale.ROOT).contains("chunked")
+        boolean bodyless = "HEAD".equalsIgnoreCase(method) || statusCode == 204 || statusCode == 304
+                || (statusCode >= 100 && statusCode < 200);
+        byte[] body = bodyless
+                ? new byte[0]
+                : transferEncoding != null && transferEncoding.toLowerCase(Locale.ROOT).contains("chunked")
                 ? readChunkedBody(input)
                 : contentLength >= 0 ? input.readNBytes(contentLength) : input.readAllBytes();
         return new ProxyResult(statusCode, headers, body);

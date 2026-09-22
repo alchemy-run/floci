@@ -30,7 +30,7 @@ An action given a user pool ID that does not resolve returns `ResourceNotFoundEx
 | ListUserPools | Lists local user pools visible in the request region. |
 | UpdateUserPool | Updates mutable user pool settings and persisted user-pool tags. |
 | AddCustomAttributes | Adds custom schema attributes in place (AWS-prefixes `custom:` / `dev:`). |
-| DeleteUserPool | Deletes a local user pool and everything it owns: users, groups, app clients, resource servers, identity providers, revoked tokens and verification codes. Refused with `InvalidParameterException` while a domain is still configured. |
+| DeleteUserPool | Deletes a local user pool and everything it owns: users, groups, app clients, resource servers, identity providers, revoked tokens and verification codes. Refused with `InvalidParameterException` while `DeletionProtection` is `ACTIVE` (switch it to `INACTIVE` with `UpdateUserPool` first, as on AWS) or while a domain is still configured. |
 | GetUserPoolMfaConfig | Returns the pool's MFA mode and, once configured, its software-token setting. |
 | SetUserPoolMfaConfig | Sets `MfaConfiguration` (`OFF`/`ON`/`OPTIONAL`) and `SoftwareTokenMfaConfiguration`. An absent `MfaConfiguration` means `OFF`, and turning MFA off drops the factor configuration with it. Validation follows the live service: `OFF` alongside a software-token, email or SMS factor is rejected, and `ON`/`OPTIONAL` with none of those three is rejected, in both cases on the member being present, not on its `Enabled` value. `WebAuthnConfiguration` sits outside both rules, as it does in AWS. SMS, email and WebAuthn configurations are validated and not stored: Floci cannot deliver those factors, so keeping the config would imply a capability it does not have. |
 
@@ -212,6 +212,32 @@ further divergences, both deliberate:
 | Action | Description |
 |--------|-------------|
 | ListUsers | Lists users stored in a user pool. |
+
+## Supported AuthFlow Values
+
+`InitiateAuth` accepts `USER_PASSWORD_AUTH`, `USER_SRP_AUTH`, `CUSTOM_AUTH`, `USER_AUTH`,
+`REFRESH_TOKEN_AUTH` and `REFRESH_TOKEN`. `AdminInitiateAuth` accepts `ADMIN_USER_PASSWORD_AUTH`,
+`ADMIN_NO_SRP_AUTH`, `USER_SRP_AUTH`, `USER_PASSWORD_AUTH`, `CUSTOM_AUTH`, `USER_AUTH`,
+`REFRESH_TOKEN_AUTH` and `REFRESH_TOKEN`.
+
+`USER_AUTH` is the choice-based flow: with no `PREFERRED_CHALLENGE` it returns
+`ChallengeName=SELECT_CHALLENGE` and an `AvailableChallenges` list drawn from what the user has
+configured (`PASSWORD`, `PASSWORD_SRP`, `EMAIL_OTP`, `SMS_OTP`); with one, it goes straight to that
+challenge. It requires the user pool's tier to be Essentials or higher. `WEB_AUTHN` and the
+`ConfirmSignUp` session as a first-factor shortcut are not implemented yet.
+
+Any other `AuthFlow` value is rejected with `InvalidParameterException` and no tokens are issued.
+
+An app client only accepts the flows in its `ExplicitAuthFlows`: `ALLOW_USER_PASSWORD_AUTH`,
+`ALLOW_USER_SRP_AUTH`, `ALLOW_CUSTOM_AUTH`, `ALLOW_USER_AUTH`, `ALLOW_ADMIN_USER_PASSWORD_AUTH` and
+`ALLOW_REFRESH_TOKEN_AUTH`, or the legacy `USER_PASSWORD_AUTH`, `ADMIN_NO_SRP_AUTH` and
+`CUSTOM_AUTH_FLOW_ONLY`. Any other flow fails with `InvalidParameterException`.
+
+A client created without `ExplicitAuthFlows`, or with it cleared to an empty list, stores and describes an
+empty list, matching AWS. It is enforced as if it had `ALLOW_REFRESH_TOKEN_AUTH`, `ALLOW_USER_SRP_AUTH` and
+`ALLOW_CUSTOM_AUTH`, the default AWS documents for such a client: only the enforcement uses that default, not
+the stored or returned value. A client that signs in with `USER_PASSWORD_AUTH`, `ADMIN_USER_PASSWORD_AUTH` or
+`USER_AUTH` must list the matching `ALLOW_` value.
 
 ## User Attribute Update Verification
 

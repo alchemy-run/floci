@@ -157,8 +157,8 @@ class EksPodIdentityIntegrationTest {
                 .queryParam("types", "networking").queryParam("owners", "aws").queryParam("publishers", "eks")
                 .get("/addons/supported-versions").then().statusCode(200)
                 .body("addons[0].addonVersions[0].compatibilities.clusterVersion", contains("1.24"));
-        for (Map.Entry<String, String> filter : Map.of("addonName", "missing", "kubernetesVersion", "1.34",
-                "types", "storage", "owners", "other", "publishers", "other").entrySet()) {
+        for (Map.Entry<String, String> filter : Map.of("addonName", "missing", "kubernetesVersion", "9.99",
+                "types", "missing", "owners", "other", "publishers", "other").entrySet()) {
             given().header("Authorization", auth(ACCOUNT, REGION, "eks"))
                     .queryParam(filter.getKey(), filter.getValue()).get("/addons/supported-versions")
                     .then().statusCode(200).body("addons", empty());
@@ -191,7 +191,7 @@ class EksPodIdentityIntegrationTest {
         String path = "/clusters/" + name + "/addons";
         try {
             given().header("Authorization", auth(ACCOUNT, REGION, "eks")).contentType("application/json")
-                    .body(Map.of("addonName", "vpc-cni")).post(path).then().statusCode(400)
+                    .body(Map.of("addonName", "missing")).post(path).then().statusCode(400)
                     .body("__type", equalTo("InvalidParameterException"));
             given().header("Authorization", auth(ACCOUNT, REGION, "eks")).get(path).then().statusCode(200)
                     .body("addons", empty());

@@ -2,7 +2,9 @@ package io.github.hectorvent.floci.services.rds;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -72,6 +74,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -84,6 +87,12 @@ public class RdsService implements Resettable, ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(RdsService.class);
     private static final ObjectMapper JSON = new ObjectMapper();
+    // Copies a record for a response that must report a transitional status ("stopping",
+    // "starting") while the stored record settles to the final one in the same call. The
+    // records already round-trip through Jackson for persistence.
+    private static final ObjectMapper RESPONSE_COPIER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     private static final Duration EVENT_RETENTION = Duration.ofDays(14);
     /** Value AWS reports as the OwningService of a secret RDS manages. */
     private static final String MANAGED_SECRET_OWNING_SERVICE = "rds";
@@ -380,7 +389,7 @@ public class RdsService implements Resettable, ResourceProvider {
         this.proxyTargetGroups = proxyTargetGroups;
         this.taggingService = taggingService;
         this.globalClusters = new InMemoryStorage<>();
-        this.snapshotData = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
+        this.snapshotData = new InMemoryStorage<>();
     }
 
     public void restorePersistedRuntime() {
@@ -629,6 +638,8 @@ public class RdsService implements Resettable, ResourceProvider {
         // resolved with the other validations, before a port is taken or a container started
         DbInstanceSettings resolvedSettings = withEffectiveWindows(settings, null)
                 .withKmsKeyId(resolveKmsKeyArn(settings.kmsKeyId(), effectiveRegion));
+        DbInstanceSettings.validateMonitoringPairOnCreate(
+                settings.monitoringInterval(), settings.monitoringRoleArn());
         boolean mock = config.services().rds().mock();
         // Always reserve a unique port (even in mock) so endpoints stay distinct and usedPorts
         // is consistent; mock mode only skips starting the container and auth proxy.
@@ -840,7 +851,7 @@ public class RdsService implements Resettable, ResourceProvider {
             case "cluster-pg" -> findClusterParameterGroupForRegion(id, region) != null;
             case "cluster-endpoint" -> clusterEndpoints.get(id).isPresent();
             case "snapshot" -> findSnapshotForScope(currentAccountId(), region, id) != null;
-            case "cluster-snapshot" -> clusterSnapshots.get(id).isPresent();
+            case "cluster-snapshot" -> findClusterSnapshotForScope(currentAccountId(), region, id) != null;
             default -> false;
         };
     }
@@ -873,6 +884,9 @@ public class RdsService implements Resettable, ResourceProvider {
                 instance.getCreatedAt(), instance.getEndpoint() != null ? instance.getEndpoint().port() : instance.getProxyPort(),
                 instance.isIamDatabaseAuthenticationEnabled(), instance.getDbiResourceId(), instance.getDbInstanceClass());
         snapshot.setDbName(instance.getDbName());
+        snapshot.setSnapshotType("manual");
+        snapshot.setOptionGroupName(instance.getOptionGroupName());
+        snapshot.setKmsKeyId(instance.getKmsKeyId());
         snapshot.setTags(tags != null ? new java.util.LinkedHashMap<>(tags) : new java.util.LinkedHashMap<>());
         snapshot.setDbSnapshotArn(regionResolver.buildArn("rds", effectiveRegion, "snapshot:" + snapshotId));
 
@@ -890,6 +904,199 @@ public class RdsService implements Resettable, ResourceProvider {
 
         return snapshot;
     }
+
+    public DbSnapshot deleteDbSnapshot(String snapshotId) {
+        return deleteDbSnapshot(snapshotId, regionResolver.getRegion());
+    }
+
+    public synchronized DbSnapshot deleteDbSnapshot(String snapshotId, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbSnapshot snapshot = Optional.ofNullable(findSnapshotForScope(accountId, effectiveRegion, snapshotId))
+                .orElseThrow(() -> new AwsException("DBSnapshotNotFound",
+                        "DBSnapshot " + snapshotId + " not found.", 404));
+        if (!"available".equalsIgnoreCase(snapshot.getStatus())) {
+            throw new AwsException("InvalidDBSnapshotState",
+                    "DBSnapshot " + snapshotId + " is not in an available state.", 400);
+        }
+
+        DbSnapshot deleted = copySnapshot(snapshot);
+        deleted.setStatus("deleted");
+        deleteSnapshotForScope(accountId, effectiveRegion, snapshotId);
+        deleteSnapshotDataForScope(accountId, effectiveRegion, snapshotId);
+        return deleted;
+    }
+
+    public DbSnapshot copyDbSnapshot(
+            String sourceIdentifier, String targetIdentifier, boolean copyTags,
+            Map<String, String> tags, String optionGroupName, String kmsKeyId) {
+        return copyDbSnapshot(sourceIdentifier, targetIdentifier, copyTags, tags,
+                optionGroupName, kmsKeyId, regionResolver.getDefaultRegion());
+    }
+
+    public synchronized DbSnapshot copyDbSnapshot(
+            String sourceIdentifier, String targetIdentifier, boolean copyTags,
+            Map<String, String> tags, String optionGroupName, String kmsKeyId, String region) {
+        String targetRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        SnapshotReference sourceReference = resolveSnapshotReference(sourceIdentifier, targetRegion);
+        DbSnapshot source = sourceReference.snapshot();
+        if (!"available".equalsIgnoreCase(source.getStatus())) {
+            throw new AwsException("InvalidDBSnapshotState",
+                    "DBSnapshot " + source.getDbSnapshotIdentifier() + " is not in an available state.", 400);
+        }
+        if (findSnapshotForScope(accountId, targetRegion, targetIdentifier) != null) {
+            throw new AwsException("DBSnapshotAlreadyExists",
+                    "DBSnapshot " + targetIdentifier + " already exists.", 400);
+        }
+        String sourceData = getSnapshotDataForScope(
+                sourceReference.accountId(), sourceReference.region(), source.getDbSnapshotIdentifier())
+                .orElseThrow(() -> new AwsException("DBSnapshotNotFound",
+                        "DBSnapshot data for " + source.getDbSnapshotIdentifier() + " not found.", 404));
+
+        DbSnapshot copy = copySnapshot(source);
+        copy.setDbSnapshotIdentifier(targetIdentifier);
+        copy.setDbSnapshotArn(regionResolver.buildArn("rds", targetRegion, "snapshot:" + targetIdentifier));
+        copy.setSnapshotCreateTime(Instant.now());
+        copy.setStatus("available");
+        copy.setSnapshotType("manual");
+        copy.setSourceDbSnapshotIdentifier(source.getDbSnapshotArn());
+        copy.setOptionGroupName(optionGroupName != null && !optionGroupName.isBlank()
+                ? optionGroupName : source.getOptionGroupName());
+        copy.setKmsKeyId(kmsKeyId != null && !kmsKeyId.isBlank() ? kmsKeyId : source.getKmsKeyId());
+        copy.setRestoreAccountIds(new ArrayList<>());
+        Map<String, String> copiedTags = new LinkedHashMap<>();
+        if (copyTags) {
+            copiedTags.putAll(source.getTags());
+        }
+        if (tags != null) {
+            copiedTags.putAll(tags);
+        }
+        copy.setTags(copiedTags);
+        putSnapshotDataForScope(accountId, targetRegion, targetIdentifier, sourceData);
+        putSnapshotForScope(accountId, targetRegion, targetIdentifier, copy);
+        return copy;
+    }
+
+    public DbSnapshot modifyDbSnapshot(
+            String snapshotId, String engineVersion, String optionGroupName) {
+        return modifyDbSnapshot(snapshotId, engineVersion, optionGroupName,
+                regionResolver.getDefaultRegion());
+    }
+
+    public synchronized DbSnapshot modifyDbSnapshot(
+            String snapshotId, String engineVersion, String optionGroupName, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbSnapshot snapshot = Optional.ofNullable(findSnapshotForScope(accountId, effectiveRegion, snapshotId))
+                .orElseThrow(() -> new AwsException("DBSnapshotNotFound",
+                        "DBSnapshot " + snapshotId + " not found.", 404));
+        if (!"available".equalsIgnoreCase(snapshot.getStatus())) {
+            throw new AwsException("InvalidDBSnapshotState",
+                    "DBSnapshot " + snapshotId + " is not in an available state.", 400);
+        }
+        if ((engineVersion == null || engineVersion.isBlank())
+                && (optionGroupName == null || optionGroupName.isBlank())) {
+            throw new AwsException("InvalidParameterCombination",
+                    "At least one snapshot attribute must be specified.", 400);
+        }
+        if (engineVersion != null && !engineVersion.isBlank()) {
+            snapshot.setEngineVersion(engineVersion);
+        }
+        if (optionGroupName != null && !optionGroupName.isBlank()) {
+            snapshot.setOptionGroupName(optionGroupName);
+        }
+        putSnapshotForScope(accountId, effectiveRegion, snapshotId, snapshot);
+        return snapshot;
+    }
+
+    private DbSnapshot copySnapshot(DbSnapshot source) {
+        DbSnapshot copy = new DbSnapshot();
+        copy.setDbSnapshotIdentifier(source.getDbSnapshotIdentifier());
+        copy.setDbSnapshotArn(source.getDbSnapshotArn());
+        copy.setSnapshotType(source.getSnapshotType());
+        copy.setSourceDbSnapshotIdentifier(source.getSourceDbSnapshotIdentifier());
+        copy.setDbInstanceIdentifier(source.getDbInstanceIdentifier());
+        copy.setSnapshotCreateTime(source.getSnapshotCreateTime());
+        copy.setEngine(source.getEngine());
+        copy.setEngineVersion(source.getEngineVersion());
+        copy.setAllocatedStorage(source.getAllocatedStorage());
+        copy.setStatus(source.getStatus());
+        copy.setMasterUsername(source.getMasterUsername());
+        copy.setMasterPassword(source.getMasterPassword());
+        copy.setAvailabilityZone(source.getAvailabilityZone());
+        copy.setVpcId(source.getVpcId());
+        copy.setInstanceCreateTime(source.getInstanceCreateTime());
+        copy.setPort(source.getPort());
+        copy.setIamDatabaseAuthenticationEnabled(source.isIamDatabaseAuthenticationEnabled());
+        copy.setDbiResourceId(source.getDbiResourceId());
+        copy.setDbName(source.getDbName());
+        copy.setDbInstanceClass(source.getDbInstanceClass());
+        copy.setOptionGroupName(source.getOptionGroupName());
+        copy.setKmsKeyId(source.getKmsKeyId());
+        copy.setTags(new LinkedHashMap<>(source.getTags()));
+        copy.setRestoreAccountIds(new ArrayList<>(source.getRestoreAccountIds()));
+        return copy;
+    }
+
+    private SnapshotReference resolveSnapshotReference(String sourceIdentifier, String targetRegion) {
+        String sourceId = sourceIdentifier;
+        String sourceRegion = targetRegion;
+        String sourceAccount = currentAccountId();
+        if (sourceIdentifier != null && sourceIdentifier.startsWith("arn:")) {
+            try {
+                AwsArnUtils.Arn parsed = AwsArnUtils.parse(sourceIdentifier);
+                if (!"aws".equals(parsed.partition()) || !"rds".equals(parsed.service())
+                        || !parsed.resource().startsWith("snapshot:")) {
+                    throw new IllegalArgumentException("not an RDS snapshot ARN");
+                }
+                sourceId = parsed.resource().substring("snapshot:".length());
+                sourceRegion = parsed.region();
+                sourceAccount = parsed.accountId();
+            } catch (IllegalArgumentException e) {
+                throw new AwsException("InvalidParameterValue",
+                        "SourceDBSnapshotIdentifier must be a snapshot identifier or ARN.", 400);
+            }
+        }
+        if (!Objects.equals(sourceAccount, currentAccountId())) {
+            throw new AwsException("DBSnapshotNotFound",
+                    "DBSnapshot " + sourceIdentifier + " not found.", 404);
+        }
+        DbSnapshot source = findSnapshotForScope(sourceAccount, sourceRegion, sourceId);
+        if (source == null) {
+            throw new AwsException("DBSnapshotNotFound",
+                    "DBSnapshot " + sourceIdentifier + " not found.", 404);
+        }
+        return new SnapshotReference(sourceAccount, sourceRegion, source);
+    }
+
+    private Optional<String> getSnapshotDataForScope(String accountId, String region, String snapshotId) {
+        String key = dbResourceKey(region, snapshotId);
+        if (snapshotData instanceof AccountAwareStorageBackend<String> aware) {
+            return aware.getForAccount(accountId, key);
+        }
+        return snapshotData.get(key);
+    }
+
+    private void putSnapshotDataForScope(String accountId, String region, String snapshotId, String data) {
+        String key = dbResourceKey(region, snapshotId);
+        if (snapshotData instanceof AccountAwareStorageBackend<String> aware) {
+            aware.putForAccount(accountId, key, data);
+        } else {
+            snapshotData.put(key, data);
+        }
+    }
+
+    private void deleteSnapshotDataForScope(String accountId, String region, String snapshotId) {
+        String key = dbResourceKey(region, snapshotId);
+        if (snapshotData instanceof AccountAwareStorageBackend<String> aware) {
+            aware.deleteForAccount(accountId, key);
+        } else {
+            snapshotData.delete(key);
+        }
+    }
+
+    private record SnapshotReference(String accountId, String region, DbSnapshot snapshot) {}
 
     public DbInstance restoreDbInstanceFromDbSnapshot(String instanceId, String snapshotId, String dbInstanceClass, String availabilityZone, boolean multiAz, String dbSubnetGroupName, java.util.List<String> vpcSecurityGroupIds, java.util.Map<String, String> tags) {
         return restoreDbInstanceFromDbSnapshot(instanceId, snapshotId, dbInstanceClass, availabilityZone,
@@ -1337,6 +1544,367 @@ public class RdsService implements Resettable, ResourceProvider {
         return snapshot;
     }
 
+    // ── DB cluster snapshots ───────────────────────────────────────────────────
+
+    /**
+     * Takes a manual snapshot of an available cluster: its description plus a dump of its
+     * database, so RestoreDBClusterFromSnapshot can bring the data back into a new cluster.
+     */
+    public DbClusterSnapshot createDbClusterSnapshot(String snapshotId, String clusterId, Map<String, String> tags) {
+        return createDbClusterSnapshot(snapshotId, clusterId, tags, regionResolver.getDefaultRegion());
+    }
+
+    public synchronized DbClusterSnapshot createDbClusterSnapshot(String snapshotId, String clusterId,
+                                                                  Map<String, String> tags, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        if (snapshotId == null || snapshotId.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "DBClusterSnapshotIdentifier is required.", 400);
+        }
+        if (findClusterSnapshotForScope(accountId, effectiveRegion, snapshotId) != null) {
+            throw new AwsException("DBClusterSnapshotAlreadyExistsFault",
+                    "DB cluster snapshot " + snapshotId + " already exists.", 400);
+        }
+        DbCluster cluster = getDbCluster(clusterId, effectiveRegion);
+        if (cluster.getStatus() != null && cluster.getStatus() != DbInstanceStatus.AVAILABLE) {
+            throw new AwsException("InvalidDBClusterStateFault",
+                    "DB cluster " + clusterId + " is not available.", 400);
+        }
+        if (cluster.getEngine() != DatabaseEngine.POSTGRES) {
+            throw new AwsException("InvalidDBClusterStateFault",
+                    "Operation CreateDBClusterSnapshot is not supported for engine " + cluster.getEngine() + ".", 400);
+        }
+
+        DbClusterSnapshot snapshot = clusterSnapshotOf(cluster, snapshotId, effectiveRegion);
+        snapshot.setTags(tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>());
+
+        String sqlDump = "";
+        if (!config.services().rds().mock()) {
+            try {
+                sqlDump = containerManager.createPostgresSnapshot(cluster.getContainerId(), cluster.getMasterUsername());
+            } catch (Exception e) {
+                LOG.warnv(e, "Failed to create snapshot {0} of DB cluster {1}", snapshotId, clusterId);
+                throw new AwsException("InvalidDBClusterStateFault", "Failed to create snapshot: " + e.getMessage(), 400);
+            }
+        }
+        snapshotData.put(clusterSnapshotDataKey(effectiveRegion, snapshotId), sqlDump);
+        putClusterSnapshotForScope(accountId, effectiveRegion, snapshotId, snapshot);
+        LOG.infov("Created DB cluster snapshot {0} of cluster {1}", snapshotId, clusterId);
+        return snapshot;
+    }
+
+    public Collection<DbClusterSnapshot> describeDbClusterSnapshots(String snapshotId, String clusterId, String snapshotType) {
+        return describeDbClusterSnapshots(snapshotId, clusterId, snapshotType, regionResolver.getDefaultRegion());
+    }
+
+    public Collection<DbClusterSnapshot> describeDbClusterSnapshots(String snapshotId, String clusterId,
+                                                                    String snapshotType, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        List<DbClusterSnapshot> matching;
+        if (snapshotId != null && !snapshotId.isBlank()) {
+            matching = List.of(requireClusterSnapshot(accountId, effectiveRegion, snapshotId));
+        } else {
+            matching = clusterSnapshots.scan(k -> true).stream()
+                    .filter(s -> hasRdsResourceIdentity(s.getDbClusterSnapshotArn(), accountId, effectiveRegion,
+                            "cluster-snapshot", s.getDbClusterSnapshotIdentifier()))
+                    .toList();
+        }
+        return matching.stream()
+                .filter(s -> clusterId == null || clusterId.isBlank() || clusterId.equals(s.getDbClusterIdentifier()))
+                .filter(s -> snapshotType == null || snapshotType.isBlank() || snapshotType.equals(s.getSnapshotType()))
+                .toList();
+    }
+
+    /** Deletes an available cluster snapshot and its data, answering with the snapshot at status "deleted". */
+    public DbClusterSnapshot deleteDbClusterSnapshot(String snapshotId) {
+        return deleteDbClusterSnapshot(snapshotId, regionResolver.getRegion());
+    }
+
+    public synchronized DbClusterSnapshot deleteDbClusterSnapshot(String snapshotId, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbClusterSnapshot snapshot = requireClusterSnapshot(accountId, effectiveRegion, snapshotId);
+        requireClusterSnapshotAvailable(snapshot, "delete");
+        snapshotData.delete(clusterSnapshotDataKey(effectiveRegion, snapshotId));
+        deleteClusterSnapshotForScope(accountId, effectiveRegion, snapshotId);
+        snapshot.setStatus("deleted");
+        LOG.infov("Deleted DB cluster snapshot {0}", snapshotId);
+        return snapshot;
+    }
+
+    /** Copies an available cluster snapshot to a new manual one, recording the source ARN. */
+    public DbClusterSnapshot copyDbClusterSnapshot(String sourceSnapshotId, String targetSnapshotId,
+                                                   boolean copyTags, Map<String, String> tags) {
+        return copyDbClusterSnapshot(sourceSnapshotId, targetSnapshotId, copyTags, tags, regionResolver.getDefaultRegion());
+    }
+
+    public synchronized DbClusterSnapshot copyDbClusterSnapshot(String sourceSnapshotId, String targetSnapshotId,
+                                                                boolean copyTags, Map<String, String> tags, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        String sourceId = clusterSnapshotIdentifierFromArnOrName(sourceSnapshotId, effectiveRegion);
+        DbClusterSnapshot source = requireClusterSnapshot(accountId, effectiveRegion, sourceId);
+        requireClusterSnapshotAvailable(source, "copy");
+        if (targetSnapshotId == null || targetSnapshotId.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "TargetDBClusterSnapshotIdentifier is required.", 400);
+        }
+        if (findClusterSnapshotForScope(accountId, effectiveRegion, targetSnapshotId) != null) {
+            throw new AwsException("DBClusterSnapshotAlreadyExistsFault",
+                    "DB cluster snapshot " + targetSnapshotId + " already exists.", 400);
+        }
+        DbClusterSnapshot copy = copyOfClusterSnapshot(source, targetSnapshotId, effectiveRegion);
+        copy.setSourceDbClusterSnapshotArn(source.getDbClusterSnapshotArn());
+        Map<String, String> copiedTags = new LinkedHashMap<>();
+        if (copyTags) {
+            copiedTags.putAll(source.getTags());
+        }
+        if (tags != null) {
+            copiedTags.putAll(tags);
+        }
+        copy.setTags(copiedTags);
+        String sqlDump = snapshotData.get(clusterSnapshotDataKey(effectiveRegion, sourceId))
+                .orElseThrow(() -> new AwsException("InvalidDBClusterSnapshotStateFault",
+                        "DB cluster snapshot data for " + sourceId + " is unavailable.", 400));
+        snapshotData.put(clusterSnapshotDataKey(effectiveRegion, targetSnapshotId), sqlDump);
+        putClusterSnapshotForScope(accountId, effectiveRegion, targetSnapshotId, copy);
+        LOG.infov("Copied DB cluster snapshot {0} to {1}", sourceId, targetSnapshotId);
+        return copy;
+    }
+
+    public DbClusterSnapshot describeDbClusterSnapshotAttributes(String snapshotId, String region) {
+        return requireClusterSnapshot(currentAccountId(), effectiveRegion(region), snapshotId);
+    }
+
+    /** The "restore" attribute, as ModifyDBSnapshotAttribute keeps it for instance snapshots. */
+    public synchronized DbClusterSnapshot modifyDbClusterSnapshotAttribute(String snapshotId, String attributeName,
+                                                                           List<String> valuesToAdd,
+                                                                           List<String> valuesToRemove, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbClusterSnapshot snapshot = requireClusterSnapshot(accountId, effectiveRegion, snapshotId);
+        if (!"restore".equals(attributeName)) {
+            throw new AwsException("InvalidParameterValue", "AttributeName must be restore.", 400);
+        }
+        requireClusterSnapshotAvailable(snapshot, "share");
+        List<String> updated = new ArrayList<>(snapshot.getRestoreAccountIds());
+        if (valuesToAdd != null) {
+            valuesToAdd.stream().filter(v -> !updated.contains(v)).forEach(updated::add);
+        }
+        if (valuesToRemove != null) {
+            updated.removeAll(valuesToRemove);
+        }
+        snapshot.setRestoreAccountIds(updated);
+        putClusterSnapshotForScope(accountId, effectiveRegion, snapshotId, snapshot);
+        return snapshot;
+    }
+
+    /**
+     * Creates a new cluster from a cluster snapshot: the snapshot's engine, credentials and
+     * database, the request's overrides where AWS allows them, and then the snapshot's data
+     * restored into the new cluster's database.
+     */
+    public DbCluster restoreDbClusterFromSnapshot(String clusterId, String snapshotId, String engine,
+                                                  String engineVersion, Integer port, String databaseName,
+                                                  String dbSubnetGroupName, String parameterGroupName,
+                                                  String availabilityZone, Boolean iamEnabled, String engineMode,
+                                                  Map<String, String> tags, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        // SnapshotIdentifier takes the snapshot's name or its ARN (API reference).
+        String resolvedSnapshotId = clusterSnapshotIdentifierFromArnOrName(snapshotId, effectiveRegion);
+        DbClusterSnapshot snapshot = requireClusterSnapshot(accountId, effectiveRegion, resolvedSnapshotId);
+        requireClusterSnapshotAvailable(snapshot, "restore from");
+        if (engine == null || engine.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "Engine is required.", 400);
+        }
+        if (resolveEngine(engine) != snapshot.getEngine()) {
+            throw new AwsException("InvalidParameterValue",
+                    "The snapshot's engine is " + snapshot.getEngineIdentifier() + "; cannot restore it as " + engine + ".", 400);
+        }
+        String sqlDump = snapshotData.get(clusterSnapshotDataKey(effectiveRegion, resolvedSnapshotId))
+                .orElseThrow(() -> new AwsException("DBClusterSnapshotNotFoundFault",
+                        "DB cluster snapshot data for " + resolvedSnapshotId + " not found.", 404));
+
+        DbCluster cluster = createDbCluster(clusterId, engine,
+                engineVersion != null && !engineVersion.isBlank() ? engineVersion : snapshot.getEngineVersion(),
+                snapshot.getMasterUsername(), snapshot.getMasterPassword(),
+                databaseName != null && !databaseName.isBlank() ? databaseName : snapshot.getDatabaseName(),
+                iamEnabled != null ? iamEnabled : snapshot.isIamDatabaseAuthenticationEnabled(),
+                parameterGroupName, dbSubnetGroupName, availabilityZone, false, effectiveRegion,
+                null, null, null, false, null,
+                engineMode != null && !engineMode.isBlank() ? engineMode : snapshot.getEngineMode(),
+                snapshot.isStorageEncrypted());
+        if (tags != null && !tags.isEmpty()) {
+            cluster.getTags().putAll(tags);
+            putClusterForScope(accountId, effectiveRegion, clusterId, cluster);
+        }
+        if (!config.services().rds().mock()) {
+            try {
+                containerManager.restorePostgresSnapshot(cluster.getContainerId(), cluster.getMasterUsername(), sqlDump);
+            } catch (Exception e) {
+                try {
+                    deleteDbCluster(clusterId, effectiveRegion);
+                } catch (Exception cleanupError) {
+                    e.addSuppressed(cleanupError);
+                }
+                AwsException awsEx = new AwsException("InvalidDBClusterSnapshotStateFault",
+                        "Failed to restore snapshot: " + e.getMessage(), 400);
+                awsEx.initCause(e);
+                throw awsEx;
+            }
+        }
+        return cluster;
+    }
+
+    private DbClusterSnapshot clusterSnapshotOf(DbCluster cluster, String snapshotId, String region) {
+        DbClusterSnapshot snapshot = new DbClusterSnapshot();
+        snapshot.setDbClusterSnapshotIdentifier(snapshotId);
+        snapshot.setDbClusterSnapshotArn(regionResolver.buildArn("rds", region, "cluster-snapshot:" + snapshotId));
+        snapshot.setDbClusterIdentifier(cluster.getDbClusterIdentifier());
+        snapshot.setSnapshotCreateTime(Instant.now());
+        snapshot.setClusterCreateTime(cluster.getCreatedAt());
+        snapshot.setEngine(cluster.getEngine());
+        snapshot.setEngineIdentifier(cluster.getEngineIdentifier() != null
+                ? cluster.getEngineIdentifier() : cluster.getEngine().name().toLowerCase(Locale.ROOT));
+        snapshot.setEngineVersion(cluster.getEngineVersion());
+        snapshot.setEngineMode(cluster.getEngineMode());
+        // Aurora reports 1 GiB for a cluster snapshot: storage is not provisioned per cluster.
+        snapshot.setAllocatedStorage(1);
+        snapshot.setStatus("available");
+        snapshot.setPercentProgress(100);
+        snapshot.setPort(cluster.getEndpoint() != null ? cluster.getEndpoint().port() : cluster.getProxyPort());
+        snapshot.setVpcId(cluster.getVpcId());
+        if (cluster.getAvailabilityZone() != null) {
+            snapshot.setAvailabilityZones(new ArrayList<>(List.of(cluster.getAvailabilityZone())));
+        }
+        snapshot.setMasterUsername(cluster.getMasterUsername());
+        snapshot.setMasterPassword(cluster.getMasterPassword());
+        snapshot.setDatabaseName(cluster.getDatabaseName());
+        snapshot.setLicenseModel("postgresql-license");
+        snapshot.setStorageEncrypted(cluster.isStorageEncrypted());
+        snapshot.setIamDatabaseAuthenticationEnabled(cluster.isIamDatabaseAuthenticationEnabled());
+        snapshot.setDbClusterResourceId(cluster.getDbClusterResourceId());
+        return snapshot;
+    }
+
+    private DbClusterSnapshot copyOfClusterSnapshot(DbClusterSnapshot source, String targetId, String region) {
+        DbClusterSnapshot copy = new DbClusterSnapshot();
+        copy.setDbClusterSnapshotIdentifier(targetId);
+        copy.setDbClusterSnapshotArn(regionResolver.buildArn("rds", region, "cluster-snapshot:" + targetId));
+        copy.setDbClusterIdentifier(source.getDbClusterIdentifier());
+        copy.setSnapshotCreateTime(Instant.now());
+        copy.setClusterCreateTime(source.getClusterCreateTime());
+        copy.setEngine(source.getEngine());
+        copy.setEngineIdentifier(source.getEngineIdentifier());
+        copy.setEngineVersion(source.getEngineVersion());
+        copy.setEngineMode(source.getEngineMode());
+        copy.setAllocatedStorage(source.getAllocatedStorage());
+        copy.setStatus("available");
+        copy.setPercentProgress(100);
+        copy.setPort(source.getPort());
+        copy.setVpcId(source.getVpcId());
+        copy.setAvailabilityZones(new ArrayList<>(source.getAvailabilityZones()));
+        copy.setMasterUsername(source.getMasterUsername());
+        copy.setMasterPassword(source.getMasterPassword());
+        copy.setDatabaseName(source.getDatabaseName());
+        copy.setLicenseModel(source.getLicenseModel());
+        copy.setStorageEncrypted(source.isStorageEncrypted());
+        copy.setKmsKeyId(source.getKmsKeyId());
+        copy.setIamDatabaseAuthenticationEnabled(source.isIamDatabaseAuthenticationEnabled());
+        copy.setDbClusterResourceId(source.getDbClusterResourceId());
+        return copy;
+    }
+
+    private DbClusterSnapshot requireClusterSnapshot(String accountId, String region, String snapshotId) {
+        if (snapshotId == null || snapshotId.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "DBClusterSnapshotIdentifier is required.", 400);
+        }
+        return Optional.ofNullable(findClusterSnapshotForScope(accountId, region, snapshotId))
+                .orElseThrow(() -> new AwsException("DBClusterSnapshotNotFoundFault",
+                        "DBClusterSnapshot " + snapshotId + " not found.", 404));
+    }
+
+    private static void requireClusterSnapshotAvailable(DbClusterSnapshot snapshot, String operation) {
+        if (!"available".equals(snapshot.getStatus())) {
+            throw new AwsException("InvalidDBClusterSnapshotStateFault",
+                    "Cannot " + operation + " DB cluster snapshot " + snapshot.getDbClusterSnapshotIdentifier()
+                            + " while its status is " + snapshot.getStatus() + ".", 400);
+        }
+    }
+
+    private String clusterSnapshotIdentifierFromArnOrName(String source, String region) {
+        if (source == null || source.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "A DB cluster snapshot identifier is required.", 400);
+        }
+        if (!source.startsWith("arn:")) {
+            return source;
+        }
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(source);
+        } catch (IllegalArgumentException malformed) {
+            throw new AwsException("InvalidParameterValue", "Invalid snapshot identifier: " + source, 400);
+        }
+        String resource = arn.resource();
+        if (!"aws".equals(arn.partition()) || !"rds".equals(arn.service())
+                || !resource.startsWith("cluster-snapshot:")) {
+            throw new AwsException("InvalidParameterValue", "Invalid snapshot identifier: " + source, 400);
+        }
+        if (!currentAccountId().equals(arn.accountId())) {
+            throw new AwsException("DBClusterSnapshotNotFoundFault", "DB cluster snapshot " + source + " not found.", 404);
+        }
+        if (!region.equals(arn.region())) {
+            throw new AwsException("InvalidParameterValue",
+                    "Cross-region snapshot copy is not supported: " + source, 400);
+        }
+        return resource.substring("cluster-snapshot:".length());
+    }
+
+    /** Cluster snapshot dumps share the snapshot data store with instance snapshots under their own prefix. */
+    private String clusterSnapshotDataKey(String region, String snapshotId) {
+        return dbResourceKey(region, "cluster-snapshot:" + snapshotId);
+    }
+
+    private synchronized DbClusterSnapshot findClusterSnapshotForScope(String accountId, String region, String snapshotId) {
+        String key = dbResourceKey(region, snapshotId);
+        Predicate<DbClusterSnapshot> owner = snapshot -> hasRdsResourceIdentity(
+                snapshot.getDbClusterSnapshotArn(), accountId, region, "cluster-snapshot", snapshotId);
+        if (clusterSnapshots instanceof AccountAwareStorageBackend<DbClusterSnapshot> aware) {
+            return aware.getForAccountMigratingLegacyKeys(accountId, key, List.of(snapshotId), owner)
+                    .filter(owner).orElse(null);
+        }
+        Optional<DbClusterSnapshot> canonical = clusterSnapshots.get(key).filter(owner);
+        if (canonical.isPresent()) {
+            clusterSnapshots.get(snapshotId).filter(owner).ifPresent(ignored -> clusterSnapshots.delete(snapshotId));
+            return canonical.get();
+        }
+        Optional<DbClusterSnapshot> legacy = clusterSnapshots.get(snapshotId).filter(owner);
+        if (legacy.isPresent()) {
+            clusterSnapshots.put(key, legacy.get());
+            clusterSnapshots.delete(snapshotId);
+        }
+        return legacy.orElse(null);
+    }
+
+    private void putClusterSnapshotForScope(String accountId, String region, String snapshotId, DbClusterSnapshot snapshot) {
+        String key = dbResourceKey(region, snapshotId);
+        if (clusterSnapshots instanceof AccountAwareStorageBackend<DbClusterSnapshot> aware) {
+            aware.putForAccount(accountId, key, snapshot);
+        } else {
+            clusterSnapshots.put(key, snapshot);
+        }
+    }
+
+    private void deleteClusterSnapshotForScope(String accountId, String region, String snapshotId) {
+        String key = dbResourceKey(region, snapshotId);
+        if (clusterSnapshots instanceof AccountAwareStorageBackend<DbClusterSnapshot> aware) {
+            aware.deleteForAccount(accountId, key);
+        } else {
+            clusterSnapshots.delete(key);
+        }
+    }
+
     public Map<String, String> listTagsForResource(String resourceName) {
         return listTagsForResource(resourceName, resourceRegionOrDefault(resourceName));
     }
@@ -1450,10 +2018,10 @@ public class RdsService implements Resettable, ResourceProvider {
                 });
             }
             case "cluster-snapshot" -> {
-                DbClusterSnapshot snapshot = getDbClusterSnapshot(resourceId);
+                DbClusterSnapshot snapshot = requireClusterSnapshot(currentAccountId(), effectiveRegion, resourceId);
                 yield new TagHandle(snapshot.getTags(), updated -> {
                     snapshot.setTags(updated);
-                    clusterSnapshots.put(resourceId, snapshot);
+                    putClusterSnapshotForScope(currentAccountId(), effectiveRegion, resourceId, snapshot);
                 });
             }
             case "snapshot" -> {
@@ -1943,6 +2511,12 @@ public class RdsService implements Resettable, ResourceProvider {
         validateInstanceSettings(settings);
         String effectiveRegion = effectiveRegion(region);
         DbInstance instance = getDbInstance(id, effectiveRegion);
+        // "You can't modify a stopped DB instance" (user guide, stopping an instance temporarily).
+        if (isStoppedOrInTransit(instance.getStatus())) {
+            throw new AwsException("InvalidDBInstanceState",
+                    "DB instance " + id + " is in state " + instance.getStatus().name().toLowerCase(Locale.ROOT)
+                            + " and cannot be modified.", 400);
+        }
         DbInstanceSettings effective = withEffectiveWindows(settings, instance);
         instance.setStatus(DbInstanceStatus.AVAILABLE);
         if (optionGroupName != null && !optionGroupName.isBlank()) {
@@ -2070,8 +2644,7 @@ public class RdsService implements Resettable, ResourceProvider {
         if (DbInstanceSettings.windowsOverlap(backup, maintenance)) {
             throw DbInstanceSettings.overlappingWindows();
         }
-        return new DbInstanceSettings(settings.storageEncrypted(), settings.kmsKeyId(),
-                settings.backupRetentionPeriod(), backup, maintenance, settings.copyTagsToSnapshot());
+        return settings.withWindows(backup, maintenance);
     }
 
     /**
@@ -2127,6 +2700,338 @@ public class RdsService implements Resettable, ResourceProvider {
                 .filter(option -> dbInstanceClass == null || dbInstanceClass.isBlank()
                         || dbInstanceClass.equalsIgnoreCase(option.get("dbInstanceClass")))
                 .toList();
+    }
+
+    // ── Stop, start and reboot ────────────────────────────────────────────────
+
+    /** Aurora members are stopped and started through their cluster; the model lists InvalidDBClusterStateFault for both calls. */
+    private static void refuseClusterMember(DbInstance instance, String id, String clusterOperation) {
+        if (instance.getDbClusterIdentifier() != null && !instance.getDbClusterIdentifier().isBlank()) {
+            throw new AwsException("InvalidDBClusterStateFault",
+                    "DB instance " + id + " is a member of DB cluster " + instance.getDbClusterIdentifier()
+                            + "; use " + clusterOperation + " on the cluster.", 400);
+        }
+    }
+
+    private static boolean isStoppedOrInTransit(DbInstanceStatus status) {
+        return status == DbInstanceStatus.STOPPING || status == DbInstanceStatus.STOPPED
+                || status == DbInstanceStatus.STARTING;
+    }
+
+    /**
+     * Stops an available standalone instance: an optional snapshot first, then the proxy and
+     * the container go away while the record, its endpoint and its storage volume stay, so
+     * StartDBInstance brings the same database back. The response reports "stopping" and the
+     * stored instance settles to "stopped", the two statuses the user guide describes.
+     */
+    public DbInstance stopDbInstance(String id, String snapshotId) {
+        return stopDbInstance(id, snapshotId, regionResolver.getDefaultRegion());
+    }
+
+    public synchronized DbInstance stopDbInstance(String id, String snapshotId, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbInstance instance = getDbInstance(id, effectiveRegion);
+        refuseClusterMember(instance, id, "StopDBCluster");
+        if (instance.getReadReplicaSourceDbInstanceIdentifier() != null
+                || !instance.getReadReplicaDbInstanceIdentifiers().isEmpty()) {
+            throw new AwsException("InvalidDBInstanceState",
+                    "DB instance " + id + " has a read replica or is a read replica and cannot be stopped.", 400);
+        }
+        if (instance.getStatus() != DbInstanceStatus.AVAILABLE) {
+            throw new AwsException("InvalidDBInstanceState",
+                    "DB instance " + id + " is not in available state.", 400);
+        }
+        if (snapshotId != null && !snapshotId.isBlank()) {
+            createDbSnapshot(snapshotId, id, null, effectiveRegion);
+        }
+
+        instance.setStatus(DbInstanceStatus.STOPPING);
+        putInstanceForScope(accountId, effectiveRegion, id, instance);
+        DbInstance response = RESPONSE_COPIER.convertValue(instance, DbInstance.class);
+
+        if (!config.services().rds().mock()) {
+            proxyManager.stopProxy(rdsResourceRelayKey(instance.getDbInstanceArn(), id));
+            if (instance.getContainerId() != null) {
+                try {
+                    containerManager.stop(buildHandle(instance));
+                } catch (RuntimeException | Error e) {
+                    instance.setStatus(DbInstanceStatus.FAILED);
+                    putInstanceForScope(accountId, effectiveRegion, id, instance);
+                    throw e;
+                }
+            }
+            // The volume stays; only the container is gone until StartDBInstance.
+            instance.setContainerId(null);
+            instance.setContainerHost(null);
+            instance.setContainerPort(0);
+        }
+        instance.setStatus(DbInstanceStatus.STOPPED);
+        putInstanceForScope(accountId, effectiveRegion, id, instance);
+        LOG.infov("DB instance {0} stopped", id);
+        return response;
+    }
+
+    /** Starts a stopped instance on the volume it kept; the response reports "starting". */
+    public DbInstance startDbInstance(String id) {
+        return startDbInstance(id, regionResolver.getDefaultRegion());
+    }
+
+    public synchronized DbInstance startDbInstance(String id, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbInstance instance = getDbInstance(id, effectiveRegion);
+        // A stopped cluster's members are stopped with it and only StartDBCluster brings them
+        // back: started alone, a member would get a standalone container on its own volume
+        // while the cluster stayed stopped.
+        refuseClusterMember(instance, id, "StartDBCluster");
+        if (instance.getStatus() != DbInstanceStatus.STOPPED) {
+            throw new AwsException("InvalidDBInstanceState",
+                    "DB instance " + id + " is not in stopped state.", 400);
+        }
+        instance.setStatus(DbInstanceStatus.STARTING);
+        putInstanceForScope(accountId, effectiveRegion, id, instance);
+        DbInstance response = RESPONSE_COPIER.convertValue(instance, DbInstance.class);
+
+        if (!config.services().rds().mock()) {
+            startStandaloneInstanceBackend(instance, id, effectiveRegion);
+        }
+        instance.setStatus(DbInstanceStatus.AVAILABLE);
+        putInstanceForScope(accountId, effectiveRegion, id, instance);
+        LOG.infov("DB instance {0} started", id);
+        return response;
+    }
+
+    /**
+     * Brings a standalone instance's container up on its existing volume and its proxy with
+     * it, the way a reboot does after stopping them.
+     */
+    private void startStandaloneInstanceBackend(DbInstance instance, String id, String effectiveRegion) {
+        String image = imageForEngine(instance.getEngine(), instance.getEngineVersion());
+        String storageResourceId = resolvedInstanceStorageResourceId(instance);
+        String dockerVolumeName = resolvedInstanceDockerVolumeName(instance);
+        RdsContainerHandle handle;
+        try {
+            handle = containerManager.tryStart(
+                    instance.getDbInstanceArn(), id, storageResourceId,
+                    dockerVolumeName, instance.getEngine(), image, instance.getMasterUsername(),
+                    instance.getMasterPassword(), instance.getDbName());
+        } catch (RuntimeException | Error e) {
+            instance.setStatus(DbInstanceStatus.FAILED);
+            putInstanceForScope(currentAccountId(), effectiveRegion, id, instance);
+            throw e;
+        }
+        instance.setContainerStorageResourceId(storageResourceId);
+        instance.setDockerVolumeName(dockerVolumeName);
+        instance.setContainerId(handle != null ? handle.getContainerId() : null);
+        instance.setContainerHost(handle != null ? handle.getHost() : null);
+        instance.setContainerPort(handle != null ? handle.getPort() : 0);
+        if (hasBackend(instance.getContainerHost(), instance.getContainerPort())) {
+            String effectiveMasterUser = instance.getMasterUsername() != null
+                    ? instance.getMasterUsername() : "root";
+            final String accountId = accountIdFromArn(instance.getDbInstanceArn());
+            final String instanceRegion = regionFromArn(instance.getDbInstanceArn());
+            proxyManager.startProxy(rdsResourceRelayKey(instance.getDbInstanceArn(), id),
+                    instance.getEngine(),
+                    instance.isIamDatabaseAuthenticationEnabled(),
+                    instance.getProxyPort(), instance.getContainerHost(), instance.getContainerPort(),
+                    instance.getEndpoint().address(),
+                    effectiveMasterUser, instance.getMasterPassword(), instance.getDbName(),
+                    (user, pw) -> validateDbPasswordForScope(accountId, instanceRegion, id, user, pw));
+        }
+    }
+
+    /**
+     * Stops an available cluster and its members: the cluster's proxy and container go away,
+     * every member's proxy with them, and all of them report "stopped" until StartDBCluster.
+     */
+    public synchronized DbCluster stopDbCluster(String id, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbCluster cluster = getDbCluster(id, effectiveRegion);
+        if (cluster.getStatus() != null && cluster.getStatus() != DbInstanceStatus.AVAILABLE) {
+            throw new AwsException("InvalidDBClusterStateFault",
+                    "DB cluster " + id + " is not in available state.", 400);
+        }
+        cluster.setStatus(DbInstanceStatus.STOPPING);
+        putClusterForScope(accountId, effectiveRegion, id, cluster);
+        DbCluster response = RESPONSE_COPIER.convertValue(cluster, DbCluster.class);
+
+        boolean mock = config.services().rds().mock();
+        for (String memberId : cluster.getDbClusterMembers()) {
+            DbInstance member = findInstanceForScope(accountId, effectiveRegion, memberId);
+            if (member == null) {
+                continue;
+            }
+            if (!mock) {
+                proxyManager.stopProxy(rdsResourceRelayKey(member.getDbInstanceArn(), memberId));
+            }
+            member.setStatus(DbInstanceStatus.STOPPED);
+            member.setContainerHost(null);
+            member.setContainerPort(0);
+            putInstanceForScope(accountId, effectiveRegion, memberId, member);
+        }
+        if (!mock) {
+            proxyManager.stopProxy(rdsResourceRelayKey(cluster.getDbClusterArn(), id));
+            if (cluster.getContainerId() != null) {
+                try {
+                    containerManager.stop(buildClusterHandle(cluster));
+                } catch (RuntimeException | Error e) {
+                    cluster.setStatus(DbInstanceStatus.FAILED);
+                    putClusterForScope(accountId, effectiveRegion, id, cluster);
+                    throw e;
+                }
+            }
+            cluster.setContainerId(null);
+            cluster.setContainerHost(null);
+            cluster.setContainerPort(0);
+        }
+        cluster.setStatus(DbInstanceStatus.STOPPED);
+        putClusterForScope(accountId, effectiveRegion, id, cluster);
+        LOG.infov("DB cluster {0} stopped", id);
+        return response;
+    }
+
+    /** Starts a stopped cluster and its members on the cluster's kept volume. */
+    public synchronized DbCluster startDbCluster(String id, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbCluster cluster = getDbCluster(id, effectiveRegion);
+        if (cluster.getStatus() != DbInstanceStatus.STOPPED) {
+            throw new AwsException("InvalidDBClusterStateFault",
+                    "DB cluster " + id + " is not in stopped state.", 400);
+        }
+        cluster.setStatus(DbInstanceStatus.STARTING);
+        putClusterForScope(accountId, effectiveRegion, id, cluster);
+        DbCluster response = RESPONSE_COPIER.convertValue(cluster, DbCluster.class);
+
+        if (!config.services().rds().mock()) {
+            startClusterBackend(cluster, id, effectiveRegion);
+        }
+        cluster.setStatus(DbInstanceStatus.AVAILABLE);
+        putClusterForScope(accountId, effectiveRegion, id, cluster);
+        for (String memberId : cluster.getDbClusterMembers()) {
+            DbInstance member = findInstanceForScope(accountId, effectiveRegion, memberId);
+            if (member == null) {
+                continue;
+            }
+            member.setContainerId(cluster.getContainerId());
+            member.setContainerHost(cluster.getContainerHost());
+            member.setContainerPort(cluster.getContainerPort());
+            if (!config.services().rds().mock() && hasBackend(cluster.getContainerHost(), cluster.getContainerPort())) {
+                final String memberRegion = regionFromArn(member.getDbInstanceArn());
+                proxyManager.startProxy(rdsResourceRelayKey(member.getDbInstanceArn(), memberId),
+                        member.getEngine(), member.isIamDatabaseAuthenticationEnabled(), member.getProxyPort(),
+                        cluster.getContainerHost(), cluster.getContainerPort(), member.getEndpoint().address(),
+                        member.getMasterUsername() != null ? member.getMasterUsername() : "root",
+                        member.getMasterPassword(), member.getDbName(),
+                        (user, pw) -> validateDbPasswordForScope(accountId, memberRegion, memberId, user, pw));
+            }
+            member.setStatus(DbInstanceStatus.AVAILABLE);
+            putInstanceForScope(accountId, effectiveRegion, memberId, member);
+        }
+        LOG.infov("DB cluster {0} started", id);
+        return response;
+    }
+
+    /** Reboots a cluster: its container and proxies go down and come back on the same volume. */
+    public synchronized DbCluster rebootDbCluster(String id, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbCluster cluster = getDbCluster(id, effectiveRegion);
+        if (cluster.getStatus() != null && cluster.getStatus() != DbInstanceStatus.AVAILABLE) {
+            throw new AwsException("InvalidDBClusterStateFault",
+                    "DB cluster " + id + " is not in available state.", 400);
+        }
+        cluster.setStatus(DbInstanceStatus.REBOOTING);
+        putClusterForScope(accountId, effectiveRegion, id, cluster);
+        DbCluster response = RESPONSE_COPIER.convertValue(cluster, DbCluster.class);
+        stopDbClusterRuntime(cluster, id, effectiveRegion, accountId);
+        if (!config.services().rds().mock()) {
+            startClusterBackend(cluster, id, effectiveRegion);
+        }
+        cluster.setStatus(DbInstanceStatus.AVAILABLE);
+        putClusterForScope(accountId, effectiveRegion, id, cluster);
+        for (String memberId : cluster.getDbClusterMembers()) {
+            DbInstance member = findInstanceForScope(accountId, effectiveRegion, memberId);
+            if (member == null) {
+                continue;
+            }
+            member.setContainerId(cluster.getContainerId());
+            member.setContainerHost(cluster.getContainerHost());
+            member.setContainerPort(cluster.getContainerPort());
+            if (!config.services().rds().mock() && hasBackend(cluster.getContainerHost(), cluster.getContainerPort())) {
+                final String memberRegion = regionFromArn(member.getDbInstanceArn());
+                proxyManager.startProxy(rdsResourceRelayKey(member.getDbInstanceArn(), memberId),
+                        member.getEngine(), member.isIamDatabaseAuthenticationEnabled(), member.getProxyPort(),
+                        cluster.getContainerHost(), cluster.getContainerPort(), member.getEndpoint().address(),
+                        member.getMasterUsername() != null ? member.getMasterUsername() : "root",
+                        member.getMasterPassword(), member.getDbName(),
+                        (user, pw) -> validateDbPasswordForScope(accountId, memberRegion, memberId, user, pw));
+            }
+            member.setStatus(DbInstanceStatus.AVAILABLE);
+            putInstanceForScope(accountId, effectiveRegion, memberId, member);
+        }
+        LOG.infov("DB cluster {0} rebooted", id);
+        return response;
+    }
+
+    private void stopDbClusterRuntime(DbCluster cluster, String id, String effectiveRegion, String accountId) {
+        if (config.services().rds().mock()) {
+            return;
+        }
+        for (String memberId : cluster.getDbClusterMembers()) {
+            DbInstance member = findInstanceForScope(accountId, effectiveRegion, memberId);
+            if (member != null) {
+                proxyManager.stopProxy(rdsResourceRelayKey(member.getDbInstanceArn(), memberId));
+            }
+        }
+        proxyManager.stopProxy(rdsResourceRelayKey(cluster.getDbClusterArn(), id));
+        if (cluster.getContainerId() != null) {
+            try {
+                containerManager.stop(buildClusterHandle(cluster));
+            } catch (RuntimeException | Error e) {
+                cluster.setStatus(DbInstanceStatus.FAILED);
+                putClusterForScope(accountId, effectiveRegion, id, cluster);
+                throw e;
+            }
+        }
+        cluster.setContainerId(null);
+        cluster.setContainerHost(null);
+        cluster.setContainerPort(0);
+    }
+
+    /** Brings a cluster's container up on its existing volume and its proxy with it. */
+    private void startClusterBackend(DbCluster cluster, String id, String effectiveRegion) {
+        String image = imageForEngine(cluster.getEngine(), cluster.getEngineVersion());
+        String storageResourceId = resolvedClusterStorageResourceId(cluster);
+        String dockerVolumeName = resolvedClusterDockerVolumeName(cluster);
+        RdsContainerHandle handle;
+        try {
+            handle = containerManager.tryStart(
+                    cluster.getDbClusterArn(), id, storageResourceId, dockerVolumeName,
+                    cluster.getEngine(), image, cluster.getMasterUsername(), cluster.getMasterPassword(),
+                    cluster.getDatabaseName());
+        } catch (RuntimeException | Error e) {
+            cluster.setStatus(DbInstanceStatus.FAILED);
+            putClusterForScope(currentAccountId(), effectiveRegion, id, cluster);
+            throw e;
+        }
+        cluster.setContainerStorageResourceId(storageResourceId);
+        cluster.setDockerVolumeName(dockerVolumeName);
+        cluster.setContainerId(handle != null ? handle.getContainerId() : null);
+        cluster.setContainerHost(handle != null ? handle.getHost() : null);
+        cluster.setContainerPort(handle != null ? handle.getPort() : 0);
+        if (handle != null) {
+            final String accountId = accountIdFromArn(cluster.getDbClusterArn());
+            final String clusterRegion = regionFromArn(cluster.getDbClusterArn());
+            proxyManager.startProxy(rdsResourceRelayKey(cluster.getDbClusterArn(), id),
+                    cluster.getEngine(), cluster.isIamDatabaseAuthenticationEnabled(), cluster.getProxyPort(),
+                    handle.getHost(), handle.getPort(), cluster.getEndpoint().address(),
+                    cluster.getMasterUsername() != null ? cluster.getMasterUsername() : "root",
+                    cluster.getMasterPassword(), cluster.getDatabaseName(),
+                    (user, pw) -> validateDbClusterPasswordForScope(accountId, clusterRegion, id, user, pw));
+        }
     }
 
     public DbInstance rebootDbInstance(String id) {
@@ -5067,98 +5972,28 @@ public class RdsService implements Resettable, ResourceProvider {
         return describeDbSnapshots(snapshotId, instanceId, regionResolver.getRegion());
     }
 
-    public void deleteDbSnapshot(String snapshotId) {
-        deleteDbSnapshot(snapshotId, regionResolver.getRegion());
-    }
-
-    public synchronized void deleteDbSnapshot(String snapshotId, String region) {
-        String effectiveRegion = effectiveRegion(region);
-        getDbSnapshot(snapshotId, effectiveRegion);
-        String key = dbResourceKey(effectiveRegion, snapshotId);
-        if (snapshots instanceof AccountAwareStorageBackend<DbSnapshot> aware) {
-            aware.deleteForAccount(currentAccountId(), key);
-        } else {
-            snapshots.delete(key);
-        }
-        snapshotData.delete(key);
-    }
-
     public DbSnapshot copyDbSnapshot(String sourceId, String targetId) {
         return copyDbSnapshot(sourceId, targetId, regionResolver.getRegion());
     }
 
-    public synchronized DbSnapshot copyDbSnapshot(String sourceId, String targetId, String region) {
-        String effectiveRegion = effectiveRegion(region);
-        DbSnapshot source = getDbSnapshot(sourceId, effectiveRegion);
-        if (findSnapshotForScope(currentAccountId(), effectiveRegion, targetId) != null) {
-            throw new AwsException("DBSnapshotAlreadyExists",
-                    "DB snapshot " + targetId + " already exists.", 400);
-        }
-        DbSnapshot copy = new DbSnapshot(targetId, source.getDbInstanceIdentifier(), Instant.now(),
-                source.getEngine(), source.getEngineVersion(), source.getAllocatedStorage(), "available",
-                source.getMasterUsername(), source.getMasterPassword(), source.getAvailabilityZone(),
-                source.getVpcId(), source.getInstanceCreateTime(), source.getPort(),
-                source.isIamDatabaseAuthenticationEnabled(), source.getDbiResourceId(), source.getDbInstanceClass());
-        copy.setDbName(source.getDbName());
-        copy.setTags(new LinkedHashMap<>(source.getTags()));
-        copy.setDbSnapshotArn(regionResolver.buildArn("rds", effectiveRegion, "snapshot:" + targetId));
-        snapshotData.get(dbResourceKey(effectiveRegion, sourceId))
-                .ifPresent(data -> snapshotData.put(dbResourceKey(effectiveRegion, targetId), data));
-        putSnapshotForScope(currentAccountId(), effectiveRegion, targetId, copy);
-        return copy;
+    public DbSnapshot copyDbSnapshot(String sourceId, String targetId, String region) {
+        return copyDbSnapshot(sourceId, targetId, true, Map.of(), null, null, region);
     }
 
     public DbClusterSnapshot createDbClusterSnapshot(String snapshotId, String clusterId) {
-        DbCluster cluster = getDbCluster(clusterId, regionResolver.getRegion());
-        if (clusterSnapshots.get(snapshotId).isPresent()) {
-            throw new AwsException("DBClusterSnapshotAlreadyExistsFault",
-                    "DB cluster snapshot " + snapshotId + " already exists.", 400);
-        }
-        DbClusterSnapshot snapshot = new DbClusterSnapshot();
-        snapshot.setDbClusterSnapshotIdentifier(snapshotId);
-        snapshot.setDbClusterIdentifier(clusterId);
-        snapshot.setEngine(cluster.getEngine() != null ? cluster.getEngine().name().toLowerCase() : "aurora-postgresql");
-        snapshot.setDbClusterSnapshotArn(
-                regionResolver.buildArn("rds", regionResolver.getRegion(), "cluster-snapshot:" + snapshotId));
-        clusterSnapshots.put(snapshotId, snapshot);
-        return snapshot;
+        return createDbClusterSnapshot(snapshotId, clusterId, Map.of(), regionResolver.getRegion());
     }
 
     public DbClusterSnapshot getDbClusterSnapshot(String snapshotId) {
-        return clusterSnapshots.get(snapshotId).orElseThrow(() ->
-                new AwsException("DBClusterSnapshotNotFoundFault",
-                        "DBClusterSnapshot " + snapshotId + " not found.", 404));
+        return requireClusterSnapshot(currentAccountId(), regionResolver.getRegion(), snapshotId);
     }
 
     public Collection<DbClusterSnapshot> listDbClusterSnapshots(String snapshotId, String clusterId) {
-        if (snapshotId != null && !snapshotId.isBlank()) {
-            return clusterSnapshots.get(snapshotId).map(List::of).orElse(List.of());
-        }
-        return clusterSnapshots.scan(k -> true).stream()
-                .filter(s -> clusterId == null || clusterId.isBlank()
-                        || clusterId.equals(s.getDbClusterIdentifier()))
-                .toList();
-    }
-
-    public void deleteDbClusterSnapshot(String snapshotId) {
-        getDbClusterSnapshot(snapshotId);
-        clusterSnapshots.delete(snapshotId);
+        return describeDbClusterSnapshots(snapshotId, clusterId, null, regionResolver.getRegion());
     }
 
     public DbClusterSnapshot copyDbClusterSnapshot(String sourceId, String targetId) {
-        DbClusterSnapshot source = getDbClusterSnapshot(sourceId);
-        if (clusterSnapshots.get(targetId).isPresent()) {
-            throw new AwsException("DBClusterSnapshotAlreadyExistsFault",
-                    "DB cluster snapshot " + targetId + " already exists.", 400);
-        }
-        DbClusterSnapshot copy = new DbClusterSnapshot();
-        copy.setDbClusterSnapshotIdentifier(targetId);
-        copy.setDbClusterIdentifier(source.getDbClusterIdentifier());
-        copy.setEngine(source.getEngine());
-        copy.setDbClusterSnapshotArn(
-                regionResolver.buildArn("rds", regionResolver.getRegion(), "cluster-snapshot:" + targetId));
-        clusterSnapshots.put(targetId, copy);
-        return copy;
+        return copyDbClusterSnapshot(sourceId, targetId, false, Map.of(), regionResolver.getRegion());
     }
 
     // ── Option Groups ─────────────────────────────────────────────────────────
@@ -6352,6 +7187,20 @@ public class RdsService implements Resettable, ResourceProvider {
             if (cluster.getStatus() == DbInstanceStatus.DELETING) {
                 continue;
             }
+            if (cluster.getStatus() == DbInstanceStatus.STOPPED) {
+                // A stopped cluster stays stopped across an emulator restart; StartDBCluster
+                // brings its container back. Its endpoint keeps its port when that port is free.
+                int port = reserveOrAllocateProxyPort(cluster.getProxyPort());
+                if (port != cluster.getProxyPort()) {
+                    cluster.setProxyPort(port);
+                    DbEndpoint endpoint = proxyEndpoint(port);
+                    cluster.setEndpoint(endpoint);
+                    cluster.setReaderEndpoint(endpoint);
+                    putClusterForScope(accountIdFromArn(cluster.getDbClusterArn()),
+                            regionFromArn(cluster.getDbClusterArn()), cluster.getDbClusterIdentifier(), cluster);
+                }
+                continue;
+            }
             String accountId = accountIdFromArn(cluster.getDbClusterArn());
             String clusterRegion = regionFromArn(cluster.getDbClusterArn());
             String storageResourceId = resolvedClusterStorageResourceId(cluster);
@@ -6445,6 +7294,17 @@ public class RdsService implements Resettable, ResourceProvider {
     private void restoreInstances() {
         for (DbInstance instance : allInstances()) {
             if (instance.getStatus() == DbInstanceStatus.DELETING) {
+                continue;
+            }
+            if (instance.getStatus() == DbInstanceStatus.STOPPED) {
+                // Stays stopped across a restart; StartDBInstance brings the container back.
+                int port = reserveOrAllocateProxyPort(instance.getProxyPort());
+                if (port != instance.getProxyPort()) {
+                    instance.setProxyPort(port);
+                    instance.setEndpoint(proxyEndpoint(port));
+                    putInstanceForScope(accountIdFromArn(instance.getDbInstanceArn()),
+                            regionFromArn(instance.getDbInstanceArn()), instance.getDbInstanceIdentifier(), instance);
+                }
                 continue;
             }
             String accountId = accountIdFromArn(instance.getDbInstanceArn());
@@ -7025,6 +7885,15 @@ public class RdsService implements Resettable, ResourceProvider {
             aware.putForAccount(accountId, key, snapshot);
         } else {
             snapshots.put(key, snapshot);
+        }
+    }
+
+    private void deleteSnapshotForScope(String accountId, String region, String snapshotId) {
+        String key = dbResourceKey(region, snapshotId);
+        if (snapshots instanceof AccountAwareStorageBackend<DbSnapshot> aware) {
+            aware.deleteForAccount(accountId, key);
+        } else {
+            snapshots.delete(key);
         }
     }
 

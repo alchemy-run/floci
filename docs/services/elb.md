@@ -113,8 +113,9 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 - `ModifyCapacityReservation` persists `MinimumLoadBalancerCapacity` on the load balancer. `ResetCapacityReservation=true` clears it.
 - `authenticate-oidc` listener actions are stored and returned on describe. `ClientSecret` is accepted on create/modify and omitted from describe, matching AWS.
 - `CreateListener` for NLB TCP/TLS (and HTTPS with a certificate) is a control-plane success even if the local HTTP proxy cannot bind.
-- Region maps reloaded from storage can be immutable (`Map.of()` / Jackson empty objects). ElbV2 copies them into a `ConcurrentHashMap` before mutate — otherwise `UnsupportedOperationException` (null message) leaked as `InternalFailure: Unexpected error: null`.
+- Region maps reloaded from storage can be immutable (`Map.of()` / Jackson empty objects). ElbV2 copies them into a `ConcurrentHashMap` before mutation; otherwise `UnsupportedOperationException` (null message) leaked as `InternalFailure: Unexpected error: null`.
 - `DescribeListenerCertificates` marks the CreateListener/ModifyListener certificate as `IsDefault=true` and AddListenerCertificates entries as `IsDefault=false`. `ModifyListener` does not wipe SNI extras.
+- `RegisterTargets` rejects link-local and cloud instance-metadata addresses (`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`) with `InvalidTarget`, and the load balancer and its health checks refuse to connect to them. Loopback and private addresses stay reachable so a load balancer can front a neighbouring container.
 
 ## ARN Format
 

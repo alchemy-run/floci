@@ -70,6 +70,17 @@ class ProvisionContextTest {
     }
 
     @Test
+    void resolveOrDefaultReturnsTheValueOtherwiseTheDefault() {
+        ProvisionContext ctx = context(null);
+
+        assertEquals("HTTP", ctx.resolveOrDefault(props("{\"ProtocolType\":\"HTTP\"}"), "ProtocolType", "WEBSOCKET"));
+        assertEquals("WEBSOCKET", ctx.resolveOrDefault(props("{}"), "ProtocolType", "WEBSOCKET"), "absent falls back");
+        assertEquals("WEBSOCKET", ctx.resolveOrDefault(props("{\"ProtocolType\":\"\"}"), "ProtocolType", "WEBSOCKET"),
+                "blank falls back");
+        assertEquals("WEBSOCKET", ctx.resolveOrDefault(null, "ProtocolType", "WEBSOCKET"), "null props falls back");
+    }
+
+    @Test
     void stablePhysicalNamePrefersTheTemplatesName() {
         assertEquals("chosen",
                 context("prior").stablePhysicalName("chosen", "Bucket", 63, true));

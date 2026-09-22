@@ -65,6 +65,7 @@ class RedshiftCatalogSeedIntegrationTest {
         try {
             return Awaitility.await()
                     .atMost(Duration.ofSeconds(30))
+                    .pollDelay(Duration.ZERO)
                     .pollInterval(Duration.ofMillis(500))
                     .ignoreExceptions()
                     .until(() -> DriverManager.getConnection(jdbcUrl(cluster), username, password), Objects::nonNull);

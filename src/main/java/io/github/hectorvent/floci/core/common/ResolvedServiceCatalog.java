@@ -44,6 +44,7 @@ import io.github.hectorvent.floci.services.ses.SesContactController;
 import io.github.hectorvent.floci.services.ses.SesCvetController;
 import io.github.hectorvent.floci.services.ses.SesDedicatedIpController;
 import io.github.hectorvent.floci.services.ses.SesIdentityController;
+import io.github.hectorvent.floci.services.ses.SesImportJobController;
 import io.github.hectorvent.floci.services.ses.SesSendController;
 import io.github.hectorvent.floci.services.ses.SesSuppressionController;
 import io.github.hectorvent.floci.services.ses.SesTagController;
@@ -193,7 +194,7 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("neptune"), Set.of(), Set.of()),
                 descriptor("docdb", "docdb", config.services().docdb().enabled(), true,
-                        "docdb", config.storage().mode(),                        
+                        "docdb", config.storage().mode(),
                         5000L, AwsNamespaces.RDS, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),
                         Set.of(), Set.of("docdb"), Set.of(), Set.of()),
@@ -310,7 +311,7 @@ public class ResolvedServiceCatalog {
                                 SesDedicatedIpController.class, SesIdentityController.class,
                                 SesSendController.class, SesSuppressionController.class,
                                 SesTagController.class, SesTemplateController.class,
-                                SesTenantController.class)),
+                                SesImportJobController.class, SesTenantController.class)),
                 descriptor("es", "opensearch", config.services().opensearch().enabled(), true,
                         "opensearch", storageMode(config.storage().services().opensearch().mode(), config.storage().mode()),
                         config.storage().services().opensearch().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -592,6 +593,11 @@ public class ResolvedServiceCatalog {
                         "bcmpricingcalculator", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AWSBCMPricingCalculator."), Set.of("bcm-pricing-calculator"), Set.of(), Set.of()),
+                descriptor("timestream-influxdb", "timestreaminfluxdb",
+                        config.services().timestreamInfluxdb().enabled(), true,
+                        "timestreaminfluxdb", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonTimestreamInfluxDB."), Set.of("timestream-influxdb"), Set.of(), Set.of()),
                 descriptor("bcm-data-exports", "bcmdataexports", config.services().bcmDataExports().enabled(), true,
                         "bcmdataexports", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
@@ -737,7 +743,11 @@ public class ResolvedServiceCatalog {
                         "marketplace", config.storage().mode(), 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON, ServiceProtocol.JSON, ServiceProtocol.CBOR),
                         Set.of("AWSMPCommerceService_v20200301.", "AWSMPEntitlementService.", "AWSMPMeteringService."), Set.of("aws-marketplace"), Set.of("AWS Marketplace Entitlement Service"),
-                        Set.of(MarketplaceCatalogController.class, MarketplaceDeploymentController.class, MarketplaceReportingController.class, MarketplaceDiscoveryController.class))
+                        Set.of(MarketplaceCatalogController.class, MarketplaceDeploymentController.class, MarketplaceReportingController.class, MarketplaceDiscoveryController.class)),
+                descriptor("dms", "dms", config.services().dms().enabled(), true,
+                        "dms", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonDMSv20160101."), Set.of("dms"), Set.of(), Set.of())
         ));
     }
 

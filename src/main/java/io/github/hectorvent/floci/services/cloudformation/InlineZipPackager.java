@@ -17,7 +17,7 @@ import java.util.zip.ZipOutputStream;
  * Lives outside {@code CloudFormationResourceProvisioner} so the eventual Lambda
  * provisioner extraction can take it along unchanged.</p>
  */
-final class InlineZipPackager {
+public final class InlineZipPackager {
 
     /**
      * The cfn-response module for Node.js. Unlike AWS's canonical module this one honors
@@ -101,7 +101,7 @@ final class InlineZipPackager {
 
     private InlineZipPackager() {}
 
-    static String sourceToZipBase64(String source, String handler, String runtime) {
+    public static String sourceToZipBase64(String source, String handler, String runtime) {
         String module = handler.contains(".") ? handler.substring(0, handler.lastIndexOf('.')) : "index";
         String ext = runtime.startsWith("python") ? ".py" : ".js";
         try {

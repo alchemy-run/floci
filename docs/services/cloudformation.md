@@ -53,6 +53,18 @@ StackSets support both `SELF_MANAGED` and the Cloud Launchpad `SERVICE_MANAGED` 
 
 Operation IDs are recorded and validated. Duplicate IDs return `OperationIdAlreadyExistsException`, missing stack sets return `StackSetNotFoundException`, and missing operation IDs return `OperationNotFoundException`. Invalid targets and request shapes use the CloudFormation query-protocol validation errors. Operations complete locally, so `OperationInProgressException` is only reachable when local operation state actually overlaps; Floci does not inject concurrency failures solely to exercise an error code.
 
+## CloudWatch Logs log streams
+
+`AWS::Logs::LogStream` creates a stream in the required `LogGroupName`. `LogStreamName` is optional;
+when omitted, including through `Fn::If` returning `AWS::NoValue`, CloudFormation generates a name
+and keeps it across updates. An explicit empty name remains invalid. `Ref` returns the stream name.
+The resource has no `Fn::GetAtt` attributes.
+
+Changing either name replaces the stream. The previous stream and its events remain available
+until the update commits; a failed stack update restores the previous stream. `UpdateReplacePolicy:
+Retain` keeps a displaced stream. Stack deletion removes the current stream and its events, and
+tolerates a stream that was already deleted.
+
 ## CloudWatch Logs metric filters
 
 `AWS::Logs::MetricFilter` returns the filter name alone for both `Ref` and
@@ -112,12 +124,12 @@ cross-resource references.
 <!-- floci:cfn-types:start -->
 | Service | Resource types |
 |---|---|
-| S3 | `Bucket`, `BucketPolicy` (accepted; policy not enforced) |
+| S3 | `Bucket`, `BucketPolicy` (document stored on the bucket; S3 does not evaluate it) |
 | SQS | `Queue`, `QueuePolicy` (accepted; policy not enforced) |
 | SNS | `Topic`, `Subscription`, `TopicPolicy` |
 | DynamoDB | `Table`, `GlobalTable` |
 | Lambda | `Function` (Zip via S3/inline `ZipFile`, and Image), `LayerVersion`, `EventSourceMapping` (SQS, Kinesis, DynamoDB Streams), `Version`, `Alias` (also what SAM's `AutoPublishAlias` expands into), `Permission`, `EventInvokeConfig`, `MicrovmImage`, `NetworkConnector`, `Url`. Inline `ZipFile` packages include the `cfn-response` (Node.js) / `cfnresponse` (Python) module AWS injects for that code path, so Solutions-style custom-resource handlers work. |
-| IAM | `Role`, `User`, `AccessKey`, `Policy`, `ManagedPolicy`, `InstanceProfile` |
+| IAM | `Role`, `User` (template `LoginProfile` and `PermissionsBoundary` are ignored; an API-created login profile is removed on delete), `AccessKey`, `Policy`, `ManagedPolicy`, `InstanceProfile` |
 | Organizations | `Organization`, `OrganizationalUnit`, `Account`, `Policy`, `ResourcePolicy` |
 | SSM | `Parameter` |
 | KMS | `Key`, `Alias` |
@@ -138,7 +150,7 @@ cross-resource references.
 | CodePipeline | `Pipeline`, `CustomActionType`, `Webhook` |
 | CodeBuild | `Project` |
 | Batch | `ComputeEnvironment`, `JobQueue`, `JobDefinition` |
-| Cognito | `UserPool` (`ProviderURL` is the local issuer of the tokens Floci mints, `<base-url>/<pool id>`), `UserPoolClient`, `UserPoolDomain` |
+| Cognito | `UserPool` (`ProviderURL` is the local issuer of the tokens Floci mints, `<base-url>/<pool id>`), `UserPoolClient`, `UserPoolDomain`, `UserPoolGroup` |
 | ACM | `Certificate` |
 | EventBridge | `Rule`, `EventBus`, `EventBusPolicy` |
 | EventBridge Scheduler | `ScheduleGroup` |
@@ -149,7 +161,7 @@ cross-resource references.
 | IoT Core | `DomainConfiguration` (`ServerCertificates` resolves to a JSON string), `Policy` (deleted after detaching it from its principals; on AWS the delete fails with `DeleteConflictException` while the policy is attached), `Thing`, `TopicRule` |
 | CloudFront | `CachePolicy`, `Distribution`, `OriginAccessControl`, `OriginRequestPolicy`, `ResponseHeadersPolicy` |
 | CloudWatch | `Alarm`, `Dashboard` |
-| CloudWatch Logs | `LogGroup`, `MetricFilter` |
+| CloudWatch Logs | `LogGroup`, `LogStream`, `MetricFilter` |
 | WAFv2 | `WebACL` |
 | Config | `ConfigRule` |
 | CloudFormation | `CustomResource`, `Custom::DynamoDBReplica` (applied natively against DynamoDB, not via a provider Lambda), `Stack` (nested stacks), `Custom::*` (Lambda-backed) |

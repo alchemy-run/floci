@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SchemaRegistry {
     private final Map<String, GraphQLSchema> schemas = new ConcurrentHashMap<>();
     private final Map<String, GraphQL> engines = new ConcurrentHashMap<>();
+    private final Map<String, String> sdls = new ConcurrentHashMap<>();
     private final AppSyncSchemaParser appSyncSchemaParser;
     private final AuthFieldWrapper authFieldWrapper;
 
@@ -47,6 +48,11 @@ public class SchemaRegistry {
         }
         schemas.put(apiId, schema);
         engines.put(apiId, buildGraphQL(schema));
+        sdls.put(apiId, sdl);
+    }
+
+    public Optional<String> getSdl(String apiId) {
+        return Optional.ofNullable(sdls.get(apiId));
     }
 
     public Optional<GraphQLSchema> getSchema(String apiId) {
@@ -60,6 +66,7 @@ public class SchemaRegistry {
     public void remove(String apiId) {
         schemas.remove(apiId);
         engines.remove(apiId);
+        sdls.remove(apiId);
     }
 
     public static GraphQL buildGraphQL(GraphQLSchema schema) {

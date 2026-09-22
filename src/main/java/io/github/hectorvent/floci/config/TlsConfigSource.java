@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import org.eclipse.microprofile.config.spi.ConfigSource;
@@ -62,22 +63,27 @@ public class TlsConfigSource implements ConfigSource {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     // host.docker.internal: how Lambda containers reach Floci when it runs on the host (not in a container).
-    private static final List<String> DEFAULT_SAN_HOSTNAMES = List.of(
-            "localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
-            "localhost.floci.io", "*.localhost.floci.io", "host.docker.internal",
-            "*.execute-api.localhost.floci.io", "*.execute-api.localhost.localstack.cloud",
-            // StartSyncExecution's Smithy hostPrefix "sync-" → sync-states.{region}.amazonaws.com
-            "sync-states.us-east-1.amazonaws.com",
-            "sync-states-fips.us-east-1.amazonaws.com",
-            "*.us-east-1.amazonaws.com",
-            // GraphQL data plane: {apiId}.appsync-api.{region}.amazonaws.com
-            // (*.us-east-1.amazonaws.com is a single-label wildcard and does not match this.)
-            "*.appsync-api.us-east-1.amazonaws.com",
-            // API Gateway invoke / @connections: {apiId}.execute-api.{region}.amazonaws.com
-            "*.execute-api.us-east-1.amazonaws.com",
-            // Lambda MicroVM endpoints: {microvmId}.lambda-microvm.{region}.localhost.floci.io
-            // (*.localhost.floci.io is a single-label wildcard and does not match this.)
-            "*.lambda-microvm.us-east-1.localhost.floci.io");
+    // A wildcard SAN covers one label, so every two-label service form needs its own entry.
+    // Package-private so the tests assert against this list instead of copying it.
+    static final List<String> DEFAULT_SAN_HOSTNAMES = defaultSanHostnames();
+
+    private static List<String> defaultSanHostnames() {
+        List<String> sans = new ArrayList<>(List.of(
+                "localhost", "127.0.0.1", "0.0.0.0", "*.localhost",
+                "localhost.floci.io", "*.localhost.floci.io",
+                "*.execute-api.localhost.floci.io",
+                "*.execute-api.localhost.localstack.cloud",
+                "*.cloudfront.localhost.floci.io", "*.cloudfront.localhost",
+                "host.docker.internal",
+                "sync-states.us-east-1.amazonaws.com", "sync-states-fips.us-east-1.amazonaws.com",
+                "*.us-east-1.amazonaws.com", "*.appsync-api.us-east-1.amazonaws.com",
+                "*.execute-api.us-east-1.amazonaws.com",
+                "*.lambda-microvm.us-east-1.localhost.floci.io"));
+        for (String region : AwsRegions.ALL) {
+            sans.add("*.dkr.ecr." + region + ".localhost.floci.io");
+        }
+        return List.copyOf(sans);
+    }
 
     private static volatile Path resolvedTlsDir;
 

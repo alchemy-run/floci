@@ -274,7 +274,7 @@ public class StepFunctionsCfnProvisioner implements CfnResourceProvisioner {
         if (roleArn == null || roleArn.isBlank()) {
             throw new AwsException("ValidationError", "RoleArn is required for a state machine", 400);
         }
-        String type = resolveOrDefault(props, "StateMachineType", ctx, "STANDARD");
+        String type = ctx.resolveOrDefault(props, "StateMachineType", "STANDARD");
         Map<String, String> tags = parseCfnTags(props != null ? props.get("Tags") : null, engine);
         String definition = resolveStateMachineDefinition(props, ctx);
         JsonNode loggingConfiguration = resolveStateMachineLoggingConfiguration(props, engine);
@@ -712,11 +712,6 @@ public class StepFunctionsCfnProvisioner implements CfnResourceProvisioner {
                     "Could not record Step Functions replacement ownership for "
                             + resource.getLogicalId(), e);
         }
-    }
-    private String resolveOrDefault(JsonNode props, String name,
-                                    ProvisionContext ctx, String defaultValue) {
-        String value = ctx.resolveOptional(props, name);
-        return (value != null && !value.isBlank()) ? value : defaultValue;
     }
     private Map<String, String> parseCfnTags(JsonNode tagsNode, CloudFormationTemplateEngine engine) {
         tagsNode = engine.resolveNode(tagsNode);

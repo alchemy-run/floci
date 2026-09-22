@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.apigateway;
 
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -2250,6 +2251,12 @@ public class ApiGatewayController {
         node.put("apiKeySource", "HEADER");
         node.put("disableExecuteApiEndpoint", false);
 
+        // AWS returns the policy JSON-escaped inside the string ({\"Version\":...}), and the
+        // Terraform provider unquotes it on read, so a raw document here would fail to parse.
+        if (api.getPolicy() != null) {
+            node.put("policy", escapePolicy(api.getPolicy()));
+        }
+
         return node;
     }
 
@@ -2261,6 +2268,11 @@ public class ApiGatewayController {
                 value != null && (value.equalsIgnoreCase("methods")
                         || value.contains("resourceMethods")
                         || value.equalsIgnoreCase("item")));
+    }
+
+    // Policies are JSON strings, including escaped newlines in pretty-printed documents.
+    private static String escapePolicy(String policy) {
+        return new String(JsonStringEncoder.getInstance().quoteAsString(policy));
     }
 
     private ObjectNode toResourceNode(ApiGatewayResource r) {
@@ -2320,6 +2332,10 @@ public class ApiGatewayController {
         node.put("apiKeyRequired", m.isApiKeyRequired());
         if (m.getAuthorizerId() != null) node.put("authorizerId", m.getAuthorizerId());
         if (m.getRequestValidatorId() != null) node.put("requestValidatorId", m.getRequestValidatorId());
+        if (m.getRequestParameters() != null && !m.getRequestParameters().isEmpty()) {
+            ObjectNode params = node.putObject("requestParameters");
+            m.getRequestParameters().forEach(params::put);
+        }
         if (m.getRequestModels() != null && !m.getRequestModels().isEmpty()) {
             ObjectNode models = objectMapper.createObjectNode();
             m.getRequestModels().forEach(models::put);
@@ -2408,6 +2424,16 @@ public class ApiGatewayController {
         node.put("cacheClusterEnabled", s.isCacheClusterEnabled());
         node.put("cacheClusterStatus", s.getCacheClusterStatus());
         if (s.getCacheClusterSize() != null) node.put("cacheClusterSize", s.getCacheClusterSize());
+        node.put("tracingEnabled", s.isTracingEnabled());
+        if (s.getAccessLogSettings() != null) {
+            ObjectNode logs = node.putObject("accessLogSettings");
+            if (s.getAccessLogSettings().destinationArn() != null) {
+                logs.put("destinationArn", s.getAccessLogSettings().destinationArn());
+            }
+            if (s.getAccessLogSettings().format() != null) {
+                logs.put("format", s.getAccessLogSettings().format());
+            }
+        }
         if (!s.getVariables().isEmpty()) {
             ObjectNode vars = node.putObject("variables");
             s.getVariables().forEach(vars::put);

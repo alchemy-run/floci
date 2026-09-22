@@ -232,6 +232,10 @@ public class ApiGatewayService {
         api.setCreatedDate(System.currentTimeMillis() / 1000L);
         api.setTags(ReservedTags.stripApiGatewayReservedTags(tags));
 
+        if (request.get("policy") instanceof String policy && !policy.isEmpty()) {
+            api.setPolicy(policy);
+        }
+
         EndpointConfiguration endpointConfiguration = new EndpointConfiguration();
         if (request.get(EPC_KEY) instanceof Map<?, ?> epMap) {
             epMap.forEach((k, v) -> {
@@ -779,6 +783,13 @@ public class ApiGatewayService {
             stage.setCacheClusterSize((String) request.getOrDefault("cacheClusterSize", "0.5"));
         }
 
+        stage.setTracingEnabled(Boolean.TRUE.equals(request.get("tracingEnabled")));
+        if (request.get("accessLogSettings") instanceof Map<?, ?> logs) {
+            stage.setAccessLogSettings(new Stage.AccessLogSettings(
+                    logs.get("destinationArn") instanceof String arn ? arn : null,
+                    logs.get("format") instanceof String format ? format : null));
+        }
+
         stageStore.put(stageKey(region, apiId, stageName), stage);
         LOG.infov("Created stage {0} for API {1}", stageName, apiId);
         return stage;
@@ -807,12 +818,24 @@ public class ApiGatewayService {
                 String value = op.get("value");
                 LOG.infov("Patch operation: op={0}, path={1}, value={2}", opType, path, value);
 
+                if ("remove" .equals(opType) && "/accessLogSettings" .equals(path)) {
+                    stage.setAccessLogSettings(null);
+                    continue;
+                }
                 if (!"replace" .equals(opType) && !"add" .equals(opType)) continue;
 
                 if ("/description" .equals(path)) {
                     stage.setDescription(value);
                 } else if ("/deploymentId" .equals(path)) {
                     stage.setDeploymentId(value);
+                } else if ("/tracingEnabled" .equals(path)) {
+                    stage.setTracingEnabled(Boolean.parseBoolean(value));
+                } else if ("/accessLogSettings/destinationArn" .equals(path)) {
+                    Stage.AccessLogSettings logs = stage.getAccessLogSettings();
+                    stage.setAccessLogSettings(new Stage.AccessLogSettings(value, logs != null ? logs.format() : null));
+                } else if ("/accessLogSettings/format" .equals(path)) {
+                    Stage.AccessLogSettings logs = stage.getAccessLogSettings();
+                    stage.setAccessLogSettings(new Stage.AccessLogSettings(logs != null ? logs.destinationArn() : null, value));
                 } else if (path.startsWith("/variables/")) {
                     String varKey = path.substring("/variables/" .length());
                     LOG.infov("Setting stage variable {0} = {1}", varKey, value);
@@ -2481,6 +2504,8 @@ public class ApiGatewayService {
                     api.setName(value);
                 } else if ("/description".equals(path)) {
                     api.setDescription("remove".equals(opType) ? null : value);
+                } else if ("/policy".equals(path)) {
+                    api.setPolicy("remove".equals(opType) || value == null || value.isEmpty() ? null : value);
                 } else if (path.startsWith("/binaryMediaTypes/")) {
                     String mediaType = decodeJsonPointerSegment(path.substring("/binaryMediaTypes/".length()));
                     if ("remove".equals(opType)) {
@@ -2643,14 +2668,44 @@ public class ApiGatewayService {
                         throw new AwsException("BadRequestException", "Invalid boolean value '" + value + "' for apiKeyRequired. Must be 'true' or 'false'", 400);
                     }
                 }
+                // Checked here, before anything is applied: the method is the live stored object,
+                // so a failure halfway through the apply loop would leave earlier ops in place.
+                if (path.startsWith("/requestParameters/") && ("add".equals(opType) || "replace".equals(opType))) {
+                    validateRequestParameterNames(
+                            Map.of(unescapeJsonPointer(path.substring("/requestParameters/".length())), Boolean.TRUE));
+                }
             }
             for (Map<String, String> op : patchOperations) {
-                if (!"replace".equals(op.get("op"))) continue;
+                String opType = op.get("op");
                 String path = op.getOrDefault("path", "");
                 String value = op.get("value");
+                // Terraform patches request parameters and models one entry at a time with
+                // add/replace/remove, so those maps are handled before the replace-only members.
+                if (path.startsWith("/requestParameters/")) {
+                    String name = unescapeJsonPointer(path.substring("/requestParameters/".length()));
+                    if ("remove".equals(opType)) {
+                        method.getRequestParameters().remove(name);
+                    } else if ("add".equals(opType) || "replace".equals(opType)) {
+                        method.getRequestParameters().put(name, Boolean.parseBoolean(value));
+                    }
+                    continue;
+                }
+                if (path.startsWith("/requestModels/")) {
+                    String contentType = unescapeJsonPointer(path.substring("/requestModels/".length()));
+                    if ("remove".equals(opType)) {
+                        method.getRequestModels().remove(contentType);
+                    } else if (("add".equals(opType) || "replace".equals(opType)) && value != null) {
+                        method.getRequestModels().put(contentType, value);
+                    }
+                    continue;
+                }
+                if (!"replace".equals(opType)) continue;
                 if ("/authorizationType".equals(path)) method.setAuthorizationType(value);
                 else if ("/authorizerId".equals(path)) method.setAuthorizerId(value);
                 else if ("/apiKeyRequired".equals(path)) method.setApiKeyRequired(Boolean.parseBoolean(value));
+                else if ("/requestValidatorId".equals(path)) {
+                    method.setRequestValidatorId(value == null || value.isEmpty() ? null : value);
+                }
             }
         }
         resourceStore.put(resourceKey(region, apiId, resourceId), getResource(region, apiId, resourceId));

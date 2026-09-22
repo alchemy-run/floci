@@ -318,6 +318,97 @@ class AppSyncExecutionIntegrationTest {
     }
 
     @Test
+    void awsDateTimeLiteralCoercionRejectsInvalidValueAsValidationErrorNotServerError() {
+        // graphql-java only catches CoercingParseLiteralException while validating a literal
+        // argument, and every AppSyncScalars parseLiteral() used to delegate to parseValue(),
+        // which throws CoercingParseValueException instead: uncaught, that escaped as an HTTP
+        // 500 rather than becoming a spec-correct ValidationError. Fixed in AppSyncScalars.
+        String scalarApi = createApi("scalar-lit-" + UUID.randomUUID().toString().substring(0, 8));
+        String scalarKey = createApiKey(scalarApi);
+        startSchema(scalarApi, "type Query { echo(t: AWSDateTime): AWSDateTime }");
+        awaitSchemaSuccess(scalarApi);
+
+        given()
+            .header("x-api-key", scalarKey)
+            .contentType("application/json")
+            .body("{\"query\":\"{ echo(t: \\\"not-a-date\\\") }\"}")
+        .when()
+            .post("/v1/apis/" + scalarApi + "/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors[0].errorType", equalTo("ValidationError"))
+            .body("errors[0].message", containsString("Invalid AWSDateTime"));
+
+        given()
+            .header("x-api-key", scalarKey)
+            .contentType("application/json")
+            .body("{\"query\":\"{ echo(t: \\\"2026-01-01T00:00:00Z\\\") }\"}")
+        .when()
+            .post("/v1/apis/" + scalarApi + "/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors", nullValue());
+    }
+
+    @Test
+    void awsDateTimeVariableCoercionRejectsInvalidValueAndAcceptsValid() {
+        // Validate variable coercion through the executable schema, not just SDL registration.
+        String scalarApi = createApi("scalar-" + UUID.randomUUID().toString().substring(0, 8));
+        String scalarKey = createApiKey(scalarApi);
+        startSchema(scalarApi, "type Query { echo(t: AWSDateTime): AWSDateTime }");
+        awaitSchemaSuccess(scalarApi);
+
+        given()
+            .header("x-api-key", scalarKey)
+            .contentType("application/json")
+            .body("""
+                {
+                  "query": "query($t: AWSDateTime) { echo(t: $t) }",
+                  "variables": {"t": "not-a-date"}
+                }
+                """)
+        .when()
+            .post("/v1/apis/" + scalarApi + "/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors[0].errorType", equalTo("ValidationError"))
+            .body("errors[0].message", containsString("Invalid AWSDateTime"));
+
+        given()
+            .header("x-api-key", scalarKey)
+            .contentType("application/json")
+            .body("""
+                {
+                  "query": "query($t: AWSDateTime) { echo(t: $t) }",
+                  "variables": {"t": "2026-01-01T00:00:00Z"}
+                }
+                """)
+        .when()
+            .post("/v1/apis/" + scalarApi + "/graphql")
+        .then()
+            .statusCode(200)
+            .body("errors", nullValue());
+    }
+
+    @Test
+    void fragmentCycleAgainstProtectedFieldNeverLeaksRealData() {
+        // Invalid fragment cycles must be rejected before resolver execution.
+        String protectedApi = createApi("protected-" + UUID.randomUUID().toString().substring(0, 8));
+        String protectedKey = createApiKey(protectedApi);
+        startSchema(protectedApi, "type Query { hello: String secret: String @aws_iam }");
+        awaitSchemaSuccess(protectedApi);
+
+        given()
+            .header("x-api-key", protectedKey)
+            .contentType("application/json")
+            .body("{\"query\":\"{ hello secret ...a } fragment a on Query { ...a }\"}")
+        .when()
+            .post("/v1/apis/" + protectedApi + "/graphql")
+        .then()
+            .body("data.secret", nullValue());
+    }
+
+    @Test
     void whitespaceOnlyQueryReturns200SyntaxError() {
         given()
             .header("x-api-key", apiKey)
@@ -338,7 +429,7 @@ class AppSyncExecutionIntegrationTest {
         awaitSchemaSuccess(hydrateApi);
 
         schemaRegistry.remove(hydrateApi);
-        assertTrue(schemaRegistry.getSchema(hydrateApi).isEmpty());
+        assertTrue(schemaRegistry.getSdl(hydrateApi).isEmpty());
 
         given()
             .header("x-api-key", hydrateKey)

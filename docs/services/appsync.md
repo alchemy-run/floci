@@ -29,7 +29,7 @@ targets and HTTP URLs that use a literal private or loopback address.
 
 | Operation | Description |
 |---|---|
-| `StartSchemaCreation` | Start schema creation : validates and parses SDL using graphql-java (invalid SDL returns 400) |
+| `StartSchemaCreation` | Compile SDL asynchronously in-process; invalid schemas reach `FAILED` with structured errors |
 | `GetSchemaCreationStatus` | Get schema creation status |
 | `GetIntrospectionSchema` | Get the introspection schema (HTTP payload is the raw SDL/JSON blob) |
 
@@ -165,9 +165,26 @@ As on AWS, `ApiKey.id` is the key value itself (`da2-` followed by 26 lowercase 
 
 ## Schema Registry
 
-`StartSchemaCreation` validates the provided GraphQL SDL using [graphql-java](https://github.com/graphql-java/graphql-java). Invalid schemas are rejected asynchronously (status `FAILED` with details after `PROCESSING`). Valid schemas are registered in an in-memory `SchemaRegistry` and persisted to the schema store.
+Schema parsing and query execution run in-process with
+[graphql-java](https://github.com/graphql-java/graphql-java). `StartSchemaCreation` compiles SDL
+with AppSync's directives and 17 custom scalars. Invalid schemas transition from `PROCESSING`
+to `FAILED` with structured `codeErrors`; valid schemas are cached as executable GraphQL engines
+and persisted as SDL.
 
-On emulator startup, after storage load and orphan recovery, Floci **rehydrates** SUCCESS SDLs from the schema store into `SchemaRegistry` so `POST /v1/apis/{apiId}/graphql` works across restarts (memory/persistent/hybrid/wal).
+The executable schema dispatches fields through the API's current JS/VTL resolvers, including
+pipeline functions and Lambda data sources. Field authorization wraps each resolver before its
+callback runs, enforcing API auth modes, Cognito groups, Lambda denied fields, and IAM field
+permissions without replacing real resolver results with null stubs.
+
+On emulator startup, Floci recompiles persisted SDL into `SchemaRegistry` after storage load and
+orphan recovery. Invalid persisted schemas are logged and skipped without preventing other
+schemas from loading. Schema creation, rehydration, and GraphQL execution do not require the
+GraphQL sidecar.
+
+The upstream sidecar client, schema compiler, and authorization planner remain available as
+internal utilities, but are not on the AppSync request path: their current contract cannot
+execute Floci's resolver or data-source callbacks. The `graphql-image` and `graphql-url` settings
+apply only to those utilities, not to the in-process execution engine.
 
 The following **AWS scalar types** are pre-registered and available in any schema without requiring explicit `scalar` declarations:
 
@@ -252,7 +269,7 @@ Configured modes are the API default `authenticationType` plus `additionalAuthen
 | Mode | Emulator notes |
 |---|---|
 | API_KEY | Lookup by `ApiKey.id`, which is the key value (`da2-…`). Identity is absent (not `{}`). Default key expiry is 7 days when `expires` is omitted; stored `expires` is rounded down to the nearest hour. Create/UpdateApiKey require `expires` between 1 and 365 days from now (`ApiKeyValidityOutOfBoundsException`, 400). `deletes` is `expires` plus 60 days. |
-| AWS_IAM | Verifies a real header-signed SigV4 request (`appsync` service, fixed `/v1/apis/{apiId}/graphql` canonical path, 5-minute clock skew): the `Credential=` access key must resolve to a secret via `IamService`, and the signature must match. The legacy `test`/`test` pair is still emulator ALLOW, but it must be signed with secret `test` like any other key, and it is not a bypass. A temporary (`ASIA...`) credential must also present the `X-Amz-Security-Token` header matching the one issued for it. An unknown or unsigned key is always 401 and never becomes the account-root identity. Known keys additionally evaluate `appsync:GraphQL`. |
+| AWS_IAM | Verifies a real header-signed SigV4 request (`appsync` service, original `/graphql` or `/v1/apis/{apiId}/graphql` canonical path before virtual-host routing, 5-minute clock skew): the `Credential=` access key must resolve to a secret via `IamService`, and the signature must match. The legacy `test`/`test` pair is still emulator ALLOW, but it must be signed with secret `test` like any other key, and it is not a bypass. A temporary (`ASIA...`) credential must also present the `X-Amz-Security-Token` header matching the one issued for it. An unknown or unsigned key is always 401 and never becomes the account-root identity. Known keys additionally evaluate `appsync:GraphQL`. |
 | Cognito / OIDC | JWT signature is verified, not just decoded. Cognito checks the token against the issuing user pool's own RS256 signing key (`alg`, `kid`, issuer, audience/`clientId`, expiry); OIDC checks it against the configured issuer's published JWKS (via OIDC discovery), the same way the HTTP API JWT authorizer does. Both fail closed: an unreachable issuer, unsupported algorithm (including `none`), unmatched `kid`, or bad signature is 401. OIDC as the sole mode still skips the token's own `iss` claim check, but the signature is always verified against the configured issuer's keys. OIDC identity is `{sub, issuer, claims}` (no `sourceIp`). |
 | Lambda | AppSync `isAuthorized` contract via `LambdaService.invoke` (not an API Gateway policy document). |
 

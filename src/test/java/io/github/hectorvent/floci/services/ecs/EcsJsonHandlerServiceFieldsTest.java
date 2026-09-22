@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.ecs.container.HostVolumePolicy;
+import io.github.hectorvent.floci.services.ecs.model.CreateServiceRequest;
 import io.github.hectorvent.floci.services.ecs.model.EcsServiceModel;
+import io.github.hectorvent.floci.services.ecs.model.UpdateServiceRequest;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,8 +14,6 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
@@ -43,11 +43,22 @@ class EcsJsonHandlerServiceFieldsTest {
         stored.setTaskDefinition("family:1");
         stored.setDesiredCount(0);
         stored.setStatus("ACTIVE");
-        when(service.createService(any(), anyString(), anyString(), anyInt(), any(), any(), any(), any(),
-                any(), any(), any(), any(), anyString()))
-                .thenReturn(stored);
-        when(service.updateService(any(), anyString(), any(), any(), any(), any(), anyBoolean(), any(), anyString()))
-                .thenReturn(stored);
+        when(service.createService(any(CreateServiceRequest.class), anyString()))
+                .thenAnswer(inv -> {
+                    CreateServiceRequest request = inv.getArgument(0);
+                    stored.setDeploymentConfiguration(request.getDeploymentConfiguration());
+                    stored.setHealthCheckGracePeriodSeconds(request.getHealthCheckGracePeriodSeconds());
+                    stored.setCapacityProviderStrategy(request.getCapacityProviderStrategy());
+                    stored.setServiceRegistries(request.getServiceRegistries());
+                    stored.setLaunchType(request.getLaunchType());
+                    return stored;
+                });
+        when(service.updateService(any(UpdateServiceRequest.class), anyString()))
+                .thenAnswer(inv -> {
+                    UpdateServiceRequest request = inv.getArgument(0);
+                    stored.setDeploymentConfiguration(request.getDeploymentConfiguration());
+                    return stored;
+                });
         handler = new EcsJsonHandler(service, objectMapper,
                 new HostVolumePolicy(mock(EmulatorConfig.class, RETURNS_DEEP_STUBS)));
     }

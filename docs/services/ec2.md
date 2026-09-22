@@ -201,7 +201,7 @@ longer flips the record to `terminated`.
 |--------|-------------|
 | CreateVpc | Creates a VPC with the requested CIDR block. |
 | DescribeVpcs | Lists or returns stored VPCs. |
-| DeleteVpc | Deletes a VPC. Auto-removes the default security group, main route table, and default network ACL (AWS furniture). Remaining subnets, extra groups/tables, instances, attachments, or endpoints are `DependencyViolation`. |
+| DeleteVpc | Deletes a VPC and its default security group and rules, main route table, and default network ACL, including their tags. Remaining subnets, non-default groups/tables/ACLs, live instances, network interfaces, gateways, or endpoints cause `DependencyViolation`. |
 | ModifyVpcAttribute | Updates supported VPC attributes. |
 | DescribeVpcAttribute | Returns a supported VPC attribute. |
 | DescribeVpcEndpointServices | Returns an empty local VPC endpoint service catalog. |
@@ -216,6 +216,7 @@ longer flips the record to `terminated`.
 | AssociateDhcpOptions | Associates a DHCP options set with a VPC. |
 | DeleteDhcpOptions | Deletes a DHCP options set. |
 | DescribeDhcpOptions | Lists or returns stored DHCP options sets. |
+| DescribeVpnGateways | Validates filters and returns empty discovery results; explicit IDs return not-found errors. |
 | CreateDefaultVpc | Creates or returns the default VPC for the region. |
 | AssociateVpcCidrBlock | Adds a secondary CIDR block association to a VPC. |
 | DisassociateVpcCidrBlock | Removes a secondary CIDR block association from a VPC. |
@@ -229,6 +230,8 @@ longer flips the record to `terminated`.
 | DeleteFlowLogs | Deletes stored flow logs. Missing ids are ignored (idempotent). |
 
 `DescribeTags` classifies `fl-*` ids as `vpc-flow-log`.
+
+`DescribeVpnGateways` provides empty discovery compatibility only; virtual private gateway lifecycles are not modeled.
 
 ### Subnets
 
@@ -629,8 +632,10 @@ starts from empty data and is how a template moves between the two selection mod
 Two behaviours worth calling out, because they are what Terraform reads back:
 
 - **`IamInstanceProfile` keeps the form it was given.** A profile submitted as `Name` reads back as
-  `Name`, not rewritten to `Arn`. The instance-profile ARN is derived at launch time instead, so
-  `aws_launch_template.iam_instance_profile.name` converges.
+  `Name`, not rewritten to `Arn`. At launch time, Floci resolves that name against IAM in the
+  caller's account and preserves the profile's full path in its ARN. A name missing from that
+  account is rejected with `InvalidParameterValue`. This also applies to direct `RunInstances`
+  requests and `CreateFleet` launches, so `aws_launch_template.iam_instance_profile.name` converges.
 - **`NetworkInterfaces` stays a `NetworkInterfaces` block.** Its `Groups` are not hoisted into
   top-level `SecurityGroupIds`; on AWS the two are mutually exclusive. A launch from the template
   resolves its security groups from whichever of the two is populated.
@@ -908,3 +913,12 @@ aws ec2 associate-address \
 - Default VPC seed (`vpc-default` / `subnet-default-a|b|c`) runs when that VPC is missing, even if other VPCs already exist. `CreateDefaultVpc` reseeds after a delete.
 - Security group rules are not enforced as a firewall (Docker bridge networking handles routing), but TCP ingress rules opened to a CIDR source are published on the host via socat sidecars so the instance's app is reachable from `localhost` : see [Security Group Port Publishing](#security-group-port-publishing).
 - The IMDS server identifies which instance is calling via IMDSv2 tokens (mapped at token issuance time) or by the container's bridge IP for IMDSv1.
+
+### External image catalog
+
+Set `FLOCI_SERVICES_EC2_IMAGE_CATALOG_PATH` (`floci.services.ec2.image-catalog-path`)
+to a readable YAML file to replace the bundled image catalog for a Floci process.
+The file uses the same schema as `src/main/resources/ec2/image-catalog.yaml` and must
+include every image that process should expose. Missing or invalid files fail on first
+catalog use; leaving the setting unset preserves the bundled catalog. Containerized
+Floci needs the file mounted at the configured container path.

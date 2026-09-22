@@ -21,6 +21,16 @@ public class RestApi {
     private Map<String, String> tags = new HashMap<>();
     private EndpointConfiguration endpointConfiguration;
     private List<String> binaryMediaTypes = new ArrayList<>();
+    /** Resource policy document, stored exactly as the caller sent it. */
+    private String policy;
+
+    public String getPolicy() {
+        return policy;
+    }
+
+    public void setPolicy(String policy) {
+        this.policy = policy;
+    }
 
 
     public String getId() {

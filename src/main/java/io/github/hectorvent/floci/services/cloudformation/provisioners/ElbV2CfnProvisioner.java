@@ -206,7 +206,7 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
      */
     private void provisionListener(StackResource r, JsonNode props, ProvisionContext ctx) {
         String lbArn = ctx.resolveOptional(props, "LoadBalancerArn");
-        String protocol = resolveOrDefault(props, "Protocol", ctx, "HTTP");
+        String protocol = ctx.resolveOrDefault(props, "Protocol", "HTTP");
         int port = parseInt(ctx.resolveOptional(props, "Port"), "Port", 80);
         String sslPolicy = ctx.resolveOptional(props, "SslPolicy");
         List<String> certificates = parseCertificates(props, ctx);
@@ -461,11 +461,6 @@ public class ElbV2CfnProvisioner implements CfnResourceProvisioner {
             result.add(condition);
         }
         return result;
-    }
-
-    private static String resolveOrDefault(JsonNode props, String name, ProvisionContext ctx, String fallback) {
-        String value = ctx.resolveOptional(props, name);
-        return value != null && !value.isBlank() ? value : fallback;
     }
 
     /** An absent value takes the default; anything present has to be an integer. */

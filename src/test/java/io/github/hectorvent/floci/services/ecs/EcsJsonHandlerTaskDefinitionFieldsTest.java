@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.services.ecs.container.HostVolumePolicy;
+import io.github.hectorvent.floci.services.ecs.model.RegisterTaskDefinitionRequest;
 import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,16 +38,20 @@ class EcsJsonHandlerTaskDefinitionFieldsTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         service = mock(EcsService.class);
-        when(service.registerTaskDefinition(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), anyString()))
+        when(service.registerTaskDefinition(any(RegisterTaskDefinitionRequest.class), anyString()))
                 .thenAnswer(inv -> {
+                    RegisterTaskDefinitionRequest request = inv.getArgument(0);
                     TaskDefinition td = new TaskDefinition();
-                    td.setFamily(inv.getArgument(0));
+                    td.setFamily(request.getFamily());
                     td.setRevision(1);
                     td.setStatus("ACTIVE");
                     td.setTaskDefinitionArn("arn:aws:ecs:us-east-1:000000000000:task-definition/"
-                            + inv.getArgument(0) + ":1");
-                    td.setContainerDefinitions(inv.getArgument(1, List.class));
-                    td.setTags(inv.getArgument(8));
+                            + request.getFamily() + ":1");
+                    td.setContainerDefinitions(request.getContainerDefinitions());
+                    td.setVolumes(request.getVolumes());
+                    td.setRuntimePlatform(request.getRuntimePlatform());
+                    td.setEphemeralStorage(request.getEphemeralStorage());
+                    td.setTags(request.getTags());
                     return td;
                 });
         handler = new EcsJsonHandler(service, objectMapper,

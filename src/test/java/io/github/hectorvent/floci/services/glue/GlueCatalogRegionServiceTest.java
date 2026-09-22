@@ -4,6 +4,8 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.glue.model.Column;
+import io.github.hectorvent.floci.services.glue.model.ConnectionInput;
+import io.github.hectorvent.floci.services.glue.model.DataCatalogEncryptionSettings;
 import io.github.hectorvent.floci.services.glue.model.Database;
 import io.github.hectorvent.floci.services.glue.model.Partition;
 import io.github.hectorvent.floci.services.glue.model.PartitionIndex;
@@ -30,7 +32,9 @@ class GlueCatalogRegionServiceTest {
             new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
             new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
             new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
-            new InMemoryStorage<>(), null, resolver, new ResourceGroupsTaggingService(null));
+            new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+            new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+            null, resolver, new ResourceGroupsTaggingService(null), null);
 
     @Test
     void catalogReadsUpdatesAndChildDeletesAreRegionLocal() {
@@ -86,6 +90,32 @@ class GlueCatalogRegionServiceTest {
                 .columnStatisticsList().isEmpty());
         region = "us-east-1";
         assertCatalog("east");
+    }
+
+    @Test
+    void connectionsPoliciesAndEncryptionSettingsFollowTheCatalogRegion() {
+        ConnectionInput connection = new ConnectionInput();
+        connection.setName("network");
+        connection.setConnectionType("NETWORK");
+        connection.setConnectionProperties(Map.of());
+        service.createConnection(connection, Map.of("region", region), region);
+        String hash = service.putResourcePolicy("{\"Statement\":[]}", null, "NOT_EXIST", null);
+        DataCatalogEncryptionSettings encryption = DataCatalogEncryptionSettings.defaults();
+        encryption.getEncryptionAtRest().setCatalogEncryptionMode("SSE-KMS");
+        service.putDataCatalogEncryptionSettings(encryption);
+
+        region = "us-west-2";
+        assertMissing(() -> service.getConnection("network", false));
+        assertMissing(service::getResourcePolicy);
+        assertEquals("DISABLED", service.getDataCatalogEncryptionSettings().getEncryptionAtRest().getCatalogEncryptionMode());
+        service.createConnection(connection, Map.of("region", region), region);
+        service.deleteConnection("network", region);
+
+        region = "us-east-1";
+        assertEquals("network", service.getConnection("network", false).getName());
+        assertEquals(hash, service.getResourcePolicy().getPolicyHash());
+        assertEquals("SSE-KMS", service.getDataCatalogEncryptionSettings().getEncryptionAtRest().getCatalogEncryptionMode());
+        assertEquals(Map.of("region", region), service.getTags(resolver.buildArn("glue", region, "connection/network")));
     }
 
     private void populate(String marker) {

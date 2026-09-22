@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.ses;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -375,7 +376,7 @@ public class SesSendController {
                         "Custom verification email template <" + templateName + "> does not exist", 404);
             }
             throw remapV1Exception(e);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }

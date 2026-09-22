@@ -15,6 +15,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * DynamoDB JSON protocol handler.
@@ -687,6 +688,7 @@ public class DynamoDbJsonHandler {
             checkUnusedEan(exprAttrNames, hashTokens);
             Set<String> colonTokensAll = extractColonTokens(updateExpression, conditionExpression);
             checkUnusedEav(exprAttrValues, colonTokensAll);
+            dynamoDbService.requireAddOrDeleteOperandTypes(updateExpression, exprAttrValues, true);
         }
 
         if (expectedUpd != null) {
@@ -1715,22 +1717,7 @@ public class DynamoDbJsonHandler {
     }
 
     private Response handleTransactWriteItems(JsonNode request, String region) {
-        JsonNode transactItemsNode = request.path("TransactItems");
-        if (transactItemsNode.isMissingNode() || transactItemsNode.isNull() || !transactItemsNode.isArray()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value null at 'transactItems' failed to satisfy constraint: "
-                    + "Member must have length greater than or equal to 1", 400);
-        }
-        if (transactItemsNode.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '[]' at 'transactItems' failed to satisfy constraint: "
-                    + "Member must have length greater than or equal to 1", 400);
-        }
-        if (transactItemsNode.size() > 100) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '" + transactItemsNode + "' at 'transactItems' failed to satisfy constraint: "
-                    + "Member must have length less than or equal to 100", 400);
-        }
+        JsonNode transactItemsNode = requireValidTransactRequest(request);
 
         for (JsonNode txItem : transactItemsNode) {
             for (JsonNode op : txItem) {
@@ -1742,6 +1729,8 @@ public class DynamoDbJsonHandler {
                         op.get("ExpressionAttributeNames"),
                         op.get("ExpressionAttributeValues"));
                 DynamoDbAttributeValueValidator.requireNestingWithinLimit(op.get("Item"), false);
+                dynamoDbService.requireAddOrDeleteOperandTypes(op.path("UpdateExpression").textValue(),
+                        op.get("ExpressionAttributeValues"), false);
             }
         }
 
@@ -1797,11 +1786,50 @@ public class DynamoDbJsonHandler {
                 : null;
 
         try {
-            dynamoDbService.transactWriteItems(transactItems, region, clientRequestToken, request);
-            return Response.ok(objectMapper.createObjectNode()).build();
+            DynamoDbService.TransactWriteResult result =
+                    dynamoDbService.transactWriteItems(transactItems, region, clientRequestToken, request);
+            ObjectNode response = objectMapper.createObjectNode();
+            addTransactWriteConsumedCapacity(response, request, result);
+            return Response.ok(response).build();
         } catch (TransactionCanceledException e) {
             return transactWriteCanceled(e);
         }
+    }
+
+    private static JsonNode requireValidTransactRequest(JsonNode request) {
+        JsonNode transactItems = request.path("TransactItems");
+        List<String> validationErrors = new ArrayList<>();
+        if (transactItems.isMissingNode() || transactItems.isNull() || !transactItems.isArray()) {
+            validationErrors.add("Value null at 'transactItems' failed to satisfy constraint: "
+                    + "Member must have length greater than or equal to 1");
+        } else if (transactItems.isEmpty()) {
+            validationErrors.add("Value '[]' at 'transactItems' failed to satisfy constraint: "
+                    + "Member must have length greater than or equal to 1");
+        } else if (transactItems.size() > 100) {
+            validationErrors.add("Value '" + transactItems + "' at 'transactItems' failed to satisfy constraint: "
+                    + "Member must have length less than or equal to 100");
+        }
+        addReturnConsumedCapacityError(request, validationErrors);
+        throwValidationErrors(validationErrors);
+        return transactItems;
+    }
+
+    private static void addReturnConsumedCapacityError(JsonNode request, List<String> validationErrors) {
+        String returnCC = request.has("ReturnConsumedCapacity") ? request.get("ReturnConsumedCapacity").asText() : null;
+        if (returnCC != null && !VALID_RETURN_CONSUMED_CAPACITY.contains(returnCC)) {
+            validationErrors.add("Value '" + returnCC + "' at 'returnConsumedCapacity' failed to satisfy constraint: "
+                    + "Member must satisfy enum value set: [INDEXES, TOTAL, NONE]");
+        }
+    }
+
+    private static void throwValidationErrors(List<String> validationErrors) {
+        if (validationErrors.isEmpty()) {
+            return;
+        }
+        int n = validationErrors.size();
+        throw new AwsException("ValidationException",
+                n + " validation error" + (n > 1 ? "s" : "") + " detected: "
+                + String.join("; ", validationErrors), 400);
     }
 
     private Response transactWriteCanceled(TransactionCanceledException e) {
@@ -1824,22 +1852,7 @@ public class DynamoDbJsonHandler {
     }
 
     private Response handleTransactGetItems(JsonNode request, String region) {
-        JsonNode transactItemsNode = request.path("TransactItems");
-        if (transactItemsNode.isMissingNode() || transactItemsNode.isNull() || !transactItemsNode.isArray()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value null at 'transactItems' failed to satisfy constraint: "
-                    + "Member must have length greater than or equal to 1", 400);
-        }
-        if (transactItemsNode.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '[]' at 'transactItems' failed to satisfy constraint: "
-                    + "Member must have length greater than or equal to 1", 400);
-        }
-        if (transactItemsNode.size() > 100) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '" + transactItemsNode + "' at 'transactItems' failed to satisfy constraint: "
-                    + "Member must have length less than or equal to 100", 400);
-        }
+        JsonNode transactItemsNode = requireValidTransactRequest(request);
 
         for (JsonNode txItem : transactItemsNode) {
             DynamoDbExpressionSize.checkRead(txItem.path("Get").path("ProjectionExpression").textValue(),
@@ -1883,9 +1896,9 @@ public class DynamoDbJsonHandler {
         List<JsonNode> transactItems = new ArrayList<>();
         transactItemsNode.forEach(transactItems::add);
 
-        List<JsonNode> results;
+        DynamoDbService.TransactGetResult result;
         try {
-            results = dynamoDbService.transactGetItems(transactItems, region);
+            result = dynamoDbService.transactGetItems(transactItems, region);
         } catch (TransactionCanceledException e) {
             ObjectNode body = objectMapper.createObjectNode();
             body.put("__type", "TransactionCanceledException");
@@ -1907,7 +1920,7 @@ public class DynamoDbJsonHandler {
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode responsesArray = objectMapper.createArrayNode();
-        for (JsonNode item : results) {
+        for (JsonNode item : result.items()) {
             ObjectNode entry = objectMapper.createObjectNode();
             if (item != null) {
                 entry.set("Item", item);
@@ -1915,6 +1928,7 @@ public class DynamoDbJsonHandler {
             responsesArray.add(entry);
         }
         response.set("Responses", responsesArray);
+        addPerTableConsumedCapacity(response, request, result.capacity(), "ReadCapacityUnits");
         return Response.ok(response).build();
     }
 
@@ -2118,6 +2132,18 @@ public class DynamoDbJsonHandler {
     private Response handleEnableKinesisStreamingDestination(JsonNode request, String region) {
         String tableName = request.path("TableName").asText();
         String streamArn = request.path("StreamArn").asText();
+        JsonNode precisionNode = request.path("EnableKinesisStreamingConfiguration")
+                .path("ApproximateCreationDateTimePrecision");
+        String precision = precisionNode.isMissingNode() || precisionNode.isNull()
+                ? KinesisStreamingDestination.PRECISION_MILLISECOND : precisionNode.asText();
+        if (!KinesisStreamingDestination.PRECISION_MILLISECOND.equals(precision)
+                && !KinesisStreamingDestination.PRECISION_MICROSECOND.equals(precision)) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value '" + precision
+                            + "' at 'enableKinesisStreamingConfiguration.approximateCreationDateTimePrecision' "
+                            + "failed to satisfy constraint: Member must satisfy enum value set: [MILLISECOND, MICROSECOND]",
+                    400);
+        }
 
         TableDefinition table = dynamoDbService.describeTable(tableName, region);
         String resolvedTableName = table.getTableName();
@@ -2146,19 +2172,11 @@ public class DynamoDbJsonHandler {
             existing.get().setDestinationStatusDescription("Kinesis streaming is enabled for this table");
             existing.get().setApproximateCreationDateTimePrecision(precision);
         } else {
-            KinesisStreamingDestination destination = new KinesisStreamingDestination(streamArn);
-            destination.setApproximateCreationDateTimePrecision(precision);
-            table.getKinesisStreamingDestinations().add(destination);
+            table.getKinesisStreamingDestinations().add(new KinesisStreamingDestination(streamArn, precision));
         }
 
-        if (!table.isStreamEnabled()) {
-            StreamDescription sd = dynamoDbStreamService.enableStream(
-                    resolvedTableName, table.getTableArn(), "NEW_AND_OLD_IMAGES", region);
-            table.setStreamEnabled(true);
-            table.setStreamArn(sd.getStreamArn());
-            table.setStreamViewType("NEW_AND_OLD_IMAGES");
-        }
-
+        // DynamoDB Streams is left as the caller configured it: Kinesis forwarding does not depend on it, and
+        // turning it on here showed up as stream_enabled drift on aws_dynamodb_table that never converged.
         dynamoDbService.persistTable(resolvedTableName, table, region);
 
         ObjectNode response = objectMapper.createObjectNode();
@@ -2166,8 +2184,8 @@ public class DynamoDbJsonHandler {
         response.put("StreamArn", streamArn);
         response.put("DestinationStatus", "ACTIVE");
         response.put("DestinationStatusDescription", "Kinesis streaming is enabled for this table");
-        ObjectNode enableConfig = response.putObject("EnableKinesisStreamingConfiguration");
-        enableConfig.put("ApproximateCreationDateTimePrecision", precision);
+        response.putObject("EnableKinesisStreamingConfiguration")
+                .put("ApproximateCreationDateTimePrecision", precision);
         return Response.ok(response).build();
     }
 
@@ -2441,32 +2459,59 @@ public class DynamoDbJsonHandler {
                 writeCapacityNode(tableName, cost, "INDEXES".equals(returnCC)));
     }
 
+    private void addTransactWriteConsumedCapacity(ObjectNode response, JsonNode request,
+                                                  DynamoDbService.TransactWriteResult result) {
+        addPerTableConsumedCapacity(response, request, result.capacity(),
+                result.replayed() ? "ReadCapacityUnits" : "WriteCapacityUnits");
+    }
+
+    private void addPerTableConsumedCapacity(ObjectNode response, JsonNode request,
+                                             Map<String, DynamoDbWriteCapacity.Cost> capacityByTable,
+                                             String unitsField) {
+        String returnCC = request.path("ReturnConsumedCapacity").asText("NONE");
+        if ("NONE".equals(returnCC) || capacityByTable.isEmpty()) {
+            return;
+        }
+        ArrayNode entries = objectMapper.createArrayNode();
+        capacityByTable.forEach((tableName, cost) ->
+                entries.add(writeCapacityNode(tableName, cost, "INDEXES".equals(returnCC), unitsField)));
+        response.set("ConsumedCapacity", entries);
+    }
+
     private ObjectNode writeCapacityNode(String tableName, DynamoDbWriteCapacity.Cost cost,
                                           boolean withBreakdown) {
-        var cc = objectMapper.createObjectNode();
+        return writeCapacityNode(tableName, cost, withBreakdown, null);
+    }
+
+    private ObjectNode writeCapacityNode(String tableName, DynamoDbWriteCapacity.Cost cost,
+                                          boolean withBreakdown, String unitsField) {
+        ObjectNode cc = objectMapper.createObjectNode();
         cc.put("TableName", DynamoDbTableNames.resolve(tableName));
-        cc.put("CapacityUnits", cost.total());
+        cc.setAll(capacityUnitsNode(cost.total(), unitsField));
         if (withBreakdown) {
-            var tableCap = objectMapper.createObjectNode();
-            tableCap.put("CapacityUnits", cost.table());
-            cc.set("Table", tableCap);
+            cc.set("Table", capacityUnitsNode(cost.table(), unitsField));
             if (!cost.gsi().isEmpty()) {
-                cc.set("GlobalSecondaryIndexes", capacityUnitsMap(cost.gsi()));
+                cc.set("GlobalSecondaryIndexes", capacityUnitsMap(cost.gsi(), unitsField));
             }
             if (!cost.lsi().isEmpty()) {
-                cc.set("LocalSecondaryIndexes", capacityUnitsMap(cost.lsi()));
+                cc.set("LocalSecondaryIndexes", capacityUnitsMap(cost.lsi(), unitsField));
             }
         }
         return cc;
     }
 
-    private ObjectNode capacityUnitsMap(Map<String, Double> unitsByIndex) {
-        var node = objectMapper.createObjectNode();
-        unitsByIndex.forEach((indexName, units) -> {
-            var cap = objectMapper.createObjectNode();
-            cap.put("CapacityUnits", units);
-            node.set(indexName, cap);
-        });
+    private ObjectNode capacityUnitsMap(Map<String, Double> unitsByIndex, String unitsField) {
+        ObjectNode node = objectMapper.createObjectNode();
+        unitsByIndex.forEach((indexName, units) -> node.set(indexName, capacityUnitsNode(units, unitsField)));
+        return node;
+    }
+
+    private ObjectNode capacityUnitsNode(double units, String unitsField) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("CapacityUnits", units);
+        if (unitsField != null) {
+            node.put(unitsField, units);
+        }
         return node;
     }
 
@@ -2934,35 +2979,38 @@ public class DynamoDbJsonHandler {
         if (stmts.isMissingNode() || !stmts.isArray() || stmts.isEmpty()) {
             throw new AwsException("ValidationException", "TransactStatements must not be empty", 400);
         }
+        List<String> validationErrors = new ArrayList<>();
+        addReturnConsumedCapacityError(request, validationErrors);
+        throwValidationErrors(validationErrors);
         try {
-            cancelOnTooDeepParameters(stmts);
-            List<DynamoDbPartiQLParser.Stmt> parsed = new ArrayList<>();
-            List<JsonNode> writeItems = new ArrayList<>();
-            for (JsonNode s : stmts) {
-                DynamoDbPartiQLParser.Stmt stmt = DynamoDbPartiQLParser.parse(
-                        s.path("Statement").asText(), toPartiQLParams(s.path("Parameters")));
-                parsed.add(stmt);
-                if (!(stmt instanceof DynamoDbPartiQLParser.Stmt.Select)) {
-                    writeItems.add(partiQLHandler.toTransactItem(stmt, region));
-                }
+            List<DynamoDbPartiQLParser.Stmt> statements = new ArrayList<>();
+            for (int i = 0; i < stmts.size(); i++) {
+                JsonNode s = stmts.get(i);
+                List<JsonNode> parameters = toPartiQLParams(s.path("Parameters"));
+                statements.add(inTransactStatement(i,
+                        () -> DynamoDbPartiQLParser.parse(s.path("Statement").asText(), parameters)));
             }
-            if (!writeItems.isEmpty()) {
-                dynamoDbService.transactWriteItems(writeItems, region);
+            long reads = statements.stream().filter(DynamoDbPartiQLParser.Stmt.Select.class::isInstance).count();
+            if (reads > 0 && reads < statements.size()) {
+                throw new AwsException("ValidationException",
+                        "ExecuteTransaction API does not support both read and write operations in the same request.", 400);
             }
-            ArrayNode responses = objectMapper.createArrayNode();
-            for (DynamoDbPartiQLParser.Stmt stmt : parsed) {
-                ObjectNode slot = objectMapper.createObjectNode();
-                if (stmt instanceof DynamoDbPartiQLParser.Stmt.Select) {
-                    JsonNode result = partiQLHandler.execute(stmt, PartiQLExecuteContext.builder(), region);
-                    JsonNode firstItem = result.path("Items").path(0);
-                    if (!firstItem.isMissingNode()) {
-                        slot.set("Item", firstItem);
-                    }
-                }
-                responses.add(slot);
+            if (reads == statements.size()) {
+                return executeTransactionReads(statements.stream()
+                        .map(DynamoDbPartiQLParser.Stmt.Select.class::cast)
+                        .toList(), request, region);
             }
+            List<DynamoDbPartiQLHandler.TransactMember> members = new ArrayList<>();
+            for (int i = 0; i < statements.size(); i++) {
+                DynamoDbPartiQLParser.Stmt stmt = statements.get(i);
+                members.add(inTransactStatement(i, () -> partiQLHandler.toTransactItem(stmt, region)));
+            }
+            List<JsonNode> transactItems = cancelOnMemberReasons(members);
+            DynamoDbService.TransactWriteResult result = dynamoDbService.transactWriteItems(transactItems, region,
+                    request.path("ClientRequestToken").asText(null), request);
             ObjectNode resp = objectMapper.createObjectNode();
-            resp.set("Responses", responses);
+            resp.set("Responses", objectMapper.createArrayNode());
+            addTransactWriteConsumedCapacity(resp, request, result);
             return Response.ok(resp).build();
         } catch (TransactionCanceledException e) {
             ObjectNode body = objectMapper.createObjectNode();
@@ -2972,8 +3020,9 @@ public class DynamoDbJsonHandler {
             for (TransactionCanceledException.CancellationReason reason : e.getCancellationReasons()) {
                 ObjectNode r = objectMapper.createObjectNode();
                 r.put("Code", reason.code().isEmpty() ? "None" : reason.code());
-                r.put("Message", reason.code().isEmpty() ? ""
-                        : reason.message() != null ? reason.message() : "The conditional request failed");
+                if (!reason.code().isEmpty()) {
+                    r.put("Message", reason.message() != null ? reason.message() : "The conditional request failed");
+                }
                 if (reason.item() != null) {
                     r.set("Item", reason.item());
                 }
@@ -2983,23 +3032,71 @@ public class DynamoDbJsonHandler {
         }
     }
 
-    // AWS cancels the transaction, with that statement's reason, when a parameter is too deep.
-    private void cancelOnTooDeepParameters(JsonNode stmts) {
-        var reasons = new ArrayList<TransactionCanceledException.CancellationReason>();
-        var cancelled = false;
-        for (JsonNode s : stmts) {
-            var tooDeep = false;
-            for (var parameter : s.path("Parameters")) {
-                tooDeep |= !DynamoDbAttributeValueValidator.valueNestingWithinLimit(parameter);
+    private Response executeTransactionReads(List<DynamoDbPartiQLParser.Stmt.Select> selects, JsonNode request,
+                                             String region) {
+        List<DynamoDbPartiQLHandler.TransactMember> members = new ArrayList<>();
+        for (int i = 0; i < selects.size(); i++) {
+            DynamoDbPartiQLParser.Stmt.Select select = selects.get(i);
+            members.add(inTransactStatement(i, () -> partiQLHandler.toTransactGetItem(select, region)));
+        }
+        List<JsonNode> getItems = cancelOnMemberReasons(members);
+
+        DynamoDbService.TransactGetResult result = dynamoDbService.transactGetItems(getItems, region);
+        requireOneReadPerItem(getItems, region);
+        List<JsonNode> results = result.items();
+        ArrayNode responses = objectMapper.createArrayNode();
+        for (int i = 0; i < results.size(); i++) {
+            JsonNode item = partiQLHandler.projectSelected(selects.get(i), results.get(i));
+            ObjectNode entry = objectMapper.createObjectNode();
+            if (item != null) {
+                entry.set("Item", item);
             }
-            cancelled |= tooDeep;
-            reasons.add(tooDeep
-                    ? new TransactionCanceledException.CancellationReason("ValidationError", null,
-                            DynamoDbAttributeValueValidator.NESTING_EXCEEDED)
-                    : new TransactionCanceledException.CancellationReason("", null));
+            responses.add(entry);
+        }
+        ObjectNode resp = objectMapper.createObjectNode();
+        resp.set("Responses", responses);
+        addPerTableConsumedCapacity(resp, request, result.capacity(), "ReadCapacityUnits");
+        return Response.ok(resp).build();
+    }
+
+    private static List<JsonNode> cancelOnMemberReasons(List<DynamoDbPartiQLHandler.TransactMember> members) {
+        List<JsonNode> items = new ArrayList<>();
+        List<TransactionCanceledException.CancellationReason> reasons = new ArrayList<>();
+        boolean cancelled = false;
+        for (DynamoDbPartiQLHandler.TransactMember member : members) {
+            cancelled |= member.reason() != null;
+            items.add(member.item());
+            reasons.add(member.reason() != null ? member.reason() : new TransactionCanceledException.CancellationReason("", null));
         }
         if (cancelled) {
             throw new TransactionCanceledException(reasons);
+        }
+        return items;
+    }
+
+    private void requireOneReadPerItem(List<JsonNode> getItems, String region) {
+        Set<List<String>> items = new HashSet<>();
+        for (JsonNode getItem : getItems) {
+            JsonNode get = getItem.path("Get");
+            String tableName = get.path("TableName").asText();
+            TableDefinition table = dynamoDbService.findTable(tableName, region).orElseThrow();
+            String itemKey = dynamoDbService.buildItemKey(table, get.path("Key"), true);
+            if (!items.add(List.of(tableName, itemKey))) {
+                throw new AwsException("ValidationException",
+                        "Transaction request cannot include multiple operations on one item", 400);
+            }
+        }
+    }
+
+    private <T> T inTransactStatement(int index, Supplier<T> member) {
+        try {
+            return member.get();
+        } catch (AwsException e) {
+            if (!"ValidationException".equals(e.getErrorCode())) {
+                throw e;
+            }
+            throw new AwsException("ValidationException",
+                    "Validation failed in TransactStatements[" + index + "]: " + e.getMessage(), 400);
         }
     }
 
@@ -3010,60 +3107,79 @@ public class DynamoDbJsonHandler {
         }
         ArrayNode responses = objectMapper.createArrayNode();
         for (JsonNode s : stmts) {
-            try {
-                DynamoDbPartiQLParser.Stmt stmt = DynamoDbPartiQLParser.parse(
-                        s.path("Statement").asText(), toPartiQLParams(s.path("Parameters")));
-                if (stmt instanceof DynamoDbPartiQLParser.Stmt.Select select
-                        && !batchSelectResolvesThroughPrimaryKey(select, region)) {
-                    throw new AwsException("ValidationError",
-                            "Select statements within BatchExecuteStatement must specify the primary key "
-                                    + "in the where clause.", 400);
-                }
-                JsonNode result = partiQLHandler.execute(stmt, PartiQLExecuteContext.builder()
-                        .consistentRead(s.path("ConsistentRead").asBoolean(false)), region);
-                ObjectNode slot = objectMapper.createObjectNode();
-                JsonNode firstItem = result.path("Items").path(0);
-                if (!firstItem.isMissingNode()) {
-                    slot.set("Item", firstItem);
-                }
-                responses.add(slot);
-            } catch (AwsException e) {
-                ObjectNode slot = objectMapper.createObjectNode();
-                ObjectNode err = objectMapper.createObjectNode();
-                err.put("Code", e.getErrorCode());
-                err.put("Message", e.getMessage());
-                slot.set("Error", err);
-                responses.add(slot);
-            }
+            responses.add(batchMemberResponse(s, region));
         }
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("Responses", responses);
         return Response.ok(resp).build();
     }
 
+    private ObjectNode batchMemberResponse(JsonNode statement, String region) {
+        ObjectNode slot = objectMapper.createObjectNode();
+        String tableName = null;
+        try {
+            DynamoDbPartiQLParser.Stmt stmt = parsePartiQLStatement(statement);
+            tableName = stmt.table();
+            if (stmt instanceof DynamoDbPartiQLParser.Stmt.Select select) {
+                requireBatchSelectReadsByKey(select, region);
+            }
+            JsonNode result = partiQLHandler.execute(stmt, PartiQLExecuteContext.builder()
+                    .consistentRead(statement.path("ConsistentRead").asBoolean(false)), region);
+            JsonNode firstItem = result.path("Items").path(0);
+            if (!firstItem.isMissingNode()) {
+                slot.set("Item", firstItem);
+            }
+            slot.put("TableName", tableName);
+        } catch (AwsException e) {
+            ObjectNode err = objectMapper.createObjectNode();
+            err.put("Code", batchMemberErrorCode(e.getErrorCode()));
+            err.put("Message", e.getMessage());
+            slot.set("Error", err);
+            if (tableName != null && batchMemberReachedItsTable(e)) {
+                slot.put("TableName", tableName);
+            }
+        }
+        return slot;
+    }
+
+    private static String batchMemberErrorCode(String errorCode) {
+        if ("ValidationException".equals(errorCode)) {
+            return "ValidationError";
+        }
+        return errorCode.endsWith("Exception")
+                ? errorCode.substring(0, errorCode.length() - "Exception".length())
+                : errorCode;
+    }
+
+    private static boolean batchMemberReachedItsTable(AwsException e) {
+        return e instanceof ItemNestingExceededException
+                || "ConditionalCheckFailedException".equals(e.getErrorCode())
+                || "DuplicateItemException".equals(e.getErrorCode());
+    }
+
     // BatchExecuteStatement only runs SELECT statements that resolve through
     // the table's primary key: index-qualified statements and partial-key
     // WHERE clauses are rejected per statement (characterised on real AWS,
     // eu-west-1, 2026-09-02).
-    private boolean batchSelectResolvesThroughPrimaryKey(DynamoDbPartiQLParser.Stmt.Select select, String region) {
+    private void requireBatchSelectReadsByKey(DynamoDbPartiQLParser.Stmt.Select select, String region) {
         if (select.index() != null) {
-            return false;
+            throw batchSelectNeedsKey();
         }
         TableDefinition table = dynamoDbService.describeTable(select.table(), region);
-        String pkName = table.getPartitionKeyName();
-        String skName = table.getSortKeyName();
-        boolean pkEq = false;
-        boolean skEq = skName == null;
-        for (DynamoDbPartiQLParser.Cond c : select.where()) {
-            if (c instanceof DynamoDbPartiQLParser.Cond.Eq eq) {
-                if (eq.attr().equals(pkName)) {
-                    pkEq = true;
-                } else if (skName != null && eq.attr().equals(skName)) {
-                    skEq = true;
-                }
-            }
+        DynamoDbPartiQLHandler.requireReadsWithinLimit(table, select.where());
+        if (!DynamoDbPartiQLHandler.namesOnlyTheKey(table, select.where())) {
+            throw batchSelectNeedsKey();
         }
-        return pkEq && skEq;
+    }
+
+    private static AwsException batchSelectNeedsKey() {
+        return new AwsException("ValidationException",
+                "Select statements within BatchExecuteStatement must specify the primary key in the where clause.", 400);
+    }
+
+    private DynamoDbPartiQLParser.Stmt parsePartiQLStatement(JsonNode statement) {
+        return DynamoDbPartiQLParser.parse(statement.path("Statement").asText(),
+                toPartiQLParams(statement.path("Parameters")));
     }
 
     private List<JsonNode> toPartiQLParams(JsonNode node) {
@@ -3071,7 +3187,11 @@ public class DynamoDbJsonHandler {
             return Collections.emptyList();
         }
         List<JsonNode> params = new ArrayList<>();
-        node.forEach(params::add);
+        for (JsonNode parameter : node) {
+            DynamoDbAttributeValueValidator.requireParameterNestingWithinLimit(parameter);
+            checkAttrSets(parameter);
+            params.add(parameter);
+        }
         return params;
     }
 }

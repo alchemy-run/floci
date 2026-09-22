@@ -13,6 +13,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -194,9 +195,9 @@ class TlsConfigSourceCertificateGenerationTest {
         assertTrue(sans.contains("*.execute-api.localhost.localstack.cloud"),
             "Certificate SANs should include LocalStack-compatible API Gateway execution hosts");
 
-        // Should not contain any custom hostnames
-        assertEquals(15, sans.size(),
-            "Certificate SANs should contain exactly the default entries");
+        // Should be the defaults and nothing else - no custom hostnames
+        assertEquals(Set.copyOf(TlsConfigSource.DEFAULT_SAN_HOSTNAMES), Set.copyOf(sans),
+            "Certificate SANs should be exactly the default entries");
     }
 
     /**

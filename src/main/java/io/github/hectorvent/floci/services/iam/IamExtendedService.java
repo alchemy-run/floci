@@ -57,7 +57,6 @@ public class IamExtendedService {
 
     private final IamService iamService;
     private final RegionResolver regionResolver;
-    private final StorageBackend<String, LoginProfile> loginProfiles;
     private final StorageBackend<String, VirtualMfaDevice> virtualMfaDevices;
     private final SAMLProviderService samlProviderService;
     private final StorageBackend<String, AccountPasswordPolicy> legacyPasswordPolicies;
@@ -75,7 +74,6 @@ public class IamExtendedService {
         this.regionResolver = regionResolver;
         this.samlProviderService = samlProviderService;
         this.legacyPasswordPolicies = storageFactory.create("iam", "iam-password-policies.json", new TypeReference<>() {});
-        this.loginProfiles = storageFactory.create("iam", "iam-login-profiles.json", new TypeReference<>() {});
         this.virtualMfaDevices = storageFactory.create("iam", "iam-virtual-mfa.json", new TypeReference<>() {});
         this.sshPublicKeys = storageFactory.create("iam", "iam-ssh-keys.json", new TypeReference<>() {});
         this.signingCertificates = storageFactory.create("iam", "iam-signing-certs.json", new TypeReference<>() {});
@@ -128,37 +126,21 @@ public class IamExtendedService {
     // =========================================================================
 
     public LoginProfile createLoginProfile(String userName, String password, boolean resetRequired) {
-        iamService.getUser(userName);
-        if (loginProfiles.get(userName).isPresent()) {
-            throw new AwsException("EntityAlreadyExists",
-                    "Login Profile for User " + userName + " already exists.", 409);
-        }
-        LoginProfile profile = new LoginProfile(userName, password, resetRequired);
-        loginProfiles.put(userName, profile);
-        return profile;
+        migrateLegacyPasswordPolicy();
+        return iamService.createLoginProfile(userName, password, resetRequired);
     }
 
     public LoginProfile getLoginProfile(String userName) {
-        iamService.getUser(userName);
-        return loginProfiles.get(userName)
-                .orElseThrow(() -> new AwsException("NoSuchEntity",
-                        "Login Profile for User " + userName + " cannot be found.", 404));
+        return iamService.getLoginProfile(userName);
     }
 
     public void updateLoginProfile(String userName, String password, Boolean resetRequired) {
-        LoginProfile profile = getLoginProfile(userName);
-        if (password != null) {
-            profile.setPassword(password);
-        }
-        if (resetRequired != null) {
-            profile.setPasswordResetRequired(resetRequired);
-        }
-        loginProfiles.put(userName, profile);
+        migrateLegacyPasswordPolicy();
+        iamService.updateLoginProfile(userName, password, resetRequired);
     }
 
     public void deleteLoginProfile(String userName) {
-        getLoginProfile(userName);
-        loginProfiles.delete(userName);
+        iamService.deleteLoginProfile(userName);
     }
 
     // =========================================================================
@@ -575,7 +557,7 @@ public class IamExtendedService {
                 .append("access_key_2_active,access_key_2_last_rotated,access_key_2_last_used_date,")
                 .append("access_key_2_last_used_region,access_key_2_last_used_service\n");
         for (IamUser user : iamService.listUsers("/")) {
-            boolean hasPassword = loginProfiles.get(user.getUserName()).isPresent();
+            boolean hasPassword = iamService.hasLoginProfile(user.getUserName());
             boolean mfa = virtualMfaDevices.scan(k -> true).stream()
                     .anyMatch(d -> user.getUserName().equals(d.getUserName()));
             csv.append(user.getUserName()).append(',')

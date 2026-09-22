@@ -179,6 +179,10 @@ services:
     doc: docs/services/detective.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/detective/DetectiveController.java, mode: rest }
+  - service: dms
+    doc: docs/services/dms.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/dms/DmsJsonHandler.java, mode: switch }
   - service: docdb
     doc: docs/services/docdb.md
     sources:
@@ -281,10 +285,10 @@ services:
     doc: docs/services/redshift.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/redshift/RedshiftQueryHandler.java, mode: switch }
-    # SubnetIds / VpcSecurityGroupIds / TagKeys / DbGroups are labels of an inner
-    # member-name switch (memberKeyRegex), not actions, same shape as the rds
-    # exclusions above.
-    exclude_actions: [SubnetIds, VpcSecurityGroupIds, TagKeys, DbGroups]
+    # SubnetIds / VpcSecurityGroupIds / IamRoles / AddIamRoles / RemoveIamRoles / TagKeys / DbGroups
+    # are labels of an inner member-name switch (memberKeyRegex), not actions, same shape as the
+    # rds exclusions above.
+    exclude_actions: [SubnetIds, VpcSecurityGroupIds, IamRoles, AddIamRoles, RemoveIamRoles, TagKeys, DbGroups]
   - service: redshiftdata
     doc: docs/services/redshift-data.md
     sources:
@@ -367,6 +371,10 @@ services:
     doc: docs/services/verifiedpermissions.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/verifiedpermissions/VerifiedPermissionsJsonHandler.java, mode: switch }
+  - service: timestream-influxdb
+    doc: docs/services/timestream-influxdb.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/timestreaminfluxdb/TimestreamInfluxDbJsonHandler.java, mode: switch }
   - service: sqs
     doc: docs/services/sqs.md
     sources:

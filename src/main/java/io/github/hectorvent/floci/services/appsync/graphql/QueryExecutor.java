@@ -55,7 +55,7 @@ public class QueryExecutor {
                             .errorType(ErrorType.OperationNotSupported)
                             .build())
                     .build();
-            return formatter.format(rejected);
+            return formatter.format(rejected.toSpecification());
         }
 
         ExecutionInput.Builder inputBuilder = ExecutionInput.newExecutionInput().query(query);
@@ -70,7 +70,7 @@ public class QueryExecutor {
         }
 
         ExecutionResult result = graphQL.execute(inputBuilder.build());
-        return formatter.format(result);
+        return formatter.format(result.toSpecification());
     }
 
     private List<OperationDefinition> parseOperations(String query) {

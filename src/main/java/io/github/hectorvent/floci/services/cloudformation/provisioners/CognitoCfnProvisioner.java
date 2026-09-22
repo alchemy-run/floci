@@ -275,9 +275,9 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
         String clientName = requestedClientName == null || requestedClientName.isBlank()
                 ? ctx.generatePhysicalName(r.getLogicalId(), 128, false)
                 : requestedClientName;
-        boolean generateSecret = Boolean.parseBoolean(resolveOrDefault(props, "GenerateSecret", ctx, "false"));
+        boolean generateSecret = Boolean.parseBoolean(ctx.resolveOrDefault(props, "GenerateSecret", "false"));
         boolean allowedOAuthFlowsUserPoolClient =
-                Boolean.parseBoolean(resolveOrDefault(props, "AllowedOAuthFlowsUserPoolClient", ctx, "false"));
+                Boolean.parseBoolean(ctx.resolveOrDefault(props, "AllowedOAuthFlowsUserPoolClient", "false"));
         List<String> allowedOAuthFlows = ctx.resolveStringList(props, "AllowedOAuthFlows");
         List<String> allowedOAuthScopes = ctx.resolveStringList(props, "AllowedOAuthScopes");
 
@@ -497,11 +497,6 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
             throw new IllegalArgumentException(
                     "AWS::Cognito::UserPoolDomain ManagedLoginVersion must be an integer, got: " + value, e);
         }
-    }
-
-    private static String resolveOrDefault(JsonNode props, String name, ProvisionContext ctx, String defaultValue) {
-        String value = ctx.resolveOptional(props, name);
-        return (value != null && !value.isBlank()) ? value : defaultValue;
     }
 
     private static Integer parseInteger(JsonNode props, String name, ProvisionContext ctx) {

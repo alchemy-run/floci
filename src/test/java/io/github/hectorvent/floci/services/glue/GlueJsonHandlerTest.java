@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
+import io.github.hectorvent.floci.services.kms.KmsService;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingService;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,7 +42,8 @@ class GlueJsonHandlerTest {
         GlueSchemaRegistryService schemaRegistryService =
                 new GlueSchemaRegistryService(storageFactory, regionResolver);
         GlueService glueService = new GlueService(
-                storageFactory, schemaRegistryService, regionResolver, new ResourceGroupsTaggingService(storageFactory));
+                storageFactory, schemaRegistryService, regionResolver, new ResourceGroupsTaggingService(storageFactory),
+                new KmsService(storageFactory, regionResolver));
         handler = new GlueJsonHandler(glueService, schemaRegistryService, mapper);
     }
 
@@ -381,6 +384,133 @@ class GlueJsonHandlerTest {
     }
 
     @Test
+    void classifierCrudPreservesPartialUpdatesAndMetadata() throws Exception {
+        ObjectNode create = mapper.createObjectNode();
+        create.putObject("GrokClassifier")
+                .put("Name", "access-logs")
+                .put("Classification", "apache")
+                .put("GrokPattern", "%{COMMONAPACHELOG}")
+                .put("CustomPatterns", "ORIGINAL value");
+        assertEquals(200, handler.handle("CreateClassifier", create, REGION).getStatus());
+
+        JsonNode created = mapper.valueToTree(body(handler.handle(
+                "GetClassifier", mapper.createObjectNode().put("Name", "access-logs"), REGION)))
+                .get("Classifier").get("GrokClassifier");
+        assertEquals(1, created.get("Version").asLong());
+        assertTrue(created.has("CreationTime"));
+        assertTrue(created.has("LastUpdated"));
+
+        ObjectNode update = mapper.createObjectNode();
+        update.putObject("GrokClassifier")
+                .put("Name", "access-logs")
+                .put("Classification", "apache-updated");
+        assertEquals(200, handler.handle("UpdateClassifier", update, REGION).getStatus());
+
+        JsonNode updated = mapper.valueToTree(body(handler.handle(
+                "GetClassifier", mapper.createObjectNode().put("Name", "access-logs"), REGION)))
+                .get("Classifier").get("GrokClassifier");
+        assertEquals("apache-updated", updated.get("Classification").asText());
+        assertEquals("%{COMMONAPACHELOG}", updated.get("GrokPattern").asText());
+        assertEquals("ORIGINAL value", updated.get("CustomPatterns").asText());
+        assertEquals(created.get("CreationTime"), updated.get("CreationTime"));
+        assertEquals(2, updated.get("Version").asLong());
+
+        assertEquals(200, handler.handle(
+                "DeleteClassifier", mapper.createObjectNode().put("Name", "access-logs"), REGION).getStatus());
+        AwsException missing = assertThrows(AwsException.class, () -> handler.handle(
+                "GetClassifier", mapper.createObjectNode().put("Name", "access-logs"), REGION));
+        assertEquals("EntityNotFoundException", missing.getErrorCode());
+    }
+
+    @Test
+    void allClassifierKindsRoundTripAndListsArePaginatedByName() throws Exception {
+        ObjectNode grok = mapper.createObjectNode();
+        grok.putObject("GrokClassifier")
+                .put("Name", "d-grok")
+                .put("Classification", "logs")
+                .put("GrokPattern", "%{GREEDYDATA:message}");
+        ObjectNode json = mapper.createObjectNode();
+        json.putObject("JsonClassifier").put("Name", "b-json").put("JsonPath", "$.records[*]");
+        ObjectNode xml = mapper.createObjectNode();
+        xml.putObject("XMLClassifier")
+                .put("Name", "a-xml")
+                .put("Classification", "xml")
+                .put("RowTag", "record");
+        ObjectNode csv = mapper.createObjectNode();
+        csv.putObject("CsvClassifier")
+                .put("Name", "c-csv")
+                .put("Delimiter", ",")
+                .put("QuoteSymbol", "\"")
+                .put("ContainsHeader", "PRESENT")
+                .put("Serde", "OpenCSVSerDe")
+                .putArray("CustomDatatypes").add("STRING").add("TIMESTAMP");
+        assertEquals(200, handler.handle("CreateClassifier", grok, REGION).getStatus());
+        assertEquals(200, handler.handle("CreateClassifier", json, REGION).getStatus());
+        assertEquals(200, handler.handle("CreateClassifier", xml, REGION).getStatus());
+        assertEquals(200, handler.handle("CreateClassifier", csv, REGION).getStatus());
+
+        ObjectNode firstRequest = mapper.createObjectNode().put("MaxResults", 2);
+        JsonNode first = mapper.valueToTree(body(handler.handle("GetClassifiers", firstRequest, REGION)));
+        assertEquals(2, first.get("Classifiers").size());
+        assertEquals("a-xml", first.get("Classifiers").get(0).get("XMLClassifier").get("Name").asText());
+        assertEquals("b-json", first.get("Classifiers").get(1).get("JsonClassifier").get("Name").asText());
+        assertEquals("2", first.get("NextToken").asText());
+
+        ObjectNode secondRequest = mapper.createObjectNode().put("MaxResults", 2).put("NextToken", "2");
+        JsonNode second = mapper.valueToTree(body(handler.handle("GetClassifiers", secondRequest, REGION)));
+        assertEquals(2, second.get("Classifiers").size());
+        assertEquals("c-csv", second.get("Classifiers").get(0).get("CsvClassifier").get("Name").asText());
+        assertEquals("d-grok", second.get("Classifiers").get(1).get("GrokClassifier").get("Name").asText());
+        assertTrue(!second.has("NextToken"));
+    }
+
+    @Test
+    void classifierValidationRejectsAmbiguousAndInvalidRequests() throws Exception {
+        ObjectNode ambiguous = mapper.createObjectNode();
+        ambiguous.putObject("JsonClassifier").put("Name", "ambiguous").put("JsonPath", "$");
+        ambiguous.putObject("XMLClassifier").put("Name", "ambiguous").put("Classification", "xml");
+        assertClassifierError("InvalidInputException", "CreateClassifier", ambiguous);
+
+        ObjectNode invalidCsv = mapper.createObjectNode();
+        invalidCsv.putObject("CsvClassifier")
+                .put("Name", "invalid-csv")
+                .put("Delimiter", ",")
+                .put("QuoteSymbol", ",")
+                .put("ContainsHeader", "MAYBE");
+        assertClassifierError("InvalidInputException", "CreateClassifier", invalidCsv);
+
+        ObjectNode invalidGrok = mapper.createObjectNode();
+        invalidGrok.putObject("GrokClassifier")
+                .put("Name", "invalid-grok")
+                .put("Classification", "logs");
+        assertClassifierError("InvalidInputException", "CreateClassifier", invalidGrok);
+    }
+
+    @Test
+    void classifierCreateUpdateAndDeleteUseAwsErrors() throws Exception {
+        ObjectNode create = mapper.createObjectNode();
+        create.putObject("JsonClassifier").put("Name", "events").put("JsonPath", "$.events[*]");
+        assertEquals(200, handler.handle("CreateClassifier", create, REGION).getStatus());
+        assertClassifierError("AlreadyExistsException", "CreateClassifier", create);
+
+        ObjectNode wrongKind = mapper.createObjectNode();
+        wrongKind.putObject("XMLClassifier").put("Name", "events").put("Classification", "xml");
+        assertClassifierError("InvalidInputException", "UpdateClassifier", wrongKind);
+
+        ObjectNode missing = mapper.createObjectNode();
+        missing.putObject("JsonClassifier").put("Name", "missing").put("JsonPath", "$");
+        assertClassifierError("EntityNotFoundException", "UpdateClassifier", missing);
+        assertClassifierError("EntityNotFoundException", "DeleteClassifier",
+                mapper.createObjectNode().put("Name", "missing"));
+    }
+
+    private void assertClassifierError(String errorCode, String action, JsonNode request) {
+        AwsException exception = assertThrows(AwsException.class,
+                () -> handler.handle(action, request, REGION));
+        assertEquals(errorCode, exception.getErrorCode());
+    }
+
+    @Test
     void createJobSucceeds() throws Exception {
         ObjectNode request = mapper.createObjectNode();
         request.put("Name", "test-job");
@@ -496,5 +626,171 @@ class GlueJsonHandlerTest {
                                                      TypeReference<Map<String, V>> typeReference) {
             return AccountAwareStorageBackend.inMemory("000000000000");
         }
+    }
+
+    private ObjectNode connectionInput(String name) {
+        ObjectNode input = mapper.createObjectNode();
+        input.put("Name", name);
+        input.put("ConnectionType", "JDBC");
+        input.put("Description", "orders db");
+        input.putArray("MatchCriteria").add("orders");
+        ObjectNode properties = input.putObject("ConnectionProperties");
+        properties.put("JDBC_CONNECTION_URL", "jdbc:postgresql://db.internal:5432/orders");
+        properties.put("USERNAME", "app");
+        properties.put("PASSWORD", "s3cret");
+        ObjectNode placement = input.putObject("PhysicalConnectionRequirements");
+        placement.put("SubnetId", "subnet-0123456789abcdef0");
+        placement.putArray("SecurityGroupIdList").add("sg-0123456789abcdef0");
+        placement.put("AvailabilityZone", "us-east-1a");
+        return input;
+    }
+
+    /**
+     * The wire shape a Glue client reads back: CreateConnection answers with its status, and
+     * GetConnection returns the definition under "Connection" with numeric timestamps and no
+     * null-valued members, which is how the AWS SDK and the Terraform provider expect it.
+     */
+    @Test
+    void createAndGetConnectionRoundTripTheDefinitionOnTheWire() throws Exception {
+        ObjectNode create = mapper.createObjectNode();
+        create.set("ConnectionInput", connectionInput("orders"));
+        create.putObject("Tags").put("env", "dev");
+
+        Response created = handler.handle("CreateConnection", create, REGION);
+        assertEquals(200, created.getStatus());
+        assertEquals("READY", mapper.valueToTree(created.getEntity()).get("CreateConnectionStatus").asText());
+
+        Response got = handler.handle("GetConnection", mapper.createObjectNode().put("Name", "orders"), REGION);
+        assertEquals(200, got.getStatus());
+        JsonNode connection = mapper.valueToTree(got.getEntity()).get("Connection");
+        assertEquals("orders", connection.get("Name").asText());
+        assertEquals("JDBC", connection.get("ConnectionType").asText());
+        assertEquals("s3cret", connection.get("ConnectionProperties").get("PASSWORD").asText());
+        assertEquals("subnet-0123456789abcdef0", connection.get("PhysicalConnectionRequirements").get("SubnetId").asText());
+        assertEquals("READY", connection.get("Status").asText());
+        assertEquals(1, connection.get("ConnectionSchemaVersion").asInt());
+        assertTrue(connection.get("CreationTime").isNumber());
+        assertTrue(connection.get("LastUpdatedTime").isNumber());
+        assertFalse(connection.has("LastUpdatedBy"));
+        assertFalse(connection.has("AuthenticationConfiguration"));
+
+        ObjectNode tags = mapper.createObjectNode();
+        tags.put("ResourceArn", "arn:aws:glue:" + REGION + ":" + ACCOUNT_ID + ":connection/orders");
+        JsonNode tagBody = mapper.valueToTree(handler.handle("GetTags", tags, REGION).getEntity());
+        assertEquals("dev", tagBody.get("Tags").get("env").asText());
+    }
+
+    @Test
+    void getConnectionsHonoursHidePasswordAndTheFilter() throws Exception {
+        ObjectNode create = mapper.createObjectNode();
+        create.set("ConnectionInput", connectionInput("orders"));
+        handler.handle("CreateConnection", create, REGION);
+        ObjectNode kafkaInput = connectionInput("events");
+        kafkaInput.put("ConnectionType", "KAFKA");
+        kafkaInput.putObject("ConnectionProperties").put("KAFKA_BOOTSTRAP_SERVERS", "broker:9092");
+        ObjectNode createKafka = mapper.createObjectNode();
+        createKafka.set("ConnectionInput", kafkaInput);
+        handler.handle("CreateConnection", createKafka, REGION);
+
+        ObjectNode list = mapper.createObjectNode();
+        list.put("HidePassword", true);
+        list.putObject("Filter").put("ConnectionType", "JDBC");
+        JsonNode body = mapper.valueToTree(handler.handle("GetConnections", list, REGION).getEntity());
+        assertEquals(1, body.get("ConnectionList").size());
+        JsonNode orders = body.get("ConnectionList").get(0);
+        assertEquals("orders", orders.get("Name").asText());
+        assertFalse(orders.get("ConnectionProperties").has("PASSWORD"));
+        assertEquals("app", orders.get("ConnectionProperties").get("USERNAME").asText());
+        assertFalse(body.has("NextToken"));
+    }
+
+    @Test
+    void updateDeleteAndBatchDeleteConnectionAnswerWithTheDocumentedBodies() throws Exception {
+        ObjectNode create = mapper.createObjectNode();
+        create.set("ConnectionInput", connectionInput("orders"));
+        handler.handle("CreateConnection", create, REGION);
+
+        ObjectNode update = mapper.createObjectNode();
+        update.put("Name", "orders");
+        ObjectNode redefinition = connectionInput("orders");
+        redefinition.remove("Description");
+        update.set("ConnectionInput", redefinition);
+        Response updated = handler.handle("UpdateConnection", update, REGION);
+        assertEquals(200, updated.getStatus());
+        assertEquals(0, mapper.valueToTree(updated.getEntity()).size());
+        JsonNode afterUpdate = mapper.valueToTree(
+                handler.handle("GetConnection", mapper.createObjectNode().put("Name", "orders"), REGION).getEntity())
+                .get("Connection");
+        assertFalse(afterUpdate.has("Description"));
+
+        ObjectNode batch = mapper.createObjectNode();
+        batch.putArray("ConnectionNameList").add("orders").add("absent");
+        JsonNode batchBody = mapper.valueToTree(handler.handle("BatchDeleteConnection", batch, REGION).getEntity());
+        assertEquals("orders", batchBody.get("Succeeded").get(0).asText());
+        assertEquals("EntityNotFoundException", batchBody.get("Errors").get("absent").get("ErrorCode").asText());
+
+        AwsException gone = assertThrows(AwsException.class, () -> handler.handle(
+                "DeleteConnection", mapper.createObjectNode().put("ConnectionName", "orders"), REGION));
+        assertEquals("EntityNotFoundException", gone.getErrorCode());
+
+        ObjectNode test = mapper.createObjectNode();
+        ObjectNode inline = test.putObject("TestConnectionInput");
+        inline.put("ConnectionType", "JDBC");
+        inline.putObject("ConnectionProperties").put("JDBC_CONNECTION_URL", "jdbc:mysql://h:3306/d");
+        assertEquals(200, handler.handle("TestConnection", test, REGION).getStatus());
+    }
+
+    @Test
+    void resourcePolicyOperationsAnswerWithTheDocumentedBodies() throws Exception {
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
+        ObjectNode put = mapper.createObjectNode();
+        put.put("PolicyInJson", policy);
+        put.put("PolicyExistsCondition", "NOT_EXIST");
+        JsonNode putBody = mapper.valueToTree(handler.handle("PutResourcePolicy", put, REGION).getEntity());
+        String hash = putBody.get("PolicyHash").asText();
+        assertFalse(hash.isBlank());
+
+        JsonNode got = mapper.valueToTree(handler.handle("GetResourcePolicy", mapper.createObjectNode(), REGION).getEntity());
+        assertEquals(policy, got.get("PolicyInJson").asText());
+        assertEquals(hash, got.get("PolicyHash").asText());
+        assertTrue(got.get("CreateTime").isNumber());
+        assertTrue(got.get("UpdateTime").isNumber());
+
+        JsonNode list = mapper.valueToTree(handler.handle("GetResourcePolicies", mapper.createObjectNode(), REGION).getEntity());
+        assertEquals(1, list.get("GetResourcePoliciesResponseList").size());
+        assertEquals(hash, list.get("GetResourcePoliciesResponseList").get(0).get("PolicyHash").asText());
+        assertFalse(list.has("NextToken"));
+
+        AwsException conflict = assertThrows(AwsException.class, () -> handler.handle("PutResourcePolicy", put, REGION));
+        assertEquals("ConditionCheckFailureException", conflict.getErrorCode());
+
+        Response deleted = handler.handle("DeleteResourcePolicy", mapper.createObjectNode(), REGION);
+        assertEquals(0, mapper.valueToTree(deleted.getEntity()).size());
+        AwsException gone = assertThrows(AwsException.class,
+                () -> handler.handle("GetResourcePolicy", mapper.createObjectNode(), REGION));
+        assertEquals("EntityNotFoundException", gone.getErrorCode());
+    }
+
+    @Test
+    void encryptionSettingsReportBothBlocksBeforeAndAfterAPut() throws Exception {
+        JsonNode defaults = mapper.valueToTree(
+                handler.handle("GetDataCatalogEncryptionSettings", mapper.createObjectNode(), REGION).getEntity());
+        JsonNode settings = defaults.get("DataCatalogEncryptionSettings");
+        assertEquals("DISABLED", settings.get("EncryptionAtRest").get("CatalogEncryptionMode").asText());
+        assertFalse(settings.get("EncryptionAtRest").has("SseAwsKmsKeyId"));
+        assertFalse(settings.get("ConnectionPasswordEncryption").get("ReturnConnectionPasswordEncrypted").asBoolean());
+
+        ObjectNode put = mapper.createObjectNode();
+        ObjectNode block = put.putObject("DataCatalogEncryptionSettings").putObject("ConnectionPasswordEncryption");
+        block.put("ReturnConnectionPasswordEncrypted", true);
+        block.put("AwsKmsKeyId", "alias/glue");
+        assertEquals(0, mapper.valueToTree(handler.handle("PutDataCatalogEncryptionSettings", put, REGION).getEntity()).size());
+
+        JsonNode after = mapper.valueToTree(
+                handler.handle("GetDataCatalogEncryptionSettings", mapper.createObjectNode(), REGION).getEntity())
+                .get("DataCatalogEncryptionSettings");
+        assertTrue(after.get("ConnectionPasswordEncryption").get("ReturnConnectionPasswordEncrypted").asBoolean());
+        assertEquals("alias/glue", after.get("ConnectionPasswordEncryption").get("AwsKmsKeyId").asText());
+        assertEquals("DISABLED", after.get("EncryptionAtRest").get("CatalogEncryptionMode").asText());
     }
 }

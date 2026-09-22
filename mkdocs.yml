@@ -140,12 +140,14 @@ nav:
     - MemoryDB: services/memorydb.md
     - RDS: services/rds.md
     - RDS Data API: services/rds-data.md
+    - Timestream for InfluxDB: services/timestream-influxdb.md
     - MSK (Kafka): services/msk.md
     - Amazon MQ: services/amazonmq.md
     - Glue: services/glue.md
     - Lake Formation: services/lakeformation.md
     - Neptune: services/neptune.md
     - DocumentDB: services/docdb.md
+    - DMS: services/dms.md
     - Athena: services/athena.md
     - Redshift: services/redshift.md
     - Redshift Data API: services/redshift-data.md

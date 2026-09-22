@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.services.iam.model.IamPolicy;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
 import io.github.hectorvent.floci.services.iam.model.InstanceProfile;
+import io.github.hectorvent.floci.services.iam.model.LoginProfile;
 import io.github.hectorvent.floci.services.iam.model.OpenIDConnectProvider;
 import io.github.hectorvent.floci.services.iam.model.PolicyVersion;
 import io.github.hectorvent.floci.services.iam.model.CallerContext;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 /**
@@ -67,6 +69,10 @@ public class IamQueryHandler {
             case "TagUser" -> handleTagUser(params);
             case "UntagUser" -> handleUntagUser(params);
             case "ListUserTags" -> handleListUserTags(params);
+            case "CreateLoginProfile" -> handleCreateLoginProfile(params, authorization);
+            case "GetLoginProfile" -> handleGetLoginProfile(params, authorization);
+            case "UpdateLoginProfile" -> handleUpdateLoginProfile(params);
+            case "DeleteLoginProfile" -> handleDeleteLoginProfile(params, authorization);
 
             // Identity providers & server certificates
             case "ListOpenIDConnectProviders" -> handleListOpenIDConnectProviders(params);
@@ -115,6 +121,7 @@ public class IamQueryHandler {
             case "UntagRole" -> handleUntagRole(params);
             case "TagInstanceProfile" -> handleTagInstanceProfile(params);
             case "UntagInstanceProfile" -> handleUntagInstanceProfile(params);
+            case "ListInstanceProfileTags" -> handleListInstanceProfileTags(params);
             case "ListRoleTags" -> handleListRoleTags(params);
 
             // Managed Policies
@@ -288,6 +295,50 @@ public class IamQueryHandler {
         String result = new XmlBuilder().start("Tags").raw(tagsXml(tags)).end("Tags")
                 .elem("IsTruncated", false).build();
         return Response.ok(AwsQueryResponse.envelope("ListUserTags", AwsNamespaces.IAM, result)).build();
+    }
+
+    private Response handleCreateLoginProfile(MultivaluedMap<String, String> params, String authorization) {
+        String userName = resolveUserName(params, authorization);
+        String password = getParam(params, "Password");
+        if (password == null) {
+            throw new AwsException("ValidationError", "The request must contain the parameter Password.", 400);
+        }
+        boolean passwordResetRequired = getBooleanParam(params, "PasswordResetRequired", false);
+        LoginProfile profile = iamService.createLoginProfile(userName, password, passwordResetRequired);
+        String result = new XmlBuilder().start("LoginProfile").raw(loginProfileXml(profile)).end("LoginProfile").build();
+        return Response.ok(AwsQueryResponse.envelope("CreateLoginProfile", AwsNamespaces.IAM, result)).build();
+    }
+
+    private Response handleGetLoginProfile(MultivaluedMap<String, String> params, String authorization) {
+        String userName = resolveUserName(params, authorization);
+        LoginProfile profile = iamService.getLoginProfile(userName);
+        String result = new XmlBuilder().start("LoginProfile").raw(loginProfileXml(profile)).end("LoginProfile").build();
+        return Response.ok(AwsQueryResponse.envelope("GetLoginProfile", AwsNamespaces.IAM, result)).build();
+    }
+
+    private Response handleUpdateLoginProfile(MultivaluedMap<String, String> params) {
+        String userName = getParam(params, "UserName");
+        if (userName == null) {
+            throw new AwsException("ValidationError", "The request must contain the parameter UserName.", 400);
+        }
+        String password = getParam(params, "Password");
+        Boolean passwordResetRequired = getOptionalBooleanParam(params, "PasswordResetRequired");
+        iamService.updateLoginProfile(userName, password, passwordResetRequired);
+        return Response.ok(AwsQueryResponse.envelopeNoResult("UpdateLoginProfile", AwsNamespaces.IAM)).build();
+    }
+
+    private Response handleDeleteLoginProfile(MultivaluedMap<String, String> params, String authorization) {
+        String userName = resolveUserName(params, authorization);
+        iamService.deleteLoginProfile(userName);
+        return Response.ok(AwsQueryResponse.envelopeNoResult("DeleteLoginProfile", AwsNamespaces.IAM)).build();
+    }
+
+    private String loginProfileXml(LoginProfile profile) {
+        return new XmlBuilder()
+                .elem("PasswordResetRequired", profile.isPasswordResetRequired())
+                .elem("UserName", profile.getUserName())
+                .elem("CreateDate", isoDate(profile.getCreateDate()))
+                .build();
     }
 
     // ListOpenIDConnectProviders is not paginated and carries only ARNs — the client fetches
@@ -498,6 +549,15 @@ public class IamQueryHandler {
         String value = params.getFirst(name);
         if (value == null) {
             return defaultValue;
+        }
+        return parseStrictBoolean(name, value);
+    }
+
+    /** Unlike {@link #getBooleanParam}, absence is meaningful here: it must not collapse to a default. */
+    private Boolean getOptionalBooleanParam(MultivaluedMap<String, String> params, String name) {
+        String value = params.getFirst(name);
+        if (value == null) {
+            return null;
         }
         return parseStrictBoolean(name, value);
     }
@@ -1399,5 +1459,14 @@ public class IamQueryHandler {
     private Response handleUntagInstanceProfile(MultivaluedMap<String, String> params) {
         iamService.untagInstanceProfile(getParam(params, "InstanceProfileName"), extractTagKeys(params));
         return Response.ok(AwsQueryResponse.envelopeNoResult("UntagInstanceProfile", AwsNamespaces.IAM)).build();
+    }
+
+    private Response handleListInstanceProfileTags(MultivaluedMap<String, String> params) {
+        String instanceProfileName = getParam(params, "InstanceProfileName");
+        // AWS documents the result as sorted by tag key.
+        Map<String, String> tags = new TreeMap<>(iamService.listInstanceProfileTags(instanceProfileName));
+        String result = new XmlBuilder().start("Tags").raw(tagsXml(tags)).end("Tags")
+                .elem("IsTruncated", false).build();
+        return Response.ok(AwsQueryResponse.envelope("ListInstanceProfileTags", AwsNamespaces.IAM, result)).build();
     }
 }

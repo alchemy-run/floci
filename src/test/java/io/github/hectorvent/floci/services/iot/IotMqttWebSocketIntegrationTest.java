@@ -40,6 +40,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -66,6 +69,7 @@ public class IotMqttWebSocketIntegrationTest {
     static final int TLS_PORT = 18837;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final short CLOSE_UNSUPPORTED_DATA = 1003;
+    private static final int CHURN_THREADS = 10;
 
     @ConfigProperty(name = "quarkus.http.test-ssl-port", defaultValue = "0")
     int testSslPort;
@@ -274,14 +278,29 @@ public class IotMqttWebSocketIntegrationTest {
 
     @Test
     void connectDisconnectChurnLeavesNoBrokerSessionBehind() throws Exception {
+        // Each connect costs a fixed ~300ms inside the Paho client (its sender, receiver and callback
+        // threads each sleep 100ms while starting), so the cycles run concurrently to keep the
+        // churn from being 30 of those in a row.
         List<String> clientIds = new ArrayList<>();
-        for (int i = 0; i < 30; i++) {
-            String clientId = "churn-" + i + "-" + System.nanoTime();
-            clientIds.add(clientId);
-            String url = i % 2 == 0 ? ws("/mqtt") : wss("/mqtt");
-            try (WsClient client = WsClient.connect(url, clientId, null, null)) {
-                assertTrue(client.isConnected());
+        ExecutorService pool = Executors.newFixedThreadPool(CHURN_THREADS);
+        try {
+            List<Future<?>> cycles = new ArrayList<>();
+            for (int i = 0; i < 30; i++) {
+                String clientId = "churn-" + i + "-" + System.nanoTime();
+                clientIds.add(clientId);
+                String url = i % 2 == 0 ? ws("/mqtt") : wss("/mqtt");
+                cycles.add(pool.submit(() -> {
+                    try (WsClient client = WsClient.connect(url, clientId, null, null)) {
+                        assertTrue(client.isConnected());
+                    }
+                    return null;
+                }));
             }
+            for (Future<?> cycle : cycles) {
+                cycle.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
         }
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         for (String clientId : clientIds) {

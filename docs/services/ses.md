@@ -226,7 +226,9 @@ Messages are stored locally by Floci and can be persisted when SES storage is ba
 
 Alongside the LocalStack fields, each captured message carries a
 `ReturnPath` holding the resolved envelope sender described under
-[SMTP Relay](#smtp-relay).
+[SMTP Relay](#smtp-relay). A message the content scan rejected carries
+`RejectReason` and none of its content: no `Subject`, `Body`, `Headers`,
+`ReplyToAddresses` or `RawData`, in neither the Simple nor the raw shape.
 
 ## Examples
 
@@ -394,6 +396,9 @@ Alongside the classic Query API, Floci implements a subset of the SES v2 REST JS
 | `POST` | `/v2/email/tags` | `TagResource` |
 | `DELETE` | `/v2/email/tags?ResourceArn=...&TagKeys=...` | `UntagResource` |
 | `GET` | `/v2/email/tags?ResourceArn=...` | `ListTagsForResource` |
+| `POST` | `/v2/email/import-jobs` | `CreateImportJob` |
+| `GET` | `/v2/email/import-jobs/{JobId}` | `GetImportJob` |
+| `POST` | `/v2/email/import-jobs/list` | `ListImportJobs` |
 
 Floci models no leased dedicated IPs: `GetDedicatedIps` is empty and IP-targeted operations return `NotFoundException`, as real AWS does for an account with no leased IPs, with required request members validated first (`BadRequestException`). `PutDedicatedIpPoolScalingAttributes` rejects downgrading a `MANAGED` pool to `STANDARD`, and `PutAccountDedicatedIpWarmupAttributes` stores the flag behind `GetAccount.DedicatedIpAutoWarmupEnabled` (default `true`).
 
@@ -406,13 +411,16 @@ Floci recognises the AWS [mailbox simulator addresses](https://docs.aws.amazon.c
 | Recipient address | Events emitted (in addition to `Send`) |
 |---|---|
 | `success@simulator.amazonses.com` | `Delivery` |
-| `bounce@simulator.amazonses.com` | `Bounce` |
-| `complaint@simulator.amazonses.com` | `Complaint` |
-| `suppressionlist@simulator.amazonses.com` | `Reject` |
+| `bounce@simulator.amazonses.com`, `suppressionlist@simulator.amazonses.com` | `Bounce` |
+| `complaint@simulator.amazonses.com` | `Delivery`, then `Complaint` |
 
 A `+label` subaddress is supported on any of these, so `bounce+order-123@simulator.amazonses.com` triggers a `Bounce` just like the bare address : the label lets senders distinguish test messages. Only `+` separates the label; `bounce-label@...` is not a simulator address.
 
 A successful send without a simulator-address recipient emits only the `Send` event.
+
+A recipient on the [account-level suppression list](https://docs.aws.amazon.com/ses/latest/dg/sending-email-suppression-list.html) produces a `Bounce` with `bounceSubType: OnAccountSuppressionList` or a `Complaint` with `complaintSubType: OnAccountSuppressionList`, following the stored reason, and never a `Delivery`. Events are split by cause: a message that reaches both `bounce@simulator` and a suppressed address publishes two `Bounce` events, each listing only its own recipients, with `mail.destination` carrying the full envelope on both. These shapes were verified against real SES on 2026-09-21.
+
+`Reject` is emitted the way AWS documents it: a message carrying the [EICAR test file](https://www.eicar.org/download-anti-malware-testfile/) in its subject, a header, any text body or MIME part, including a base64 attachment or a forwarded message, is accepted (the send returns a `MessageId`) and then rejected with a `Reject` event whose `reason` is `Bad content`. The message is not relayed, the stored record keeps only its source, its envelope and `RejectReason`, and its `Send` and `Reject` events carry the envelope but no subject or headers in `mail`, where SES would include them, so the scanned content reaches neither the mailbox store nor an event destination. What the request itself supplied, its envelope and its tags, is kept. The test string itself is deliberately not reproduced here.
 
 Account-level VDM (Virtual Deliverability Manager) attributes are stored per region. `PutAccountVdmAttributes` sets `VdmEnabled` (opt-in, defaults `DISABLED`) plus the optional `DashboardAttributes.EngagementMetrics` and `GuardianAttributes.OptimizedSharedDelivery`. `GetAccount` omits `VdmAttributes` until VDM has been configured for the region, then returns `VdmEnabled`, adding the `DashboardAttributes`/`GuardianAttributes` sub-objects only while `VdmEnabled` is `ENABLED`. Floci stores the settings but does not run VDM analytics.
 
@@ -430,7 +438,9 @@ Suppression list entries are stored per region with `Reason` ∈ {`BOUNCE`, `COM
 
 Suppressed recipients are filtered out of the SMTP relay step (non-suppressed recipients on the same send still reach the relay normally), and the configuration set's event destinations receive a synthetic `Bounce` or `Complaint` event alongside the always-emitted `Send` event. The `SendEmail` API response (`200` + `MessageId`), the stored `SentEmail` visible at `GET /_aws/ses`, and the published event's `mail.destination` all retain the original recipient list : matching the AWS contract that the message is "accepted, just not sent" for suppressed addresses.
 
-`SendEmail` honors `ListManagementOptions` (`ContactListName`, optional `TopicName`). When present, each recipient is matched against the named contact list and suppressed as a `Bounce` when opted out : reusing the same relay-exclusion and Bounce-event path as suppression-list filtering, matching AWS ("SES will issue a bounce event for a message that is sent to an unsubscribed contact"). A contact is opted out when `UnsubscribeAll` is set; with a `TopicName`, an explicit `OPT_OUT` preference for that topic (or, absent an explicit preference, the topic's `DefaultSubscriptionStatus` being `OPT_OUT`) suppresses; without a `TopicName`, only `UnsubscribeAll` contacts are suppressed. A recipient that is not yet a contact is created on the list automatically (as on AWS) and then evaluated. Referencing a contact list that does not exist fails the send with `NotFoundException`. The topic-default fallback at send time is an intentional deviation : it is not documented by AWS and mirrors the effective-status model AWS uses for `ListContacts`.
+Import jobs read their source from Floci's own S3 emulation, so the object has to be uploaded there rather than to real S3; the CSV and newline-delimited JSON record formats are AWS's own ([suppression list](https://docs.aws.amazon.com/ses/latest/dg/sending-email-suppression-list.html#sending-email-suppression-list-manual-add-bulk), [contact list](https://docs.aws.amazon.com/ses/latest/dg/sending-email-list-management.html#configuring-list-management-bulk-import)). A job still running when the emulator restarts is marked `FAILED` on the next start. Not emulated: `FailureInfo.FailedRecordsS3Url` (Floci writes no failed-record file), the per-file record limits, the same-region bucket rule, and `ListImportJobs` pagination, which returns every job in one page.
+
+`SendEmail` honors `ListManagementOptions` (`ContactListName`, optional `TopicName`). When present, each recipient is matched against the named contact list and suppressed as a `Bounce` when opted out — reusing the same relay-exclusion and Bounce-event path as suppression-list filtering, matching AWS ("SES will issue a bounce event for a message that is sent to an unsubscribed contact"). A contact is opted out when `UnsubscribeAll` is set; with a `TopicName`, an explicit `OPT_OUT` preference for that topic (or, absent an explicit preference, the topic's `DefaultSubscriptionStatus` being `OPT_OUT`) suppresses; without a `TopicName`, only `UnsubscribeAll` contacts are suppressed. A recipient that is not yet a contact is created on the list automatically (as on AWS) and then evaluated. Referencing a contact list that does not exist fails the send with `NotFoundException`. The topic-default fallback at send time is an intentional deviation — it is not documented by AWS and mirrors the effective-status model AWS uses for `ListContacts`.
 
 For a **single-recipient** list-managed send, Floci injects a functional unsubscribe link (matching AWS, which only does this for one recipient): the `{{amazonSESUnsubscribeUrl}}` body placeholder is replaced (up to twice) and a `List-Unsubscribe` header plus `List-Unsubscribe-Post: List-Unsubscribe=One-Click` are added (applied to the relayed message and shown under `Headers` at `GET /_aws/ses`; a caller-supplied `List-Unsubscribe` is overridden, matching AWS). The `{{amazonSESUnsubscribeUrl}}` placeholder is also preserved through template rendering so a templated body can carry it. On a send without `ListManagementOptions`, the placeholder is left in the body verbatim (neither replaced nor stripped) : this specific behavior is Floci's choice and is not verified against real SES. Unlike AWS's opaque hosted URL, the link points at Floci's own `/_aws/ses/unsubscribe?region=…&contactList=…&address=…&topic=…` endpoint. `GET` (a browser click) only renders a confirmation page and changes nothing : matching AWS's landing-page behavior and avoiding the RFC 8058 hazard where a client or bot that prefetches the link would silently unsubscribe the contact : while `POST` (the one-click request the confirmation form submits) applies the opt-out (a topic → `OPT_OUT` for that topic; no topic → `UnsubscribeAll`), auto-creating the contact if needed. Two deviations from AWS here: the link is carried as readable query parameters rather than an opaque token (so, like the rest of Floci, the endpoint is unauthenticated and only safe on a trusted dev/test network : a `POST` can opt out any contact), and only the one-click URL entry is emitted : its scheme follows Floci's base URL (`http` unless TLS is enabled) : whereas AWS also includes a `mailto:` entry, which Floci can't service since it has no inbound mail endpoint. Raw (MIME) sends do not get link injection yet.
 

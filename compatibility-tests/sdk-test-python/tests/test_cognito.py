@@ -126,7 +126,9 @@ class TestCognitoAuth:
         pool_id = pool_response["UserPool"]["Id"]
 
         client_response = cognito_client.create_user_pool_client(
-            UserPoolId=pool_id, ClientName=client_name
+            UserPoolId=pool_id,
+            ClientName=client_name,
+            ExplicitAuthFlows=["ALLOW_ADMIN_USER_PASSWORD_AUTH"],
         )
         client_id = client_response["UserPoolClient"]["ClientId"]
 
@@ -135,13 +137,16 @@ class TestCognitoAuth:
             Username=username,
             UserAttributes=[{"Name": "email", "Value": "pytest@example.com"}],
         )
+        cognito_client.admin_set_user_password(
+            UserPoolId=pool_id, Username=username, Password="Pytest#1234", Permanent=True
+        )
 
         try:
             response = cognito_client.admin_initiate_auth(
                 UserPoolId=pool_id,
                 ClientId=client_id,
                 AuthFlow="ADMIN_NO_SRP_AUTH",
-                AuthParameters={"USERNAME": username, "PASSWORD": "any"},
+                AuthParameters={"USERNAME": username, "PASSWORD": "Pytest#1234"},
             )
             access_token = response["AuthenticationResult"]["AccessToken"]
             assert access_token
@@ -162,7 +167,9 @@ class TestCognitoAuth:
         pool_id = pool_response["UserPool"]["Id"]
 
         client_response = cognito_client.create_user_pool_client(
-            UserPoolId=pool_id, ClientName=client_name
+            UserPoolId=pool_id,
+            ClientName=client_name,
+            ExplicitAuthFlows=["ALLOW_ADMIN_USER_PASSWORD_AUTH"],
         )
         client_id = client_response["UserPoolClient"]["ClientId"]
 
@@ -171,12 +178,15 @@ class TestCognitoAuth:
             Username=username,
             UserAttributes=[{"Name": "email", "Value": "pytest@example.com"}],
         )
+        cognito_client.admin_set_user_password(
+            UserPoolId=pool_id, Username=username, Password="Pytest#1234", Permanent=True
+        )
 
         auth_response = cognito_client.admin_initiate_auth(
             UserPoolId=pool_id,
             ClientId=client_id,
             AuthFlow="ADMIN_NO_SRP_AUTH",
-            AuthParameters={"USERNAME": username, "PASSWORD": "any"},
+            AuthParameters={"USERNAME": username, "PASSWORD": "Pytest#1234"},
         )
         access_token = auth_response["AuthenticationResult"]["AccessToken"]
 

@@ -41,8 +41,12 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -2858,7 +2862,7 @@ public class LambdaService implements ResourceProvider {
             if (!encoded.isEmpty()) {
                 encoded.append('/');
             }
-            encoded.append(java.net.URLEncoder.encode(segment, java.nio.charset.StandardCharsets.UTF_8)
+            encoded.append(java.net.URLEncoder.encode(segment, StandardCharsets.UTF_8)
                     .replace("+", "%20"));
         }
         return encoded.toString();
@@ -2885,9 +2889,9 @@ public class LambdaService implements ResourceProvider {
             // outside the lock; only the fields that decide what a snapshot copies are inside it.
             String newSha256 = null;
             try {
-                byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(zipBytes);
+                byte[] digest = MessageDigest.getInstance("SHA-256").digest(zipBytes);
                 newSha256 = Base64.getEncoder().encodeToString(digest);
-            } catch (java.security.NoSuchAlgorithmException ignored) {}
+            } catch (NoSuchAlgorithmException ignored) {}
             synchronized (lockForConcurrencyOp(fn.getFunctionArn())) {
                 fn.setCodeLocalPath(codePath.toAbsolutePath().normalize().toString());
                 fn.setCodeSizeBytes(zipBytes.length);
@@ -3003,30 +3007,78 @@ public class LambdaService implements ResourceProvider {
             throw new AwsException("InvalidParameterValueException",
                     "Hot-reload S3Key must be an absolute path on the Docker host, got: " + hostPath, 400);
         }
+        if (hostPath.contains(":")) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Hot-reload S3Key must not contain ':', got: " + hostPath, 400);
+        }
+        Path normalized;
+        try {
+            normalized = Path.of(hostPath).normalize();
+        } catch (InvalidPathException e) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Hot-reload S3Key is not a valid path: " + hostPath, 400);
+        }
         config.services().lambda().hotReload().allowedPaths().ifPresent(allowed -> {
-            if (allowed.stream().noneMatch(hostPath::startsWith)) {
+            if (allowed.stream().noneMatch(prefix -> isUnderHotReloadPrefix(normalized, prefix))) {
                 throw new AwsException("InvalidParameterValueException",
                         "Path '" + hostPath + "' is not under an allowed hot-reload mount prefix.", 400);
             }
         });
-        fn.setHotReloadHostPath(hostPath);
+        if (config.services().lambda().hotReload().allowedPaths().isEmpty() && reachesDockerSocketDirectory(normalized)) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Path '" + hostPath + "' can expose the Docker socket. Set "
+                            + "FLOCI_SERVICES_LAMBDA_HOT_RELOAD_ALLOWED_PATHS to mount it.", 400);
+        }
+        String resolvedHostPath = toDockerHostPath(normalized);
+        fn.setHotReloadHostPath(resolvedHostPath);
         fn.setCodeLocalPath(null);
         fn.setS3Bucket(null);
         fn.setS3Key(null);
         fn.setCodeSizeBytes(0);
-        // AWS always returns a non-empty CodeSha256 and version publishers
-        // (Alchemy's Lambda.Version) require one. Hot-reload code lives on a
-        // bind mount with no fixed artifact, so hash the mount path — stable,
-        // deterministic, and non-empty.
+        // Bind-mounted code has no artifact; hash its normalized path for version publication.
         try {
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(hostPath.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(resolvedHostPath.getBytes(StandardCharsets.UTF_8));
             fn.setCodeSha256(Base64.getEncoder().encodeToString(digest));
-        } catch (java.security.NoSuchAlgorithmException e) {
-            fn.setCodeSha256(Base64.getEncoder().encodeToString(hostPath.getBytes(
-                    java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            fn.setCodeSha256(Base64.getEncoder().encodeToString(resolvedHostPath.getBytes(
+                    StandardCharsets.UTF_8)));
         }
-        LOG.infov("Hot-reload configured for function {0}: bind-mounting {1}", fn.getFunctionName(), hostPath);
+        LOG.infov("Hot-reload configured for function {0}: bind-mounting {1}", fn.getFunctionName(), resolvedHostPath);
+    }
+
+    /** Docker on the host expects a POSIX path, whatever separator the JVM running Floci uses. */
+    static String toDockerHostPath(Path normalized) {
+        StringBuilder path = new StringBuilder();
+        for (Path name : normalized) {
+            path.append('/').append(name);
+        }
+        return path.length() == 0 ? "/" : path.toString();
+    }
+
+    /**
+     * True for the host root, {@code /var}, and anything in {@code /run} or {@code /var/run}, where the
+     * Docker socket lives. {@code /proc} counts too: {@code /proc/1/root/var/run} is a different string
+     * for the same directory, and no code directory lives there either.
+     */
+    static boolean reachesDockerSocketDirectory(Path normalized) {
+        return normalized.getNameCount() == 0
+                || normalized.equals(Path.of("/var"))
+                || normalized.startsWith(Path.of("/run"))
+                || normalized.startsWith(Path.of("/var/run"))
+                || normalized.startsWith(Path.of("/proc"));
+    }
+
+    private static boolean isUnderHotReloadPrefix(Path normalizedPath, String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            return false;
+        }
+        try {
+            return normalizedPath.startsWith(Path.of(prefix).normalize());
+        } catch (InvalidPathException ignored) {
+            // A malformed prefix can never contain a path, so it does not allow anything.
+            return false;
+        }
     }
 
     // ──────────────────────────── Permissions (Policy) ────────────────────────────

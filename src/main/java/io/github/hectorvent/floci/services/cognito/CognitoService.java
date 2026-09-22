@@ -85,6 +85,8 @@ import static io.github.hectorvent.floci.core.common.ReservedTags.rejectUnknownR
 @ApplicationScoped
 public class CognitoService implements ResourceProvider {
     private static final int DEFAULT_REFRESH_TOKEN_VALIDITY_DAYS = 30;
+    static final List<String> DEFAULT_EXPLICIT_AUTH_FLOWS =
+            List.of("ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_SRP_AUTH", "ALLOW_CUSTOM_AUTH");
     private static final String COGNITO_PASSWORD_SYMBOLS =
             "^$*.[]{}()?\"!@#%&/\\,><':;|_~`=+-";
     // JVM-local stripes bound lock memory without retaining one lock for every user key.
@@ -319,11 +321,7 @@ public class CognitoService implements ResourceProvider {
                 throw new AwsException("InvalidParameterException", "Attribute name contains invalid characters.", 400);
             }
 
-            boolean developerOnly = Boolean.TRUE.equals(attr.get("DeveloperOnlyAttribute"));
-            String prefix = developerOnly ? "dev:" : "custom:";
-            if (!name.startsWith("custom:") && !name.startsWith("dev:")) {
-                attr.put("Name", prefix + name);
-            }
+            attr.put("Name", prefixedAttributeName(name, Boolean.TRUE.equals(attr.get("DeveloperOnlyAttribute"))));
 
             String finalName = (String) attr.get("Name");
             boolean exists = schema.stream().anyMatch(existing -> finalName.equals(existing.get("Name")));
@@ -352,13 +350,8 @@ public class CognitoService implements ResourceProvider {
         for (Map<String, Object> attr : schema) {
             Map<String, Object> copy = attr == null ? new HashMap<>() : new HashMap<>(attr);
             String name = (String) copy.get("Name");
-            if (name != null && !name.startsWith("custom:") && !name.startsWith("dev:")) {
-                boolean standard = CognitoStandardAttributes.DEFAULTS.stream()
-                        .anyMatch(existing -> name.equals(existing.get("Name")));
-                if (!standard) {
-                    boolean developerOnly = Boolean.TRUE.equals(copy.get("DeveloperOnlyAttribute"));
-                    copy.put("Name", (developerOnly ? "dev:" : "custom:") + name);
-                }
+            if (name != null && !name.isBlank() && !CognitoStandardAttributes.isStandard(name)) {
+                copy.put("Name", prefixedAttributeName(name, Boolean.TRUE.equals(copy.get("DeveloperOnlyAttribute"))));
             }
             normalized.add(copy);
         }
@@ -398,6 +391,13 @@ public class CognitoService implements ResourceProvider {
         passwordPolicy.putIfAbsent("TemporaryPasswordValidityDays", 7);
         normalized.put("PasswordPolicy", passwordPolicy);
         pool.setPolicies(normalized);
+    }
+
+    private static String prefixedAttributeName(String name, boolean developerOnly) {
+        if (name.startsWith("custom:") || name.startsWith("dev:")) {
+            return name;
+        }
+        return (developerOnly ? "dev:" : "custom:") + name;
     }
 
     @SuppressWarnings("unchecked")
@@ -639,7 +639,12 @@ public class CognitoService implements ResourceProvider {
     }
 
     public void deleteUserPool(String id) {
-        describeUserPool(id);
+        UserPool pool = describeUserPool(id);
+        if ("ACTIVE".equalsIgnoreCase(pool.getDeletionProtection())) {
+            throw new AwsException("InvalidParameterException",
+                    "The user pool cannot be deleted because deletion protection is activated. "
+                            + "Deletion protection must be inactivated first.", 400);
+        }
         // AWS refuses to delete a pool that still has a hosted UI / custom domain; the
         // DeleteUserPool API reference documents this exact InvalidParameterException.
         boolean hasDomain = domainStore.scan(k -> true).stream()
@@ -4673,6 +4678,55 @@ public class CognitoService implements ResourceProvider {
             case RATE_LIMIT -> new AwsException("LimitExceededException",
                     "Attempt limit exceeded, please try again later", 400);
         };
+    }
+
+    /** Whether the sign-in verification-code path (EMAIL_OTP/SMS_OTP under USER_AUTH) is wired up. */
+    boolean verificationServicesConfigured() {
+        return verificationCodeService != null && messageDispatcher != null;
+    }
+
+    /**
+     * Issues and delivers a one-time code for a USER_AUTH EMAIL_OTP/SMS_OTP challenge, mirroring
+     * the SignUp/ForgotPassword code-delivery path. Returns the masked CODE_DELIVERY challenge
+     * parameters for the InitiateAuth/RespondToAuthChallenge response.
+     */
+    Map<String, String> issueSignInOtp(UserPool pool, CognitoUser user, VerificationCode.Purpose purpose,
+            String attributeName, String deliveryMedium, Map<String, Object> customMessageResponse) {
+        ensureVerificationWiring();
+        String destination = user.getAttributes().get(attributeName);
+        String code;
+        try {
+            code = verificationCodeService.issue(pool.getId(), user.getUsername(), purpose, Duration.ofMinutes(5));
+            messageDispatcher.dispatch(pool, user, purpose, code, List.of(deliveryMedium), customMessageResponse);
+        } catch (VerificationCodeException e) {
+            throw mapVerificationCodeException(e);
+        } catch (RuntimeException e) {
+            // The code was already issued and stored before dispatch failed; invalidate it so
+            // the rate limiter doesn't block an immediate retry for a code the user never
+            // received, matching how signUp's rollback treats the same failure shape.
+            verificationCodeService.invalidatePrevious(pool.getId(), user.getUsername(), purpose);
+            LOG.warnv(e, "Failed to deliver a USER_AUTH {0} code for pool {1}: {2}",
+                    purpose, pool.getId(), e.getMessage());
+            // Unlike SignUp/ResendConfirmationCode/ForgotPassword, none of InitiateAuth,
+            // AdminInitiateAuth, RespondToAuthChallenge or AdminRespondToAuthChallenge declare
+            // CodeDeliveryFailureException; all four declare InternalErrorException instead.
+            throw new AwsException("InternalErrorException", "Failed to deliver the message.", 500);
+        }
+        String masked = "email".equals(attributeName) ? maskEmail(destination) : maskPhoneNumber(destination);
+        Map<String, String> details = new LinkedHashMap<>();
+        details.put("CODE_DELIVERY_DELIVERY_MEDIUM", deliveryMedium);
+        details.put("CODE_DELIVERY_DESTINATION", masked);
+        return details;
+    }
+
+    /** Consumes a USER_AUTH EMAIL_OTP/SMS_OTP code, translating a wrong/expired code to the AWS shape. */
+    void consumeSignInOtp(String userPoolId, String username, VerificationCode.Purpose purpose, String code) {
+        ensureVerificationWiring();
+        try {
+            verificationCodeService.consume(userPoolId, username, purpose, code);
+        } catch (VerificationCodeException e) {
+            throw mapVerificationCodeException(e);
+        }
     }
 
     private boolean matchesAliasOrUsernameAttribute(UserPool pool, CognitoUser user,

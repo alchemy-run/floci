@@ -10,14 +10,17 @@ import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.AssetDownload;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.AuthorizationToken;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.DomainView;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PackageCoordinate;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PackageVersionAssetResult;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.PublishPackageVersionResult;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.ResourcePolicy;
 import io.github.hectorvent.floci.services.codeartifact.CodeArtifactService.VersionMutation;
+import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactPackageVersion;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactRepository;
 import io.github.hectorvent.floci.services.codeartifact.model.ExternalConnection;
+import io.github.hectorvent.floci.services.codeartifact.model.PackageAsset;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
@@ -100,6 +103,32 @@ public class CodeArtifactController {
             response.put("nextToken", page.nextToken());
         }
         return ok(response);
+    }
+
+    @POST
+    @Path("/v1/authorization-token")
+    @Consumes(MediaType.WILDCARD)
+    public Response getAuthorizationToken(@Context HttpHeaders headers, @QueryParam("domain") String domain,
+                                           @QueryParam("domain-owner") String domainOwner,
+                                           @QueryParam("duration") String durationSeconds) {
+        String region = regionResolver.resolveRegion(headers);
+        AuthorizationToken token = service.getAuthorizationToken(region, domain, domainOwner,
+                parseDuration(durationSeconds));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("authorizationToken", token.token());
+        response.put("expiration", token.expirationEpochSeconds());
+        return ok(response);
+    }
+
+    private static Long parseDuration(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            throw new AwsException("ValidationException", "duration must be an integer.", 400);
+        }
     }
 
     @PUT
@@ -278,25 +307,6 @@ public class CodeArtifactController {
         return ok(single("repository", repositoryDescription(r)));
     }
 
-    @POST
-    @Path("/v1/authorization-token")
-    public Response getAuthorizationToken(@Context HttpHeaders headers, @QueryParam("domain") String domain,
-                                           @QueryParam("domain-owner") String owner,
-                                           @QueryParam("duration") String duration) {
-        Long seconds = null;
-        if (duration != null) {
-            try {
-                seconds = Long.parseLong(duration);
-            } catch (NumberFormatException e) {
-                throw new AwsException("ValidationException", "duration must be an integer.", 400);
-            }
-        }
-        AuthorizationToken token = service.getAuthorizationToken(regionResolver.resolveRegion(headers), domain,
-                owner, seconds);
-        return Response.ok(Map.of("authorizationToken", token.authorizationToken(), "expiration", token.expiration()))
-                .build();
-    }
-
     public static class PackageQuery {
         @QueryParam("domain") public String domain;
         @QueryParam("domain-owner") public String owner;
@@ -320,15 +330,21 @@ public class CodeArtifactController {
     @POST
     @Path("/v1/package/version/publish")
     @Consumes(MediaType.WILDCARD)
-    public Response publishPackageVersion(@Context HttpHeaders headers, @BeanParam PackageQuery query,
-                                           @QueryParam("asset") String asset,
+    public Response publishPackageVersion(@Context HttpHeaders headers, @QueryParam("domain") String domain,
+                                           @QueryParam("domain-owner") String domainOwner,
+                                           @QueryParam("repository") String repository,
+                                           @QueryParam("format") String format,
+                                           @QueryParam("namespace") String namespace,
+                                           @QueryParam("package") String packageName,
+                                           @QueryParam("version") String version,
+                                           @QueryParam("asset") String assetName,
                                            @QueryParam("unfinished") String unfinished,
-                                           @HeaderParam("x-amz-content-sha256") String hash, byte[] body) {
-        if (unfinished != null && !"true".equals(unfinished) && !"false".equals(unfinished)) {
-            throw new AwsException("ValidationException", "unfinished must be a boolean.", 400);
-        }
-        return Response.ok(service.publishPackageVersion(query.coordinate(regionResolver.resolveRegion(headers)),
-                query.version, asset, body, hash, "true".equals(unfinished))).build();
+                                           @HeaderParam("x-amz-content-sha256") String assetSha256,
+                                           byte[] body) {
+        String region = regionResolver.resolveRegion(headers);
+        PublishPackageVersionResult result = service.publishPackageVersion(region, domain, domainOwner, repository,
+                format, namespace, packageName, version, assetName, assetSha256, unfinished, body);
+        return ok(publishPackageVersionResponse(result));
     }
 
     @GET
@@ -354,9 +370,17 @@ public class CodeArtifactController {
 
     @GET
     @Path("/v1/package/version")
-    public Response describePackageVersion(@Context HttpHeaders headers, @BeanParam PackageQuery query) {
-        return Response.ok(service.describePackageVersion(query.coordinate(regionResolver.resolveRegion(headers)),
-                query.version)).build();
+    public Response describePackageVersion(@Context HttpHeaders headers, @QueryParam("domain") String domain,
+                                            @QueryParam("domain-owner") String domainOwner,
+                                            @QueryParam("repository") String repository,
+                                            @QueryParam("format") String format,
+                                            @QueryParam("namespace") String namespace,
+                                            @QueryParam("package") String packageName,
+                                            @QueryParam("version") String version) {
+        String region = regionResolver.resolveRegion(headers);
+        CodeArtifactPackageVersion pv = service.describePackageVersion(region, domain, domainOwner, repository,
+                format, namespace, packageName, version);
+        return ok(single("packageVersion", packageVersionDescription(pv)));
     }
 
     @POST
@@ -387,13 +411,23 @@ public class CodeArtifactController {
     @GET
     @Path("/v1/package/version/asset")
     @Produces(MediaType.APPLICATION_OCTET_STREAM)
-    public Response getPackageVersionAsset(@Context HttpHeaders headers, @BeanParam PackageQuery query,
-                                            @QueryParam("asset") String asset, @QueryParam("revision") String revision) {
-        AssetDownload download = service.getPackageVersionAsset(query.coordinate(regionResolver.resolveRegion(headers)),
-                query.version, asset, revision);
-        return Response.ok(download.content(), MediaType.APPLICATION_OCTET_STREAM)
-                .header("X-AssetName", download.name()).header("X-PackageVersion", download.version())
-                .header("X-PackageVersionRevision", download.revision()).build();
+    public Response getPackageVersionAsset(@Context HttpHeaders headers, @QueryParam("domain") String domain,
+                                            @QueryParam("domain-owner") String domainOwner,
+                                            @QueryParam("repository") String repository,
+                                            @QueryParam("format") String format,
+                                            @QueryParam("namespace") String namespace,
+                                            @QueryParam("package") String packageName,
+                                            @QueryParam("version") String version,
+                                            @QueryParam("asset") String assetName,
+                                            @QueryParam("revision") String revision) {
+        String region = regionResolver.resolveRegion(headers);
+        PackageVersionAssetResult result = service.getPackageVersionAsset(region, domain, domainOwner, repository,
+                format, namespace, packageName, version, assetName, revision);
+        return Response.ok(result.asset().getContent(), MediaType.APPLICATION_OCTET_STREAM)
+                .header("X-AssetName", result.asset().getName())
+                .header("X-PackageVersion", version)
+                .header("X-PackageVersionRevision", result.packageVersionRevision())
+                .build();
     }
 
     @GET
@@ -587,6 +621,50 @@ public class CodeArtifactController {
             response.put("nextToken", page.nextToken());
         }
         return response;
+    }
+
+    private ObjectNode publishPackageVersionResponse(PublishPackageVersionResult result) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("format", result.packageVersion().getFormat());
+        if (result.packageVersion().getNamespace() != null) {
+            node.put("namespace", result.packageVersion().getNamespace());
+        }
+        node.put("package", result.packageVersion().getPackageName());
+        node.put("version", result.packageVersion().getVersion());
+        node.put("versionRevision", result.packageVersion().getRevision());
+        node.put("status", result.packageVersion().getStatus());
+        node.set("asset", assetSummary(result.asset()));
+        return node;
+    }
+
+    private ObjectNode packageVersionDescription(CodeArtifactPackageVersion pv) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("format", pv.getFormat());
+        if (pv.getNamespace() != null) {
+            node.put("namespace", pv.getNamespace());
+        }
+        node.put("packageName", pv.getPackageName());
+        node.put("version", pv.getVersion());
+        node.put("revision", pv.getRevision());
+        node.put("status", pv.getStatus());
+        if (pv.getPublishedTime() != null) {
+            node.put("publishedTime", pv.getPublishedTime());
+        }
+        ObjectNode origin = node.putObject("origin");
+        origin.put("originType", "INTERNAL");
+        origin.putObject("domainEntryPoint").put("repositoryName",
+                pv.getOriginRepository() == null ? pv.getRepositoryName() : pv.getOriginRepository());
+        node.putArray("licenses");
+        return node;
+    }
+
+    private ObjectNode assetSummary(PackageAsset asset) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("name", asset.getName());
+        node.put("size", asset.getSize());
+        ObjectNode hashes = node.putObject("hashes");
+        asset.getHashes().forEach(hashes::put);
+        return node;
     }
 
     private ObjectNode resourcePolicy(ResourcePolicy policy) {

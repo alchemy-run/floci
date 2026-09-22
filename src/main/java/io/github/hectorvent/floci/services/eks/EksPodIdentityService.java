@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Association management metadata, not a Pod Identity credential agent. */
@@ -104,8 +105,8 @@ public class EksPodIdentityService {
                 && stored.association().serviceAccount().equals(request.serviceAccount()))) {
             throw new AwsException("ResourceInUseException", "Service account already has an association", 409);
         }
-        String id = "a-" + UUID.randomUUID().toString().replace("-", "").substring(0, 19);
-        String arn = cluster.getArn().replace(":cluster/", ":podidentityassociation/") + "/" + id;
+        String id = "a-" + UUID.randomUUID().toString().replace("-", "").substring(0, 17);
+        String arn = clusterArn(cluster).replace(":cluster/", ":podidentityassociation/") + "/" + id;
         double now = Instant.now().toEpochMilli() / 1000.0;
         Association association = new Association(cluster.getName(), request.namespace(), request.serviceAccount(),
                 request.roleArn(), arn, id, Map.copyOf(tags), now, now,
@@ -218,6 +219,14 @@ public class EksPodIdentityService {
                 new StoredAssociation(association, stored.request(), stored.created(), stored.updates()));
     }
 
+    public synchronized Optional<Association> findAssociation(Cluster cluster, String namespace,
+                                                                         String serviceAccount) {
+        return storage.scan(key -> key.startsWith(prefix(cluster))).stream()
+                .map(StoredAssociation::association)
+                .filter(value -> value.namespace().equals(namespace) && value.serviceAccount().equals(serviceAccount))
+                .findFirst();
+    }
+
     public synchronized void deleteClusterAssociations(Cluster cluster) {
         for (StoredAssociation stored : storage.scan(key -> key.startsWith(prefix(cluster)))) {
             storage.delete(prefix(cluster) + stored.association().associationId());
@@ -229,17 +238,24 @@ public class EksPodIdentityService {
                 "ResourceNotFoundException", "Pod identity association not found: " + id, 404));
     }
 
+    private static String clusterArn(Cluster cluster) {
+        return cluster.getArn() != null ? cluster.getArn()
+                : "arn:aws:eks:us-east-1:" + Objects.toString(cluster.getAccountId(), "000000000000")
+                        + ":cluster/" + cluster.getName();
+    }
+
     private static String prefix(Cluster cluster) {
-        return cluster.getArn() + "/" + Objects.toString(cluster.getCreatedAt()) + "/";
+        return clusterArn(cluster) + "/" + Objects.toString(cluster.getCreatedAt()) + "/";
     }
 
     private void validateRole(Cluster cluster, String role, boolean sameAccount) {
-        String[] clusterArn = cluster.getArn().split(":", 6);
+        String[] clusterArn = clusterArn(cluster).split(":", 6);
         String[] arn = role == null ? new String[0] : role.split(":", 6);
         if (arn.length != 6 || !"arn".equals(arn[0]) || !clusterArn[1].equals(arn[1])
                 || !"iam".equals(arn[2]) || !arn[3].isEmpty() || !arn[4].matches("[0-9]{12}")
                 || !arn[5].startsWith("role/") || role.endsWith("/")
-                || (sameAccount && !clusterArn[4].equals(arn[4]))) {
+                || (sameAccount && arn[5].startsWith("role/aws-service-role/"))
+                || (sameAccount && cluster.getArn() != null && !clusterArn[4].equals(arn[4]))) {
             throw invalid("roleArn must identify an IAM role" + (sameAccount ? " in the cluster account" : ""));
         }
         String name = role.substring(role.lastIndexOf('/') + 1);
@@ -283,7 +299,8 @@ public class EksPodIdentityService {
 
     private static void validateTags(Map<String, String> tags) {
         if (tags.size() > 50 || tags.entrySet().stream().anyMatch(tag -> tag.getKey() == null
-                || tag.getKey().isEmpty() || tag.getKey().length() > 128 || tag.getValue() == null
+                || tag.getKey().isEmpty() || tag.getKey().length() > 128
+                || tag.getKey().startsWith("aws:") || tag.getKey().startsWith("AWS:") || tag.getValue() == null
                 || tag.getValue().length() > 256)) {
             throw invalid("Invalid association tags");
         }

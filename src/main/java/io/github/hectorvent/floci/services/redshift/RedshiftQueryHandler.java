@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.redshift;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.redshift.model.Cluster;
@@ -13,6 +14,7 @@ import io.github.hectorvent.floci.services.redshift.model.Integration;
 import io.github.hectorvent.floci.services.redshift.model.Parameter;
 import io.github.hectorvent.floci.services.redshift.model.RedshiftEvent;
 import io.github.hectorvent.floci.services.redshift.model.Snapshot;
+import io.github.hectorvent.floci.services.redshift.model.SnapshotCopyGrant;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -49,16 +51,25 @@ public class RedshiftQueryHandler {
     private final EmulatorConfig config;
     private final RedshiftIamDbUserResolver iamDbUserResolver;
     private final RegionResolver regionResolver;
+    private final RedshiftDynamoDbZeroEtlConsumer zeroEtlConsumer;
 
     @Inject
     public RedshiftQueryHandler(RedshiftService service, RedshiftCredentialBroker credentialBroker,
                                 EmulatorConfig config, RedshiftIamDbUserResolver iamDbUserResolver,
-                                RegionResolver regionResolver) {
+                                RegionResolver regionResolver,
+                                RedshiftDynamoDbZeroEtlConsumer zeroEtlConsumer) {
         this.service = service;
         this.credentialBroker = credentialBroker;
         this.config = config;
         this.iamDbUserResolver = iamDbUserResolver;
         this.regionResolver = regionResolver;
+        this.zeroEtlConsumer = zeroEtlConsumer;
+    }
+
+    RedshiftQueryHandler(RedshiftService service, RedshiftCredentialBroker credentialBroker,
+                         EmulatorConfig config, RedshiftIamDbUserResolver iamDbUserResolver,
+                         RegionResolver regionResolver) {
+        this(service, credentialBroker, config, iamDbUserResolver, regionResolver, null);
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params) {
@@ -72,11 +83,21 @@ public class RedshiftQueryHandler {
             String nodeType = params.getFirst("NodeType");
             String masterUsername = params.getFirst("MasterUsername");
             String masterUserPassword = params.getFirst("MasterUserPassword");
+            boolean manageMasterPassword = Boolean.parseBoolean(params.getFirst("ManageMasterPassword"));
             String clusterSubnetGroupName = params.getFirst("ClusterSubnetGroupName");
             List<String> vpcSecurityGroupIds = memberList(params, "VpcSecurityGroupIds");
+            List<String> iamRoleArns = memberList(params, "IamRoles");
 
-            Cluster cluster = service.createCluster(identifier, nodeType, masterUsername, masterUserPassword,
-                    clusterSubnetGroupName, vpcSecurityGroupIds);
+            String region = regionResolver.resolveRegionFromAuth(authorizationHeader);
+            Cluster cluster = manageMasterPassword
+                    ? service.createClusterWithManagedMasterPassword(identifier, nodeType, masterUsername,
+                            clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns,
+                            params.getFirst("MasterPasswordSecretKmsKeyId"), region)
+                    : iamRoleArns.isEmpty()
+                    ? service.createCluster(identifier, nodeType, masterUsername, masterUserPassword,
+                            clusterSubnetGroupName, vpcSecurityGroupIds)
+                    : service.createCluster(identifier, nodeType, masterUsername, masterUserPassword,
+                            clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns);
             String xml = new XmlBuilder()
                     .start("CreateClusterResponse")
                       .start("CreateClusterResult")
@@ -454,6 +475,9 @@ public class RedshiftQueryHandler {
                     encryptionContextMap(params),
                     tagMap(params),
                     regionResolver.resolveRegionFromAuth(authorizationHeader));
+            if (zeroEtlConsumer != null) {
+                zeroEtlConsumer.startPolling(integration);
+            }
             String xml = new XmlBuilder()
                     .start("CreateIntegrationResponse")
                       .start("CreateIntegrationResult")
@@ -496,6 +520,9 @@ public class RedshiftQueryHandler {
         }
         case "DeleteIntegration" -> {
             Integration integration = service.deleteIntegration(params.getFirst("IntegrationArn"));
+            if (zeroEtlConsumer != null) {
+                zeroEtlConsumer.stopPolling(integration.getIntegrationArn());
+            }
             String xml = new XmlBuilder()
                     .start("DeleteIntegrationResponse")
                       .start("DeleteIntegrationResult")
@@ -557,6 +584,67 @@ public class RedshiftQueryHandler {
                     .build();
             return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
         }
+        case "CreateSnapshotCopyGrant" -> {
+            String name = params.getFirst("SnapshotCopyGrantName");
+            if (name == null || name.isBlank()) {
+                throw new AwsException("InvalidParameterValue", "SnapshotCopyGrantName is required", 400);
+            }
+            String kmsKeyId = params.getFirst("KmsKeyId");
+            SnapshotCopyGrant grant = service.createSnapshotCopyGrant(name, kmsKeyId, parseTags(params));
+            String xml = new XmlBuilder()
+                    .start("CreateSnapshotCopyGrantResponse")
+                      .start("CreateSnapshotCopyGrantResult")
+                        .raw(buildSnapshotCopyGrantXml(grant))
+                      .end("CreateSnapshotCopyGrantResult")
+                      .start("ResponseMetadata")
+                        .elem("RequestId", "test-req-id")
+                      .end("ResponseMetadata")
+                    .end("CreateSnapshotCopyGrantResponse")
+                    .build();
+            return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
+        case "DescribeSnapshotCopyGrants" -> {
+            String name = params.getFirst("SnapshotCopyGrantName");
+            Integer maxRecords = parseOptionalInteger(params, "MaxRecords");
+            String marker = params.getFirst("Marker");
+            PaginatedResult<SnapshotCopyGrant> page = service.describeSnapshotCopyGrants(name, maxRecords, marker);
+            XmlBuilder xmlBuilder = new XmlBuilder()
+                    .start("DescribeSnapshotCopyGrantsResponse")
+                      .start("DescribeSnapshotCopyGrantsResult");
+            // AWS returns Marker only while further pages remain, and a paginating client
+            // stops when it is absent.
+            if (page.nextToken() != null) {
+                xmlBuilder.elem("Marker", page.nextToken());
+            }
+            xmlBuilder.start("SnapshotCopyGrants");
+            for (SnapshotCopyGrant grant : page.items()) {
+                xmlBuilder.raw(buildSnapshotCopyGrantXml(grant));
+            }
+            String xml = xmlBuilder
+                        .end("SnapshotCopyGrants")
+                      .end("DescribeSnapshotCopyGrantsResult")
+                      .start("ResponseMetadata")
+                        .elem("RequestId", "test-req-id")
+                      .end("ResponseMetadata")
+                    .end("DescribeSnapshotCopyGrantsResponse")
+                    .build();
+            return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
+        case "DeleteSnapshotCopyGrant" -> {
+            String name = params.getFirst("SnapshotCopyGrantName");
+            if (name == null || name.isBlank()) {
+                throw new AwsException("InvalidParameterValue", "SnapshotCopyGrantName is required", 400);
+            }
+            service.deleteSnapshotCopyGrant(name);
+            String xml = new XmlBuilder()
+                    .start("DeleteSnapshotCopyGrantResponse")
+                      .start("ResponseMetadata")
+                        .elem("RequestId", "test-req-id")
+                      .end("ResponseMetadata")
+                    .end("DeleteSnapshotCopyGrantResponse")
+                    .build();
+            return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
         case "ModifyCluster" -> {
             String clusterIdentifier = params.getFirst("ClusterIdentifier");
             if (clusterIdentifier == null || clusterIdentifier.isBlank()) {
@@ -578,6 +666,75 @@ public class RedshiftQueryHandler {
                         .elem("RequestId", "test-req-id")
                       .end("ResponseMetadata")
                     .end("ModifyClusterResponse")
+                    .build();
+            return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
+        case "DescribeClusterVersions" -> {
+            String requested = params.getFirst("ClusterVersion");
+            XmlBuilder builder = new XmlBuilder()
+                    .start("DescribeClusterVersionsResponse")
+                      .start("DescribeClusterVersionsResult")
+                        .start("ClusterVersions");
+            if (requested == null || requested.isBlank() || RedshiftClusterCatalog.CLUSTER_VERSION.equals(requested)) {
+                builder.start("ClusterVersion")
+                        .elem("ClusterVersion", RedshiftClusterCatalog.CLUSTER_VERSION)
+                        .elem("ClusterParameterGroupFamily", RedshiftClusterCatalog.PARAMETER_GROUP_FAMILY)
+                        .elem("Description", "Amazon Redshift emulated engine")
+                        .end("ClusterVersion");
+            }
+            String xml = builder
+                        .end("ClusterVersions")
+                      .end("DescribeClusterVersionsResult")
+                      .start("ResponseMetadata")
+                        .elem("RequestId", "test-req-id")
+                      .end("ResponseMetadata")
+                    .end("DescribeClusterVersionsResponse")
+                    .build();
+            return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
+        case "DescribeOrderableClusterOptions" -> {
+            String zone = regionResolver.resolveRegionFromAuth(authorizationHeader) + "a";
+            XmlBuilder builder = new XmlBuilder()
+                    .start("DescribeOrderableClusterOptionsResponse")
+                      .start("DescribeOrderableClusterOptionsResult")
+                        .start("OrderableClusterOptions");
+            for (RedshiftClusterCatalog.OrderableOption option : RedshiftClusterCatalog.orderableOptions(
+                    params.getFirst("ClusterVersion"), params.getFirst("NodeType"))) {
+                builder.start("OrderableClusterOption")
+                        .elem("ClusterVersion", RedshiftClusterCatalog.CLUSTER_VERSION)
+                        .elem("ClusterType", option.clusterType())
+                        .elem("NodeType", option.nodeType())
+                        .start("AvailabilityZones")
+                          .start("AvailabilityZone").elem("Name", zone).end("AvailabilityZone")
+                        .end("AvailabilityZones")
+                        .end("OrderableClusterOption");
+            }
+            String xml = builder
+                        .end("OrderableClusterOptions")
+                      .end("DescribeOrderableClusterOptionsResult")
+                      .start("ResponseMetadata")
+                        .elem("RequestId", "test-req-id")
+                      .end("ResponseMetadata")
+                    .end("DescribeOrderableClusterOptionsResponse")
+                    .build();
+            return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
+        case "ModifyClusterIamRoles" -> {
+            String clusterIdentifier = params.getFirst("ClusterIdentifier");
+            if (clusterIdentifier == null || clusterIdentifier.isBlank()) {
+                throw new AwsException("InvalidParameterValue", "ClusterIdentifier is required", 400);
+            }
+            Cluster cluster = service.modifyClusterIamRoles(clusterIdentifier,
+                    memberList(params, "AddIamRoles"), memberList(params, "RemoveIamRoles"));
+            String xml = new XmlBuilder()
+                    .start("ModifyClusterIamRolesResponse")
+                      .start("ModifyClusterIamRolesResult")
+                        .raw(buildClusterXml(cluster))
+                      .end("ModifyClusterIamRolesResult")
+                      .start("ResponseMetadata")
+                        .elem("RequestId", "test-req-id")
+                      .end("ResponseMetadata")
+                    .end("ModifyClusterIamRolesResponse")
                     .build();
             return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
         }
@@ -756,12 +913,25 @@ public class RedshiftQueryHandler {
             .elem("AvailabilityZoneRelocationStatus", "disabled")
             .elem("ClusterSubnetGroupName", cluster.getClusterSubnetGroupName());
 
+        if (cluster.getMasterPasswordSecretArn() != null) {
+            builder.elem("MasterPasswordSecretArn", cluster.getMasterPasswordSecretArn())
+                .elem("MasterPasswordSecretKmsKeyId", cluster.getMasterPasswordSecretKmsKeyId());
+        }
+
         if (cluster.getVpcSecurityGroupIds() != null && !cluster.getVpcSecurityGroupIds().isEmpty()) {
             builder.start("VpcSecurityGroups");
             for (String sgId : cluster.getVpcSecurityGroupIds()) {
                 builder.start("VpcSecurityGroup").elem("VpcSecurityGroupId", sgId).end("VpcSecurityGroup");
             }
             builder.end("VpcSecurityGroups");
+        }
+
+        if (cluster.getIamRoleArns() != null && !cluster.getIamRoleArns().isEmpty()) {
+            builder.start("IamRoles");
+            for (String iamRoleArn : cluster.getIamRoleArns()) {
+                builder.start("IamRole").elem("IamRoleArn", iamRoleArn).elem("ApplyStatus", "in-sync").end("IamRole");
+            }
+            builder.end("IamRoles");
         }
 
         if (cluster.getClusterParameterGroupName() != null) {
@@ -860,6 +1030,26 @@ public class RedshiftQueryHandler {
         builder.end("Subnets").elem("SubnetGroupStatus", "Complete");
         appendTags(builder, group.getTags());
         return builder.end("ClusterSubnetGroup").build();
+    }
+
+    private String buildSnapshotCopyGrantXml(SnapshotCopyGrant grant) {
+        XmlBuilder builder = new XmlBuilder()
+            .start("SnapshotCopyGrant")
+            .elem("SnapshotCopyGrantName", grant.getSnapshotCopyGrantName())
+            .elem("KmsKeyId", grant.getKmsKeyId());
+
+        if (grant.getTags() != null && !grant.getTags().isEmpty()) {
+            builder.start("Tags");
+            for (Map.Entry<String, String> tag : grant.getTags().entrySet()) {
+                builder.start("Tag")
+                    .elem("Key", tag.getKey())
+                    .elem("Value", tag.getValue())
+                  .end("Tag");
+            }
+            builder.end("Tags");
+        }
+
+        return builder.end("SnapshotCopyGrant").build();
     }
 
     private String buildParameterXml(Parameter param) {
@@ -1009,6 +1199,7 @@ public class RedshiftQueryHandler {
         return switch (baseName) {
             case "SubnetIds" -> quoted + "(\\.member|\\.SubnetIdentifier)?\\.\\d+";
             case "VpcSecurityGroupIds" -> quoted + "(\\.member|\\.VpcSecurityGroupId)?\\.\\d+";
+            case "IamRoles", "AddIamRoles", "RemoveIamRoles" -> quoted + "(\\.member|\\.IamRoleArn)?\\.\\d+";
             case "TagKeys" -> quoted + "(\\.member|\\.TagKey)?\\.\\d+";
             case "TagValues" -> quoted + "(\\.member|\\.TagValue)?\\.\\d+";
             case "SourceIds" -> quoted + "(\\.member|\\.SourceId)?\\.\\d+";

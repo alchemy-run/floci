@@ -253,7 +253,7 @@
             <version>2.4.1</version>
         </dependency>
 
-        <!-- GraphQL schema parsing and type system (AppSync execution engine) -->
+        <!-- GraphQL schema parsing and resolver execution (AppSync) -->
         <dependency>
             <groupId>com.graphql-java</groupId>
             <artifactId>graphql-java</artifactId>

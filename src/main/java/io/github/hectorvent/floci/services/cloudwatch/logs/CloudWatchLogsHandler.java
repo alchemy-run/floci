@@ -140,7 +140,7 @@ public class CloudWatchLogsHandler {
             ObjectNode node = objectMapper.createObjectNode();
             String arn = logsService.buildArn(g.getLogGroupName(), region);
             node.put("logGroupName", g.getLogGroupName());
-            node.put("createdTime", g.getCreatedTime());
+            node.put("creationTime", g.getCreatedTime());
             node.put("arn", arn + ":*");
             node.put("logGroupArn", arn);
             node.put("logGroupClass", g.getLogGroupClass() != null ? g.getLogGroupClass() : "STANDARD");
@@ -292,7 +292,7 @@ public class CloudWatchLogsHandler {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("logStreamName", s.getLogStreamName());
             node.put("arn", logGroupArn + ":log-stream:" + s.getLogStreamName());
-            node.put("createdTime", s.getCreatedTime());
+            node.put("creationTime", s.getCreatedTime());
             node.put("lastIngestionTime", s.getLastIngestionTime());
             node.put("uploadSequenceToken", s.getUploadSequenceToken());
             node.put("storedBytes", s.getStoredBytes());

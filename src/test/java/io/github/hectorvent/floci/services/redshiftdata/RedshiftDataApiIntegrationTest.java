@@ -5,10 +5,11 @@ import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.awaitility.Awaitility;
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.time.Duration;
 import java.util.List;
@@ -19,7 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RedshiftDataApiIntegrationTest {
+
+    private static final String SHARED_CLUSTER_ID = "it-rsdata-shared";
 
     @Inject
     RedshiftService redshift;
@@ -27,9 +31,11 @@ class RedshiftDataApiIntegrationTest {
     private String clusterId;
 
     @BeforeAll
-    static void configure() {
+    void createSharedCluster() {
         Assumptions.assumeTrue(dockerAvailable(), "Docker is required for Redshift Data API integration tests");
         RestAssuredJsonUtils.configureAwsContentTypes();
+        clusterId = SHARED_CLUSTER_ID;
+        redshift.createCluster(SHARED_CLUSTER_ID, "dc2.large", "admin", "Secret123");
     }
 
     private static boolean dockerAvailable() {
@@ -42,11 +48,10 @@ class RedshiftDataApiIntegrationTest {
         }
     }
 
-    @AfterEach
-    void cleanUp() {
+    @AfterAll
+    void deleteSharedCluster() {
         if (clusterId != null) {
             redshift.deleteCluster(clusterId);
-            clusterId = null;
         }
     }
 
@@ -64,7 +69,8 @@ class RedshiftDataApiIntegrationTest {
     }
 
     private void awaitFinished(String id) {
-        Awaitility.await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(250)).until(() -> {
+        Awaitility.await().atMost(Duration.ofSeconds(30)).pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(250)).until(() -> {
             String status = RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement",
                     "{\"Id\":\"" + id + "\"}").then().statusCode(200).extract().path("Status");
             assertTrue(!"FAILED".equals(status) && !"ABORTED".equals(status),
@@ -79,9 +85,6 @@ class RedshiftDataApiIntegrationTest {
 
     @Test
     void executeDescribeGetResultRoundTrip() {
-        clusterId = "it-rsdata-roundtrip";
-        redshift.createCluster(clusterId, "dc2.large", "admin", "Secret123");
-
         executeAndWait("CREATE TABLE t (id int, name varchar(20))");
         String insertId = executeAndWait("INSERT INTO t VALUES (1, 'a'), (2, 'b')");
         Object insertRows = RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement",
@@ -99,8 +102,6 @@ class RedshiftDataApiIntegrationTest {
 
     @Test
     void parameterisedStatement() {
-        clusterId = "it-rsdata-param";
-        redshift.createCluster(clusterId, "dc2.large", "admin", "Secret123");
         executeAndWait("CREATE TABLE p (id int)");
         executeAndWait("INSERT INTO p VALUES (1), (2), (3)");
 
@@ -118,8 +119,6 @@ class RedshiftDataApiIntegrationTest {
 
     @Test
     void batchExecuteReportsSubStatements() {
-        clusterId = "it-rsdata-batch";
-        redshift.createCluster(clusterId, "dc2.large", "admin", "Secret123");
         executeAndWait("CREATE TABLE bt (id int)");
 
         String id = RestAssuredJsonUtils.awsAction("RedshiftData", "BatchExecuteStatement", """
@@ -140,15 +139,14 @@ class RedshiftDataApiIntegrationTest {
 
     @Test
     void batchRollsBackEveryStatementWhenOneFails() {
-        clusterId = "it-rsdata-batch-rollback";
-        redshift.createCluster(clusterId, "dc2.large", "admin", "Secret123");
         executeAndWait("CREATE TABLE br (id int)");
 
         String id = RestAssuredJsonUtils.awsAction("RedshiftData", "BatchExecuteStatement", """
                 {"Sqls": ["INSERT INTO br VALUES (1)", "INSERT INTO br (nope) VALUES (2)"],
                  "ClusterIdentifier": "%s", "DbUser": "admin", "Database": "dev"}
                 """.formatted(clusterId)).then().statusCode(200).extract().path("Id");
-        Awaitility.await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(250)).until(() ->
+        Awaitility.await().atMost(Duration.ofSeconds(30)).pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(250)).until(() ->
                 "FAILED".equals(RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement",
                         "{\"Id\":\"" + id + "\"}").then().statusCode(200).extract().path("Status")));
 
@@ -161,8 +159,6 @@ class RedshiftDataApiIntegrationTest {
 
     @Test
     void schemaIntrospection() {
-        clusterId = "it-rsdata-schema";
-        redshift.createCluster(clusterId, "dc2.large", "admin", "Secret123");
         executeAndWait("CREATE TABLE si (a int, b int)");
 
         String target = "\"ClusterIdentifier\": \"" + clusterId + "\", \"DbUser\": \"admin\", \"Database\": \"dev\"";
@@ -184,12 +180,11 @@ class RedshiftDataApiIntegrationTest {
 
     @Test
     void executionErrorSurfacesThroughDescribeNotHttp() {
-        clusterId = "it-rsdata-err";
-        redshift.createCluster(clusterId, "dc2.large", "admin", "Secret123");
         String id = RestAssuredJsonUtils.awsAction("RedshiftData", "ExecuteStatement", """
                 {"Sql": "SELECT * FROM nope", "ClusterIdentifier": "%s", "DbUser": "admin", "Database": "dev"}
                 """.formatted(clusterId)).then().statusCode(200).extract().path("Id");
-        Awaitility.await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(250)).until(() ->
+        Awaitility.await().atMost(Duration.ofSeconds(30)).pollDelay(Duration.ZERO)
+                .pollInterval(Duration.ofMillis(250)).until(() ->
                 "FAILED".equals(RestAssuredJsonUtils.awsAction("RedshiftData", "DescribeStatement",
                         "{\"Id\":\"" + id + "\"}").then().statusCode(200).extract().path("Status")));
     }

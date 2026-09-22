@@ -7,11 +7,13 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.services.iam.model.AccessKey;
+import io.github.hectorvent.floci.services.iam.model.AccountPasswordPolicy;
 import io.github.hectorvent.floci.services.iam.model.CallerContext;
 import io.github.hectorvent.floci.services.iam.model.IamGroup;
 import io.github.hectorvent.floci.services.iam.model.IamPolicy;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
+import io.github.hectorvent.floci.services.iam.model.LoginProfile;
 import io.github.hectorvent.floci.services.iam.model.OpenIDConnectProvider;
 import io.github.hectorvent.floci.services.iam.model.InstanceProfile;
 import io.github.hectorvent.floci.services.iam.model.PolicyVersion;
@@ -97,6 +99,44 @@ class IamServiceTest {
         assertTrue(service.findSecretKey(restored.getAccessKeyId(), "token").isEmpty());
         IamService restarted = iamService(false, new InMemoryStorage<>(), stored);
         assertEquals(1, restarted.sweepOrphanedEc2InstanceSessions());
+        assertTrue(stored.getForAccount("123456789012", restored.getAccessKeyId()).isEmpty());
+    }
+
+    @Test
+    void ecsTaskRoleSessionUsesTaskIdentityTokenAndOwningAccount() {
+        SessionCredential session = new SessionCredential("ASIAECSSESSION", "secret", "token",
+                "arn:aws:iam::123456789012:role/path/worker", Instant.now().plusSeconds(3600), null, "123456789012");
+        session.setEcsTaskArn("arn:aws:ecs:us-east-1:123456789012:task/cluster/abc123");
+        AccountAwareStorageBackend<SessionCredential> stored = new AccountAwareStorageBackend<>(
+                new InMemoryStorage<>(), null, "000000000000");
+        iamService = iamService(false, new InMemoryStorage<>(), stored);
+        iamService.registerEcsTaskRoleSession(session);
+        assertTrue(stored.getForAccount("000000000000", session.getAccessKeyId()).isEmpty());
+        assertEquals("arn:aws:ecs:us-east-1:123456789012:task/cluster/abc123",
+                stored.getForAccount("123456789012", session.getAccessKeyId()).orElseThrow().getEcsTaskArn());
+
+        iamService.registerSession("ASIAOTHER", "other-secret", "other-token", session.getRoleArn(),
+                Instant.now().plusSeconds(3600), null);
+        assertEquals(1, iamService.sweepOrphanedEcsTaskRoleSessions());
+        assertTrue(iamService.findSecretKey(session.getAccessKeyId(), "token").isEmpty());
+        assertTrue(iamService.findSecretKey("ASIAOTHER", "other-token").isPresent());
+    }
+
+    @Test
+    void ecsTaskRoleSessionMarkerSurvivesPersistenceAndExpiredCredentialsCannotAuthenticate() throws Exception {
+        SessionCredential expired = new SessionCredential("ASIAEXPIREDECS", "secret", "token",
+                "arn:aws:iam::123456789012:role/worker", Instant.now().minusSeconds(1), null, "123456789012");
+        expired.setEcsTaskArn("arn:aws:ecs:us-east-1:123456789012:task/cluster/expired");
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        SessionCredential restored = mapper.readValue(mapper.writeValueAsBytes(expired), SessionCredential.class);
+        assertEquals("arn:aws:ecs:us-east-1:123456789012:task/cluster/expired", restored.getEcsTaskArn());
+        AccountAwareStorageBackend<SessionCredential> stored = new AccountAwareStorageBackend<>(
+                new InMemoryStorage<>(), null, "000000000000");
+        IamService service = iamService(false, new InMemoryStorage<>(), stored);
+        service.registerEcsTaskRoleSession(restored);
+        assertTrue(service.findSecretKey(restored.getAccessKeyId(), "token").isEmpty());
+        IamService restarted = iamService(false, new InMemoryStorage<>(), stored);
+        assertEquals(1, restarted.sweepOrphanedEcsTaskRoleSessions());
         assertTrue(stored.getForAccount("123456789012", restored.getAccessKeyId()).isEmpty());
     }
 
@@ -215,6 +255,210 @@ class IamServiceTest {
         Map<String, String> tags2 = iamService.listUserTags("alice");
         assertFalse(tags2.containsKey("team"));
         assertTrue(tags2.containsKey("env"));
+    }
+
+    // =========================================================================
+    // Login Profiles
+    // =========================================================================
+
+    @Test
+    void createGetUpdateAndDeleteLoginProfile() {
+        iamService.createUser("alice", "/");
+
+        LoginProfile created = iamService.createLoginProfile("alice", "Sup3r$ecret!", false);
+        assertEquals("alice", created.getUserName());
+        assertFalse(created.isPasswordResetRequired());
+
+        LoginProfile fetched = iamService.getLoginProfile("alice");
+        assertEquals("Sup3r$ecret!", fetched.getPassword());
+
+        iamService.updateLoginProfile("alice", "NewP4ssword!", true);
+        LoginProfile updated = iamService.getLoginProfile("alice");
+        assertEquals("NewP4ssword!", updated.getPassword());
+        assertTrue(updated.isPasswordResetRequired());
+
+        iamService.deleteLoginProfile("alice");
+        assertThrows(AwsException.class, () -> iamService.getLoginProfile("alice"));
+    }
+
+    @Test
+    void createLoginProfileTwiceIsEntityAlreadyExists() {
+        iamService.createUser("alice", "/");
+        iamService.createLoginProfile("alice", "Sup3r$ecret!", false);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> iamService.createLoginProfile("alice", "AnotherP4ss!", false));
+        assertEquals("EntityAlreadyExists", ex.getErrorCode());
+    }
+
+    @Test
+    void createLoginProfileForUnknownUserIsNoSuchEntity() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> iamService.createLoginProfile("ghost", "Sup3r$ecret!", false));
+        assertEquals("NoSuchEntity", ex.getErrorCode());
+    }
+
+    @Test
+    void getLoginProfileForUserWithNoneIsNoSuchEntity() {
+        iamService.createUser("alice", "/");
+
+        AwsException ex = assertThrows(AwsException.class, () -> iamService.getLoginProfile("alice"));
+        assertEquals("NoSuchEntity", ex.getErrorCode());
+    }
+
+    @Test
+    void deleteLoginProfileForUserWithNoneIsNoSuchEntity() {
+        iamService.createUser("alice", "/");
+
+        AwsException ex = assertThrows(AwsException.class, () -> iamService.deleteLoginProfile("alice"));
+        assertEquals("NoSuchEntity", ex.getErrorCode());
+    }
+
+    @Test
+    void updateLoginProfileLeavesAnOmittedFieldUnchanged() {
+        iamService.createUser("alice", "/");
+        iamService.createLoginProfile("alice", "Sup3r$ecret!", true);
+
+        // Only PasswordResetRequired supplied: the stored password must survive untouched.
+        iamService.updateLoginProfile("alice", null, false);
+        LoginProfile afterFlagOnly = iamService.getLoginProfile("alice");
+        assertEquals("Sup3r$ecret!", afterFlagOnly.getPassword());
+        assertFalse(afterFlagOnly.isPasswordResetRequired());
+
+        // Only Password supplied: the reset-required flag must survive untouched.
+        iamService.updateLoginProfile("alice", "NewP4ssword!", null);
+        LoginProfile afterPasswordOnly = iamService.getLoginProfile("alice");
+        assertEquals("NewP4ssword!", afterPasswordOnly.getPassword());
+        assertFalse(afterPasswordOnly.isPasswordResetRequired());
+    }
+
+    @Test
+    void updateLoginProfileForUserWithNoneIsNoSuchEntity() {
+        iamService.createUser("alice", "/");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> iamService.updateLoginProfile("alice", "NewP4ssword!", null));
+        assertEquals("NoSuchEntity", ex.getErrorCode());
+    }
+
+    @Test
+    void createLoginProfileRejectsPasswordViolatingAccountPolicy() {
+        iamService.createUser("alice", "/");
+        AccountPasswordPolicy policy = new AccountPasswordPolicy();
+        policy.setMinimumPasswordLength(12);
+        policy.setRequireSymbols(true);
+        policy.setRequireNumbers(true);
+        iamService.updateAccountPasswordPolicy(policy);
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> iamService.createLoginProfile("alice", "short", false));
+        assertEquals("PasswordPolicyViolation", ex.getErrorCode());
+    }
+
+    @Test
+    void createLoginProfileAcceptsPasswordSatisfyingAccountPolicy() {
+        iamService.createUser("alice", "/");
+        AccountPasswordPolicy policy = new AccountPasswordPolicy();
+        policy.setMinimumPasswordLength(12);
+        policy.setRequireSymbols(true);
+        policy.setRequireNumbers(true);
+        iamService.updateAccountPasswordPolicy(policy);
+
+        LoginProfile profile = iamService.createLoginProfile("alice", "Sup3r$ecret!", false);
+        assertEquals("alice", profile.getUserName());
+    }
+
+    @Test
+    void deleteUserWithLoginProfileIsDeleteConflict() {
+        iamService.createUser("alice", "/");
+        iamService.createLoginProfile("alice", "Sup3r$ecret!", false);
+
+        AwsException ex = assertThrows(AwsException.class, () -> iamService.deleteUser("alice"));
+        assertEquals("DeleteConflict", ex.getErrorCode());
+        assertEquals("alice", iamService.getUser("alice").getUserName());
+
+        iamService.deleteLoginProfile("alice");
+        iamService.deleteUser("alice");
+        iamService.createUser("alice", "/");
+        assertThrows(AwsException.class, () -> iamService.getLoginProfile("alice"));
+    }
+
+    @Test
+    void deleteUserWithInlinePolicyIsDeleteConflict() {
+        iamService.createUser("alice", "/");
+        iamService.putUserPolicy("alice", "inline-1", "{\"Version\":\"2012-10-17\"}");
+
+        AwsException ex = assertThrows(AwsException.class, () -> iamService.deleteUser("alice"));
+        assertEquals("DeleteConflict", ex.getErrorCode());
+
+        iamService.deleteUserPolicy("alice", "inline-1");
+        iamService.deleteUser("alice");
+    }
+
+    @Test
+    void deleteUserWithAccessKeyIsDeleteConflict() {
+        iamService.createUser("alice", "/");
+        String keyId = iamService.createAccessKey("alice").getAccessKeyId();
+
+        AwsException ex = assertThrows(AwsException.class, () -> iamService.deleteUser("alice"));
+        assertEquals("DeleteConflict", ex.getErrorCode());
+        assertEquals("alice", iamService.getUser("alice").getUserName());
+
+        iamService.deleteAccessKey("alice", keyId);
+        iamService.deleteUser("alice");
+    }
+
+    @Test
+    void renamingAUserMovesItsAccessKeys() {
+        iamService.createUser("alice", "/");
+        String keyId = iamService.createAccessKey("alice").getAccessKeyId();
+
+        iamService.updateUser("alice", "alicia", null);
+
+        assertEquals(1, iamService.listAccessKeys("alicia").size());
+        assertEquals("alicia", iamService.listAccessKeys("alicia").get(0).getUserName());
+        iamService.createUser("alice", "/");
+        assertTrue(iamService.listAccessKeys("alice").isEmpty());
+        assertEquals("alicia", iamService.findUserNameByAccessKeyId(keyId).orElseThrow());
+    }
+
+    @Test
+    void renamingAUserUpdatesItsGroupMembership() {
+        iamService.createUser("alice", "/");
+        iamService.createGroup("devs", "/");
+        iamService.addUserToGroup("devs", "alice");
+
+        iamService.updateUser("alice", "alicia", null);
+
+        assertEquals(List.of("alicia"), iamService.getGroup("devs").getUserNames());
+        iamService.removeUserFromGroup("devs", "alicia");
+        iamService.deleteGroup("devs");
+        iamService.deleteUser("alicia");
+    }
+
+    @Test
+    void renamingAUserMovesItsLoginProfile() {
+        iamService.createUser("alice", "/");
+        iamService.createLoginProfile("alice", "Sup3r$ecret!", true);
+
+        iamService.updateUser("alice", "alicia", null);
+
+        LoginProfile moved = iamService.getLoginProfile("alicia");
+        assertEquals("alicia", moved.getUserName());
+        assertEquals("Sup3r$ecret!", moved.getPassword());
+        assertTrue(moved.isPasswordResetRequired());
+        iamService.createUser("alice", "/");
+        AwsException ex = assertThrows(AwsException.class, () -> iamService.getLoginProfile("alice"));
+        assertEquals("NoSuchEntity", ex.getErrorCode());
+    }
+
+    @Test
+    void createLoginProfileRejectsPasswordOutsideWireCharacterSet() {
+        iamService.createUser("alice", "/");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> iamService.createLoginProfile("alice", "badpassword", false));
+        assertEquals("ValidationError", ex.getErrorCode());
     }
 
     // =========================================================================
@@ -719,6 +963,18 @@ class IamServiceTest {
 
         List<AccessKey> keys = iamService.listAccessKeys("alice");
         assertEquals(1, keys.size());
+    }
+
+    @Test
+    void accessKeySecretsAreFortyCharsAndUnique() {
+        iamService.createUser("alice", "/");
+        iamService.createUser("bob", "/");
+        AccessKey first = iamService.createAccessKey("alice");
+        AccessKey second = iamService.createAccessKey("bob");
+
+        assertEquals(40, first.getSecretAccessKey().length());
+        assertEquals(40, second.getSecretAccessKey().length());
+        assertNotEquals(first.getSecretAccessKey(), second.getSecretAccessKey());
     }
 
     @Test

@@ -46,7 +46,22 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
@@ -735,6 +750,30 @@ public class S3Service implements Resettable, ResourceProvider {
         authorizeDeleteObject(bucketName, key, null, RequestAuthorization.unsigned());
     }
 
+    /**
+     * Authorize {@code s3:GetObject} as a signed principal (an IAM role session's access key),
+     * reusing the identity-policy + resource-policy evaluation a genuine SigV4 request goes
+     * through. Used for Redshift {@code COPY ... IAM_ROLE '<arn>'}.
+     */
+    public void authorizeSignedGetObject(String accessKeyId, String sessionToken, String bucketName, String key) {
+        authorizeGetObject(bucketName, key, null, new RequestAuthorization(true, accessKeyId, sessionToken));
+    }
+
+    /** Authorize a signed {@code s3:PutObject}; see {@link #authorizeSignedGetObject}. */
+    public void authorizeSignedPutObject(String accessKeyId, String sessionToken, String bucketName, String key) {
+        authorizePutObject(bucketName, key, new RequestAuthorization(true, accessKeyId, sessionToken));
+    }
+
+    /** Authorize a signed {@code s3:ListBucket}; see {@link #authorizeSignedGetObject}. */
+    public void authorizeSignedListBucket(String accessKeyId, String sessionToken, String bucketName) {
+        authorizeListBucket(bucketName, new RequestAuthorization(true, accessKeyId, sessionToken));
+    }
+
+    /** Authorize a signed {@code s3:DeleteObject}; see {@link #authorizeSignedGetObject}. */
+    public void authorizeSignedDeleteObject(String accessKeyId, String sessionToken, String bucketName, String key) {
+        authorizeDeleteObject(bucketName, key, null, new RequestAuthorization(true, accessKeyId, sessionToken));
+    }
+
     public void authorizeCloudFrontOacGetObject(
             String bucketName, String key, String distributionArn) {
         authorizeCloudFrontGetObject(
@@ -929,7 +968,7 @@ public class S3Service implements Resettable, ResourceProvider {
                 .orElse(false);
     }
 
-    boolean isAuthEnforced() {
+    public boolean isAuthEnforced() {
         return enforceAuth;
     }
 
@@ -1213,6 +1252,15 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public S3Object getObject(String bucketName, String key, String versionId) {
+        if ("null".equals(versionId)) {
+            String bucketOwnerAccount = resolveBucketEntry(bucketName)
+                    .orElseThrow(() -> new AwsException("NoSuchBucket",
+                            "The specified bucket does not exist.", 404))
+                    .account();
+            S3Object obj = getObjectMetadata(bucketName, key, versionId);
+            obj.setData(readFile(bucketOwnerAccount, bucketName, key));
+            return obj;
+        }
         if (versionId != null) {
             // An explicit version's file is immutable once written (see storeObjectInternal) and
             // never reused by a later PUT, so this pairing can never race a concurrent overwrite.
@@ -1306,7 +1354,7 @@ public class S3Service implements Resettable, ResourceProvider {
                         "The specified bucket does not exist.", 404))
                 .account();
         if (inMemory) {
-            byte[] data = versionId != null
+            byte[] data = versionId != null && !"null".equals(versionId)
                     ? memoryDataStore.get(physicalVersionedKey(bucketOwnerAccount, bucketName, key, versionId))
                     : memoryDataStore.get(physicalKey(bucketOwnerAccount, bucketName, key));
             if (data == null) {
@@ -1315,7 +1363,7 @@ public class S3Service implements Resettable, ResourceProvider {
             return new ByteArrayInputStream(data);
         }
         try {
-            Path path = versionId != null
+            Path path = versionId != null && !"null".equals(versionId)
                     ? resolveVersionedPathForRead(bucketOwnerAccount, bucketName, key, versionId)
                     : resolveObjectPathForRead(bucketOwnerAccount, bucketName, key);
             return Files.newInputStream(path);
@@ -1325,7 +1373,7 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public S3Object getObjectMetadata(String bucketName, String key, String versionId) {
-        return copyObject(getStoredObject(bucketName, key, versionId));
+        return copyObject(getStoredObject(bucketName, key, "null".equals(versionId) ? null : versionId));
     }
 
     public GetObjectAttributesResult getObjectAttributes(String bucketName, String key, String versionId,
@@ -1465,6 +1513,21 @@ public class S3Service implements Resettable, ResourceProvider {
             LOG.debugv("Created delete marker: {0}/{1} v={2}", bucketName, key, markerId);
             fireNotifications(bucketName, key, "ObjectRemoved:DeleteMarkerCreated", deleteMarker);
             return deleteMarker;
+        } else if ("null".equals(versionId)) {
+            // A null version is stored at the plain object key until a versioned write replaces it.
+            // Treat the literal request value as that null version, not as a versioned key named
+            // "null". A delete marker is not the null version and must remain untouched.
+            S3Object existing = objectStore.get(objectKey(bucketName, key)).orElse(null);
+            if (existing == null || existing.isDeleteMarker() || existing.getVersionId() != null) {
+                return null;
+            }
+            checkLockProtection(existing, bypassGovernance);
+            objectStore.delete(objectKey(bucketName, key));
+            deleteFile(bucketName, key);
+            deleteAllAnnotationsFor(annotationParentKey(bucketName, key, null));
+            LOG.debugv("Permanently deleted null version: {0}/{1}", bucketName, key);
+            fireNotifications(bucketName, key, "ObjectRemoved:Delete", null);
+            return existing;
         } else if (versionId != null) {
             // Get the specific version before permanent deletion
             S3Object toDelete = getVersionForDeletion(bucketName, key, versionId);
@@ -1968,7 +2031,12 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public Map<String, String> getObjectTagging(String bucketName, String key) {
-        S3Object obj = getStoredObject(bucketName, key, null);
+        return getObjectTagging(bucketName, key, null);
+    }
+
+    /** Tags of one version, or of the current version when {@code versionId} is null or "null". */
+    public Map<String, String> getObjectTagging(String bucketName, String key, String versionId) {
+        S3Object obj = getStoredObject(bucketName, key, "null".equals(versionId) ? null : versionId);
         return obj.getTags() != null ? obj.getTags() : Map.of();
     }
 
@@ -3292,8 +3360,9 @@ public class S3Service implements Resettable, ResourceProvider {
                         ? memoryMultipartStore.get(uploadId).get(num)
                         : Files.readAllBytes(dataRoot.resolve(".multipart").resolve(uploadId).resolve(String.valueOf(num)));
                 combined.write(partData);
-                // For composite ETag: hash each part's MD5
-                md.update(computeETagBytes(partData));
+                // A part ETag is the MD5 of that part, so the composite hashes it without rehashing the data
+                String partETag = stripSurroundingQuotes(upload.getParts().get(num).getETag());
+                md.update(HexFormat.of().parseHex(partETag));
             }
 
             byte[] allData = combined.toByteArray();

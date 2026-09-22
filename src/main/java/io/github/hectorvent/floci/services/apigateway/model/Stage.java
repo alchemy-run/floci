@@ -21,6 +21,27 @@ public class Stage {
     private boolean cacheClusterEnabled;
     private String cacheClusterSize;
     private String cacheClusterStatus = "NOT_AVAILABLE";
+    private AccessLogSettings accessLogSettings;
+    private boolean tracingEnabled;
+
+    @RegisterForReflection
+    public record AccessLogSettings(String destinationArn, String format) {}
+
+    public AccessLogSettings getAccessLogSettings() {
+        return accessLogSettings;
+    }
+
+    public void setAccessLogSettings(AccessLogSettings accessLogSettings) {
+        this.accessLogSettings = accessLogSettings;
+    }
+
+    public boolean isTracingEnabled() {
+        return tracingEnabled;
+    }
+
+    public void setTracingEnabled(boolean tracingEnabled) {
+        this.tracingEnabled = tracingEnabled;
+    }
 
     public boolean isCacheClusterEnabled() {
         return cacheClusterEnabled;

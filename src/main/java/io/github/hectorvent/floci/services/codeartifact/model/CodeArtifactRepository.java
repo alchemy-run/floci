@@ -34,6 +34,12 @@ public class CodeArtifactRepository {
     public void setPackages(Map<String, CodeArtifactPackage> packages) {
         this.packages = packages;
     }
+    /**
+     * The Reposilite repository backing this repository's {@code maven} format, unique per
+     * creation so a deleted-and-recreated repository of the same name never inherits a previous
+     * repository's leftover artifacts. Internal; never surfaced in the public API response.
+     */
+    private String mavenRepositoryId;
 
     public String getName() {
         return name;
@@ -137,5 +143,13 @@ public class CodeArtifactRepository {
 
     public void setPolicyRevision(String policyRevision) {
         this.policyRevision = policyRevision;
+    }
+
+    public String getMavenRepositoryId() {
+        return mavenRepositoryId;
+    }
+
+    public void setMavenRepositoryId(String mavenRepositoryId) {
+        this.mavenRepositoryId = mavenRepositoryId;
     }
 }

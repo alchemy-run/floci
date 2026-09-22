@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.services.appsync.graphql.scalars.AppSyncScalar
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -21,6 +22,14 @@ class SchemaRegistryTest {
     @BeforeEach
     void setUp() {
         registry = new SchemaRegistry(new AppSyncSchemaParser(new AppSyncScalarRegistry()));
+    }
+
+    @Test
+    void getSdlReturnsWhatWasRegistered() {
+        registry.register("api-1", SDL);
+
+        assertEquals(SDL, registry.getSdl("api-1").orElseThrow());
+        assertTrue(registry.getSdl("unknown").isEmpty());
     }
 
     @Test
@@ -42,6 +51,7 @@ class SchemaRegistryTest {
 
         assertTrue(registry.getGraphQL("api-1").isEmpty());
         assertTrue(registry.getSchema("api-1").isEmpty());
+        assertTrue(registry.getSdl("api-1").isEmpty());
     }
 
     @Test
@@ -54,6 +64,7 @@ class SchemaRegistryTest {
 
         assertNotSame(original, replaced);
         assertSame(replaced, registry.getGraphQL("api-1").orElseThrow());
+        assertEquals("type Query { bye: String }", registry.getSdl("api-1").orElseThrow());
     }
 
     @Test

@@ -98,6 +98,16 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
     }
 
     /**
+     * Resolves an optional property through the engine, falling back to {@code defaultValue} when it
+     * is absent or resolves to blank. Shared by the per-service provisioners so none carries its own
+     * copy.
+     */
+    public String resolveOrDefault(JsonNode props, String name, String defaultValue) {
+        String value = resolveOptional(props, name);
+        return (value != null && !value.isBlank()) ? value : defaultValue;
+    }
+
+    /**
      * Resolves a list property to its non-blank elements, or an empty list when absent.
      *
      * <p>Routes through {@code engine.resolveStringList} so a list-valued intrinsic
@@ -111,6 +121,17 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
             return new ArrayList<>();
         }
         return new ArrayList<>(engine.resolveStringList(props.get(name)));
+    }
+
+    /**
+     * The resolved {@code PolicyDocument} of an IAM policy resource as a JSON string, defaulting to
+     * an empty policy when the property is absent. Shared by the IAM policy provisioners so neither
+     * carries its own copy.
+     */
+    public String resolvePolicyDocument(JsonNode props) {
+        JsonNode documentNode = props != null ? props.get("PolicyDocument") : null;
+        String resolved = documentNode != null ? engine.resolveJsonAttributeStrict(documentNode) : null;
+        return resolved != null ? resolved : "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
     }
 
     /**

@@ -12,6 +12,8 @@ import software.amazon.awssdk.services.iam.model.CreateGroupRequest;
 import software.amazon.awssdk.services.iam.model.CreateGroupResponse;
 import software.amazon.awssdk.services.iam.model.CreateInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.CreateInstanceProfileResponse;
+import software.amazon.awssdk.services.iam.model.CreateLoginProfileRequest;
+import software.amazon.awssdk.services.iam.model.CreateLoginProfileResponse;
 import software.amazon.awssdk.services.iam.model.CreatePolicyRequest;
 import software.amazon.awssdk.services.iam.model.CreatePolicyResponse;
 import software.amazon.awssdk.services.iam.model.CreateRoleRequest;
@@ -21,6 +23,7 @@ import software.amazon.awssdk.services.iam.model.CreateUserResponse;
 import software.amazon.awssdk.services.iam.model.DeleteAccessKeyRequest;
 import software.amazon.awssdk.services.iam.model.DeleteGroupRequest;
 import software.amazon.awssdk.services.iam.model.DeleteInstanceProfileRequest;
+import software.amazon.awssdk.services.iam.model.DeleteLoginProfileRequest;
 import software.amazon.awssdk.services.iam.model.DeletePolicyRequest;
 import software.amazon.awssdk.services.iam.model.DeleteRoleRequest;
 import software.amazon.awssdk.services.iam.model.DeleteRolePolicyRequest;
@@ -33,6 +36,8 @@ import software.amazon.awssdk.services.iam.model.GetGroupRequest;
 import software.amazon.awssdk.services.iam.model.GetGroupResponse;
 import software.amazon.awssdk.services.iam.model.GetInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.GetInstanceProfileResponse;
+import software.amazon.awssdk.services.iam.model.GetLoginProfileRequest;
+import software.amazon.awssdk.services.iam.model.GetLoginProfileResponse;
 import software.amazon.awssdk.services.iam.model.GetPolicyRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyResponse;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionRequest;
@@ -52,6 +57,8 @@ import software.amazon.awssdk.services.iam.model.ListAttachedUserPoliciesRespons
 import software.amazon.awssdk.services.iam.model.ListEntitiesForPolicyResponse;
 import software.amazon.awssdk.services.iam.model.ListGroupsForUserRequest;
 import software.amazon.awssdk.services.iam.model.ListGroupsForUserResponse;
+import software.amazon.awssdk.services.iam.model.ListInstanceProfileTagsRequest;
+import software.amazon.awssdk.services.iam.model.ListInstanceProfileTagsResponse;
 import software.amazon.awssdk.services.iam.model.ListInstanceProfilesResponse;
 import software.amazon.awssdk.services.iam.model.ListRolePoliciesRequest;
 import software.amazon.awssdk.services.iam.model.ListRolePoliciesResponse;
@@ -66,9 +73,13 @@ import software.amazon.awssdk.services.iam.model.RemoveRoleFromInstanceProfileRe
 import software.amazon.awssdk.services.iam.model.RemoveUserFromGroupRequest;
 import software.amazon.awssdk.services.iam.model.SimulatePrincipalPolicyRequest;
 import software.amazon.awssdk.services.iam.model.StatusType;
+import software.amazon.awssdk.services.iam.model.Tag;
+import software.amazon.awssdk.services.iam.model.TagInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.TagUserRequest;
+import software.amazon.awssdk.services.iam.model.UntagInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.UntagUserRequest;
 import software.amazon.awssdk.services.iam.model.UpdateAccessKeyRequest;
+import software.amazon.awssdk.services.iam.model.UpdateLoginProfileRequest;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -95,6 +106,7 @@ class IamTest {
             + "\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
     private static final String POLICY_DOCUMENT = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
             + "\"Action\":\"s3:GetObject\",\"Resource\":\"*\"}]}";
+    private static final String LOGIN_PROFILE_PASSWORD = "Sdk-Test-P4ssword!";
     private static String policyArn;
     private static String accessKeyId;
 
@@ -531,6 +543,80 @@ class IamTest {
 
         assertThat(response.instanceProfiles())
                 .anyMatch(p -> INSTANCE_PROFILE_NAME.equals(p.instanceProfileName()));
+    }
+
+    @Test
+    @Order(44)
+    void tagInstanceProfile() {
+        iam.tagInstanceProfile(TagInstanceProfileRequest.builder()
+                .instanceProfileName(INSTANCE_PROFILE_NAME)
+                .tags(Tag.builder().key("env").value("sdk-test").build())
+                .build());
+    }
+
+    @Test
+    @Order(45)
+    void listInstanceProfileTags() {
+        ListInstanceProfileTagsResponse response = iam.listInstanceProfileTags(
+                ListInstanceProfileTagsRequest.builder().instanceProfileName(INSTANCE_PROFILE_NAME).build());
+
+        assertThat(response.tags())
+                .anyMatch(t -> "env".equals(t.key()));
+    }
+
+    @Test
+    @Order(46)
+    void untagInstanceProfile() {
+        iam.untagInstanceProfile(UntagInstanceProfileRequest.builder()
+                .instanceProfileName(INSTANCE_PROFILE_NAME).tagKeys("env").build());
+    }
+
+    // ── Login Profile ──────────────────────────────────────────────────
+
+    @Test
+    @Order(39)
+    void createLoginProfile() {
+        CreateLoginProfileResponse response = iam.createLoginProfile(CreateLoginProfileRequest.builder()
+                .userName(USER_NAME).password(LOGIN_PROFILE_PASSWORD).passwordResetRequired(false).build());
+
+        assertThat(response.loginProfile().userName()).isEqualTo(USER_NAME);
+        assertThat(response.loginProfile().passwordResetRequired()).isFalse();
+        assertThat(response.loginProfile().createDate()).isNotNull();
+    }
+
+    @Test
+    @Order(40)
+    void getLoginProfile() {
+        GetLoginProfileResponse response = iam.getLoginProfile(GetLoginProfileRequest.builder()
+                .userName(USER_NAME).build());
+
+        assertThat(response.loginProfile().userName()).isEqualTo(USER_NAME);
+        assertThat(response.loginProfile().passwordResetRequired()).isFalse();
+    }
+
+    @Test
+    @Order(41)
+    void updateLoginProfile() {
+        iam.updateLoginProfile(UpdateLoginProfileRequest.builder()
+                .userName(USER_NAME).passwordResetRequired(true).build());
+
+        GetLoginProfileResponse response = iam.getLoginProfile(GetLoginProfileRequest.builder()
+                .userName(USER_NAME).build());
+        assertThat(response.loginProfile().passwordResetRequired()).isTrue();
+    }
+
+    @Test
+    @Order(42)
+    void deleteLoginProfile() {
+        iam.deleteLoginProfile(DeleteLoginProfileRequest.builder().userName(USER_NAME).build());
+    }
+
+    @Test
+    @Order(43)
+    void getLoginProfileAfterDeleteThrows() {
+        assertThatThrownBy(() -> iam.getLoginProfile(GetLoginProfileRequest.builder()
+                .userName(USER_NAME).build()))
+                .isInstanceOf(NoSuchEntityException.class);
     }
 
     // ── Error Cases ────────────────────────────────────────────────────

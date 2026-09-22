@@ -2,17 +2,17 @@ package io.github.hectorvent.floci.services.elasticache;
 
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
 import io.github.hectorvent.floci.core.common.AwsQueryResponse;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.elasticache.model.AuthMode;
 import io.github.hectorvent.floci.services.elasticache.model.CacheCluster;
 import io.github.hectorvent.floci.services.elasticache.model.CacheClusterStatus;
-import io.github.hectorvent.floci.services.elasticache.model.CacheSnapshot;
 import io.github.hectorvent.floci.services.elasticache.model.CacheParameterGroup;
-import io.github.hectorvent.floci.services.elasticache.model.ClusterNode;
+import io.github.hectorvent.floci.services.elasticache.model.CacheSnapshot;
 import io.github.hectorvent.floci.services.elasticache.model.CacheSubnetGroup;
+import io.github.hectorvent.floci.services.elasticache.model.ClusterNode;
 import io.github.hectorvent.floci.services.elasticache.model.ElastiCacheUser;
 import io.github.hectorvent.floci.services.elasticache.model.Endpoint;
 import io.github.hectorvent.floci.services.elasticache.model.ReplicationGroup;
@@ -25,6 +25,9 @@ import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -995,7 +998,7 @@ public class ElastiCacheQueryHandler {
                 .start("CacheCluster")
                   .elem("CacheClusterId", c.getCacheClusterId())
                   .elem("ARN", elasticacheArn("cluster", c.getCacheClusterId()))
-                  .elem("CacheClusterStatus", c.getCacheClusterStatus().name().toLowerCase())
+                  .elem("CacheClusterStatus", c.getCacheClusterStatus().wireName())
                   .elem("Engine", c.getEngine())
                   .elem("EngineVersion", c.getEngineVersion())
                   .elem("CacheNodeType", c.getCacheNodeType())
@@ -1232,7 +1235,7 @@ public class ElastiCacheQueryHandler {
 
     private static String extractUriHost(String token) {
         try {
-            return java.net.URI.create("http://" + token).getHost();
+            return URI.create("http://" + token).getHost();
         } catch (Exception e) {
             return "";
         }
@@ -1240,15 +1243,15 @@ public class ElastiCacheQueryHandler {
 
     private static String extractQueryParam(String token, String name) {
         try {
-            String rawQuery = java.net.URI.create("http://" + token).getRawQuery();
+            String rawQuery = URI.create("http://" + token).getRawQuery();
             if (rawQuery == null) {
                 return "";
             }
             for (String pair : rawQuery.split("&")) {
                 int eq = pair.indexOf('=');
                 if (eq >= 0 && name.equals(pair.substring(0, eq))) {
-                    return java.net.URLDecoder.decode(pair.substring(eq + 1),
-                            java.nio.charset.StandardCharsets.UTF_8);
+                    return URLDecoder.decode(pair.substring(eq + 1),
+                            StandardCharsets.UTF_8);
                 }
             }
         } catch (Exception ignored) {}

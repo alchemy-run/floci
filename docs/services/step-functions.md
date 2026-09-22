@@ -209,8 +209,19 @@ workflows converge: the `framework-isComplete-task` throws on every not-yet-comp
 
 `JitterStrategy` supports `NONE` (the default) and `FULL`. `FULL` draws the delay
 uniformly between zero and the computed delay, as on AWS. One deviation. The delay
-between attempts is capped at 30 seconds, the same cap Floci applies to `Wait` states,
-so emulated runs stay fast.
+between attempts is capped at `floci.services.stepfunctions.max-wait-seconds`
+(default 30), the same ceiling Floci applies to `Wait` states, so emulated runs stay fast.
+
+## Wait states
+
+A `Wait` state honors `Seconds`, `SecondsPath`, `Timestamp`, and `TimestampPath`. The two
+`Seconds` forms pause for the given number of seconds. The two `Timestamp` forms parse an
+ISO-8601 instant and pause until it, or return promptly when it has already passed. An
+unparseable timestamp fails the execution with `States.Runtime`. In a JSONata state machine,
+`Seconds` and `Timestamp` each accept a literal or a JSONata expression that produces the value.
+
+One deviation. Every pause is capped at `floci.services.stepfunctions.max-wait-seconds`
+(default 30) so emulated runs stay fast, where AWS sleeps the full duration.
 
 ## Timeouts
 
@@ -430,7 +441,11 @@ the wire and the task fails with `Sfn.StateMachineDoesNotExistException`.
 | `arn:aws:states:::aws-sdk:sfn:sendTaskFailure` | `{}` | `Sfn.InvalidTokenException` |
 | `arn:aws:states:::aws-sdk:scheduler:createSchedule` | `{ScheduleArn}` | `Scheduler.ConflictException` when the name is taken |
 | `arn:aws:states:::aws-sdk:scheduler:updateSchedule` | `{ScheduleArn}` | `Scheduler.ResourceNotFoundException` |
+| `arn:aws:states:::aws-sdk:scheduler:deleteSchedule` | `{}` | `Scheduler.ResourceNotFoundException` |
 | `arn:aws:states:::aws-sdk:sns:publish` | `{MessageId}` | `Sns.NotFoundException` when the topic does not exist |
+
+Scheduler create and update tasks accept `StartDate` and `EndDate` as RFC 3339 strings, including
+offsets and fractional seconds. The direct Scheduler API continues to use numeric epoch seconds.
 
 `sendTaskSuccess` and `sendTaskFailure` resolve a token a `.waitForTaskToken` task is parked on. A
 token nobody is waiting for fails the calling task rather than reporting a delivery that never
@@ -474,6 +489,10 @@ cause is the response serialized as a string, so a `Catch` can read which entry 
 ```json
 {"FailedEntryCount":1,"Entries":[{"EventId":"08cbdc46-…"},{"ErrorCode":"InvalidArgument","ErrorMessage":"EventBus not found: no-such-bus"}]}
 ```
+
+The optimized integration accepts `Detail` as a JSON object in JSONPath and JSONata workflows. It
+serializes that object once for the EventBridge request, preserving nested values and escaped text.
+The direct EventBridge API continues to accept its native string-valued `Detail` field.
 
 One deviation, and it belongs to EventBridge rather than to the integration: Floci rejects an entry
 addressed to an event bus that does not exist, while AWS accepts it and returns an `EventId`.
@@ -625,6 +644,7 @@ no additional event is written.
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_STEPFUNCTIONS_ENABLED` | `true` | Enable or disable the service |
+| `FLOCI_SERVICES_STEPFUNCTIONS_MAX_WAIT_SECONDS` | `30` | Ceiling in seconds on a `Wait` state pause and a `Retry` backoff |
 | `SFN_MOCK_CONFIG` | unset | Path to a Step Functions Local compatible mock configuration file (alias: `FLOCI_SERVICES_STEPFUNCTIONS_MOCK_CONFIG_FILE`) |
 
 ## Examples

@@ -7,6 +7,7 @@ import graphql.schema.GraphQLFieldDefinition;
 import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLSchema;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncErrorFormatter;
+import io.github.hectorvent.floci.services.appsync.graphql.AppSyncGraphqlExecutor;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncSchemaParser;
 import io.github.hectorvent.floci.services.appsync.graphql.QueryExecutor;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaRegistry;
@@ -27,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AuthorizationDataFetcherTest {
 
@@ -200,6 +203,38 @@ class AuthorizationDataFetcherTest {
         Map<String, Object> response = execute(schema, "{ hello }", apiKeyContext(api));
         assertEquals("Unauthorized", firstErrorType(response));
         assertTrue(!innerRan.get());
+    }
+
+    @Test
+    void registryPreservesResolverCallbacksBehindAuthorizationAndValidation() {
+        AppSyncGraphqlExecutor resolvers = mock(AppSyncGraphqlExecutor.class);
+        AtomicBoolean invoked = new AtomicBoolean();
+        when(resolvers.dataFetcher("api-1")).thenReturn(environment -> {
+            invoked.set(true);
+            return "resolver result";
+        });
+        SchemaRegistry registry = new SchemaRegistry(parser, wrapper, resolvers);
+        registry.register("api-1", "type Query { hello: String @aws_iam }");
+        GraphQLSchema schema = registry.getSchema("api-1").orElseThrow();
+        GraphqlApi api = api(AuthenticationType.API_KEY);
+        AdditionalAuthenticationProvider extra = new AdditionalAuthenticationProvider();
+        extra.setAuthenticationType(AuthenticationType.AWS_IAM);
+        api.setAdditionalAuthenticationProviders(List.of(extra));
+
+        Map<String, Object> denied = execute(schema, "{ hello }", apiKeyContext(api));
+        assertEquals("Unauthorized", firstErrorType(denied));
+        assertEquals(false, invoked.get());
+
+        Map<String, Object> allowed = execute(schema, "{ hello }", iamContext(api));
+        assertEquals("resolver result", dataHello(allowed));
+        assertNull(allowed.get("errors"));
+        assertTrue(invoked.get());
+
+        invoked.set(false);
+        Map<String, Object> invalid = execute(schema,
+                "{ hello ...a } fragment a on Query { ...a }", iamContext(api));
+        assertEquals("ValidationError", firstErrorType(invalid));
+        assertEquals(false, invoked.get());
     }
 
     @Test

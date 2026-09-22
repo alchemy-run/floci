@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.ses;
 
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ses.model.ConfigurationSet;
 import io.github.hectorvent.floci.services.ses.model.SentEmail;
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -22,6 +24,8 @@ class SesServiceSmtpTest {
 
     private SesService service;
     private SesConfigurationSetService configSets;
+    private SesSentEmailService sentEmails;
+    private SesSuppressionService suppression;
     private InMemoryStorage<String, SentEmail> emailStore;
 
     @BeforeEach
@@ -31,10 +35,12 @@ class SesServiceSmtpTest {
         service = builder.build();
         builder.identityService().verifyEmailIdentity("from@example.com", "us-east-1");
         configSets = builder.configSetService();
+        sentEmails = builder.sentEmailService();
+        suppression = builder.suppressionService();
     }
 
     private SentEmail storedEmail(String messageId) {
-        return service.getEmails().stream()
+        return sentEmails.listAll().stream()
                 .filter(e -> messageId.equals(e.getMessageId()))
                 .findFirst()
                 .orElseThrow();
@@ -108,6 +114,35 @@ class SesServiceSmtpTest {
     }
 
     @Test
+    void sendRawEmail_rejectedMessage_keepsNoReturnPathFromItsHeaders() {
+        // The scan trips on the subject; the Return-Path header, read off the same message, must
+        // not survive on the record either, so the request's return path is used.
+        String raw = "From: from@example.com\r\nTo: to@example.com\r\nReturn-Path: <bounces@evil.example>\r\n"
+                + "Subject: " + SesContentScan.signature() + "\r\n\r\nbody\r\n";
+
+        String messageId = service.sendRawEmail("from@example.com", List.of("to@example.com"), raw,
+                "bounces@example.com", null, List.of(), null, "us-east-1");
+
+        assertEquals("bounces@example.com", storedEmail(messageId).getReturnPath());
+        assertEquals("Bad content", storedEmail(messageId).getRejectReason());
+        verify(smtpRelay, never()).relayRaw(any());
+    }
+
+    @Test
+    void sendRawEmail_unreadableMessage_isRefusedNotStoredNotRelayed() {
+        // Nested past what mime4j can parse: the content cannot be scanned, so the send is refused
+        // rather than recorded and relayed unseen.
+        String raw = "Content-Type: message/rfc822\r\n\r\n".repeat(100_000) + "Subject: deep\r\n\r\nx\r\n";
+
+        AwsException e = assertThrows(AwsException.class, () -> service.sendRawEmail("from@example.com",
+                List.of("to@example.com"), raw, null, null, List.of(), null, "us-east-1"));
+
+        assertEquals(400, e.getHttpStatus());
+        assertTrue(sentEmails.listAll().isEmpty());
+        verify(smtpRelay, never()).relayRaw(any());
+    }
+
+    @Test
     void sendRawEmail_callsRelayRaw() {
         String messageId = service.sendRawEmail("from@example.com",
                 List.of("to@example.com"), "raw MIME", null, null, List.of(), null, "us-east-1");
@@ -171,8 +206,8 @@ class SesServiceSmtpTest {
 
     @Test
     void sendEmail_allRecipientsSuppressed_skipsRelayButStillStores() {
-        service.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
-        service.putSuppressedDestination("us-east-1", "cc@example.com", "COMPLAINT");
+        suppression.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
+        suppression.putSuppressedDestination("us-east-1", "cc@example.com", "COMPLAINT");
 
         String messageId = service.sendEmail("from@example.com",
                 List.of("to@example.com"),
@@ -189,7 +224,7 @@ class SesServiceSmtpTest {
     @Test
     void sendEmail_partialSuppression_relayCalledWithFilteredRecipients() {
         // Only suppress one of the To recipients; the other should still reach the relay.
-        service.putSuppressedDestination("us-east-1", "suppressed@example.com", "BOUNCE");
+        suppression.putSuppressedDestination("us-east-1", "suppressed@example.com", "BOUNCE");
 
         service.sendEmail("from@example.com",
                 List.of("to@example.com", "suppressed@example.com"),
@@ -204,7 +239,7 @@ class SesServiceSmtpTest {
 
     @Test
     void sendRawEmail_allRecipientsSuppressed_skipsRelayRawButStillStores() {
-        service.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
+        suppression.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
 
         String messageId = service.sendRawEmail("from@example.com",
                 List.of("to@example.com"), "raw MIME", null, null, List.of(), null, "us-east-1");
@@ -216,7 +251,7 @@ class SesServiceSmtpTest {
 
     @Test
     void sendRawEmail_partialSuppression_relayRawCalledWithFilteredRecipients() {
-        service.putSuppressedDestination("us-east-1", "suppressed@example.com", "COMPLAINT");
+        suppression.putSuppressedDestination("us-east-1", "suppressed@example.com", "COMPLAINT");
 
         service.sendRawEmail("from@example.com",
                 List.of("to@example.com", "suppressed@example.com"),
@@ -233,7 +268,7 @@ class SesServiceSmtpTest {
         // overrides to an empty list, which is the AWS V2 contract for "disable
         // suppression filtering for this configuration set". A recipient on the
         // suppression list with reason=BOUNCE should still reach the SMTP relay.
-        service.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
+        suppression.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
         service.createConfigurationSet(new ConfigurationSet("cs-no-suppression"), "us-east-1");
         configSets.putSuppressionOptions("cs-no-suppression", List.of(), "us-east-1");
 
@@ -249,7 +284,7 @@ class SesServiceSmtpTest {
         // Account-level reasons include both BOUNCE and COMPLAINT by default.
         // The CS narrows the effective reasons to [BOUNCE] only — so a recipient
         // suppressed for COMPLAINT is NOT filtered when sending through this CS.
-        service.putSuppressedDestination("us-east-1", "complainer@example.com", "COMPLAINT");
+        suppression.putSuppressedDestination("us-east-1", "complainer@example.com", "COMPLAINT");
         service.createConfigurationSet(new ConfigurationSet("cs-bounce-only"), "us-east-1");
         configSets.putSuppressionOptions("cs-bounce-only", List.of("BOUNCE"), "us-east-1");
 
@@ -265,7 +300,7 @@ class SesServiceSmtpTest {
         // A configuration set whose SuppressionOptions block was never PUT must
         // fall back to account-level reasons — same filtering behaviour as a
         // send without any configuration set.
-        service.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
+        suppression.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
         service.createConfigurationSet(new ConfigurationSet("cs-default"), "us-east-1");
 
         service.sendEmail("from@example.com",
@@ -277,7 +312,7 @@ class SesServiceSmtpTest {
 
     @Test
     void sendRawEmail_csOverridesAccountToEmptyList_suppressionListIsIgnored() {
-        service.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
+        suppression.putSuppressedDestination("us-east-1", "to@example.com", "BOUNCE");
         service.createConfigurationSet(new ConfigurationSet("cs-no-suppression-raw"), "us-east-1");
         configSets.putSuppressionOptions("cs-no-suppression-raw", List.of(), "us-east-1");
 

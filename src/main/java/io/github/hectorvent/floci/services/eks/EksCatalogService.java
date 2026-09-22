@@ -5,6 +5,9 @@ import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.eks.model.AddonInfo;
+import io.github.hectorvent.floci.services.eks.model.AddonVersionInfo;
+import io.github.hectorvent.floci.services.eks.model.Compatibility;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -76,15 +79,20 @@ public class EksCatalogService {
               }
             }
             """;
-    private static final List<Map<String, Object>> VPC_CNI_COMPATIBILITIES = List.of(
-            Map.of("clusterVersion", "1.23", "platformVersions", List.of("*"), "defaultVersion", false),
-            Map.of("clusterVersion", "1.24", "platformVersions", List.of("*"), "defaultVersion", false));
-
     private final RegionResolver regionResolver;
+    private final EksAddonCatalog addonCatalog;
 
     @Inject
-    public EksCatalogService(RegionResolver regionResolver) {
+    public EksCatalogService(RegionResolver regionResolver, EksAddonCatalog addonCatalog) {
         this.regionResolver = regionResolver;
+        this.addonCatalog = addonCatalog;
+    }
+
+    static AddonInfo historicalVpcCni() {
+        return new AddonInfo("vpc-cni", "networking", List.of(new AddonVersionInfo(VPC_CNI_VERSION,
+                List.of("amd64", "arm64"), List.of(
+                        new Compatibility("1.23", List.of("*"), false),
+                        new Compatibility("1.24", List.of("*"), false)), false, true)), "eks", "aws");
     }
 
     public Map<String, Object> listAccessPolicies(String maxResults, String nextToken) {
@@ -126,19 +134,11 @@ public class EksCatalogService {
     public Map<String, Object> describeAddonVersions(String addonName, String kubernetesVersion,
                                                     List<String> types, List<String> publishers, List<String> owners,
                                                     String maxResults, String nextToken) {
-        List<Map<String, Object>> compatibilities = VPC_CNI_COMPATIBILITIES.stream()
-                .filter(value -> kubernetesVersion == null || kubernetesVersion.equals(value.get("clusterVersion")))
-                .toList();
-        List<Map<String, Object>> addons = List.of();
-        if ((addonName == null || "vpc-cni".equals(addonName)) && matches(types, "networking")
-                && matches(publishers, "eks") && matches(owners, "aws") && !compatibilities.isEmpty()) {
-            Map<String, Object> version = Map.of("addonVersion", VPC_CNI_VERSION,
-                    "architecture", List.of("amd64", "arm64"), "compatibilities", compatibilities,
-                    "requiresConfiguration", false, "requiresIamPermissions", true);
-            addons = List.of(Map.of("addonName", "vpc-cni", "type", "networking", "publisher", "eks",
-                    "owner", "aws", "addonVersions", List.of(version)));
-        }
-        return page("addons", addons, "addonName", maxResults, nextToken);
+        PaginatedResult<AddonInfo> result = Pagination.paginate(
+                addonCatalog.describeVersions(addonName, kubernetesVersion, publishers, types, owners),
+                AddonInfo::addonName, Pagination.parseMaxResults(maxResults, INVALID), nextToken, 100, INVALID);
+        return result.nextToken() == null ? Map.of("addons", result.items())
+                : Map.of("addons", result.items(), "nextToken", result.nextToken());
     }
 
     public Map<String, Object> describeAddonConfiguration(String addonName, String addonVersion) {

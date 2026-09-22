@@ -228,6 +228,25 @@ class ContainerLauncherTest {
     }
 
     @Test
+    void launchFunction_hotReloadMountsTheHostDirectoryReadOnlyAtVarTask() {
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("hot-reload-fn");
+        fn.setRuntime("nodejs20.x");
+        fn.setHandler("index.handler");
+        fn.setHotReloadHostPath("/home/ci/code");
+
+        launcher.launch(fn);
+
+        ContainerSpec spec = captureRealContainerSpec();
+        assertEquals(1, spec.binds().stream()
+                .filter(b -> "/home/ci/code".equals(b.getPath()) && "/var/task".equals(b.getVolume().getPath()))
+                .count());
+        assertEquals(AccessMode.ro, spec.binds().stream()
+                .filter(b -> "/var/task".equals(b.getVolume().getPath()))
+                .findFirst().orElseThrow().getAccessMode());
+    }
+
+    @Test
     void launchFunction_usesArm64DockerPlatformWhenArchitectureHonouringIsEnabled() throws Exception {
         EmulatorConfig.LambdaServiceConfig lambda = config.services().lambda();
         when(lambda.honourArchitectures()).thenReturn(true);

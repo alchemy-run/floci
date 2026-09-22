@@ -101,4 +101,14 @@ public interface CfnResourceProvisioner {
     default void clearUpdate(StackResource resource) {
         // no-op by default: a type with no replacement cleanup records nothing to clear
     }
+
+    /**
+     * Carries additive ownership tracking a failed update discovered onto the last known-good
+     * resource metadata CloudFormation restores, so entities the failed attempt created but could
+     * not remove are not orphaned. Only additive tracking belongs here; committed resource state
+     * must not be overwritten. The default has none to carry.
+     */
+    default void mergeFailedUpdateResourceTracking(StackResource previous, StackResource attempted) {
+        // no-op by default: only a provisioner that tracks generated sub-resources needs this
+    }
 }

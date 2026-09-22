@@ -11,7 +11,6 @@ import io.github.hectorvent.floci.services.iam.model.IamPolicy;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.services.iam.model.IamUser;
 import io.github.hectorvent.floci.services.iam.model.InstanceProfile;
-import io.github.hectorvent.floci.services.iam.model.LoginProfile;
 import io.github.hectorvent.floci.services.iam.model.OidcProvider;
 import io.github.hectorvent.floci.services.iam.model.PolicyVersion;
 import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
@@ -57,10 +56,6 @@ public class IamExtendedQueryHandler {
         try {
             extra.migrateLegacyPasswordPolicy();
             return Optional.ofNullable(switch (action) {
-                case "CreateLoginProfile" -> handleCreateLoginProfile(params);
-                case "GetLoginProfile" -> handleGetLoginProfile(params);
-                case "UpdateLoginProfile" -> handleUpdateLoginProfile(params);
-                case "DeleteLoginProfile" -> handleDeleteLoginProfile(params);
                 case "CreateVirtualMFADevice" -> handleCreateVirtualMfaDevice(params);
                 case "ListVirtualMFADevices" -> handleListVirtualMfaDevices(params);
                 case "GetMFADevice" -> handleGetMfaDevice(params);
@@ -163,32 +158,6 @@ public class IamExtendedQueryHandler {
     private Response handleDeleteAccountPasswordPolicy() {
         extra.deleteAccountPasswordPolicy();
         return okNoResult("DeleteAccountPasswordPolicy");
-    }
-
-    private Response handleCreateLoginProfile(MultivaluedMap<String, String> params) {
-        LoginProfile profile = extra.createLoginProfile(
-                params.getFirst("UserName"),
-                params.getFirst("Password"),
-                getBoolean(params, "PasswordResetRequired"));
-        return ok("CreateLoginProfile", loginProfileXml(profile));
-    }
-
-    private Response handleGetLoginProfile(MultivaluedMap<String, String> params) {
-        return ok("GetLoginProfile", loginProfileXml(extra.getLoginProfile(params.getFirst("UserName"))));
-    }
-
-    private Response handleUpdateLoginProfile(MultivaluedMap<String, String> params) {
-        extra.updateLoginProfile(
-                params.getFirst("UserName"),
-                params.getFirst("Password"),
-                params.containsKey("PasswordResetRequired")
-                        ? getBoolean(params, "PasswordResetRequired") : null);
-        return okNoResult("UpdateLoginProfile");
-    }
-
-    private Response handleDeleteLoginProfile(MultivaluedMap<String, String> params) {
-        extra.deleteLoginProfile(params.getFirst("UserName"));
-        return okNoResult("DeleteLoginProfile");
     }
 
     private Response handleCreateVirtualMfaDevice(MultivaluedMap<String, String> params) {
@@ -856,14 +825,6 @@ public class IamExtendedQueryHandler {
             xml.elem("PasswordReusePrevention", policy.getPasswordReusePrevention().longValue());
         }
         return xml.elem("HardExpiry", policy.isHardExpiry()).build();
-    }
-
-    private static String loginProfileXml(LoginProfile profile) {
-        return new XmlBuilder().start("LoginProfile")
-                .elem("UserName", profile.getUserName())
-                .elem("CreateDate", iso(profile.getCreateDate()))
-                .elem("PasswordResetRequired", profile.isPasswordResetRequired())
-                .end("LoginProfile").build();
     }
 
     private String virtualMfaXml(VirtualMfaDevice device, boolean includeSecrets) {

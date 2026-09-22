@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.cloudfront;
 
+import io.github.hectorvent.floci.core.common.RequestHost;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.inject.Instance;
@@ -55,10 +56,7 @@ public class CloudFrontDistributionFilter implements ContainerRequestFilter {
                 || path.startsWith("/2020-05-31/"))) {
             return;
         }
-        String host = requestContext.getHeaderString("Host");
-        if (host == null || host.isBlank()) {
-            host = originalUri.getAuthority();
-        }
+        String host = RequestHost.of(requestContext);
         if (host == null) {
             return;
         }

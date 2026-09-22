@@ -54,7 +54,8 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
     private final ContainerDetector containerDetector;
     private final S3Service s3Service;
     private final ObjectMapper mapper;
-    // Replaced by clear() after a state reset, whose container teardown shuts this pool down.
+    private final SageMakerGpuResolver gpuResolver;
+    // Replaced by afterReset() after a state reset, whose container teardown shuts this pool down.
     private volatile ExecutorService executor = Executors.newCachedThreadPool();
     private final ConcurrentHashMap<String, String> containers = new ConcurrentHashMap<>();
     // Names a stop that stop() has already committed to the store as "Stopped": run()'s exit-code
@@ -66,7 +67,8 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
     @Inject
     public SageMakerTrainingRunner(ContainerBuilder containerBuilder, ContainerLifecycleManager lifecycleManager,
                                    ContainerLogStreamer logStreamer, EmulatorConfig config,
-                                   ContainerDetector containerDetector, S3Service s3Service, ObjectMapper mapper) {
+                                   ContainerDetector containerDetector, S3Service s3Service, ObjectMapper mapper,
+                                   SageMakerGpuResolver gpuResolver) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.logStreamer = logStreamer;
@@ -74,6 +76,7 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
         this.containerDetector = containerDetector;
         this.s3Service = s3Service;
         this.mapper = mapper;
+        this.gpuResolver = gpuResolver;
     }
 
     public void runAsync(TrainingJobResource job, SageMakerService service) {
@@ -95,6 +98,10 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
                     .withEmbeddedDns()
                     .withLogRotation();
             SageMakerEndpointManager.applyEntrypoint(builder, job.algorithmSpecification, "train");
+            // Throws when the requested instance type asks for hardware this host cannot
+            // stand in for, so the job fails with a reason rather than quietly training
+            // on CPU and producing an artifact that looks legitimate.
+            gpuResolver.applyTo(builder, instanceType(job), instanceCount(job));
             ContainerSpec spec = builder.build();
             containerId = lifecycleManager.create(spec);
             containers.put(job.trainingJobName, containerId);
@@ -170,14 +177,20 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
         executor.shutdownNow();
     }
 
-    /**
-     * Runs after a state reset has torn the containers down and wiped the store, never on
-     * shutdown. The teardown shut the worker pool down, so without a new one every later
-     * CreateTrainingJob would be rejected until the emulator restarted.
-     */
     @Override
     public synchronized void clear() {
         stopRequested.clear();
+    }
+
+    /**
+     * Runs at the end of every state reset, never on shutdown. The teardown shut the worker
+     * pool down, so without a new one every later CreateTrainingJob would be rejected until
+     * the emulator restarted. This hook rather than {@code clear()} because the controller
+     * runs it even when the storage wipe or another service's {@code clear()} threw, and a
+     * failed reset must not leave the pool terminated for good.
+     */
+    @Override
+    public synchronized void afterReset() {
         if (executor.isShutdown()) {
             executor = Executors.newCachedThreadPool();
         }
@@ -316,6 +329,16 @@ public class SageMakerTrainingRunner implements ContainerTeardown, Resettable {
         } catch (NotFoundException e) {
             return 1;
         }
+    }
+
+    private static String instanceType(TrainingJobResource job) {
+        return SageMakerEndpointManager.string(job.resourceConfig.get("InstanceType"));
+    }
+
+    /** Absent or unparseable means one, matching how a single-instance job is described. */
+    private static int instanceCount(TrainingJobResource job) {
+        Object value = job.resourceConfig.get("InstanceCount");
+        return value instanceof Number n ? n.intValue() : 1;
     }
 
     private Duration timeout(TrainingJobResource job) {

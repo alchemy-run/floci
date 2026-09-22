@@ -188,6 +188,7 @@ floci:
       enabled: true
       default-port: 5439
       image-version: postgres:15-alpine
+      poll-interval-ms: 1000
       proxy-base-port: 7100
       proxy-max-port: 7199
       default-credential-duration-seconds: 900
@@ -234,6 +235,7 @@ floci:
       default-recovery-window-days: 30
     kinesis:
       enabled: true
+      list-shards-next-token-ttl-millis: 300000
     firehose:
       enabled: true
       tick-interval-seconds: 10
@@ -247,6 +249,7 @@ floci:
       enabled: true
       allow-plaintext-http: true
       mock-config-file: ${SFN_MOCK_CONFIG:src/test/resources/fixtures/sfn-mock-config.json}
+      max-wait-seconds: 30
     swf:
       enabled: true
       timeout-sweep-enabled: true
@@ -275,6 +278,8 @@ floci:
       proxy-base-port: 9400
       proxy-max-port: 9499
     ec2:
+      # Optional complete catalog override for locally built guest images.
+      image-catalog-path: ${FLOCI_SERVICES_EC2_IMAGE_CATALOG_PATH:}
       enabled: true
       imds-port: 9169
       ssh-port-range-start: 2200
@@ -313,6 +318,7 @@ floci:
       mock: true
       ecr-registry-mirror: true
       imds: false
+      irsa-signing-key: true
     mwaa:
       enabled: true
       mock: true
@@ -330,6 +336,18 @@ floci:
     sagemaker:
       enabled: true
       # docker-network: floci-network
+      gpu:
+        # Off by default: an existing deployment keeps launching CPU-only
+        # containers. How many GPUs an ml.* type has is shipped in
+        # sagemaker/instance-type-catalog.yaml; this is only about which of
+        # this machine's devices Floci may hand out.
+        enabled: false
+        # cdi | device-ids | count. Podman resolves only cdi, and accepts
+        # count while attaching no device, so cdi fails loudly instead.
+        mode: cdi
+        # Required for cdi and device-ids modes; unset allows no device.
+        # devices:
+        #   - nvidia.com/gpu=GPU-<uuid>
     batch:
       enabled: true
       runner-mode: immediate
@@ -370,6 +388,9 @@ floci:
       emit-mode: off
     bcm-pricing-calculator:
       enabled: true
+    timestream-influxdb:
+      enabled: true
+      mock: true
     bcm-data-exports:
       enabled: true
       emit-mode: off
@@ -494,4 +515,6 @@ floci:
     codeartifact:
       enabled: true
     marketplace:
+      enabled: true
+    dms:
       enabled: true

@@ -250,7 +250,7 @@ class ScheduleDispatcherTest {
 
         tickEveryTenSeconds("2026-04-21T09:18:00Z", 3);
 
-        verify(invoker, times(1)).invoke(eq(s), any(Instant.class), eq(1), anyString());
+        verify(invoker, times(1)).invoke(eq(s), eq(Instant.parse("2026-04-21T09:17:54Z")), eq(1), anyString());
         verifyNoInteractions(sqsService);
     }
 

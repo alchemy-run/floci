@@ -223,6 +223,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>neptune</artifactId>
         </dependency>
+        <!-- DMS management client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>databasemigration</artifactId>
+        </dependency>
         <!-- EventBridge client -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -536,6 +541,11 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>bcmpricingcalculator</artifactId>
+        </dependency>
+        <!-- Timestream for InfluxDB client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>timestreaminfluxdb</artifactId>
         </dependency>
         <!-- SSO credential support (needed for FLOCI_TARGET=aws with SSO profiles) -->
         <dependency>

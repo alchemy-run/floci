@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   check-signatures:
@@ -35,6 +36,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           # Local `git log --show-signature` only verifies against keys the
           # runner already trusts, which is nobody's - it would report every
@@ -46,12 +48,41 @@ jobs:
           #
           # Merge commits are skipped via --no-merges, matching the
           # Conventional Commits and AI Attribution jobs.
+          #
+          # An unresolvable API call is treated as a hard failure here,
+          # unlike ai-attribution.yml's classify(), which lets a commit
+          # through when it can't resolve an author ("Unresolvable (deleted
+          # account, API trouble) is not evidence"). The two jobs weigh the
+          # mistake differently: a false positive in AI Attribution accuses a
+          # human contributor of being a bot, while an unverifiable signature
+          # here only withholds a verdict that branch protection enforces at
+          # the merge button anyway - failing closed costs a re-run, not a
+          # wrongly blocked contributor.
 
           FAILED=0
+          UNSIGNED=0
+
+          # One call gets verification for up to 250 commits (this
+          # endpoint's documented cap). The loop below still walks the same
+          # git-log range as before, so this is only a lookup cache: any sha
+          # it doesn't cover (over the cap, or absent for any other reason)
+          # falls back to the per-commit call that already handles API
+          # failures. --paginate re-runs --jq per page and concatenates the
+          # output, so this emits one JSON object per commit rather than a
+          # single array - jq reads that as a stream of values just fine.
+          pr_commits=$(gh api "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate --jq '.[] | {sha: .sha, verification: .commit.verification}') || pr_commits=''
 
           for sha in $(git log --no-merges --format=%H "$BASE_SHA".."$HEAD_SHA"); do
             subject=$(git show -s --format=%s "$sha")
-            verification=$(gh api "repos/$REPO/commits/$sha" --jq '.commit.verification')
+
+            verification=$(echo "$pr_commits" | jq -c --arg sha "$sha" 'select(.sha == $sha) | .verification')
+
+            if [ -z "$verification" ] && ! verification=$(gh api "repos/$REPO/commits/$sha" --jq '.commit.verification'); then
+              echo "::error::Could not check verification status for commit: $sha $subject (GitHub API call failed - this is not a signature failure, re-run the job)"
+              FAILED=1
+              continue
+            fi
+
             verified=$(echo "$verification" | jq -r '.verified')
             reason=$(echo "$verification" | jq -r '.reason')
 
@@ -59,11 +90,12 @@ jobs:
               echo "ok: $sha $subject"
             else
               echo "::error::Commit is not signed/verified: $sha $subject ($reason)"
+              UNSIGNED=1
               FAILED=1
             fi
           done
 
-          if [ "$FAILED" -ne 0 ]; then
+          if [ "$UNSIGNED" -ne 0 ]; then
             echo ""
             echo "  This repo requires every commit to be GPG or SSH signed and verified"
             echo "  by GitHub before a PR can merge - the commit(s) flagged above aren't."

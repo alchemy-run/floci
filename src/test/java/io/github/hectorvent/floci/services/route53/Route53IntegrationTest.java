@@ -648,6 +648,48 @@ class Route53IntegrationTest {
     }
 
     @Test
+    @Order(25)
+    void updateHostedZoneComment_replacesTheCommentAndClearsItWhenOmitted() {
+        String ownZoneId = createZoneForCommentTest("comment-zone-1", "before the import");
+
+        given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <UpdateHostedZoneCommentRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                          <Comment>after the import</Comment>
+                        </UpdateHostedZoneCommentRequest>
+                        """)
+                .when().post("/2013-04-01/hostedzone/" + ownZoneId)
+                .then()
+                .statusCode(200)
+                .contentType(XML)
+                .body("UpdateHostedZoneCommentResponse.HostedZone.Id", equalTo("/hostedzone/" + ownZoneId))
+                .body("UpdateHostedZoneCommentResponse.HostedZone.Config.Comment", equalTo("after the import"));
+
+        given()
+                .when().get("/2013-04-01/hostedzone/" + ownZoneId)
+                .then()
+                .statusCode(200)
+                .body("GetHostedZoneResponse.HostedZone.Config.Comment", equalTo("after the import"));
+
+        // AWS deletes the existing comment when the request carries none.
+        given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <UpdateHostedZoneCommentRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/"/>
+                        """)
+                .when().post("/2013-04-01/hostedzone/" + ownZoneId)
+                .then()
+                .statusCode(200)
+                .body(not(containsString("<Comment>")));
+
+        // Cleanup
+        given().when().delete("/2013-04-01/hostedzone/" + ownZoneId).then().statusCode(200);
+    }
+
+    @Test
     @Order(23)
     void getHealthCheckLastFailureReason_returnsEmptyObservations() {
         String body = """
@@ -683,6 +725,23 @@ class Route53IntegrationTest {
         assertThat(xml, containsString("<StatusReport>"));
 
         given().delete("/2013-04-01/healthcheck/" + id).then().statusCode(200);
+    }
+
+    @Test
+    @Order(26)
+    void updateHostedZoneComment_unknownZoneIsNoSuchHostedZone() {
+        given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <UpdateHostedZoneCommentRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                          <Comment>nope</Comment>
+                        </UpdateHostedZoneCommentRequest>
+                        """)
+                .when().post("/2013-04-01/hostedzone/ZNOPE000000000")
+                .then()
+                .statusCode(404)
+                .body(containsString("NoSuchHostedZone"));
     }
 
     @Test
@@ -740,8 +799,40 @@ class Route53IntegrationTest {
         given().delete("/2013-04-01/hostedzone/" + zoneId).then().statusCode(200);
     }
 
+    @Test
+    @Order(27)
+    void updateHostedZoneComment_rejectsABodyThatIsNotAnUpdateRequest() {
+        String zoneId = createZoneForCommentTest("comment-zone-2", "keep me");
+
+        // A truncated document parses to no root, so it must not read as "no Comment given".
+        given()
+                .contentType(XML)
+                .body("<UpdateHostedZoneCommentRequest><Comment>gone</Comment>")
+                .when().post("/2013-04-01/hostedzone/" + zoneId)
+                .then()
+                .statusCode(400)
+                .body(containsString("InvalidInput"));
+
+        given()
+                .contentType(XML)
+                .body("<DeleteHostedZoneRequest/>")
+                .when().post("/2013-04-01/hostedzone/" + zoneId)
+                .then()
+                .statusCode(400)
+                .body(containsString("InvalidInput"));
+
+        given()
+                .when().get("/2013-04-01/hostedzone/" + zoneId)
+                .then()
+                .statusCode(200)
+                .body("GetHostedZoneResponse.HostedZone.Config.Comment", equalTo("keep me"));
+
+        // Cleanup
+        given().when().delete("/2013-04-01/hostedzone/" + zoneId).then().statusCode(200);
+    }
+
     private static String createZone(String name, String callerRef) {
-        String loc = given()
+        String location = given()
                 .contentType(XML)
                 .body("""
                         <?xml version="1.0" encoding="UTF-8"?>
@@ -753,6 +844,24 @@ class Route53IntegrationTest {
                 .when().post("/2013-04-01/hostedzone")
                 .then().statusCode(201)
                 .extract().header("Location");
-        return loc.substring(loc.lastIndexOf('/') + 1);
+        return location.substring(location.lastIndexOf('/') + 1);
+    }
+
+    private String createZoneForCommentTest(String callerReference, String comment) {
+        String location = given()
+                .contentType(XML)
+                .body("""
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                          <Name>comments.example.com</Name>
+                          <CallerReference>%s</CallerReference>
+                          <HostedZoneConfig>
+                            <Comment>%s</Comment>
+                          </HostedZoneConfig>
+                        </CreateHostedZoneRequest>
+                        """.formatted(callerReference, comment))
+                .when().post("/2013-04-01/hostedzone")
+                .then().statusCode(201).extract().header("Location");
+        return location.substring(location.lastIndexOf('/') + 1);
     }
 }

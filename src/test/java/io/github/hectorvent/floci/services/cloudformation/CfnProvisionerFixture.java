@@ -33,6 +33,8 @@ import io.github.hectorvent.floci.services.cloudformation.provisioners.ApiGatewa
 import io.github.hectorvent.floci.services.cloudformation.provisioners.ApiGatewayUsagePlanCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.ApiGatewayDomainCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.ApiGatewayGatewayResponseCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.ApiGatewayRestApiCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.ApiGatewayV2CfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.AutoScalingGroupCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.AutoScalingLifecycleHookCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.AutoScalingScalingPolicyCfnProvisioner;
@@ -45,6 +47,7 @@ import io.github.hectorvent.floci.services.cloudformation.provisioners.CloudTrai
 import io.github.hectorvent.floci.services.cloudformation.provisioners.CloudWatchCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.CloudWatchDashboardCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.CognitoCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.CognitoUserPoolGroupCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.Ec2LaunchTemplateCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.Ec2NetworkCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.Ec2NetworkAclCfnProvisioner;
@@ -54,10 +57,17 @@ import io.github.hectorvent.floci.services.cloudformation.provisioners.Ec2VpcCfn
 import io.github.hectorvent.floci.services.cloudformation.provisioners.Ec2VpcEndpointCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.Ec2VpcGatewayAttachmentCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.EcrCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.EksCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.EcsCapacityCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.EcsCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.ElbV2CfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.FirehoseCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.IamAccessKeyCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.IamInstanceProfileCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.IamManagedPolicyCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.CustomResourceCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.LambdaCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.IamPolicyCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.IamRoleCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.IamUserCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.IotCfnProvisioner;
@@ -69,6 +79,7 @@ import io.github.hectorvent.floci.services.cloudformation.provisioners.LambdaEve
 import io.github.hectorvent.floci.services.cloudformation.provisioners.LambdaEventSourceMappingCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.LambdaVersionAliasCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.LogsCfnProvisioner;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.LogsLogStreamCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.LogsMetricFilterCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.PipesCfnProvisioner;
 import io.github.hectorvent.floci.services.cloudformation.provisioners.RdsCfnProvisioner;
@@ -239,6 +250,13 @@ final class CfnProvisionerFixture {
             if (stepFunctionsService != null) {
                 discovered.add(new StepFunctionsCfnProvisioner(stepFunctionsService, s3Service, objectMapper));
             }
+            if (lambdaService != null) {
+                discovered.add(new LambdaCfnProvisioner(lambdaService, lambdaLayerService, s3Service, config));
+            }
+            if (customResourceResponseStore != null) {
+                discovered.add(new CustomResourceCfnProvisioner(lambdaService, objectMapper,
+                        customResourceResponseStore, reachableEndpoint));
+            }
             if (s3Service != null) {
                 discovered.add(new S3CfnProvisioner(s3Service));
             }
@@ -262,6 +280,7 @@ final class CfnProvisionerFixture {
             }
             if (cognitoService != null) {
                 discovered.add(new CognitoCfnProvisioner(cognitoService));
+                discovered.add(new CognitoUserPoolGroupCfnProvisioner(cognitoService));
             }
             if (cloudFrontService != null) {
                 discovered.add(new CloudFrontCfnProvisioner(cloudFrontService));
@@ -271,6 +290,7 @@ final class CfnProvisionerFixture {
             }
             if (logsService != null) {
                 discovered.add(new LogsCfnProvisioner(logsService));
+                discovered.add(new LogsLogStreamCfnProvisioner(logsService));
             }
             if (logsMetricFilterService != null) {
                 discovered.add(new LogsMetricFilterCfnProvisioner(logsMetricFilterService));
@@ -287,6 +307,13 @@ final class CfnProvisionerFixture {
             if (iamService != null) {
                 discovered.add(new IamRoleCfnProvisioner(iamService));
                 discovered.add(new IamUserCfnProvisioner(iamService));
+                discovered.add(new IamAccessKeyCfnProvisioner(iamService));
+                discovered.add(new IamInstanceProfileCfnProvisioner(iamService));
+                discovered.add(new IamPolicyCfnProvisioner(iamService));
+                discovered.add(new IamManagedPolicyCfnProvisioner(iamService));
+            }
+            if (eksService != null) {
+                discovered.add(new EksCfnProvisioner(eksService));
             }
             if (elbV2Service != null) {
                 discovered.add(new ElbV2CfnProvisioner(elbV2Service));
@@ -301,6 +328,10 @@ final class CfnProvisionerFixture {
                 discovered.add(new ApiGatewayUsagePlanCfnProvisioner(apiGatewayService));
                 discovered.add(new ApiGatewayDomainCfnProvisioner(apiGatewayService));
                 discovered.add(new ApiGatewayGatewayResponseCfnProvisioner(apiGatewayService));
+                discovered.add(new ApiGatewayRestApiCfnProvisioner(apiGatewayService, s3Service, objectMapper));
+            }
+            if (apiGatewayV2Service != null) {
+                discovered.add(new ApiGatewayV2CfnProvisioner(apiGatewayV2Service, s3Service, objectMapper));
             }
             if (autoScalingService != null) {
                 discovered.add(new AutoScalingGroupCfnProvisioner(autoScalingService));
@@ -679,16 +710,7 @@ final class CfnProvisionerFixture {
             }
             ensureDynamicReferences();
             return new CloudFormationResourceProvisioner(
-                    s3Service,
-                    lambdaService,
-                    iamService,
-                    apiGatewayService,
-                    apiGatewayV2Service,
-                    lambdaLayerService,
                     objectMapper,
-                    customResourceResponseStore,
-                    reachableEndpoint,
-                    eksService,
                     resourceRegistry,
                     dynamicReferences,
                     config);

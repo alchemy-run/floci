@@ -39,6 +39,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class SecurityGroupFirewallDockerIntegrationTest {
 
+    // A denied connection is dropped without a reply, so it only ends when nc's timeout expires;
+    // a permitted one connects in tens of milliseconds, so one second is ample to call it denied.
+    private static final int PERMITTED_TIMEOUT_SECONDS = 2;
+    private static final int DENIED_TIMEOUT_SECONDS = 1;
+
     @Inject SecurityGroupFirewallManager firewall;
     @Inject ContainerLifecycleManager lifecycle;
     @Inject ContainerBuilder builder;
@@ -220,8 +225,8 @@ class SecurityGroupFirewallDockerIntegrationTest {
                 Thread.sleep(100);
             }
             assertEquals(0, connect(workers.getFirst(), "127.0.0.1"));
-            assertNotEquals(0, connect(workers.get(1), target.transportAddress()));
-            assertNotEquals(0, connect(workers.get(1), "10.0.0.2"));
+            assertNotEquals(0, connect(workers.get(1), target.transportAddress(), DENIED_TIMEOUT_SECONDS));
+            assertNotEquals(0, connect(workers.get(1), "10.0.0.2", DENIED_TIMEOUT_SECONDS));
 
             IpRange corrected = new IpRange();
             corrected.setCidrIp("10.1.0.0/24");
@@ -232,7 +237,7 @@ class SecurityGroupFirewallDockerIntegrationTest {
             assertEquals(0, connect(workers.get(1), "10.0.0.2"));
 
             firewall.quarantineSurvivingNamespaces();
-            assertNotEquals(0, connect(workers.get(1), target.transportAddress()));
+            assertNotEquals(0, connect(workers.get(1), target.transportAddress(), DENIED_TIMEOUT_SECONDS));
             firewall.refreshPolicies("us-east-1", Map.of("sg-target", targetGroup,
                     "sg-source", sourceGroup), Map.of());
             assertEquals(0, connect(workers.get(1), target.transportAddress()));
@@ -241,7 +246,7 @@ class SecurityGroupFirewallDockerIntegrationTest {
             Map<String, SecurityGroup> groups = Map.of("sg-target", targetGroup, "sg-source", sourceGroup,
                     "sg-replacement", replacement);
             firewall.updateGroups(targetEni, Set.of("sg-replacement"), groups, Map.of());
-            assertNotEquals(0, connect(workers.get(1), target.transportAddress()));
+            assertNotEquals(0, connect(workers.get(1), target.transportAddress(), DENIED_TIMEOUT_SECONDS));
             firewall.updateGroups(targetEni, Set.of("sg-target"), groups, Map.of());
             assertEquals(0, connect(workers.get(1), target.transportAddress()));
 
@@ -326,8 +331,12 @@ class SecurityGroupFirewallDockerIntegrationTest {
     }
 
     private int connect(String worker, String address) throws Exception {
+        return connect(worker, address, PERMITTED_TIMEOUT_SECONDS);
+    }
+
+    private int connect(String worker, String address, int timeoutSeconds) throws Exception {
         String id = docker.execCreateCmd(worker).withAttachStdout(true).withAttachStderr(true)
-                .withCmd("nc", "-z", "-w", "2", address, "8080")
+                .withCmd("nc", "-z", "-w", String.valueOf(timeoutSeconds), address, "8080")
                 .exec().getId();
         try (ResultCallback.Adapter<Frame> callback = new ResultCallback.Adapter<>()) {
             docker.execStartCmd(id).exec(callback).awaitCompletion(5, TimeUnit.SECONDS);

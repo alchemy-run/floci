@@ -26,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -432,7 +433,7 @@ class ElbV2ServiceTest {
         String lbArn = service.createLoadBalancer(
                 REGION, "immutable-region-lb", "internal", "application", "ipv4",
                 ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
-        var field = ElbV2Service.class.getDeclaredField("listeners");
+        Field field = ElbV2Service.class.getDeclaredField("listeners");
         field.setAccessible(true);
         @SuppressWarnings("unchecked")
         Map<String, Map<String, Listener>> persisted = (Map<String, Map<String, Listener>>) field.get(service);
@@ -549,6 +550,28 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void deleteListenerIsIgnoredForRegionWithNoListeners() {
+        String emptyRegion = "eu-central-1";
+
+        service.deleteListener(emptyRegion, "arn:aws:elasticloadbalancing:" + emptyRegion
+                + ":000000000000:listener/app/sample-lb/1111111111111111/2222222222222222");
+
+        assertTrue(service.describeListeners(emptyRegion, null, null).isEmpty());
+        verifyNoInteractions(dataPlane);
+    }
+
+    @Test
+    void deleteLoadBalancerIsIgnoredForRegionWithNoLoadBalancers() {
+        String emptyRegion = "eu-central-1";
+
+        service.deleteLoadBalancer(emptyRegion, "arn:aws:elasticloadbalancing:" + emptyRegion
+                + ":000000000000:loadbalancer/app/sample-lb/1111111111111111");
+
+        assertTrue(service.describeLoadBalancers(emptyRegion, null, null, null, null).isEmpty());
+        verifyNoInteractions(dataPlane);
+    }
+
+    @Test
     void describeTargetHealthReturnsUnusedForExplicitUnregisteredTarget() {
         String tgArn = createTargetGroup("sample-tg");
         TargetDescription target = new TargetDescription();
@@ -560,6 +583,33 @@ class ElbV2ServiceTest {
         assertEquals("unused", health.getState());
         assertEquals("Target.NotRegistered", health.getReason());
         assertEquals("Target is not registered to the target group", health.getDescription());
+    }
+
+    @Test
+    void registerTargetsRejectsLinkLocalAndMetadataAddresses() {
+        String tgArn = createTargetGroup("metadata-tg");
+
+        for (String address : List.of("169.254.169.254", "169.254.170.2", "fe80::1", "fd00:ec2::254")) {
+            TargetDescription target = new TargetDescription();
+            target.setId(address);
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> service.registerTargets(REGION, tgArn, List.of(target)), address);
+            assertEquals("InvalidTarget", ex.getErrorCode());
+        }
+        assertTrue(service.describeTargetGroups(REGION, null, List.of(tgArn), null).getFirst().getTargets().isEmpty());
+        verify(healthChecker, never()).addTargets(eq(tgArn), anyList(), any(TargetGroup.class));
+    }
+
+    @Test
+    void registerTargetsStillAcceptsLoopbackAndPrivateAddresses() {
+        String tgArn = createTargetGroup("local-tg");
+
+        for (String address : List.of("127.0.0.1", "10.0.0.5", "172.17.0.2", "192.168.1.10")) {
+            TargetDescription target = new TargetDescription();
+            target.setId(address);
+            service.registerTargets(REGION, tgArn, List.of(target));
+        }
+        assertEquals(4, service.describeTargetGroups(REGION, null, List.of(tgArn), null).getFirst().getTargets().size());
     }
 
     private String createTargetGroup(String name) {

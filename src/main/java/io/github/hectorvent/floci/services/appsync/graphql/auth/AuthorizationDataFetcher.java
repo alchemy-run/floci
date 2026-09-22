@@ -7,12 +7,13 @@ import graphql.schema.GraphQLAppliedDirective;
 import graphql.schema.GraphQLAppliedDirectiveArgument;
 import graphql.schema.GraphQLFieldDefinition;
 import graphql.schema.GraphQLObjectType;
+import io.github.hectorvent.floci.services.appsync.graphql.auth.AppSyncAuthRequirements.AuthRequirement;
+import io.github.hectorvent.floci.services.appsync.graphql.auth.AppSyncAuthRequirements.DirectiveUse;
 import io.github.hectorvent.floci.services.appsync.model.AuthenticationType;
 import io.github.hectorvent.floci.services.appsync.model.GraphqlApi;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 public class AuthorizationDataFetcher implements DataFetcher<Object> {
@@ -122,28 +123,10 @@ public class AuthorizationDataFetcher implements DataFetcher<Object> {
     }
 
     static List<AuthRequirement> requirementsFrom(List<GraphQLAppliedDirective> directives, GraphqlApi api) {
-        List<AuthRequirement> requirements = new ArrayList<>();
-        boolean ignoreAwsAuth = AuthMiddleware.hasAdditionalModes(api);
-        for (GraphQLAppliedDirective directive : directives) {
-            String name = directive.getName();
-            switch (name) {
-                case "aws_api_key" -> requirements.add(new AuthRequirement(AuthenticationType.API_KEY, null));
-                case "aws_iam" -> requirements.add(new AuthRequirement(AuthenticationType.AWS_IAM, null));
-                case "aws_oidc" -> requirements.add(new AuthRequirement(AuthenticationType.OPENID_CONNECT, null));
-                case "aws_lambda" -> requirements.add(new AuthRequirement(AuthenticationType.AWS_LAMBDA, null));
-                case "aws_cognito_user_pools" -> requirements.add(
-                        new AuthRequirement(AuthenticationType.AMAZON_COGNITO_USER_POOLS, groupsArg(directive)));
-                case "aws_auth" -> {
-                    if (!ignoreAwsAuth && api.getAuthenticationType() == AuthenticationType.AMAZON_COGNITO_USER_POOLS) {
-                        requirements.add(new AuthRequirement(
-                                AuthenticationType.AMAZON_COGNITO_USER_POOLS, groupsArg(directive)));
-                    }
-                }
-                default -> {
-                }
-            }
-        }
-        return requirements;
+        List<DirectiveUse> uses = directives.stream()
+                .map(directive -> new DirectiveUse(directive.getName(), groupsArg(directive)))
+                .toList();
+        return AppSyncAuthRequirements.requirementsFrom(uses, api);
     }
 
     @SuppressWarnings("unchecked")
@@ -166,26 +149,6 @@ public class AuthorizationDataFetcher implements DataFetcher<Object> {
     }
 
     static boolean groupsAllowed(AuthRequirement requirement, AppSyncAuthContext auth) {
-        if (requirement.groups() == null || requirement.groups().isEmpty()) {
-            return true;
-        }
-        if (auth.authenticationType() != AuthenticationType.AMAZON_COGNITO_USER_POOLS) {
-            return true;
-        }
-        Object groups = auth.identity() == null ? null : auth.identity().get("groups");
-        if (!(groups instanceof List<?> callerGroups)) {
-            return false;
-        }
-        for (String required : requirement.groups()) {
-            for (Object caller : callerGroups) {
-                if (required.equals(String.valueOf(caller))) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    record AuthRequirement(AuthenticationType mode, List<String> groups) {
+        return AppSyncAuthRequirements.groupsAllowed(requirement, auth);
     }
 }

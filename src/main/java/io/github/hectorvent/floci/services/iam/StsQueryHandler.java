@@ -21,6 +21,7 @@ import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.security.SecureRandom;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -51,6 +52,9 @@ public class StsQueryHandler {
     private final OidcIssuerKeyLookup oidcIssuerKeys;
     private final SAMLProviderService samlProviderService;
     private final SAMLTrustPolicyEvaluator samlTrustEvaluator;
+
+    /** CSPRNG for session secret keys and session tokens; ordinary IDs keep using {@link ThreadLocalRandom}. */
+    private final SecureRandom secureRandom = new SecureRandom();
 
     @Context
     HttpHeaders headers;
@@ -488,10 +492,10 @@ public class StsQueryHandler {
         return sb.toString();
     }
 
-    private static String randomSecret(int length) {
+    private String randomSecret(int length) {
         StringBuilder sb = new StringBuilder(length);
         for (int i = 0; i < length; i++) {
-            sb.append(CHARS.charAt(ThreadLocalRandom.current().nextInt(CHARS.length())));
+            sb.append(CHARS.charAt(secureRandom.nextInt(CHARS.length())));
         }
         return sb.toString();
     }

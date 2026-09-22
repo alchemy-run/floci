@@ -767,6 +767,7 @@ public interface EmulatorConfig {
         BcmDataExportsServiceConfig bcmDataExports();
         OamServiceConfig oam();
         BcmPricingCalculatorServiceConfig bcmPricingCalculator();
+        TimestreamInfluxDbServiceConfig timestreamInfluxdb();
         ConfigServiceConfig configservice();
         CloudTrailServiceConfig cloudtrail();
         CloudControlServiceConfig cloudcontrol();
@@ -817,11 +818,26 @@ public interface EmulatorConfig {
         CodeGuruReviewerServiceConfig codegurureviewer();
         CodeArtifactServiceConfig codeartifact();
         MarketplaceServiceConfig marketplace();
+        DmsServiceConfig dms();
+    }
+
+    interface DmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface CodeArtifactServiceConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /** When set, Floci uses this URL and skips Reposilite sidecar container management. */
+        Optional<String> mavenUrl();
+
+        /** {@code name:secret} access token for a pre-configured {@link #mavenUrl()}. */
+        Optional<String> mavenToken();
+
+        @WithDefault("dzikoysk/reposilite:3.6.3")
+        String mavenImage();
     }
 
     interface ConnectServiceConfig {
@@ -1175,6 +1191,57 @@ public interface EmulatorConfig {
         boolean enabled();
 
         Optional<String> dockerNetwork();
+
+        GpuConfig gpu();
+
+        /**
+         * Whether, and how, this host lends its accelerators to training containers.
+         *
+         * <p>How many GPUs an instance type has is an AWS fact and lives in the shipped
+         * catalog; this covers only the local decision of which devices Floci may use.
+         */
+        interface GpuConfig {
+            /**
+             * Off by default, so an existing deployment keeps launching CPU-only
+             * containers exactly as before.
+             */
+            @WithDefault("false")
+            boolean enabled();
+
+            /**
+             * How the device request is expressed on the wire, because daemons disagree.
+             *
+             * <p>Defaults to {@code cdi}: Podman resolves only that form, and accepts the
+             * {@code count} form while attaching no device
+             * (containers/podman#22645). Preferring CDI means a misconfiguration fails
+             * the container start instead of silently training on CPU. Use {@code count}
+             * or {@code device-ids} against Docker.
+             */
+            @WithDefault("cdi")
+            GpuRequestMode mode();
+
+            /**
+             * The devices Floci may hand out: CDI names such as
+             * {@code nvidia.com/gpu=GPU-<uuid>} for {@code cdi} mode, or daemon device ids
+             * for {@code device-ids} mode.
+             *
+             * <p>Unset allows no device, so a training job in those modes fails rather than
+             * starting. Defaulting to "every device the daemon exposes" would be the wrong
+             * behaviour on a machine sharing GPUs with other workloads.
+             *
+             * <p>Ignored in {@code count} mode, where the daemon does the choosing.
+             *
+             * <p>Optional rather than a defaulted list because SmallRye rejects an empty
+             * string as a collection default: unset simply means no device is allowed.
+             */
+            Optional<List<String>> devices();
+        }
+
+        enum GpuRequestMode {
+            CDI,
+            DEVICE_IDS,
+            COUNT
+        }
     }
 
     interface CodeDeployServiceConfig {
@@ -1433,6 +1500,9 @@ public interface EmulatorConfig {
         @WithDefault("7199")
         int proxyMaxPort();
 
+        @WithDefault("1000")
+        long pollIntervalMs();
+
         // Hostname clients use to reach a cluster endpoint. Empty -> resolved from
         // DockerHostResolver (falls back to "localhost").
         Optional<String> endpointHost();
@@ -1667,6 +1737,14 @@ public interface EmulatorConfig {
     interface KinesisServiceConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /**
+         * Lifetime of a ListShards NextToken, in milliseconds. AWS expires these tokens 300000
+         * milliseconds after they are issued; lowering it lets tests exercise the expiry path
+         * without waiting.
+         */
+        @WithDefault("300000")
+        long listShardsNextTokenTtlMillis();
     }
 
     interface FirehoseServiceConfig {
@@ -1725,6 +1803,13 @@ public interface EmulatorConfig {
          * compatibility with Step Functions Local.
          */
         Optional<String> mockConfigFile();
+
+        /**
+         * Ceiling, in seconds, on a Wait state pause and a Retry backoff. AWS allows waits far longer
+         * than this, but the emulator caps them to keep runs fast. Raise it to exercise longer waits.
+         */
+        @WithDefault("30")
+        int maxWaitSeconds();
     }
 
     interface SwfServiceConfig {
@@ -1886,6 +1971,14 @@ public interface EmulatorConfig {
         /** When true, tasks go straight to RUNNING without starting real Docker containers. */
         @WithDefault("false")
         boolean mock();
+
+        /**
+         * Publish {@code awsvpc} task ports on the Docker host so local host processes can
+         * reach them. This is an emulator-only escape hatch and can cause port collisions
+         * when more than one task exposes the same port.
+         */
+        @WithDefault("false")
+        boolean publishAwsvpcPortsToHost();
 
         Optional<String> dockerNetwork();
 
@@ -2144,6 +2237,12 @@ public interface EmulatorConfig {
          *  Env: FLOCI_SERVICES_APPSYNC_VTL_TIMEOUT_MILLIS */
         @WithDefault("5000")
         long vtlTimeoutMillis();
+
+        /** When set, Floci uses this URL and skips GraphQL sidecar container management. */
+        Optional<String> graphqlUrl();
+
+        @WithDefault("floci/floci-sidecar-graphql:0.2.0")
+        String graphqlImage();
     }
 
     interface OamServiceConfig {
@@ -2154,6 +2253,34 @@ public interface EmulatorConfig {
     interface BcmPricingCalculatorServiceConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface TimestreamInfluxDbServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, DB instances and clusters reach AVAILABLE without a backing InfluxDB container. */
+        @WithDefault("false")
+        boolean mock();
+
+        /** InfluxDB 2.x image backing DB instances. Env: FLOCI_SERVICES_TIMESTREAM_INFLUXDB_DEFAULT_IMAGE */
+        @WithDefault("influxdb:2.7")
+        String defaultImage();
+
+        /** Lowest host port the InfluxDB HTTP listener (container port 8086) is published on. */
+        @WithDefault("8086")
+        int hostPortBase();
+
+        /** Highest host port the InfluxDB HTTP listener is published on. */
+        @WithDefault("8185")
+        int hostPortMax();
+
+        /** Seconds to wait for a started InfluxDB container to answer its health check. */
+        @WithDefault("120")
+        int readinessTimeoutSeconds();
+
+        /** Docker network to attach InfluxDB containers to. Empty uses the default network. */
+        Optional<String> dockerNetwork();
     }
 
     interface BcmDataExportsServiceConfig {
@@ -2571,9 +2698,10 @@ public interface EmulatorConfig {
             boolean enabled();
 
             /**
-             * Optional allow-list of absolute path prefixes. When non-empty, the S3Key supplied
-             * to a hot-reload CreateFunction/UpdateFunctionCode must start with one of these
-             * prefixes. Empty = all absolute paths are accepted.
+             * Optional allow-list of absolute directories. When set, the S3Key supplied to a
+             * hot-reload CreateFunction/UpdateFunctionCode must be one of these directories or
+             * inside one, compared after {@code .} and {@code ..} segments are resolved.
+             * Unset = all absolute paths are accepted.
              *
              * Env var: FLOCI_SERVICES_LAMBDA_HOT_RELOAD_ALLOWED_PATHS
              */
@@ -2582,6 +2710,9 @@ public interface EmulatorConfig {
     }
 
     interface Ec2ServiceConfig {
+        /** Optional full EC2 catalog file for locally built guest images. */
+        Optional<String> imageCatalogPath();
+
         @WithDefault("true")
         boolean enabled();
 
@@ -2803,6 +2934,13 @@ public interface EmulatorConfig {
         @WithDefault("rancher/k3s:latest")
         String defaultImage();
 
+        /**
+         * Optional image template for k3s images when version is specified.
+         * For example: "custom-registry.internal/k3s:v%s".
+         * If omitted, Floci maps supported Kubernetes versions to stable upstream k3s images.
+         */
+        Optional<String> imageTemplate();
+
         @WithDefault("6500")
         int apiServerBasePort();
 
@@ -2866,6 +3004,32 @@ public interface EmulatorConfig {
          */
         @WithDefault("false")
         boolean imds();
+
+        /**
+         * When true, routes link-local IMDS traffic from ordinary pod network namespaces to the node's
+         * link-local listener. Requires {@code imds()} to be enabled.
+         */
+        @WithDefault("false")
+        boolean imdsPodNetwork();
+
+        /**
+         * When true, configures k3s with the cluster's per-cluster OIDC signing keypair and
+         * advertises Floci's OIDC issuer URL, enabling in-cluster IAM Roles for Service Accounts (IRSA).
+         */
+        @WithDefault("true")
+        boolean irsaSigningKey();
+
+        /**
+         * When true, registers a {@code MutatingWebhookConfiguration} in each new cluster so pods
+         * whose service account has an EKS Pod Identity association are mutated at admission with a
+         * projected pod identity token and the container credentials environment variables.
+         *
+         * <p>Requires {@link EmulatorConfig#tls()} to be enabled: Kubernetes rejects an admission
+         * webhook URL that is not {@code https}. With TLS off the webhook is skipped with a warning
+         * and pods start unmutated.
+         */
+        @WithDefault("true")
+        boolean podIdentityWebhook();
     }
 
     /**

@@ -366,7 +366,7 @@ public class ScheduleDispatcher implements Resettable {
     }
 
     private static String regionOf(Schedule schedule) {
-        return AwsArnUtils.regionOrDefault(schedule.getArn(), "us-east-1");
+        return ScheduleInvoker.regionOf(schedule);
     }
 
     private record Occurrence(String scheduleArn, Instant scheduledAt) {
