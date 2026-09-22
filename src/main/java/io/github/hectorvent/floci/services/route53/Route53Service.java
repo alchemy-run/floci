@@ -190,13 +190,6 @@ public class Route53Service {
         return zone;
     }
 
-    public HostedZone updateHostedZoneComment(String id, String comment) {
-        HostedZone zone = getHostedZone(id);
-        zone.setComment(comment);
-        zoneStore.put(zone.getId(), zone);
-        return zone;
-    }
-
     public synchronized ChangeInfo deleteHostedZone(String id) {
         HostedZone zone = getHostedZone(id);
         String zoneId = zone.getId();
@@ -280,9 +273,9 @@ public class Route53Service {
      * leaving the previous comment in place.
      */
     public synchronized HostedZone updateHostedZoneComment(String id, String comment) {
-        HostedZone zone = getHostedZoneOwnedByCaller(id);
+        HostedZone zone = getHostedZoneOwnedByCaller(normalizeZoneId(id));
         zone.setComment(comment);
-        zoneStore.put(id, zone);
+        zoneStore.put(zone.getId(), zone);
         return zone;
     }
 

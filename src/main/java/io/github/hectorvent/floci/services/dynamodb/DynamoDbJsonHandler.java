@@ -2158,9 +2158,6 @@ public class DynamoDbJsonHandler {
             }
         }
 
-        String precision = readApproximateCreationDateTimePrecision(
-                request.path("EnableKinesisStreamingConfiguration"));
-
         Optional<KinesisStreamingDestination> existing = table.findKinesisStreamingDestination(streamArn);
         if (existing.isPresent() && "ACTIVE".equals(existing.get().getDestinationStatus())) {
             throw new AwsException("ValidationException",

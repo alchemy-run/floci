@@ -169,23 +169,6 @@ public class Route53Controller {
         }
     }
 
-    @POST
-    @Path("/hostedzone/{Id}")
-    public Response updateHostedZoneComment(@PathParam("Id") String id, String body) {
-        try {
-            String comment = XmlParser.extractFirst(body, "Comment", "");
-            HostedZone zone = service.updateHostedZoneComment(id, comment);
-            String xml = new XmlBuilder()
-                    .start("UpdateHostedZoneCommentResponse", NS)
-                    .raw(xmlHostedZone(zone))
-                    .end("UpdateHostedZoneCommentResponse")
-                    .build();
-            return Response.ok(xml, XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
     @GET
     @Path("/hostedzone")
     public Response listHostedZones(@QueryParam("marker") String marker,
