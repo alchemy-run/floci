@@ -177,7 +177,7 @@ class Ec2PrivateIpAllocationTest {
         when(occupied.getLabels()).thenReturn(Map.of());
         when(list.exec()).thenReturn(List.of(occupied));
         when(docker.listNetworksCmd()).thenReturn(list);
-        VpcNetworkManager networks = new VpcNetworkManager(config, docker);
+        VpcNetworkManager networks = new VpcNetworkManager(config, docker, null);
         service = service(networks);
         String vpc = service.createVpc(REGION, "10.0.0.0/16", false).getVpcId();
         subnet = service.createSubnet(REGION, vpc, "10.0.1.0/24", REGION + "a").getSubnetId();
