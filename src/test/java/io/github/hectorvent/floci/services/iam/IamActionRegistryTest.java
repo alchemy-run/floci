@@ -114,6 +114,75 @@ class IamActionRegistryTest {
     }
 
     @Test
+    void resolvesAndEnforcesEmrServerlessApplicationAndSubresourceActions() {
+        String[][] routes = {
+                {"GET", "/applications/app", "GetApplication"},
+                {"PATCH", "/applications/app", "UpdateApplication"},
+                {"POST", "/applications/app/start", "StartApplication"},
+                {"GET", "/applications/app/jobruns", "ListJobRuns"},
+                {"POST", "/applications/app/jobruns", "StartJobRun"},
+                {"GET", "/applications/app/jobruns/run", "GetJobRun"},
+                {"DELETE", "/applications/app/jobruns/run", "CancelJobRun"},
+                {"GET", "/applications/app/jobruns/run/attempts", "ListJobRunAttempts"},
+                {"GET", "/applications/app/jobruns/run/dashboard", "GetDashboardForJobRun"},
+                {"GET", "/applications/app/sessions", "ListSessions"},
+                {"POST", "/applications/app/sessions", "StartSession"},
+                {"GET", "/applications/app/sessions/session/endpoint", "GetSessionEndpoint"},
+                {"DELETE", "/applications/app/sessions/session", "TerminateSession"},
+                {"POST", "/tags/arn:aws:emr-serverless:us-east-1:000000000000:/applications/app", "TagResource"}
+        };
+        for (String[] route : routes) {
+            for (String prefix : new String[]{"", "/_emrserverless"}) {
+                String action = registry.resolve("emr-serverless", mockCtx(route[0], prefix + route[1],
+                        new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
+                assertEquals("emr-serverless:" + route[2], action);
+                assertTrue(registry.isRoleEnforcedAction(action));
+            }
+        }
+        assertFalse(registry.isRoleEnforcedAction("emr-serverless:UnknownAction"));
+    }
+
+    @Test
+    void resolvesAndEnforcesGuardDutyAndInspector2Routes() {
+        String[][] routes = {
+                {"guardduty", "GET", "/detector", "ListDetectors"},
+                {"guardduty", "POST", "/detector", "CreateDetector"},
+                {"guardduty", "POST", "/detector/d/filter", "CreateFilter"},
+                {"guardduty", "GET", "/detector/d/filter", "ListFilters"},
+                {"guardduty", "GET", "/detector/d/filter/n", "GetFilter"},
+                {"guardduty", "POST", "/detector/d/filter/n", "UpdateFilter"},
+                {"guardduty", "DELETE", "/detector/d/filter/n", "DeleteFilter"},
+                {"guardduty", "GET", "/detector/d/ipset/i", "GetIPSet"},
+                {"guardduty", "DELETE", "/detector/d/threatintelset/i", "DeleteThreatIntelSet"},
+                {"guardduty", "POST", "/detector/d/findings/create", "CreateSampleFindings"},
+                {"guardduty", "POST", "/detector/d/findings/get", "GetFindings"},
+                {"guardduty", "POST", "/detector/d/usage/statistics", "GetUsageStatistics"},
+                {"guardduty", "POST", "/detector/d/coverage", "ListCoverage"},
+                {"guardduty", "GET", "/invitation/count", "GetInvitationsCount"},
+                {"guardduty", "POST", "/detector/d/member/invite", "InviteMembers"},
+                {"guardduty", "GET", "/tags/arn:aws:guardduty:r:a:detector/d/filter/n", "ListTagsForResource"},
+                {"inspector2", "POST", "/filters/create", "CreateFilter"},
+                {"inspector2", "POST", "/filters/update", "UpdateFilter"},
+                {"inspector2", "POST", "/filters/delete", "DeleteFilter"},
+                {"inspector2", "POST", "/filters/list", "ListFilters"},
+                {"inspector2", "POST", "/ec2deepinspectionconfiguration/get", "GetEc2DeepInspectionConfiguration"},
+                {"inspector2", "POST", "/cis/scan-configuration/list", "ListCisScanConfigurations"},
+                {"inspector2", "POST", "/status/batch/get", "BatchGetAccountStatus"},
+                {"inspector2", "DELETE", "/tags/arn:aws:inspector2:r:a:owner/a/filter/f", "UntagResource"}
+        };
+        for (String[] route : routes) {
+            String action = registry.resolve(route[0], mockCtx(route[1], route[2],
+                    new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
+            assertEquals(route[0] + ":" + route[3], action);
+            assertTrue(registry.isRoleEnforcedAction(action));
+        }
+        assertFalse(registry.isRoleEnforcedAction("guardduty:UnknownAction"));
+        assertFalse(registry.isRoleEnforcedAction("inspector2:UnknownAction"));
+        assertNull(registry.resolve("inspector2", mockCtx("POST", "/detector/d/filter",
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
+    @Test
     void resolvesSesV2SendRoutes() {
         assertEquals("ses:SendEmail", registry.resolve("ses",
                 mockCtx("POST", "/v2/email/outbound-emails", new MultivaluedHashMap<>(),

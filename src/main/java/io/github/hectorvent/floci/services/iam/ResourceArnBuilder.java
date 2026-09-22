@@ -69,8 +69,18 @@ public class ResourceArnBuilder {
             case "ssm"            -> List.of(buildSsmArn(ctx, region, accountId));
             case "kms"            -> List.of(buildKmsArn(path, region, accountId));
             case "ses"            -> List.of(buildSesIdentityArn(ctx, region, accountId));
+            case "emr-serverless" -> List.of(buildEmrServerlessArn(ctx, path, region, accountId));
+            case "guardduty"      -> List.of(buildGuardDutyArn(ctx, path, region, accountId));
+            case "inspector2"     -> List.of(buildInspector2Arn(ctx, path, region, accountId));
             default               -> List.of("*");
         };
+    }
+
+    public String buildExecutionRoleArn(ContainerRequestContext ctx) {
+        JsonNode body = readJsonBody(ctx);
+        JsonNode role = body == null ? null : body.get("executionRoleArn");
+        return role != null && role.isTextual() && !role.textValue().isBlank()
+                ? role.textValue() : null;
     }
 
     // ── S3 ──────────────────────────────────────────────────────────────────────
@@ -101,6 +111,80 @@ public class ResourceArnBuilder {
         int colon = name.indexOf(':');
         if (colon > 0) name = name.substring(0, colon);
         return AwsArnUtils.Arn.of("lambda", region, accountId, "function:" + name).toString();
+    }
+
+    private String buildGuardDutyArn(ContainerRequestContext ctx, String path, String region, String accountId) {
+        path = path.startsWith("/") ? path : "/" + path;
+        if (path.startsWith("/tags/")) {
+            return path.substring("/tags/".length());
+        }
+        String detector = extractSegmentAfter(path, "detector");
+        if (detector == null) {
+            return "*";
+        }
+        String resource = "detector/" + detector;
+        for (String kind : List.of("filter", "ipset", "threatintelset")) {
+            String id = extractSegmentAfter(path, kind);
+            if (id != null) {
+                return AwsArnUtils.Arn.of("guardduty", region, accountId, resource + "/" + kind + "/" + id).toString();
+            }
+            if (path.endsWith("/" + kind)) {
+                if ("filter".equals(kind) && "POST".equals(ctx.getMethod())) {
+                    JsonNode body = readJsonBody(ctx);
+                    JsonNode name = body == null ? null : body.get("name");
+                    if (name != null && name.isTextual() && !name.asText().isBlank()) {
+                        return AwsArnUtils.Arn.of("guardduty", region, accountId,
+                                resource + "/filter/" + name.asText()).toString();
+                    }
+                }
+                // Set creation and collection listing do not support resource-level permissions.
+                return "*";
+            }
+        }
+        return AwsArnUtils.Arn.of("guardduty", region, accountId, resource).toString();
+    }
+
+    private String buildInspector2Arn(ContainerRequestContext ctx, String path, String region, String accountId) {
+        path = path.startsWith("/") ? path : "/" + path;
+        if (path.startsWith("/tags/")) {
+            return path.substring("/tags/".length());
+        }
+        if ("/filters/create".equals(path)) {
+            return AwsArnUtils.Arn.of("inspector2", region, accountId,
+                    "owner/" + accountId + "/filter/*").toString();
+        }
+        if ("/filters/update".equals(path) || "/filters/delete".equals(path)) {
+            JsonNode body = readJsonBody(ctx);
+            JsonNode arn = body == null ? null : body.get("filterArn");
+            if (arn != null && arn.isTextual() && !arn.asText().isBlank()) {
+                return arn.asText();
+            }
+        }
+        return "*";
+    }
+
+    private String buildEmrServerlessArn(ContainerRequestContext ctx, String path, String region, String accountId) {
+        path = path.startsWith("/") ? path : "/" + path;
+        int tags = path.indexOf("/tags/");
+        if (tags >= 0) {
+            return path.substring(tags + "/tags/".length());
+        }
+        String applicationId = extractSegmentAfter(path, "applications");
+        if (applicationId == null) {
+            return "*";
+        }
+        String resource = "/applications/" + applicationId;
+        String jobRunId = extractSegmentAfter(path, "jobruns");
+        String sessionId = extractSegmentAfter(path, "sessions");
+        if (jobRunId == null && sessionId == null && path.endsWith("/dashboard")) {
+            sessionId = ctx.getUriInfo().getQueryParameters().getFirst("resourceId");
+        }
+        if (jobRunId != null) {
+            resource += "/jobruns/" + jobRunId;
+        } else if (sessionId != null) {
+            resource += "/sessions/" + sessionId;
+        }
+        return AwsArnUtils.Arn.of("emr-serverless", region, accountId, resource).toString();
     }
 
     // ── SQS ─────────────────────────────────────────────────────────────────────

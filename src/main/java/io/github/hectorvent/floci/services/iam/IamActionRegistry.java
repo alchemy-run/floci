@@ -82,6 +82,92 @@ public class IamActionRegistry {
         rule("apigateway", "DELETE", ".*/restapis/.+",                      "apigateway:DELETE"),
         rule("apigateway", "POST",   ".*/restapis/.+",                      "apigateway:POST"),
 
+        // ── EMR Serverless ─────────────────────────────────────────────────────
+        rule("emr-serverless", "GET", ".*/applications$", "emr-serverless:ListApplications"),
+        rule("emr-serverless", "POST", ".*/applications$", "emr-serverless:CreateApplication"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+$", "emr-serverless:GetApplication"),
+        rule("emr-serverless", "PATCH", ".*/applications/[^/]+$", "emr-serverless:UpdateApplication"),
+        rule("emr-serverless", "DELETE", ".*/applications/[^/]+$", "emr-serverless:DeleteApplication"),
+        rule("emr-serverless", "POST", ".*/applications/[^/]+/start$", "emr-serverless:StartApplication"),
+        rule("emr-serverless", "POST", ".*/applications/[^/]+/stop$", "emr-serverless:StopApplication"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/dashboard$", "emr-serverless:GetResourceDashboard"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns$", "emr-serverless:ListJobRuns"),
+        rule("emr-serverless", "POST", ".*/applications/[^/]+/jobruns$", "emr-serverless:StartJobRun"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns/[^/]+$", "emr-serverless:GetJobRun"),
+        rule("emr-serverless", "DELETE", ".*/applications/[^/]+/jobruns/[^/]+$", "emr-serverless:CancelJobRun"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns/[^/]+/attempts$", "emr-serverless:ListJobRunAttempts"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/jobruns/[^/]+/dashboard$", "emr-serverless:GetDashboardForJobRun"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/sessions$", "emr-serverless:ListSessions"),
+        rule("emr-serverless", "POST", ".*/applications/[^/]+/sessions$", "emr-serverless:StartSession"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/sessions/[^/]+$", "emr-serverless:GetSession"),
+        rule("emr-serverless", "DELETE", ".*/applications/[^/]+/sessions/[^/]+$", "emr-serverless:TerminateSession"),
+        rule("emr-serverless", "GET", ".*/applications/[^/]+/sessions/[^/]+/endpoint$", "emr-serverless:GetSessionEndpoint"),
+        rule("emr-serverless", "GET", ".*/tags/.+$", "emr-serverless:ListTagsForResource"),
+        rule("emr-serverless", "POST", ".*/tags/.+$", "emr-serverless:TagResource"),
+        rule("emr-serverless", "DELETE", ".*/tags/.+$", "emr-serverless:UntagResource"),
+
+        // GuardDuty REST-JSON operations.
+        rule("guardduty", "GET", "^/detector$", "guardduty:ListDetectors"),
+        rule("guardduty", "POST", "^/detector$", "guardduty:CreateDetector"),
+        rule("guardduty", "GET", "^/detector/[^/]+$", "guardduty:GetDetector"),
+        rule("guardduty", "POST", "^/detector/[^/]+$", "guardduty:UpdateDetector"),
+        rule("guardduty", "DELETE", "^/detector/[^/]+$", "guardduty:DeleteDetector"),
+        rule("guardduty", "POST", "^/detector/[^/]+/filter$", "guardduty:CreateFilter"),
+        rule("guardduty", "GET", "^/detector/[^/]+/filter$", "guardduty:ListFilters"),
+        rule("guardduty", "GET", "^/detector/[^/]+/filter/[^/]+$", "guardduty:GetFilter"),
+        rule("guardduty", "POST", "^/detector/[^/]+/filter/[^/]+$", "guardduty:UpdateFilter"),
+        rule("guardduty", "DELETE", "^/detector/[^/]+/filter/[^/]+$", "guardduty:DeleteFilter"),
+        rule("guardduty", "POST", "^/detector/[^/]+/ipset$", "guardduty:CreateIPSet"),
+        rule("guardduty", "GET", "^/detector/[^/]+/ipset$", "guardduty:ListIPSets"),
+        rule("guardduty", "GET", "^/detector/[^/]+/ipset/[^/]+$", "guardduty:GetIPSet"),
+        rule("guardduty", "POST", "^/detector/[^/]+/ipset/[^/]+$", "guardduty:UpdateIPSet"),
+        rule("guardduty", "DELETE", "^/detector/[^/]+/ipset/[^/]+$", "guardduty:DeleteIPSet"),
+        rule("guardduty", "POST", "^/detector/[^/]+/threatintelset$", "guardduty:CreateThreatIntelSet"),
+        rule("guardduty", "GET", "^/detector/[^/]+/threatintelset$", "guardduty:ListThreatIntelSets"),
+        rule("guardduty", "GET", "^/detector/[^/]+/threatintelset/[^/]+$", "guardduty:GetThreatIntelSet"),
+        rule("guardduty", "POST", "^/detector/[^/]+/threatintelset/[^/]+$", "guardduty:UpdateThreatIntelSet"),
+        rule("guardduty", "DELETE", "^/detector/[^/]+/threatintelset/[^/]+$", "guardduty:DeleteThreatIntelSet"),
+        rule("guardduty", "POST", "^/detector/[^/]+/findings/create$", "guardduty:CreateSampleFindings"),
+        rule("guardduty", "POST", "^/detector/[^/]+/findings$", "guardduty:ListFindings"),
+        rule("guardduty", "POST", "^/detector/[^/]+/findings/get$", "guardduty:GetFindings"),
+        rule("guardduty", "POST", "^/detector/[^/]+/findings/statistics$", "guardduty:GetFindingsStatistics"),
+        rule("guardduty", "POST", "^/detector/[^/]+/findings/archive$", "guardduty:ArchiveFindings"),
+        rule("guardduty", "POST", "^/detector/[^/]+/findings/unarchive$", "guardduty:UnarchiveFindings"),
+        rule("guardduty", "POST", "^/detector/[^/]+/findings/feedback$", "guardduty:UpdateFindingsFeedback"),
+        rule("guardduty", "POST", "^/detector/[^/]+/usage/statistics$", "guardduty:GetUsageStatistics"),
+        rule("guardduty", "POST", "^/detector/[^/]+/coverage$", "guardduty:ListCoverage"),
+        rule("guardduty", "POST", "^/detector/[^/]+/freeTrial/daysRemaining$", "guardduty:GetRemainingFreeTrialDays"),
+        rule("guardduty", "GET", "^/detector/[^/]+/member$", "guardduty:ListMembers"),
+        rule("guardduty", "POST", "^/detector/[^/]+/member$", "guardduty:CreateMembers"),
+        rule("guardduty", "POST", "^/detector/[^/]+/member/invite$", "guardduty:InviteMembers"),
+        rule("guardduty", "GET", "^/detector/[^/]+/admin$", "guardduty:DescribeOrganizationConfiguration"),
+        rule("guardduty", "POST", "^/detector/[^/]+/admin$", "guardduty:UpdateOrganizationConfiguration"),
+        rule("guardduty", "GET", "^/invitation$", "guardduty:ListInvitations"),
+        rule("guardduty", "GET", "^/invitation/count$", "guardduty:GetInvitationsCount"),
+        rule("guardduty", "POST", "^/admin/enable$", "guardduty:EnableOrganizationAdminAccount"),
+        rule("guardduty", "POST", "^/admin/disable$", "guardduty:DisableOrganizationAdminAccount"),
+        rule("guardduty", "GET", "^/tags/.+$", "guardduty:ListTagsForResource"),
+        rule("guardduty", "POST", "^/tags/.+$", "guardduty:TagResource"),
+        rule("guardduty", "DELETE", "^/tags/.+$", "guardduty:UntagResource"),
+
+        // Inspector2 REST-JSON operations.
+        rule("inspector2", "POST", "^/filters/create$", "inspector2:CreateFilter"),
+        rule("inspector2", "POST", "^/filters/update$", "inspector2:UpdateFilter"),
+        rule("inspector2", "POST", "^/filters/delete$", "inspector2:DeleteFilter"),
+        rule("inspector2", "POST", "^/filters/list$", "inspector2:ListFilters"),
+        rule("inspector2", "POST", "^/ec2deepinspectionconfiguration/get$", "inspector2:GetEc2DeepInspectionConfiguration"),
+        rule("inspector2", "POST", "^/cis/scan-configuration/list$", "inspector2:ListCisScanConfigurations"),
+        rule("inspector2", "POST", "^/delegatedadminaccounts/list$", "inspector2:ListDelegatedAdminAccounts"),
+        rule("inspector2", "POST", "^/delegatedadminaccounts/enable$", "inspector2:EnableDelegatedAdminAccount"),
+        rule("inspector2", "POST", "^/delegatedadminaccounts/disable$", "inspector2:DisableDelegatedAdminAccount"),
+        rule("inspector2", "POST", "^/status/batch/get$", "inspector2:BatchGetAccountStatus"),
+        rule("inspector2", "POST", "^/enable$", "inspector2:Enable"),
+        rule("inspector2", "POST", "^/organizationconfiguration/update$", "inspector2:UpdateOrganizationConfiguration"),
+        rule("inspector2", "POST", "^/organizationconfiguration/describe$", "inspector2:DescribeOrganizationConfiguration"),
+        rule("inspector2", "GET", "^/tags/.+$", "inspector2:ListTagsForResource"),
+        rule("inspector2", "POST", "^/tags/.+$", "inspector2:TagResource"),
+        rule("inspector2", "DELETE", "^/tags/.+$", "inspector2:UntagResource"),
+
         // ── Kinesis ────────────────────────────────────────────────────────────
         rule("kinesis", "POST", ".*", "kinesis:*"),
 
@@ -238,7 +324,9 @@ public class IamActionRegistry {
      * for assumed-role callers while global enforcement is off.
      */
     public boolean isRoleEnforcedAction(String action) {
-        return action != null && ROLE_ENFORCED_ACTIONS.contains(action);
+        return action != null && (ROLE_ENFORCED_ACTIONS.contains(action)
+                || RULES.stream().anyMatch(rule -> Set.of("emr-serverless", "guardduty", "inspector2")
+                        .contains(rule.service()) && rule.action().equals(action)));
     }
 
     /**

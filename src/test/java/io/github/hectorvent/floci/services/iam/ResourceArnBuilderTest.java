@@ -29,6 +29,88 @@ import static org.mockito.Mockito.when;
 class ResourceArnBuilderTest {
 
     @Test
+    void emrServerlessScopesApplicationsJobRunsAndSessions() {
+        String[][] routes = {
+                {"applications/app", "applications/app"},
+                {"applications/app/start", "applications/app"},
+                {"applications/app/jobruns", "applications/app"},
+                {"applications/app/jobruns/run", "applications/app/jobruns/run"},
+                {"applications/app/jobruns/run/attempts", "applications/app/jobruns/run"},
+                {"applications/app/sessions", "applications/app"},
+                {"applications/app/sessions/session/endpoint", "applications/app/sessions/session"}
+        };
+        for (String[] route : routes) {
+            for (String prefix : new String[]{"", "/", "/_emrserverless/"}) {
+                assertEquals("arn:aws:emr-serverless:eu-west-1:123456789012:/" + route[1],
+                        builder.build("emr-serverless", mockJsonCtx(prefix + route[0], "{}"),
+                                "eu-west-1", "123456789012"));
+            }
+        }
+        assertEquals("*", builder.build("emr-serverless", mockJsonCtx("/applications", "{}"),
+                "eu-west-1", "123456789012"));
+        String arn = "arn:aws:emr-serverless:eu-west-1:123456789012:/applications/app";
+        assertEquals(arn, builder.build("emr-serverless", mockJsonCtx("/tags/" + arn, "{}"),
+                "eu-west-1", "123456789012"));
+    }
+
+    @Test
+    void guardDutyScopesDetectorChildrenAndCreateFilterNames() {
+        for (String kind : List.of("filter", "ipset", "threatintelset")) {
+            String resource = "detector/d/" + kind + "/n";
+            assertEquals("arn:aws:guardduty:eu-west-1:123456789012:" + resource,
+                    builder.build("guardduty", mockJsonCtx("/" + resource, "{}"),
+                            "eu-west-1", "123456789012"));
+            assertEquals("*", builder.build("guardduty", mockJsonCtx("/detector/d/" + kind, "{}"),
+                    "eu-west-1", "123456789012"));
+        }
+        ContainerRequestContext create = mockJsonCtx("/detector/d/filter", "{\"name\":\"named\"}");
+        when(create.getMethod()).thenReturn("POST");
+        assertEquals("arn:aws:guardduty:eu-west-1:123456789012:detector/d/filter/named",
+                builder.build("guardduty", create, "eu-west-1", "123456789012"));
+        assertEquals("arn:aws:guardduty:eu-west-1:123456789012:detector/d",
+                builder.build("guardduty", mockJsonCtx("/detector/d/findings/get", "{}"),
+                        "eu-west-1", "123456789012"));
+        assertEquals("*", builder.build("guardduty", mockJsonCtx("/invitation", "{}"),
+                "eu-west-1", "123456789012"));
+    }
+
+    @Test
+    void inspector2ScopesMutationsButNotListFilters() {
+        String arn = "arn:aws:inspector2:eu-west-1:123456789012:owner/123456789012/filter/f";
+        for (String operation : List.of("update", "delete")) {
+            assertEquals(arn, builder.build("inspector2", mockJsonCtx("/filters/" + operation,
+                    "{\"filterArn\":\"" + arn + "\"}"), "eu-west-1", "123456789012"));
+        }
+        assertEquals("arn:aws:inspector2:eu-west-1:123456789012:owner/123456789012/filter/*",
+                builder.build("inspector2", mockJsonCtx("/filters/create", "{}"), "eu-west-1", "123456789012"));
+        assertEquals("*", builder.build("inspector2", mockJsonCtx("/filters/list",
+                "{\"arns\":[\"" + arn + "\"]}"), "eu-west-1", "123456789012"));
+        assertEquals(arn, builder.build("inspector2", mockJsonCtx("/tags/" + arn, "{}"),
+                "eu-west-1", "123456789012"));
+        String detectorArn = "arn:aws:guardduty:eu-west-1:123456789012:detector/d/filter/f";
+        assertEquals(detectorArn, builder.build("guardduty", mockJsonCtx("/tags/" + detectorArn, "{}"),
+                "eu-west-1", "123456789012"));
+    }
+
+    @Test
+    void emrServerlessDashboardScopesTheRequestedSession() {
+        ContainerRequestContext request = mockJsonCtx("/applications/app/dashboard", "{}");
+        request.getUriInfo().getQueryParameters().putSingle("resourceId", "session");
+        assertEquals("arn:aws:emr-serverless:eu-west-1:123456789012:/applications/app/sessions/session",
+                builder.build("emr-serverless", request, "eu-west-1", "123456789012"));
+    }
+
+    @Test
+    void executionRoleArnReadPreservesTheRequestBody() throws Exception {
+        String role = "arn:aws:iam::123456789012:role/JobRole";
+        String body = "{\"executionRoleArn\":\"" + role + "\",\"jobDriver\":{}}";
+        AtomicReference<InputStream> stream = new AtomicReference<>(
+                new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(role, builder.buildExecutionRoleArn(mockJsonCtx("/applications/app/jobruns", stream)));
+        assertEquals(body, new String(stream.get().readAllBytes(), StandardCharsets.UTF_8));
+    }
+
+    @Test
     void sesIdentityArnFromJsonFromEmailAddress() {
         String body = "{\"FromEmailAddress\":\"noreply@bound.example.com\",\"Content\":{}}";
         ContainerRequestContext ctx = mockJsonCtx("/v2/email/outbound-emails", body);

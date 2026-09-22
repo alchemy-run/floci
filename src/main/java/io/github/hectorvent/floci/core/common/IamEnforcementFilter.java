@@ -50,7 +50,7 @@ import java.util.regex.Pattern;
  *
  * <p>Global {@code floci.services.iam.enforcement-enabled} stays off by default.
  * Assumed-role sessions (Lambda execution-role credentials) are still evaluated
- * for the small {@code ROLE_ENFORCED_ACTIONS} set (SES send + {@code kms:GetKeyRotationStatus})
+ * for the explicitly modeled SES, KMS, EMR Serverless, GuardDuty, and Inspector2 actions
  * so scoped-IAM denial tests can observe {@code AccessDenied} without turning on
  * evaluation for every JSON 1.1 / Query operation.
  *
@@ -269,6 +269,19 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
         if (abortIfDenied(ctx, caller, action, credentialScope, resources, targetContexts,
                 region, accountId, akid)) {
             return;
+        }
+
+        if ("emr-serverless:StartJobRun".equals(action) || "emr-serverless:StartSession".equals(action)) {
+            String executionRoleArn = arnBuilder.buildExecutionRoleArn(ctx);
+            if (executionRoleArn != null) {
+                Map<String, List<String>> passRoleContext = new HashMap<>();
+                principalArn.ifPresent(arn -> passRoleContext.put("aws:PrincipalArn", List.of(arn)));
+                passRoleContext.put("iam:PassedToService", List.of("emr-serverless.amazonaws.com"));
+                if (abortIfDenied(ctx, caller, "iam:PassRole", credentialScope, List.of(executionRoleArn),
+                        List.of(passRoleContext), region, accountId, akid)) {
+                    return;
+                }
+            }
         }
 
         // A PutObject carrying If-Match compares against the object it replaces, and S3 authorizes

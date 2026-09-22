@@ -536,6 +536,92 @@ class IamEnforcementFilterTest {
     }
 
     @Test
+    void emrServerlessRequiresPassRoleForTheExecutionRoleAndService() {
+        when(iamConfig.enforcementEnabled()).thenReturn(false);
+        requestContext.setAccountId("222233334444");
+        requestContext.setRegion("us-east-1");
+        String application = "arn:aws:emr-serverless:us-east-1:222233334444:/applications/app";
+        String role = "arn:aws:iam::222233334444:role/JobRole";
+        String auth = "AWS4-HMAC-SHA256 Credential=ASIASESSION/20260922/us-east-1/emr-serverless/aws4_request, "
+                + "SignedHeaders=host, Signature=abc";
+        when(accountResolver.extractAccessKeyId(auth)).thenReturn("ASIASESSION");
+        when(iamService.isAssumedRoleSession("ASIASESSION")).thenReturn(true);
+        for (String action : List.of("emr-serverless:StartJobRun", "emr-serverless:StartSession")) {
+            when(actionRegistry.isRoleEnforcedAction(action)).thenReturn(true);
+            for (String passedToService : List.of("emr-serverless.amazonaws.com", "lambda.amazonaws.com")) {
+                ContainerRequestContext request = mock(ContainerRequestContext.class);
+                when(request.getHeaderString("Authorization")).thenReturn(auth);
+                when(request.getMediaType()).thenReturn(MediaType.APPLICATION_JSON_TYPE);
+                when(actionRegistry.resolve("emr-serverless", request)).thenReturn(action);
+                when(arnBuilder.buildResources("emr-serverless", request, "us-east-1", "222233334444"))
+                        .thenReturn(List.of(application));
+                when(arnBuilder.buildExecutionRoleArn(request)).thenReturn(role);
+                when(iamService.resolveCallerContext("ASIASESSION")).thenReturn(CallerContext.of(List.of("""
+                        {"Version":"2012-10-17","Statement":[
+                          {"Effect":"Allow","Action":"%s","Resource":"%s"},
+                          {"Effect":"Allow","Action":"iam:PassRole","Resource":"%s",
+                           "Condition":{"StringEquals":{"iam:PassedToService":"%s"}}}
+                        ]}
+                        """.formatted(action, application, role, passedToService))));
+
+                newFilterWithScp(mock(ScpProvider.class)).filter(request);
+
+                if (passedToService.equals("emr-serverless.amazonaws.com")) {
+                    verify(request, never()).abortWith(any(Response.class));
+                } else {
+                    ArgumentCaptor<Response> response = ArgumentCaptor.forClass(Response.class);
+                    verify(request).abortWith(response.capture());
+                    assertEquals(403, response.getValue().getStatus());
+                    assertTrue(response.getValue().getEntity().toString().contains("iam:PassRole"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void guardDutyAndInspector2RolePermissionsAreResourceScoped() {
+        when(iamConfig.enforcementEnabled()).thenReturn(false);
+        requestContext.setAccountId("222233334444");
+        requestContext.setRegion("us-east-1");
+        String[][] operations = {
+                {"guardduty", "GetFilter", "detector/d/filter/allowed"},
+                {"inspector2", "UpdateFilter", "owner/222233334444/filter/allowed"}
+        };
+        for (String[] operation : operations) {
+            String action = operation[0] + ":" + operation[1];
+            String arn = "arn:aws:" + operation[0] + ":us-east-1:222233334444:" + operation[2];
+            String auth = "AWS4-HMAC-SHA256 Credential=ASIASESSION/20260922/us-east-1/" + operation[0]
+                    + "/aws4_request, SignedHeaders=host, Signature=abc";
+            when(accountResolver.extractAccessKeyId(auth)).thenReturn("ASIASESSION");
+            when(iamService.isAssumedRoleSession("ASIASESSION")).thenReturn(true);
+            when(actionRegistry.isRoleEnforcedAction(action)).thenReturn(true);
+            when(iamService.resolveCallerContext("ASIASESSION")).thenReturn(CallerContext.of(List.of("""
+                    {"Version":"2012-10-17","Statement":[
+                      {"Effect":"Allow","Action":"%s","Resource":"%s"}
+                    ]}
+                    """.formatted(action, arn))));
+            for (String target : List.of(arn, arn.replace("/allowed", "/foreign"))) {
+                ContainerRequestContext request = mock(ContainerRequestContext.class);
+                when(request.getHeaderString("Authorization")).thenReturn(auth);
+                when(request.getMediaType()).thenReturn(MediaType.APPLICATION_JSON_TYPE);
+                when(actionRegistry.resolve(operation[0], request)).thenReturn(action);
+                when(arnBuilder.buildResources(operation[0], request, "us-east-1", "222233334444"))
+                        .thenReturn(List.of(target));
+
+                newFilterWithScp(mock(ScpProvider.class)).filter(request);
+
+                if (target.equals(arn)) {
+                    verify(request, never()).abortWith(any(Response.class));
+                } else {
+                    ArgumentCaptor<Response> response = ArgumentCaptor.forClass(Response.class);
+                    verify(request).abortWith(response.capture());
+                    assertEquals(403, response.getValue().getStatus());
+                }
+            }
+        }
+    }
+
+    @Test
     void userAccessKeyStaysPermissiveWhenGlobalEnforcementIsOff() {
         when(iamConfig.enforcementEnabled()).thenReturn(false);
         ContainerRequestContext containerRequest = mock(ContainerRequestContext.class);
