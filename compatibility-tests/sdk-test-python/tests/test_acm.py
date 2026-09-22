@@ -32,16 +32,69 @@ class TestACMCertificateLifecycle:
         [("RSA_2048", rsa.RSAPublicKey), ("EC_prime256v1", ec.EllipticCurvePublicKey)],
     )
     def test_request_certificate_key_algorithms(
-        self, acm_client, key_algorithm, key_type
+        self, acm_client, route53_client, key_algorithm, key_type
     ):
-        """Test RequestCertificate issues a parseable certificate for each key algorithm."""
+        """Test DNS-validated certificates contain the requested key algorithm."""
+        domain_name = f"{key_algorithm.lower().replace('_', '-')}.example.com"
         response = acm_client.request_certificate(
-            DomainName=f"{key_algorithm.lower().replace('_', '-')}.example.com",
+            DomainName=domain_name,
+            ValidationMethod="DNS",
             KeyAlgorithm=key_algorithm,
         )
         arn = response["CertificateArn"]
 
         try:
+            pending = acm_client.describe_certificate(CertificateArn=arn)["Certificate"]
+            assert pending["Status"] == "PENDING_VALIDATION"
+            assert pending["DomainValidationOptions"]
+            records = [
+                {
+                    "Name": option["ResourceRecord"]["Name"],
+                    "Type": option["ResourceRecord"]["Type"],
+                    "TTL": 60,
+                    "ResourceRecords": [{"Value": option["ResourceRecord"]["Value"]}],
+                }
+                for option in pending["DomainValidationOptions"]
+            ]
+            zone_id = route53_client.create_hosted_zone(
+                Name=domain_name, CallerReference=arn
+            )["HostedZone"]["Id"]
+            try:
+                route53_client.change_resource_record_sets(
+                    HostedZoneId=zone_id,
+                    ChangeBatch={
+                        "Changes": [
+                            {"Action": "UPSERT", "ResourceRecordSet": record}
+                            for record in records
+                        ]
+                    },
+                )
+                try:
+                    acm_client.get_waiter("certificate_validated").wait(
+                        CertificateArn=arn,
+                        WaiterConfig={"Delay": 1, "MaxAttempts": 10},
+                    )
+                    issued = acm_client.describe_certificate(CertificateArn=arn)["Certificate"]
+                    assert issued["Status"] == "ISSUED"
+                    assert issued["KeyAlgorithm"] == key_algorithm
+                    assert issued["DomainValidationOptions"]
+                    assert all(
+                        option["ValidationStatus"] == "SUCCESS"
+                        for option in issued["DomainValidationOptions"]
+                    )
+                finally:
+                    route53_client.change_resource_record_sets(
+                        HostedZoneId=zone_id,
+                        ChangeBatch={
+                            "Changes": [
+                                {"Action": "DELETE", "ResourceRecordSet": record}
+                                for record in records
+                            ]
+                        },
+                    )
+            finally:
+                route53_client.delete_hosted_zone(Id=zone_id)
+
             response = acm_client.get_certificate(CertificateArn=arn)
             certificate = x509.load_pem_x509_certificate(response["Certificate"].encode())
             assert isinstance(certificate.public_key(), key_type)

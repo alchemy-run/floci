@@ -164,6 +164,12 @@ def acm_client(aws_config, client_config):
 
 
 @pytest.fixture
+def route53_client(aws_config, client_config):
+    """Create Route53 client."""
+    return boto3.client("route53", config=client_config, **aws_config)
+
+
+@pytest.fixture
 def ecr_client(aws_config, client_config):
     """Create ECR client."""
     return boto3.client("ecr", config=client_config, **aws_config)
