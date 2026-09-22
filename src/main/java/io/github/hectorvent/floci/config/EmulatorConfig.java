@@ -1014,6 +1014,18 @@ public interface EmulatorConfig {
     interface EmrServerlessServiceConfig {
         @WithDefault("true")
         boolean enabled();
+
+        /** Versioned image containing spark-submit and image-local entry points. */
+        @WithDefault("apache/spark:3.5.2-scala2.12-java17-python3-ubuntu")
+        String sparkImage();
+
+        /** Spark installation directory inside the worker image. */
+        @WithDefault("/opt/spark")
+        String sparkHome();
+
+        /** Local worker execution limit in seconds, between 1 and 900. */
+        @WithDefault("300")
+        int jobTimeoutSeconds();
     }
 
     interface Route53ResolverServiceConfig {

@@ -10,6 +10,7 @@ public class CreateApplicationRequest {
     private AutoStopConfiguration autoStopConfiguration;
     private String clientToken;
     private ImageConfiguration imageConfiguration;
+    private InteractiveConfiguration interactiveConfiguration;
     private Map<String, InitialCapacityConfig> initialCapacity;
     private MaximumCapacity maximumCapacity;
     private String name;
@@ -27,6 +28,8 @@ public class CreateApplicationRequest {
     public void setAutoStopConfiguration(AutoStopConfiguration autoStopConfiguration) { this.autoStopConfiguration = autoStopConfiguration; }
     public String getClientToken() { return clientToken; }
     public void setClientToken(String clientToken) { this.clientToken = clientToken; }
+    public InteractiveConfiguration getInteractiveConfiguration() { return interactiveConfiguration; }
+    public void setInteractiveConfiguration(InteractiveConfiguration interactiveConfiguration) { this.interactiveConfiguration = interactiveConfiguration; }
     public ImageConfiguration getImageConfiguration() { return imageConfiguration; }
     public void setImageConfiguration(ImageConfiguration imageConfiguration) { this.imageConfiguration = imageConfiguration; }
     public Map<String, InitialCapacityConfig> getInitialCapacity() { return initialCapacity; }

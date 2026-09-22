@@ -1,13 +1,17 @@
 # EMR Serverless
 
-EMR Serverless is an AWS service that provides serverless data analytics environments. Floci provides an emulator for the management-plane API (REST JSON) which covers the basic lifecycle of an Application.
+Floci supports the EMR Serverless application and job-run REST JSON APIs. Spark batch jobs execute with `spark-submit` in a Docker worker, using entry points already present in the worker image. Job success requires an observed zero exit code and confirmed worker removal.
 
 ## Configuration
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `floci.emrserverless.enabled` | Whether the EMR Serverless API is enabled | `true` |
-| `floci.emrserverless.port` | The port the service is exposed on | `4566` |
+| `floci.services.emrserverless.enabled` | Whether the EMR Serverless API is enabled | `true` |
+| `floci.services.emrserverless.spark-image` | Versioned Docker image containing Spark and job entry points | `apache/spark:3.5.2-scala2.12-java17-python3-ubuntu` |
+| `floci.services.emrserverless.spark-home` | Spark installation directory inside the image | `/opt/spark` |
+| `floci.services.emrserverless.job-timeout-seconds` | Worker execution limit, from 1 to 900 seconds | `300` |
+
+Environment overrides are `FLOCI_SERVICES_EMRSERVERLESS_SPARK_IMAGE`, `FLOCI_SERVICES_EMRSERVERLESS_SPARK_HOME`, and `FLOCI_SERVICES_EMRSERVERLESS_JOB_TIMEOUT_SECONDS`. Requests use the shared Floci gateway port.
 
 ## Endpoints
 
@@ -21,9 +25,23 @@ The emulator implements the standard AWS `emr-serverless` service endpoints:
 * `POST /applications/{applicationId}/start` (StartApplication)
 * `POST /applications/{applicationId}/stop` (StopApplication)
 
+* `POST /applications/{applicationId}/jobruns` (StartJobRun)
+* `GET /applications/{applicationId}/jobruns` (ListJobRuns)
+* `GET /applications/{applicationId}/jobruns/{jobRunId}` (GetJobRun)
+* `DELETE /applications/{applicationId}/jobruns/{jobRunId}` (CancelJobRun)
+* `GET /applications/{applicationId}/jobruns/{jobRunId}/attempts` (ListJobRunAttempts)
+* `GET /applications/{applicationId}/sessions` (ListSessions, empty until interactive execution is supported)
+* `GET`, `POST`, `DELETE /tags/{resourceArn}` (application tagging)
+
+## Spark execution
+
+Docker must be available. The execution role must exist in the application's account and trust `emr-serverless.amazonaws.com`. IAM-authorized job submission also requires `iam:PassRole` for that role. Workers receive expiring role credentials which are revoked after execution.
+
+An image-local entry point such as `local:///usr/lib/spark/examples/src/main/python/pi.py` is translated to the configured Spark home. Output is captured in `/aws/emr-serverless`, under the stream `{applicationId}/{jobRunId}/SPARK_DRIVER`. Cancellation removes the worker before reporting `CANCELLED`. Interrupted workers are cleaned up rather than replayed after restart.
+
 ## Limitations and Differences from AWS
 
-* **Jobs not implemented**: Floci supports the provisioning of the `Application` management plane (which satisfies tools like Terraform's `aws_emrserverless_application` resource). Executing actual Spark or Hive jobs against these applications via `StartJobRun` is not currently implemented.
-* **Instant Start/Stop**: Floci marks the application `STARTED` or `STOPPED` immediately without provisioning actual compute capacity in the background.
-* **Data Plane**: Floci does not implement the data-plane API or any execution environments.
-* **Tagging APIs**: `TagResource`, `UntagResource`, and `ListTagsForResource` are currently unsupported.
+* **Bounded local execution**: One worker runs at a time with one CPU and 1536 MiB of container memory. The pending queue is limited to 32 jobs and a five-minute wait. Requested cloud capacity does not expand these local limits.
+* **Image-local Spark only**: S3 entry points, Hive, streaming, VPC-attached workers, per-worker specifications, configuration overrides, execution-policy overrides, and automatic retries are unsupported.
+* **Instant application Start/Stop**: Application state changes immediately; compute is allocated only when a job runs. Active jobs must terminate before the application can be stopped or deleted.
+* **Interactive execution**: Sessions and dashboards remain unsupported and return explicit errors rather than synthetic activity or entitlement denials.

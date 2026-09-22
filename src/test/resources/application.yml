@@ -447,6 +447,9 @@ floci:
       enabled: true
     emrserverless:
       enabled: true
+      spark-image: apache/spark:3.5.2-scala2.12-java17-python3-ubuntu
+      spark-home: /opt/spark
+      job-timeout-seconds: 300
     ssoadmin:
       enabled: true
     ssooidc:

@@ -4,14 +4,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 @RegisterForReflection
 public class UpdateApplicationResponse {
-    private String applicationId;
-    private String arn;
-    private String name;
+    private Application application;
 
-    public String getApplicationId() { return applicationId; }
-    public void setApplicationId(String applicationId) { this.applicationId = applicationId; }
-    public String getArn() { return arn; }
-    public void setArn(String arn) { this.arn = arn; }
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public Application getApplication() { return application; }
+    public void setApplication(Application application) { this.application = application; }
 }
