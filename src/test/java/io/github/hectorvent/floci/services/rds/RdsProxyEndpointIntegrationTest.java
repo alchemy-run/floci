@@ -159,7 +159,11 @@ class RdsProxyEndpointIntegrationTest {
     private List<String> subnetIds() {
         return ec2.describeSubnets(REGION, List.of(), Map.of()).stream()
                 .filter(subnet -> ec2.resolveDefaultVpcId(REGION).equals(subnet.getVpcId()))
-                .map(Subnet::getSubnetId).sorted().limit(2).toList();
+                // Other classes add subnets to the default VPC; a proxy needs two distinct zones.
+                .sorted(java.util.Comparator.comparing(Subnet::getSubnetId))
+                .collect(java.util.stream.Collectors.toMap(Subnet::getAvailabilityZone, Subnet::getSubnetId,
+                        (first, second) -> first, java.util.TreeMap::new))
+                .values().stream().limit(2).toList();
     }
 
     private static RequestSpecification query(String action) {
