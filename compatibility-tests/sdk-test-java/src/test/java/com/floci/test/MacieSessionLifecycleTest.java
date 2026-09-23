@@ -119,8 +119,8 @@ class MacieSessionLifecycleTest {
                         .isInstanceOf(AccessDeniedException.class);
                 assertThatThrownBy(() -> otherRegion.getAdministratorAccount(request -> {}))
                         .isInstanceOf(AccessDeniedException.class);
-                assertThatThrownBy(() -> owner.createSampleFindings(request -> {}))
-                        .isInstanceOf(ValidationException.class).hasMessageContaining("does not support Macie");
+                owner.createSampleFindings(request -> {});
+                assertThat(owner.listFindings(request -> {}).findingIds()).isNotEmpty();
             } finally {
                 owner.disableMacie(request -> {});
             }

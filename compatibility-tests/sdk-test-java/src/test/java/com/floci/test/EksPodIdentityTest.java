@@ -164,7 +164,7 @@ class EksPodIdentityTest {
                             .matched().response()).isPresent();
                 }
                 assertThat(eks.listAddons(request -> request.clusterName(cluster)).addons()).isEmpty();
-                assertThatThrownBy(() -> eks.createAddon(request -> request.clusterName(cluster).addonName("vpc-cni")))
+                assertThatThrownBy(() -> eks.createAddon(request -> request.clusterName(cluster).addonName("floci-unknown-addon")))
                         .isInstanceOf(InvalidParameterException.class);
                 assertThatThrownBy(() -> eks.describeAddon(request -> request.clusterName(cluster).addonName("vpc-cni")))
                         .isInstanceOf(ResourceNotFoundException.class);

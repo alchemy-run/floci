@@ -441,9 +441,10 @@ class Ec2ContainerManagerTest {
             harness.manager.launch(guest, "ubuntu:24.04", null, "us-west-2");
             awaitUntil(() -> "running".equals(guest.getState().getName()), Duration.ofSeconds(2));
             ExecCreateCmd exec = harness.dockerClient.execCreateCmd(TEST_CONTAINER_ID);
-            when(harness.dockerClient.execCreateCmd(managed.helperId())).thenReturn(exec);
+            // doReturn avoids invoking the mock while the launch thread is still using it.
+            doReturn(exec).when(harness.dockerClient).execCreateCmd(managed.helperId());
             CopyArchiveToContainerCmd copy = mock(CopyArchiveToContainerCmd.class, RETURNS_SELF);
-            when(harness.dockerClient.copyArchiveToContainerCmd(managed.helperId())).thenReturn(copy);
+            doReturn(copy).when(harness.dockerClient).copyArchiveToContainerCmd(managed.helperId());
             List<MetadataFile> files = new CopyOnWriteArrayList<>();
             when(copy.withTarInputStream(any(InputStream.class))).thenAnswer(call -> {
                 try (TarArchiveInputStream archive = new TarArchiveInputStream(call.getArgument(0))) {

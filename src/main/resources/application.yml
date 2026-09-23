@@ -708,6 +708,8 @@ floci:
       staging-bucket: floci-cur-staging
     bcm-pricing-calculator:
       enabled: true
+    timestream:
+      enabled: true                               # FLOCI_SERVICES_TIMESTREAM_ENABLED: Timestream for LiveAnalytics (not-onboarded responses)
     timestream-influxdb:
       enabled: true
       mock: false                                 # FLOCI_SERVICES_TIMESTREAM_INFLUXDB_MOCK: true = metadata only, no Docker
