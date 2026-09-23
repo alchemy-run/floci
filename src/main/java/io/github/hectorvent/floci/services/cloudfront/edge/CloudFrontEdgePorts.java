@@ -69,6 +69,8 @@ public class CloudFrontEdgePorts {
     private final Map<String, Integer> ports = new ConcurrentHashMap<>();
     /** port -> the bound or closing server reserving it. */
     private final Map<Integer, HttpServer> servers = new ConcurrentHashMap<>();
+    /** When each port's previous server finished closing (see {@link #listen}). */
+    private final Map<Integer, Long> releasedAtNanos = new ConcurrentHashMap<>();
 
     private HttpClient client;
 
@@ -170,7 +172,10 @@ public class CloudFrontEdgePorts {
         }
         try {
             CompletableFuture<Void> closed = server.close().toCompletionStage().toCompletableFuture()
-                    .thenRun(() -> servers.remove(port, server));
+                    .thenRun(() -> {
+                        releasedAtNanos.put(port, System.nanoTime());
+                        servers.remove(port, server);
+                    });
             // Completion must not take this monitor: Vert.x also completes close on its event loop.
             if (!Context.isOnEventLoopThread()) {
                 closed.get(5, TimeUnit.SECONDS);
@@ -190,6 +195,29 @@ public class CloudFrontEdgePorts {
      * that creates the distribution.
      */
     private HttpServer listen(String distributionId, int port) {
+        // The OS can briefly refuse a port whose listener just reported closed. Retry only
+        // for ports this class released moments ago, so a port held by another process is
+        // still skipped immediately.
+        Long releasedAt = releasedAtNanos.remove(port);
+        boolean recentlyReleased = releasedAt != null
+                && System.nanoTime() - releasedAt < TimeUnit.SECONDS.toNanos(2);
+        int attempts = recentlyReleased ? 20 : 1;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            HttpServer server = listenOnce(distributionId, port);
+            if (server != null || attempt == attempts) {
+                return server;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private HttpServer listenOnce(String distributionId, int port) {
         HttpServer server = vertx.createHttpServer(new HttpServerOptions()
                 .setHost("0.0.0.0")
                 .setPort(port));
