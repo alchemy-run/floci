@@ -24,6 +24,7 @@ import java.net.InetAddress;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -178,7 +179,7 @@ public class ElbV2Service implements ResourceProvider {
         }
         for (Map<String, Rule> regionRules : rules.values()) {
             for (Rule rule : regionRules.values()) {
-                listenerToRules.computeIfAbsent(rule.getListenerArn(), k -> new ArrayList<>())
+                listenerToRules.computeIfAbsent(rule.getListenerArn(), k -> new CopyOnWriteArrayList<>())
                         .add(rule.getRuleArn());
             }
         }
@@ -581,7 +582,7 @@ public class ElbV2Service implements ResourceProvider {
         Map<String, Rule> regionRules = mutableRegion(rules, region);
         regionRules.put(defaultRule.getRuleArn(), defaultRule);
         rules.put(region, regionRules);
-        listenerToRules.computeIfAbsent(listenerArn, k -> new ArrayList<>()).add(defaultRule.getRuleArn());
+        listenerToRules.computeIfAbsent(listenerArn, k -> new CopyOnWriteArrayList<>()).add(defaultRule.getRuleArn());
         for (Action action : defaultRule.getActions()) {
             linkTgToLb(action, lbArn);
         }
@@ -698,7 +699,7 @@ public class ElbV2Service implements ResourceProvider {
 
     // ── Rules ─────────────────────────────────────────────────────────────────
 
-    public Rule createRule(String region, String listenerArn, List<RuleCondition> conditions,
+    public synchronized Rule createRule(String region, String listenerArn, List<RuleCondition> conditions,
                             int priority, List<Action> actions, Map<String, String> initialTags) {
         requireListener(region, listenerArn);
         if (priority < 1 || priority > 50000) {
@@ -736,7 +737,7 @@ public class ElbV2Service implements ResourceProvider {
 
         regionRules.put(ruleArn, rule);
         rules.put(region, regionRules);
-        listenerToRules.computeIfAbsent(listenerArn, k -> new ArrayList<>()).add(ruleArn);
+        listenerToRules.computeIfAbsent(listenerArn, k -> new CopyOnWriteArrayList<>()).add(ruleArn);
 
         // update TG → LB index for all target group actions
         for (Action a : rule.getActions()) {
@@ -776,7 +777,7 @@ public class ElbV2Service implements ResourceProvider {
         return new ArrayList<>(regionRules.values());
     }
 
-    public void deleteRule(String region, String ruleArn) {
+    public synchronized void deleteRule(String region, String ruleArn) {
         Map<String, Rule> regionRules = mutableRegion(rules, region);
         Rule rule = regionRules.get(ruleArn);
         if (rule == null) {
@@ -798,7 +799,7 @@ public class ElbV2Service implements ResourceProvider {
         dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
     }
 
-    public Rule modifyRule(String region, String ruleArn, List<RuleCondition> conditions, List<Action> actions) {
+    public synchronized Rule modifyRule(String region, String ruleArn, List<RuleCondition> conditions, List<Action> actions) {
         Rule rule = requireRule(region, ruleArn);
         String listenerArn = rule.getListenerArn();
         if (conditions != null) rule.setConditions(new ArrayList<>(conditions));
@@ -808,7 +809,7 @@ public class ElbV2Service implements ResourceProvider {
         return rule;
     }
 
-    public void setRulePriorities(String region, Map<String, Integer> arnToPriority) {
+    public synchronized void setRulePriorities(String region, Map<String, Integer> arnToPriority) {
         Map<String, Rule> regionRules = rules.getOrDefault(region, Map.of());
 
         // validate all rules exist and are not default before touching anything

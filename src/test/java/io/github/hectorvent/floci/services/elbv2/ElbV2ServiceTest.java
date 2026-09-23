@@ -163,6 +163,51 @@ class ElbV2ServiceTest {
     }
 
     @Test
+    void concurrentCreateRulesOnOneListenerAreAtomic() throws Exception {
+        String lbArn = service.createLoadBalancer(
+                REGION, "rules-race-lb", "internal", "application", "ipv4",
+                ALB_SUBNETS, List.of("sg-a"), Map.of()).getLoadBalancerArn();
+        String tgArn = createTargetGroup("rules-race-tg");
+        String listenerArn = service.createListener(
+                REGION, lbArn, "HTTP", 80, null, List.of(),
+                List.of(forwardAction(tgArn)), List.of(), Map.of()).getListenerArn();
+
+        int threads = 16;
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger priorityInUse = new java.util.concurrent.atomic.AtomicInteger();
+        List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            // Half the callers race for priority 10; the rest take distinct priorities.
+            int priority = i % 2 == 0 ? 10 : 100 + i;
+            futures.add(pool.submit(() -> {
+                start.await();
+                try {
+                    service.createRule(REGION, listenerArn, List.of(pathPattern("/p" + priority + "/*")),
+                            priority, List.of(forwardAction(tgArn)), Map.of());
+                } catch (AwsException e) {
+                    if (!"PriorityInUse".equals(e.getErrorCode())) {
+                        throw e;
+                    }
+                    priorityInUse.incrementAndGet();
+                }
+                return null;
+            }));
+        }
+        start.countDown();
+        for (java.util.concurrent.Future<?> future : futures) {
+            future.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+
+        List<Rule> rules = service.describeRules(REGION, listenerArn, null);
+        assertEquals(1, rules.stream().filter(r -> "10".equals(r.getPriority())).count());
+        assertEquals(threads / 2 - 1, priorityInUse.get());
+        // default rule + one priority-10 winner + the distinct-priority rules
+        assertEquals(1 + 1 + threads / 2, rules.size());
+    }
+
+    @Test
     void createLoadBalancerAcceptsSubnetsEc2StoreCannotSee() {
         when(ec2Service.findSubnetById(eq(REGION), anyString())).thenReturn(Optional.empty());
 
