@@ -51,6 +51,7 @@ validation:
     unrecognized_links: warn
 not_in_nav: |
   configuration/application-yml.md
+  alchemy-local-gaps.md
   design/*.md
 
 extra_css:

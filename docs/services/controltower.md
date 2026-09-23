@@ -46,6 +46,7 @@ Enabled-baseline operations are recorded with AWS operation names such as `ENABL
 | `UpdateEnabledControl` | `POST /update-enabled-control` | Updates parameters when they differ from the current configuration |
 | `ResetEnabledControl` | `POST /reset-enabled-control` | Repairs non-SCP enabled controls and records a reset operation |
 | `GetControlOperation` | `POST /get-control-operation` | Reads a previously issued control operation |
+| `ListControlOperations` | `POST /list-control-operations` | Lists recorded control operations with filtering and pagination |
 
 ## Operation behavior
 

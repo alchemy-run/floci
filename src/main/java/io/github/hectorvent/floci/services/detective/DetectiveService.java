@@ -32,6 +32,7 @@ public class DetectiveService implements Resettable {
     private static final int MAX_MEMBERS = 1200;
     private static final String ACCEPTED_BUT_DISABLED = "ACCEPTED_BUT_DISABLED";
     private static final String ENABLED = "ENABLED";
+    private static final String GRAPH_ARN_PATTERN = "arn:aws:detective:[a-z0-9-]+:\\d{12}:graph:[a-f0-9]{32}";
 
     private final AccountAwareStorageBackend<DetectiveState> states;
     private final RegionResolver regionResolver;
@@ -115,21 +116,114 @@ public class DetectiveService implements Resettable {
             Map<String, String> collected = collectCoreEvents(region, Instant.parse(startTime), now);
             state.getCoreEvents().putAll(collected);
         }
-        String ingestState = cloudTrailEnabled ? "STARTED" : "DISABLED";
-        if (!ingestState.equals(state.getCoreIngestState())) {
-            state.setCoreIngestState(ingestState);
-            state.getCoreIngestStateChanges().put(ingestState, now.toString());
-        }
+        updateCoreIngestState(state, now);
         state.setCoreCollectionStartTime(startTime);
         states.put(region, state);
 
         ObjectNode response = objectMapper.createObjectNode();
         ObjectNode core = response.putObject("DatasourcePackages").putObject("DETECTIVE_CORE");
         core.put("DatasourcePackageIngestState", state.getCoreIngestState());
-        ObjectNode changes = core.putObject("LastIngestStateChange");
+        core.set("LastIngestStateChange", coreIngestStateChanges(state));
+        return response;
+    }
+
+    private boolean updateCoreIngestState(DetectiveState state, Instant now) {
+        String ingestState = cloudTrailEnabled ? "STARTED" : "DISABLED";
+        if (ingestState.equals(state.getCoreIngestState())) {
+            return false;
+        }
+        state.setCoreIngestState(ingestState);
+        state.getCoreIngestStateChanges().put(ingestState, now.toString());
+        return true;
+    }
+
+    private ObjectNode coreIngestStateChanges(DetectiveState state) {
+        ObjectNode changes = objectMapper.createObjectNode();
         state.getCoreIngestStateChanges().forEach((status, timestamp) ->
                 changes.putObject(status).put("Timestamp", timestamp));
+        return changes;
+    }
+
+    /**
+     * Datasource ingest history for accounts in the caller's behavior graph. The graph owner
+     * contributes the local core package; member accounts have no ingest history because
+     * cross-account member ingestion is not implemented.
+     */
+    public synchronized ObjectNode batchGetGraphMemberDatasources(String region, String graphArn,
+                                                                  List<String> accountIds) {
+        requireGraphArn(region, graphArn);
+        if (accountIds == null || accountIds.isEmpty() || accountIds.size() > 50) {
+            throw new AwsException("ValidationException", "AccountIds must contain between 1 and 50 accounts.", 400);
+        }
+        accountIds.forEach(DetectiveService::requireAccountId);
+        DetectiveState state = requireGraph(region);
+        String owner = regionResolver.getAccountId();
+        if (accountIds.contains(owner) && updateCoreIngestState(state, Instant.now())) {
+            states.put(region, state);
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        var datasources = response.putArray("MemberDatasources");
+        var unprocessed = response.putArray("UnprocessedAccounts");
+        for (String accountId : new java.util.LinkedHashSet<>(accountIds)) {
+            if (owner.equals(accountId)) {
+                datasources.add(membershipDatasources(accountId, graphArn, state));
+            } else if (state.getMembers().containsKey(accountId)) {
+                datasources.add(membershipDatasources(accountId, graphArn, null));
+            } else {
+                unprocessed.addObject().put("AccountId", accountId)
+                        .put("Reason", "The account is not a member of the behavior graph.");
+            }
+        }
         return response;
+    }
+
+    /** Datasource ingest history for the caller's membership in each requested behavior graph. */
+    public synchronized ObjectNode batchGetMembershipDatasources(List<String> graphArns) {
+        if (graphArns == null || graphArns.isEmpty() || graphArns.size() > 50) {
+            throw new AwsException("ValidationException", "GraphArns must contain between 1 and 50 graphs.", 400);
+        }
+        for (String graphArn : graphArns) {
+            if (graphArn == null || !graphArn.matches(GRAPH_ARN_PATTERN)) {
+                throw new AwsException("ValidationException", "GraphArns must contain valid Detective graph ARNs.", 400);
+            }
+        }
+        String caller = regionResolver.getAccountId();
+        ObjectNode response = objectMapper.createObjectNode();
+        var datasources = response.putArray("MembershipDatasources");
+        var unprocessed = response.putArray("UnprocessedGraphs");
+        for (String graphArn : new java.util.LinkedHashSet<>(graphArns)) {
+            String[] parts = graphArn.split(":");
+            String graphRegion = parts[3];
+            String owner = parts[4];
+            DetectiveState state = caller.equals(owner)
+                    ? state(graphRegion)
+                    : states.getForAccount(owner, graphRegion).orElse(null);
+            if (state == null || !state.isGraph() || !graphArn.equals(state.getGraphArn())) {
+                unprocessed.addObject().put("GraphArn", graphArn).put("Reason", "Behavior graph not found.");
+            } else if (caller.equals(owner)) {
+                if (updateCoreIngestState(state, Instant.now())) {
+                    states.put(graphRegion, state);
+                }
+                datasources.add(membershipDatasources(caller, graphArn, state));
+            } else if (state.getMembers().containsKey(caller)) {
+                datasources.add(membershipDatasources(caller, graphArn, null));
+            } else {
+                unprocessed.addObject().put("GraphArn", graphArn)
+                        .put("Reason", "The account is not a member of the behavior graph.");
+            }
+        }
+        return response;
+    }
+
+    private ObjectNode membershipDatasources(String accountId, String graphArn, DetectiveState ownerState) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("AccountId", accountId);
+        node.put("GraphArn", graphArn);
+        ObjectNode history = node.putObject("DatasourcePackageIngestHistory");
+        if (ownerState != null) {
+            history.set("DETECTIVE_CORE", coreIngestStateChanges(ownerState));
+        }
+        return node;
     }
 
     private Map<String, String> collectCoreEvents(String region, Instant start, Instant end) {
@@ -398,7 +492,7 @@ public class DetectiveService implements Resettable {
     }
 
     public void requireGraphArn(String region, String graphArn) {
-        if (graphArn == null || !graphArn.matches("arn:aws:detective:[a-z0-9-]+:\\d{12}:graph:[a-f0-9]{32}")) {
+        if (graphArn == null || !graphArn.matches(GRAPH_ARN_PATTERN)) {
             throw new AwsException("ValidationException", "GraphArn must be a valid Detective graph ARN.", 400);
         }
         String prefix = "arn:aws:detective:" + region + ":" + regionResolver.getAccountId() + ":graph:";

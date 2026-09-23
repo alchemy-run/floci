@@ -13,9 +13,11 @@ import io.github.hectorvent.floci.services.inspector2.model.InspectorFilter;
 import io.github.hectorvent.floci.services.inspector2.model.InspectorState;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -87,6 +89,87 @@ public class Inspector2Controller {
     public Response listCisScanConfigurations(@Context HttpHeaders headers, String body) {
         return Response.ok(service.listCisScanConfigurations(
                 region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/findings/list")
+    public Response listFindings(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.listFindings(region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/coverage/list")
+    public Response listCoverage(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.listCoverage(region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/vulnerabilities/search")
+    public Response searchVulnerabilities(@Context HttpHeaders headers, String body) {
+        region(headers);
+        return Response.ok(service.searchVulnerabilities(parse(body))).build();
+    }
+
+    @POST
+    @Path("/usage/list")
+    public Response listUsageTotals(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.listUsageTotals(
+                region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/accountpermissions/list")
+    public Response listAccountPermissions(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.listAccountPermissions(
+                region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/freetrialinfo/batchget")
+    public Response batchGetFreeTrialInfo(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.batchGetFreeTrialInfo(
+                region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/configuration/get")
+    public Response getConfiguration(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.getConfiguration(
+                region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @GET
+    @Path("/encryptionkey/get")
+    public Response getEncryptionKey(@Context HttpHeaders headers, @QueryParam("scanType") String scanType,
+                                     @QueryParam("resourceType") String resourceType) {
+        region(headers);
+        return Response.ok(service.getEncryptionKey(scanType, resourceType)).build();
+    }
+
+    @POST
+    @Path("/cis/scan/list")
+    public Response listCisScans(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.listCisScans(region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/members/list")
+    public Response listMembers(@Context HttpHeaders headers, String body) {
+        return Response.ok(service.listMembers(region(headers), requestContext.getAccountId(), parse(body))).build();
+    }
+
+    @POST
+    @Path("/delegatedadminaccounts/get")
+    public Response getDelegatedAdminAccount(@Context HttpHeaders headers, String body) {
+        parse(body);
+        return Response.ok(service.getDelegatedAdminAccount(region(headers), requestContext.getAccountId())).build();
+    }
+
+    @POST
+    @Path("/reporting/status/get")
+    public Response getFindingsReportStatus(@Context HttpHeaders headers, String body) {
+        region(headers);
+        return Response.ok(service.getFindingsReportStatus(parse(body))).build();
     }
 
     @POST

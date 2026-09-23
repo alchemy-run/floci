@@ -22,6 +22,7 @@ public class Detector {
     private OrganizationConfiguration organizationConfiguration;
     private Map<String, JsonNode> findings = Map.of();
     private Map<String, JsonNode> resources = Map.of();
+    private JsonNode malwareScanSettings;
 
     public Detector() {
     }
@@ -133,5 +134,13 @@ public class Detector {
 
     public void setOrganizationConfiguration(OrganizationConfiguration organizationConfiguration) {
         this.organizationConfiguration = organizationConfiguration;
+    }
+
+    public JsonNode getMalwareScanSettings() {
+        return malwareScanSettings;
+    }
+
+    public void setMalwareScanSettings(JsonNode malwareScanSettings) {
+        this.malwareScanSettings = malwareScanSettings;
     }
 }

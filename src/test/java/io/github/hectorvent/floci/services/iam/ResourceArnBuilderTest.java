@@ -85,6 +85,11 @@ class ResourceArnBuilderTest {
                 builder.build("inspector2", mockJsonCtx("/filters/create", "{}"), "eu-west-1", "123456789012"));
         assertEquals("*", builder.build("inspector2", mockJsonCtx("/filters/list",
                 "{\"arns\":[\"" + arn + "\"]}"), "eu-west-1", "123456789012"));
+        for (String accountLevel : List.of("/findings/list", "/coverage/list", "/members/list",
+                "/delegatedadminaccounts/get", "/reporting/status/get")) {
+            assertEquals("*", builder.build("inspector2", mockJsonCtx(accountLevel, "{}"),
+                    "eu-west-1", "123456789012"));
+        }
         assertEquals(arn, builder.build("inspector2", mockJsonCtx("/tags/" + arn, "{}"),
                 "eu-west-1", "123456789012"));
         String detectorArn = "arn:aws:guardduty:eu-west-1:123456789012:detector/d/filter/f";

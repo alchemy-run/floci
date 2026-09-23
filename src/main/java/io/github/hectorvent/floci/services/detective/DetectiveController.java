@@ -235,6 +235,38 @@ public class DetectiveController {
     }
 
     @POST
+    @Path("/graph/datasources/get")
+    public Response batchGetGraphMemberDatasources(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        return Response.ok(service.batchGetGraphMemberDatasources(region(headers),
+                request.path("GraphArn").asText(null), stringList(request, "AccountIds"))).build();
+    }
+
+    @POST
+    @Path("/membership/datasources/get")
+    public Response batchGetMembershipDatasources(String body) {
+        return Response.ok(service.batchGetMembershipDatasources(stringList(parse(body), "GraphArns"))).build();
+    }
+
+    private static List<String> stringList(JsonNode request, String field) {
+        JsonNode values = request.get(field);
+        if (values == null || values.isNull()) {
+            return null;
+        }
+        if (!values.isArray()) {
+            throw new AwsException("ValidationException", field + " must be a list.", 400);
+        }
+        List<String> result = new java.util.ArrayList<>(values.size());
+        for (JsonNode value : values) {
+            if (!value.isTextual()) {
+                throw new AwsException("ValidationException", field + " must contain strings.", 400);
+            }
+            result.add(value.textValue());
+        }
+        return result;
+    }
+
+    @POST
     @Path("/graph/datasources/update")
     public Response updateDatasourcePackages(@Context HttpHeaders headers, String body) {
         service.requireGraphArn(region(headers), parse(body).path("GraphArn").asText(null));

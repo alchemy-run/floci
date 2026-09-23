@@ -17,8 +17,6 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import java.time.Instant;
-
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -82,6 +80,22 @@ public class ControlTowerControlController {
     public Response operation(@Context HttpHeaders headers, String body) {
         JsonNode request = parse(body);
         var operation = service.operation(account(), region(headers), requireText(request, "operationIdentifier"));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("controlOperation", operationNode(operation));
+        return Response.ok(response).build();
+    }
+
+    @POST @Path("/list-control-operations")
+    public Response listOperations(@Context HttpHeaders headers, String body) {
+        var result = service.listOperations(account(), region(headers), parse(body));
+        ObjectNode response = objectMapper.createObjectNode();
+        var array = response.putArray("controlOperations");
+        result.operations().forEach(operation -> array.add(operationNode(operation)));
+        if (result.nextToken() != null) response.put("nextToken", result.nextToken());
+        return Response.ok(response).build();
+    }
+
+    private ObjectNode operationNode(ControlTowerControlService.ControlOperation operation) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("operationIdentifier", operation.operationIdentifier());
         node.put("operationType", operation.operationType());
@@ -89,12 +103,9 @@ public class ControlTowerControlController {
         node.put("controlIdentifier", operation.controlIdentifier());
         node.put("enabledControlIdentifier", operation.enabledControlIdentifier());
         node.put("targetIdentifier", operation.targetIdentifier());
-        String now = Instant.now().toString();
-        node.put("startTime", now);
-        node.put("endTime", now);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.set("controlOperation", node);
-        return Response.ok(response).build();
+        node.put("startTime", operation.startTime());
+        node.put("endTime", operation.endTime());
+        return node;
     }
 
     private ObjectNode summary(EnabledControl control) {

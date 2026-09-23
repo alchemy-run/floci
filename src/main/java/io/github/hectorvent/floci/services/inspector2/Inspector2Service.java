@@ -27,6 +27,21 @@ import java.util.UUID;
 public class Inspector2Service implements Resettable {
     private static final Set<String> RESOURCE_TYPES = Set.of(
             "EC2", "ECR", "LAMBDA", "LAMBDA_CODE", "CODE_REPOSITORY");
+    private static final Set<String> ENCRYPTION_RESOURCE_TYPES = Set.of(
+            "AWS_EC2_INSTANCE", "AWS_ECR_CONTAINER_IMAGE", "AWS_ECR_REPOSITORY", "AWS_LAMBDA_FUNCTION",
+            "CODE_REPOSITORY", "Microsoft.Compute/virtualMachines",
+            "Microsoft.ContainerRegistry/registry/containerImage", "Microsoft.Web/sites");
+    private static final Map<String, List<String>> PERMISSION_OPERATIONS = permissionOperations();
+    /** Amazon Inspector's free trial lasts 15 days from activation of each scan type. */
+    private static final double FREE_TRIAL_SECONDS = 15 * 24 * 60 * 60;
+
+    private static Map<String, List<String>> permissionOperations() {
+        Map<String, List<String>> operations = new LinkedHashMap<>();
+        operations.put("EC2", List.of("ENABLE_SCANNING", "DISABLE_SCANNING"));
+        operations.put("ECR", List.of("ENABLE_SCANNING", "DISABLE_SCANNING", "ENABLE_REPOSITORY", "DISABLE_REPOSITORY"));
+        operations.put("LAMBDA", List.of("ENABLE_SCANNING", "DISABLE_SCANNING"));
+        return java.util.Collections.unmodifiableMap(operations);
+    }
 
     private final AccountAwareStorageBackend<InspectorState> states;
     private final OrganizationsService organizationsService;
@@ -164,6 +179,271 @@ public class Inspector2Service implements Resettable {
         }
         throw new AwsException("NotImplementedException",
                 "CIS scan configurations are not implemented by Floci.", 501);
+    }
+
+    public synchronized Map<String, Object> listFindings(String region, String accountId, JsonNode request) {
+        requireObject(request);
+        optionalObject(request, "filterCriteria");
+        optionalObject(request, "sortCriteria");
+        // Floci runs no vulnerability scanner, so no findings are ever produced.
+        return page("findings", List.<String>of(), id -> id,
+                maxResults(request, 100), text(request, "nextToken", 1, 1000000, false), 100);
+    }
+
+    public synchronized Map<String, Object> listCoverage(String region, String accountId, JsonNode request) {
+        requireObject(request);
+        optionalObject(request, "filterCriteria");
+        // No scanner means no resource is ever reported as covered.
+        return page("coveredResources", List.<String>of(), id -> id,
+                maxResults(request, 200), text(request, "nextToken", 1, 1000000, false), 200);
+    }
+
+    public synchronized Map<String, Object> searchVulnerabilities(JsonNode request) {
+        requireObject(request);
+        JsonNode criteria = request.get("filterCriteria");
+        if (criteria == null || !criteria.isObject()) {
+            throw validation("filterCriteria is required.");
+        }
+        JsonNode ids = criteria.get("vulnerabilityIds");
+        if (ids == null || !ids.isArray() || ids.size() != 1) {
+            throw validation("filterCriteria.vulnerabilityIds must contain exactly 1 vulnerability ID.");
+        }
+        String id = ids.get(0).isTextual() ? ids.get(0).textValue() : null;
+        if (id == null || !id.matches("^CVE-[12][0-9]{3}-[0-9]{1,10}$")) {
+            throw validation("filterCriteria.vulnerabilityIds must contain CVE identifiers.");
+        }
+        List<Map<String, Object>> matches = VulnerabilityCatalog.lookup(id).map(List::of).orElse(List.of());
+        return page("vulnerabilities", matches, entry -> (String) entry.get("id"),
+                null, text(request, "nextToken", 1, 1000000, false), 100);
+    }
+
+    public synchronized Map<String, Object> listUsageTotals(String region, String callerAccountId, JsonNode request) {
+        requireObject(request);
+        Integer maxResults = maxResults(request, 500);
+        String token = text(request, "nextToken", 1, 1000000, false);
+        JsonNode accountIds = request.get("accountIds");
+        if (accountIds != null && (!accountIds.isArray() || accountIds.isEmpty() || accountIds.size() > 7000)) {
+            throw validation("accountIds must contain between 1 and 7000 account IDs.");
+        }
+        if (accountIds != null) {
+            for (JsonNode accountId : accountIds) {
+                requireAccountId(accountId.isTextual() ? accountId.textValue() : null);
+                authorizeAccountAccess(region, callerAccountId, accountId.textValue());
+            }
+        }
+        // Floci does not meter scans, so there is no usage to total.
+        return page("totals", List.<String>of(), id -> id, maxResults, token, 500);
+    }
+
+    public synchronized Map<String, Object> listAccountPermissions(
+            String region, String callerAccountId, JsonNode request) {
+        requireObject(request);
+        String service = text(request, "service", 1, 16, false);
+        if (service != null && !PERMISSION_OPERATIONS.containsKey(service)) {
+            throw validation("service must be one of EC2, ECR, or LAMBDA.");
+        }
+        Integer maxResults = maxResults(request, 1024);
+        String token = text(request, "nextToken", 1, 1000000, false);
+        List<Map<String, Object>> permissions = new ArrayList<>();
+        if (!isManagedMember(region, callerAccountId)) {
+            PERMISSION_OPERATIONS.forEach((permissionService, operations) -> {
+                if (service == null || service.equals(permissionService)) {
+                    for (String operation : operations) {
+                        Map<String, Object> permission = new LinkedHashMap<>();
+                        permission.put("service", permissionService);
+                        permission.put("operation", operation);
+                        permissions.add(permission);
+                    }
+                }
+            });
+        }
+        return page("permissions", permissions,
+                permission -> permission.get("service") + ":" + permission.get("operation"),
+                maxResults, token, 1024);
+    }
+
+    public synchronized Map<String, Object> batchGetFreeTrialInfo(
+            String region, String callerAccountId, JsonNode request) {
+        requireObject(request);
+        JsonNode accountIds = request.get("accountIds");
+        if (accountIds == null || !accountIds.isArray()) {
+            throw validation("accountIds is required.");
+        }
+        List<Map<String, Object>> accounts = new ArrayList<>();
+        List<Map<String, Object>> failed = new ArrayList<>();
+        double now = timestamp();
+        for (JsonNode node : accountIds) {
+            String accountId = node.isTextual() ? node.textValue() : null;
+            requireAccountId(accountId);
+            try {
+                authorizeAccountAccess(region, callerAccountId, accountId);
+            } catch (AwsException e) {
+                Map<String, Object> failure = new LinkedHashMap<>();
+                failure.put("accountId", accountId);
+                failure.put("code", "ACCESS_DENIED");
+                failure.put("message", e.getMessage());
+                failed.add(failure);
+                continue;
+            }
+            List<Map<String, Object>> trials = new ArrayList<>();
+            stateForAccount(accountId, region).getFreeTrialStarts().forEach((type, start) -> {
+                double end = start + FREE_TRIAL_SECONDS;
+                Map<String, Object> trial = new LinkedHashMap<>();
+                trial.put("type", type);
+                trial.put("start", start);
+                trial.put("end", end);
+                trial.put("status", now < end ? "ACTIVE" : "INACTIVE");
+                trials.add(trial);
+            });
+            Map<String, Object> account = new LinkedHashMap<>();
+            account.put("accountId", accountId);
+            account.put("freeTrialInfo", trials);
+            accounts.add(account);
+        }
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("accounts", accounts);
+        response.put("failedAccounts", failed);
+        return response;
+    }
+
+    public synchronized Map<String, Object> getConfiguration(String region, String callerAccountId, JsonNode request) {
+        requireObject(request);
+        String accountId = text(request, "accountId", 12, 12, false);
+        if (accountId != null) {
+            requireAccountId(accountId);
+            authorizeAccountAccess(region, callerAccountId, accountId);
+        }
+        // UpdateConfiguration is not supported, so no ECR or EC2 scan configuration has been set.
+        return Map.of();
+    }
+
+    public Map<String, Object> getEncryptionKey(String scanType, String resourceType) {
+        if (scanType == null || !Set.of("NETWORK", "PACKAGE", "CODE").contains(scanType)) {
+            throw validation("scanType must be one of NETWORK, PACKAGE, or CODE.");
+        }
+        if (resourceType == null || !ENCRYPTION_RESOURCE_TYPES.contains(resourceType)) {
+            throw validation("resourceType is invalid.");
+        }
+        // UpdateEncryptionKey is not supported, so no customer managed key is ever configured.
+        throw new AwsException("ResourceNotFoundException",
+                "No customer managed key is configured for the specified scan type and resource type.", 404);
+    }
+
+    public synchronized Map<String, Object> listCisScans(String region, String accountId, JsonNode request) {
+        requireObject(request);
+        optionalObject(request, "filterCriteria");
+        optionalEnum(request, "detailLevel", Set.of("ORGANIZATION", "MEMBER"));
+        optionalEnum(request, "sortBy", Set.of("STATUS", "SCHEDULED_BY", "SCAN_START_DATE", "FAILED_CHECKS"));
+        optionalEnum(request, "sortOrder", Set.of("ASC", "DESC"));
+        Integer maxResults = maxResults(request, 100);
+        String token = text(request, "nextToken", 1, 1000000, false);
+        if (!"ENABLED".equals(stateForAccount(accountId, region).getStatus())) {
+            throw accessDenied("Invoking account is not enabled.");
+        }
+        // CIS scan configurations cannot be created in Floci, so no scans have run.
+        return page("scans", List.<String>of(), id -> id, maxResults, token, 100);
+    }
+
+    public synchronized Map<String, Object> listMembers(String region, String callerAccountId, JsonNode request) {
+        requireObject(request);
+        JsonNode onlyAssociatedNode = request.get("onlyAssociated");
+        if (onlyAssociatedNode != null && !onlyAssociatedNode.isNull() && !onlyAssociatedNode.isBoolean()) {
+            throw validation("onlyAssociated must be a boolean.");
+        }
+        boolean onlyAssociated = onlyAssociatedNode == null || onlyAssociatedNode.isNull()
+                || onlyAssociatedNode.booleanValue();
+        Integer maxResults = maxResults(request, 50);
+        String token = text(request, "nextToken", 1, 1000000, false);
+        List<Map<String, Object>> members = new ArrayList<>();
+        String managementAccountId = managementAccountFor(callerAccountId).orElse(null);
+        if (managementAccountId != null && callerAccountId.equals(
+                stateForAccount(managementAccountId, region).getAdminAccountId())) {
+            for (var account : organizationsService.listAccounts(managementAccountId)) {
+                if (callerAccountId.equals(account.getId())) {
+                    continue;
+                }
+                boolean associated = !"DISABLED".equals(stateForAccount(account.getId(), region).getStatus());
+                if (onlyAssociated && !associated) {
+                    continue;
+                }
+                Map<String, Object> member = new LinkedHashMap<>();
+                member.put("accountId", account.getId());
+                member.put("relationshipStatus", associated ? "ENABLED" : "CREATED");
+                member.put("delegatedAdminAccountId", callerAccountId);
+                members.add(member);
+            }
+        }
+        return page("members", members, member -> (String) member.get("accountId"), maxResults, token, 50);
+    }
+
+    public synchronized Map<String, Object> getDelegatedAdminAccount(String region, String callerAccountId) {
+        String managementAccountId = managementAccountFor(callerAccountId)
+                .orElseThrow(() -> accessDenied("The caller is not a member of an AWS Organizations organization."));
+        String adminAccountId = stateForAccount(managementAccountId, region).getAdminAccountId();
+        if (adminAccountId == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "No delegated administrator is configured for the organization.", 404);
+        }
+        Map<String, Object> delegatedAdmin = new LinkedHashMap<>();
+        delegatedAdmin.put("accountId", adminAccountId);
+        delegatedAdmin.put("relationshipStatus", "ENABLED");
+        return Map.of("delegatedAdmin", delegatedAdmin);
+    }
+
+    public Map<String, Object> getFindingsReportStatus(JsonNode request) {
+        requireObject(request);
+        String reportId = text(request, "reportId", 36, 36, false);
+        if (reportId != null && !reportId.matches(
+                "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")) {
+            throw validation("reportId must be a findings report ID.");
+        }
+        // CreateFindingsReport is not supported, so no findings report exists.
+        throw new AwsException("ResourceNotFoundException", "The specified findings report was not found.", 404);
+    }
+
+    /** True for an organization account whose Inspector settings are managed by another account. */
+    private boolean isManagedMember(String region, String accountId) {
+        return managementAccountFor(accountId)
+                .map(managementAccountId -> stateForAccount(managementAccountId, region).getAdminAccountId())
+                .filter(adminAccountId -> !adminAccountId.equals(accountId))
+                .isPresent();
+    }
+
+    private static <T> Map<String, Object> page(String key, List<T> items, java.util.function.Function<T, String> cursor,
+                                                Integer maxResults, String token, int pageSize) {
+        PaginatedResult<T> page = Pagination.paginate(items, cursor, maxResults, token, pageSize,
+                "ValidationException");
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put(key, page.items());
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return response;
+    }
+
+    private static Integer maxResults(JsonNode request, int max) {
+        JsonNode value = request.get("maxResults");
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 1 || value.intValue() > max) {
+            throw validation("maxResults must be between 1 and " + max + ".");
+        }
+        return value.intValue();
+    }
+
+    private static void optionalObject(JsonNode request, String name) {
+        JsonNode value = request.get(name);
+        if (value != null && !value.isNull() && !value.isObject()) {
+            throw validation(name + " must be an object.");
+        }
+    }
+
+    private static void optionalEnum(JsonNode request, String name, Set<String> allowed) {
+        String value = text(request, name, 1, 64, false);
+        if (value != null && !allowed.contains(value)) {
+            throw validation(name + " must be one of " + String.join(", ", new java.util.TreeSet<>(allowed)) + ".");
+        }
     }
 
     private static InspectorFilter requireFilter(InspectorState state, String arn) {
@@ -308,6 +588,7 @@ public class Inspector2Service implements Resettable {
         delegated.setAdminAccountId(accountId);
         for (String resourceType : RESOURCE_TYPES) {
             delegated.setResourceStatus(resourceType, "ENABLED");
+            delegated.getFreeTrialStarts().putIfAbsent(resourceType, timestamp());
         }
         delegated.setStatus("ENABLED");
         delegated.setDeepInspectionStatus("ACTIVATED");
@@ -373,6 +654,7 @@ public class Inspector2Service implements Resettable {
                 String current = state.resourceStatus(resourceType);
                 if (!"ENABLED".equals(current) && !"ENABLING".equals(current)) {
                     state.setResourceStatus(resourceType, "ENABLING");
+                    state.getFreeTrialStarts().putIfAbsent(resourceType, timestamp());
                     changed = true;
                 }
             }
@@ -525,6 +807,7 @@ public class Inspector2Service implements Resettable {
         copy.setAutoEnableCodeRepository(source.isAutoEnableCodeRepository());
         copy.setDeepInspectionStatus(source.getDeepInspectionStatus());
         source.getFilters().forEach((arn, filter) -> copy.getFilters().put(arn, filter.copy()));
+        copy.getFreeTrialStarts().putAll(source.getFreeTrialStarts());
         return copy;
     }
 

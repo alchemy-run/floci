@@ -68,6 +68,45 @@ class ControlTowerControlControllerIntegrationTest {
     }
 
     @Test
+    void listControlOperationsReturnsRecordedOperations() {
+        String target = "arn:aws:organizations::000000000000:ou/o-example/ou-example-listops1";
+        String control = "arn:aws:controltower:us-east-1::control/AWS-GR_EBS_OPTIMIZED_INSTANCE";
+        var enabled = post("/enable-control", "{\"controlIdentifier\":\"" + control
+                + "\",\"targetIdentifier\":\"" + target + "\"}").then().statusCode(200).extract();
+        String enabledArn = enabled.path("arn");
+        String enableOperation = enabled.path("operationIdentifier");
+        String resetOperation = post("/reset-enabled-control", "{\"enabledControlIdentifier\":\"" + enabledArn + "\"}")
+                .then().statusCode(200).extract().path("operationIdentifier");
+
+        String filter = "\"filter\":{\"enabledControlIdentifiers\":[\"" + enabledArn + "\"]}";
+        post("/list-control-operations", "{" + filter + "}")
+                .then().statusCode(200)
+                .body("controlOperations", hasSize(2))
+                .body("controlOperations[0].operationIdentifier", equalTo(enableOperation))
+                .body("controlOperations[0].operationType", equalTo("ENABLE_CONTROL"))
+                .body("controlOperations[0].status", equalTo("SUCCEEDED"))
+                .body("controlOperations[0].controlIdentifier", equalTo(control))
+                .body("controlOperations[0].targetIdentifier", equalTo(target))
+                .body("controlOperations[0].startTime", notNullValue())
+                .body("controlOperations[1].operationIdentifier", equalTo(resetOperation));
+
+        String firstPage = post("/list-control-operations", "{" + filter + ",\"maxResults\":1}")
+                .then().statusCode(200).body("controlOperations", hasSize(1))
+                .extract().path("nextToken");
+        post("/list-control-operations", "{" + filter + ",\"maxResults\":1,\"nextToken\":\"" + firstPage + "\"}")
+                .then().statusCode(200)
+                .body("controlOperations[0].operationIdentifier", equalTo(resetOperation));
+
+        post("/list-control-operations", "{\"filter\":{\"enabledControlIdentifiers\":[\"" + enabledArn
+                + "\"],\"controlOperationTypes\":[\"RESET_ENABLED_CONTROL\"]}}")
+                .then().statusCode(200).body("controlOperations", hasSize(1));
+        post("/list-control-operations", "{\"filter\":{\"statuses\":[\"DONE\"]}}")
+                .then().statusCode(400).body("__type", containsString("ValidationException"));
+        post("/list-control-operations", "{\"maxResults\":0}")
+                .then().statusCode(400).body("__type", containsString("ValidationException"));
+    }
+
+    @Test
     void listEnabledControlsRejectsNegativeNextToken() {
         post("/list-enabled-controls", "{\"nextToken\":\"-1\"}")
                 .then().statusCode(400).body("__type", containsString("ValidationException"));

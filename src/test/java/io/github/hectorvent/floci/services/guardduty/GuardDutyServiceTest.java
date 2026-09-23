@@ -15,6 +15,8 @@ import io.github.hectorvent.floci.services.guardduty.model.MemberAccount;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationAdditionalConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationFeature;
+import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.organizations.model.OrganizationAccount;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.Bucket;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
@@ -625,6 +627,86 @@ class GuardDutyServiceTest {
         assertEquals("INACTIVE", withS3.getResource(REGION, detectorId, "ipset", setId).path("status").asText());
         withS3.deleteResource(REGION, detectorId, "ipset", setId);
         assertTrue(withS3.listResources(REGION, detectorId, "ipset", null, null).items().isEmpty());
+    }
+
+    @Test
+    void organizationStatisticsCountOrganizationAccountsAssociatedWithTheDelegatedAdministrator() {
+        String admin = "111111111111";
+        String activeMember = "222222222222";
+        String suspendedMember = "333333333333";
+        String outsider = "444444444444";
+        OrganizationsService organizations = mock(OrganizationsService.class);
+        when(organizations.listAccounts(admin)).thenReturn(List.of(
+                orgAccount(admin, "ACTIVE"), orgAccount(activeMember, "ACTIVE"),
+                orgAccount(suspendedMember, "SUSPENDED"), orgAccount(outsider, "ACTIVE")));
+        GuardDutyService withOrganizations = new GuardDutyService(
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(), null, organizations);
+
+        assertThrows(AwsException.class, () -> withOrganizations.getOrganizationStatistics(REGION, admin));
+        withOrganizations.enableOrganizationAdminAccount(REGION, request("{\"adminAccountId\":\"" + admin + "\"}"));
+        Detector adminDetector = withOrganizations.createDetector(REGION, admin, request(
+                "{\"enable\":true,\"features\":[{\"name\":\"S3_DATA_EVENTS\",\"status\":\"ENABLED\","
+                        + "\"additionalConfiguration\":[]}]}"));
+        withOrganizations.createMembers(REGION, adminDetector.getId(), request("{\"accountDetails\":["
+                + "{\"accountId\":\"" + activeMember + "\",\"email\":\"active@example.com\"},"
+                + "{\"accountId\":\"" + suspendedMember + "\",\"email\":\"suspended@example.com\"}]}"));
+        withOrganizations.createDetector(REGION, activeMember, request(
+                "{\"enable\":true,\"features\":[{\"name\":\"S3_DATA_EVENTS\",\"status\":\"DISABLED\"}]}"));
+        withOrganizations.createDetector(REGION, suspendedMember, request("{\"enable\":true}"));
+
+        JsonNode statistics = withOrganizations.getOrganizationStatistics(REGION, admin)
+                .path("organizationDetails").path("organizationStatistics");
+        assertEquals(4, statistics.path("totalAccountsCount").asInt());
+        assertEquals(3, statistics.path("memberAccountsCount").asInt());
+        assertEquals(2, statistics.path("activeAccountsCount").asInt());
+        assertEquals(2, statistics.path("enabledAccountsCount").asInt());
+        assertEquals(1, statistics.path("countByFeature").size());
+        assertEquals("S3_DATA_EVENTS", statistics.path("countByFeature").get(0).path("name").asText());
+        assertEquals(1, statistics.path("countByFeature").get(0).path("enabledAccountsCount").asInt());
+
+        when(organizations.listAccounts(admin)).thenThrow(
+                new AwsException("AWSOrganizationsNotInUseException", "not in use", 400));
+        AwsException outside = assertThrows(AwsException.class,
+                () -> withOrganizations.getOrganizationStatistics(REGION, admin));
+        assertEquals("BadRequestException", outside.getErrorCode());
+    }
+
+    @Test
+    void administratorAccountIgnoresUnacceptedInvitations() {
+        Detector administrator = service.createDetector(REGION, "555555555555", request("{\"enable\":true}"));
+        service.createMembers(REGION, administrator.getId(), request(
+                "{\"accountDetails\":[{\"accountId\":\"" + ACCOUNT + "\",\"email\":\"member@example.com\"}]}"));
+        service.inviteMembers(REGION, administrator.getId(), request(
+                "{\"accountIds\":[\"" + ACCOUNT + "\"],\"disableEmailNotification\":true}"));
+        Detector member = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}"));
+
+        assertNull(service.getAdministratorAccount(REGION, member.getId(), ACCOUNT));
+        assertThrows(AwsException.class, () -> service.getAdministratorAccount(REGION, "missing", ACCOUNT));
+    }
+
+    @Test
+    void malwareScanSettingsPersistWithTheDetector() {
+        Detector detector = service.createDetector(REGION, ACCOUNT, request("{\"enable\":true}"));
+        assertEquals("NO_RETENTION",
+                service.getMalwareScanSettings(REGION, detector.getId()).path("ebsSnapshotPreservation").asText());
+
+        service.updateMalwareScanSettings(REGION, detector.getId(), request(
+                "{\"scanResourceCriteria\":{\"exclude\":{\"EC2_INSTANCE_TAG\":{\"mapEquals\":[{\"key\":\"skip\"}]}}}}"));
+        JsonNode settings = service.getMalwareScanSettings(REGION, detector.getId());
+        assertEquals("NO_RETENTION", settings.path("ebsSnapshotPreservation").asText());
+        assertEquals("skip", settings.at("/scanResourceCriteria/exclude/EC2_INSTANCE_TAG/mapEquals/0/key").asText());
+        assertThrows(AwsException.class, () -> service.updateMalwareScanSettings(REGION, detector.getId(),
+                request("{\"scanResourceCriteria\":{\"include\":{\"RESOURCE_TYPE\":{\"mapEquals\":[{\"key\":\"k\"}]}}}}")));
+
+        service.deleteDetector(REGION, detector.getId());
+        assertThrows(AwsException.class, () -> service.getMalwareScanSettings(REGION, detector.getId()));
+    }
+
+    private static OrganizationAccount orgAccount(String id, String status) {
+        OrganizationAccount account = new OrganizationAccount();
+        account.setId(id);
+        account.setStatus(status);
+        return account;
     }
 
     private JsonNode sampleRequest() {

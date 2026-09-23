@@ -19,6 +19,8 @@ Floci implements the REST JSON Detective organization and behavior-graph operati
 | `ListInvitations` | - |
 | `ListInvestigations` | - |
 | `ListDatasourcePackages` | - |
+| `BatchGetGraphMemberDatasources` | Returns datasource ingest history for accounts in the caller's behavior graph; unknown accounts are returned as unprocessed. |
+| `BatchGetMembershipDatasources` | Returns the caller's datasource ingest history in each requested behavior graph; unknown graphs and non-memberships are returned as unprocessed. |
 | `UpdateDatasourcePackages` | - |
 | `StartInvestigation` | - |
 | `GetInvestigation` | - |
@@ -39,6 +41,8 @@ Organization configuration accepts an optional `AutoEnable` field and requires t
 Collection is materialized on datasource reads, not by a background worker. It follows CloudTrail pagination, deduplicates event IDs, and only accepts management events for the graph owner's account and Region since graph creation. Legacy graphs without a creation timestamp begin collection at their first datasource read. Event records and ingest-state changes use the existing Detective storage backend and survive persistence reloads. Deleting the graph removes its collected events; a replacement never inherits its predecessor's data. A failed collection returns an error without committing a partial batch or reporting a new successful ingest state.
 
 This is a limited local core datasource: it consumes the management events captured by Floci's CloudTrail implementation, not VPC flow logs or GuardDuty findings. It does not perform AWS behavioral analytics. EKS audit and Security Hub datasource ingestion, datasource updates, cross-account member collection, and investigation execution remain unsupported and are rejected explicitly. Listing investigations on a fresh graph remains empty; collecting management events does not fabricate investigations or indicators.
+
+`BatchGetGraphMemberDatasources` and `BatchGetMembershipDatasources` report the same persisted core ingest history for the graph owner. Member accounts are reported with an empty ingest history because member ingestion is not implemented. Accounts that are not in the graph, and graphs that do not exist or where the caller has no membership, are returned through `UnprocessedAccounts` and `UnprocessedGraphs`.
 
 The datasource listing accepts `MaxResults` from 1 through 200. Only the local core package is exposed, so there is no continuation token; supplied `NextToken` values are rejected. Missing, deleted, foreign-account, and wrong-Region graph ARNs are rejected before reading any source events.
 

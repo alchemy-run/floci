@@ -356,6 +356,56 @@ public class GuardDutyController {
                 region(headers), detectorId, parse(body))).build();
     }
 
+    @GET
+    @Path("/detector/{detectorId}/administrator")
+    public Response getAdministratorAccount(@Context HttpHeaders headers,
+                                            @PathParam("detectorId") String detectorId) {
+        MemberAccount membership = service.getAdministratorAccount(
+                region(headers), detectorId, regionResolver.getAccountId());
+        ObjectNode response = objectMapper.createObjectNode();
+        if (membership != null) {
+            ObjectNode administrator = response.putObject("administrator");
+            administrator.put("accountId", membership.administratorId());
+            if (membership.invitationId() != null) {
+                administrator.put("invitationId", membership.invitationId());
+            }
+            administrator.put("relationshipStatus", membership.relationshipStatus());
+            if (membership.invitedAt() != null) {
+                administrator.put("invitedAt", membership.invitedAt());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/detector/{detectorId}/malware-scan-settings")
+    public Response getMalwareScanSettings(@Context HttpHeaders headers,
+                                           @PathParam("detectorId") String detectorId) {
+        return Response.ok(service.getMalwareScanSettings(region(headers), detectorId)).build();
+    }
+
+    @POST
+    @Path("/detector/{detectorId}/malware-scan-settings")
+    public Response updateMalwareScanSettings(@Context HttpHeaders headers,
+                                              @PathParam("detectorId") String detectorId, String body) {
+        service.updateMalwareScanSettings(region(headers), detectorId, parse(body));
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/detector/{detectorId}/investigation/list")
+    public Response listInvestigations(@Context HttpHeaders headers,
+                                       @PathParam("detectorId") String detectorId, String body) {
+        return Response.ok(service.listInvestigations(region(headers), detectorId, parse(body))).build();
+    }
+
+    @GET
+    @Path("/organization/statistics")
+    public Response getOrganizationStatistics(@Context HttpHeaders headers) {
+        return Response.ok(service.getOrganizationStatistics(
+                region(headers), regionResolver.getAccountId())).build();
+    }
+
     @POST
     @Path("/detector/{detectorId}/member/invite")
     public Response inviteMembers(@Context HttpHeaders headers,

@@ -135,10 +135,63 @@ public class ControlTowerControlService {
         return operation;
     }
 
+    public synchronized OperationListResult listOperations(String accountId, String region, JsonNode request) {
+        requireObject(request);
+        JsonNode maxValue = request.get("maxResults");
+        int maxResults = 200;
+        if (maxValue != null && !maxValue.isNull()) {
+            if (!maxValue.isInt() || maxValue.intValue() < 1 || maxValue.intValue() > 200) {
+                throw validation("maxResults must be between 1 and 200.");
+            }
+            maxResults = maxValue.intValue();
+        }
+        int offset = nextToken(request);
+        Set<String> controlIds = Set.of();
+        Set<String> targetIds = Set.of();
+        Set<String> enabledControlIds = Set.of();
+        Set<String> statuses = Set.of();
+        Set<String> types = Set.of();
+        JsonNode filter = request.get("filter");
+        if (filter != null && !filter.isNull()) {
+            if (!filter.isObject()) throw validation("filter must be a JSON object.");
+            controlIds = stringSet(filter.get("controlIdentifiers"));
+            targetIds = stringSet(filter.get("targetIdentifiers"));
+            enabledControlIds = stringSet(filter.get("enabledControlIdentifiers"));
+            statuses = stringSet(filter.get("statuses"));
+            types = stringSet(filter.get("controlOperationTypes"));
+            if (statuses.stream().anyMatch(v -> !Set.of("SUCCEEDED", "FAILED", "IN_PROGRESS").contains(v))) {
+                throw validation("statuses contains an invalid value.");
+            }
+            if (types.stream().anyMatch(v -> !Set.of("ENABLE_CONTROL", "DISABLE_CONTROL",
+                    "UPDATE_ENABLED_CONTROL", "RESET_ENABLED_CONTROL").contains(v))) {
+                throw validation("controlOperationTypes contains an invalid value.");
+            }
+        }
+        String scopePrefix = accountId + "::" + region + "::";
+        List<ControlOperation> result = new ArrayList<>();
+        for (Map.Entry<String, ControlOperation> entry : operations.entrySet()) {
+            ControlOperation operation = entry.getValue();
+            if (entry.getKey().startsWith(scopePrefix)
+                    && (controlIds.isEmpty() || controlIds.contains(operation.controlIdentifier()))
+                    && (targetIds.isEmpty() || targetIds.contains(operation.targetIdentifier()))
+                    && (enabledControlIds.isEmpty() || enabledControlIds.contains(operation.enabledControlIdentifier()))
+                    && (statuses.isEmpty() || statuses.contains(operation.status()))
+                    && (types.isEmpty() || types.contains(operation.operationType()))) {
+                result.add(operation);
+            }
+        }
+        if (offset > result.size()) throw validation("nextToken is invalid.");
+        int end = Math.min(result.size(), offset + maxResults);
+        return new OperationListResult(new ArrayList<>(result.subList(offset, end)),
+                end < result.size() ? String.valueOf(end) : null);
+    }
+
     private void record(String accountId, String region, String operationId, String type, EnabledControl control) {
         String scopePrefix = accountId + "::" + region + "::";
+        String now = java.time.Instant.now().toString();
         operations.put(operationKey(accountId, region, operationId), new ControlOperation(
-                operationId, type, SUCCEEDED, control.getControlIdentifier(), control.getArn(), control.getTargetIdentifier()));
+                operationId, type, SUCCEEDED, control.getControlIdentifier(), control.getArn(),
+                control.getTargetIdentifier(), now, now));
         long inScope = operations.keySet().stream().filter(key -> key.startsWith(scopePrefix)).count();
         if (inScope > MAX_OPERATIONS_PER_SCOPE) {
             var iterator = operations.keySet().iterator();
@@ -266,5 +319,6 @@ public class ControlTowerControlService {
     public record ListResult(List<EnabledControl> controls, String nextToken) {}
     public record ControlOperation(String operationIdentifier, String operationType, String status,
                                    String controlIdentifier, String enabledControlIdentifier,
-                                   String targetIdentifier) {}
+                                   String targetIdentifier, String startTime, String endTime) {}
+    public record OperationListResult(List<ControlOperation> operations, String nextToken) {}
 }

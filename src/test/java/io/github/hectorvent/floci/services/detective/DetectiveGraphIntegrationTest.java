@@ -278,6 +278,54 @@ class DetectiveGraphIntegrationTest {
                 .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
     }
 
+    @Test
+    void datasourceHistoryComesFromGraphAndMembershipState() {
+        String arn = create(ACCOUNT, EAST);
+        request(ACCOUNT, EAST).body(Map.of("GraphArn", arn, "Accounts",
+                        new Object[]{Map.of("AccountId", OTHER, "EmailAddress", "member@example.com")}))
+                .post("/graph/members").then().statusCode(200);
+
+        request(ACCOUNT, EAST).body(Map.of("GraphArn", arn, "AccountIds",
+                        new Object[]{ACCOUNT, OTHER, "123456789012"}))
+                .post("/graph/datasources/get").then().statusCode(200)
+                .body("MemberDatasources", hasSize(2))
+                .body("MemberDatasources[0].AccountId", equalTo(ACCOUNT))
+                .body("MemberDatasources[0].GraphArn", equalTo(arn))
+                .body("MemberDatasources[0].DatasourcePackageIngestHistory.DETECTIVE_CORE.keySet()",
+                        hasSize(1))
+                .body("MemberDatasources[1].AccountId", equalTo(OTHER))
+                .body("MemberDatasources[1].DatasourcePackageIngestHistory", equalTo(Map.of()))
+                .body("UnprocessedAccounts", hasSize(1))
+                .body("UnprocessedAccounts[0].AccountId", equalTo("123456789012"));
+        request(ACCOUNT, EAST).body(Map.of("GraphArn", arn, "AccountIds", new Object[]{"bad"}))
+                .post("/graph/datasources/get").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+        request(OTHER, EAST).body(Map.of("GraphArn", arn, "AccountIds", new Object[]{OTHER}))
+                .post("/graph/datasources/get").then().statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+
+        String unknown = "arn:aws:detective:us-east-1:720000000003:graph:" + "a".repeat(32);
+        request(ACCOUNT, EAST).body(Map.of("GraphArns", new Object[]{arn, unknown}))
+                .post("/membership/datasources/get").then().statusCode(200)
+                .body("MembershipDatasources", hasSize(1))
+                .body("MembershipDatasources[0].AccountId", equalTo(ACCOUNT))
+                .body("UnprocessedGraphs", hasSize(1))
+                .body("UnprocessedGraphs[0].GraphArn", equalTo(unknown));
+        request(OTHER, WEST).body(Map.of("GraphArns", new Object[]{arn}))
+                .post("/membership/datasources/get").then().statusCode(200)
+                .body("MembershipDatasources", hasSize(1))
+                .body("MembershipDatasources[0].AccountId", equalTo(OTHER))
+                .body("MembershipDatasources[0].GraphArn", equalTo(arn))
+                .body("UnprocessedGraphs", hasSize(0));
+        request("720000000004", EAST).body(Map.of("GraphArns", new Object[]{arn}))
+                .post("/membership/datasources/get").then().statusCode(200)
+                .body("MembershipDatasources", hasSize(0))
+                .body("UnprocessedGraphs", hasSize(1));
+        request(ACCOUNT, EAST).body(Map.of("GraphArns", new Object[]{"not-an-arn"}))
+                .post("/membership/datasources/get").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+    }
+
     private static String create(String account, String region) {
         return request(account, region).body("{\"Tags\":{\"env\":\"test\"}}")
                 .post("/graph").then().statusCode(200).extract().path("GraphArn");

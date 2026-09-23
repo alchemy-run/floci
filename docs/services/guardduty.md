@@ -22,6 +22,11 @@ region and use the configured Floci storage mode.
 | `EnableOrganizationAdminAccount` | `POST /admin/enable` | Designate the delegated administrator account |
 | `DisableOrganizationAdminAccount` | `POST /admin/disable` | Remove the delegated administrator account |
 | `ListOrganizationAdminAccounts` | `GET /admin` | List the delegated administrator account |
+| `GetOrganizationStatistics` | `GET /organization/statistics` | Count organization accounts associated with the delegated administrator, and their enabled detectors and features |
+| `GetAdministratorAccount` | `GET /detector/{detectorId}/administrator` | Return the administrator of an enabled membership, or an empty response for a standalone account |
+| `GetMalwareScanSettings` | `GET /detector/{detectorId}/malware-scan-settings` | Return the detector's malware scan settings (default `NO_RETENTION`) |
+| `UpdateMalwareScanSettings` | `POST /detector/{detectorId}/malware-scan-settings` | Update snapshot preservation and `EC2_INSTANCE_TAG` scan criteria |
+| `ListInvestigations` | `POST /detector/{detectorId}/investigation/list` | List investigations; always empty because Floci runs no Extended Threat Detection analysis |
 | `CreateMembers` | `POST /detector/{detectorId}/member` | Create GuardDuty member accounts for a detector |
 | `ListMembers` | `GET /detector/{detectorId}/member` | List detector members with pagination and association filtering |
 | `TagResource` | `POST /tags/{resourceArn}` | Add tags to a detector |
@@ -75,9 +80,13 @@ aws guardduty delete-detector --detector-id "$DETECTOR_ID"
   `adminAccountId` membership is not validated, delegated-administrator permissions are not
   enforced on the organization endpoints, and auto-enablement is never fanned out to member
   accounts. Organization configuration is stored per calling account and echoed back as
-  submitted — sufficient for Terraform's `aws_guardduty_organization_configuration`,
+  submitted, sufficient for Terraform's `aws_guardduty_organization_configuration`,
   `aws_guardduty_organization_configuration_feature`, and
   `aws_guardduty_organization_admin_account` resources in a single-account workflow.
+- `GetOrganizationStatistics` is the exception: only the enabled delegated administrator may
+  call it, and the caller must belong to an organization in Floci's Organizations service.
+  Otherwise it returns `BadRequestException`. Counts come from the organization's accounts,
+  the administrator's `Enabled` members, and their detectors in the request Region.
 - No findings are generated: detection, malware scans, and the findings APIs
   (`ListFindings`, `GetFindings`, filters, and publishing destinations) are not implemented.
 - Member creation and listing are implemented. Invitation, IP-set, threat-intel, and coverage APIs are not implemented.

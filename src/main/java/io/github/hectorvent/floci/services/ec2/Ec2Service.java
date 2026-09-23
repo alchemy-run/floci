@@ -185,6 +185,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
     // persistent/hybrid/wal modes; see #1297 — CloudFormation persists stacks/exports that
     // reference these EC2 ids, so the ids must survive too)
     private final StorageBackend<String, Vpc> vpcs;
+    /** VPC keys this emulator deleted; a create naming one must NotFound, never substitute. */
+    private final Set<String> deletedVpcKeys = ConcurrentHashMap.newKeySet();
     private final StorageBackend<String, Subnet> subnets;
     private final StorageBackend<String, SecurityGroup> securityGroups;
     private final StorageBackend<String, SecurityGroupRule> securityGroupRules;
@@ -3763,6 +3765,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
             requireNoVpcDependents(region, vpcId);
             deleteVpcDefaultResources(region, vpcId);
             vpcs.delete(key(region, vpcId));
+            deletedVpcKeys.add(key(region, vpcId));
             tags.delete(vpcId);
         }
         if (vpcNetworkManager != null) {
@@ -7265,6 +7268,9 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
         Vpc vpc = vpcs.get(key(region, vpcId)).orElse(null);
         if (vpc != null) {
             return vpc;
+        }
+        if (deletedVpcKeys.contains(key(region, vpcId))) {
+            throw new AwsException("InvalidVpcID.NotFound", "The vpc ID '" + vpcId + "' does not exist", 400);
         }
         Vpc defaultVpc = vpcs.scan(k -> true).stream()
                 .filter(v -> region.equals(v.getRegion()) && v.isDefault())

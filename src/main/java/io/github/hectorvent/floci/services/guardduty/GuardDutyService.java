@@ -18,6 +18,8 @@ import io.github.hectorvent.floci.services.guardduty.model.MemberAccount;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationAdditionalConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationConfiguration;
 import io.github.hectorvent.floci.services.guardduty.model.OrganizationFeature;
+import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.organizations.model.OrganizationAccount;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -82,9 +84,11 @@ public class GuardDutyService {
     private final StorageBackend<String, AdminAccount> adminAccountStore;
     private final StorageBackend<String, MemberAccount> memberStore;
     private final S3Service s3Service;
+    private final OrganizationsService organizationsService;
 
     @Inject
-    public GuardDutyService(StorageFactory storageFactory, S3Service s3Service) {
+    public GuardDutyService(StorageFactory storageFactory, S3Service s3Service,
+                            OrganizationsService organizationsService) {
         this(storageFactory.create(
                         "guardduty",
                         "guardduty-detectors.json",
@@ -99,14 +103,14 @@ public class GuardDutyService {
                         "guardduty",
                         "guardduty-members.json",
                         new TypeReference<Map<String, MemberAccount>>() {
-                        }), s3Service);
+                        }), s3Service, organizationsService);
     }
 
     GuardDutyService(
             StorageBackend<String, Detector> detectorStore,
             StorageBackend<String, AdminAccount> adminAccountStore,
             StorageBackend<String, MemberAccount> memberStore) {
-        this(detectorStore, adminAccountStore, memberStore, null);
+        this(detectorStore, adminAccountStore, memberStore, null, null);
     }
 
     GuardDutyService(
@@ -114,10 +118,20 @@ public class GuardDutyService {
             StorageBackend<String, AdminAccount> adminAccountStore,
             StorageBackend<String, MemberAccount> memberStore,
             S3Service s3Service) {
+        this(detectorStore, adminAccountStore, memberStore, s3Service, null);
+    }
+
+    GuardDutyService(
+            StorageBackend<String, Detector> detectorStore,
+            StorageBackend<String, AdminAccount> adminAccountStore,
+            StorageBackend<String, MemberAccount> memberStore,
+            S3Service s3Service,
+            OrganizationsService organizationsService) {
         this.detectorStore = detectorStore;
         this.adminAccountStore = adminAccountStore;
         this.memberStore = memberStore;
         this.s3Service = s3Service;
+        this.organizationsService = organizationsService;
     }
 
     public synchronized Detector createDetector(String region, String accountId, JsonNode request) {
@@ -694,6 +708,211 @@ public class GuardDutyService {
 
     public int getInvitationsCount(String region, String accountId) {
         return invitations(region, accountId).size();
+    }
+
+    /**
+     * Returns the administrator that manages the caller's detector, or {@code null} for a standalone
+     * account. Only an established ({@code Enabled}) membership counts; pending invitations do not.
+     */
+    public MemberAccount getAdministratorAccount(String region, String detectorId, String accountId) {
+        getDetector(region, detectorId);
+        return allMembers(region).stream()
+                .filter(member -> accountId.equals(member.accountId())
+                        && "Enabled".equals(member.relationshipStatus())
+                        && !accountId.equals(member.administratorId()))
+                .min(Comparator.comparing(MemberAccount::administratorId))
+                .orElse(null);
+    }
+
+    public ObjectNode getMalwareScanSettings(String region, String detectorId) {
+        JsonNode stored = getDetector(region, detectorId).getMalwareScanSettings();
+        if (stored instanceof ObjectNode settings) {
+            return settings.deepCopy();
+        }
+        ObjectNode defaults = object();
+        defaults.put("ebsSnapshotPreservation", "NO_RETENTION");
+        return defaults;
+    }
+
+    public synchronized void updateMalwareScanSettings(String region, String detectorId, JsonNode request) {
+        String key = storageKey(region, detectorId);
+        Detector detector = detectorStore.get(key).orElseThrow(GuardDutyService::detectorNotFound);
+        ObjectNode settings = getMalwareScanSettings(region, detectorId);
+        if (request.has("ebsSnapshotPreservation")) {
+            String preservation = requireText(request, "ebsSnapshotPreservation");
+            if (!Set.of("NO_RETENTION", "RETENTION_WITH_FINDING").contains(preservation)) {
+                throw badRequest("ebsSnapshotPreservation must be NO_RETENTION or RETENTION_WITH_FINDING.");
+            }
+            settings.put("ebsSnapshotPreservation", preservation);
+        }
+        if (request.has("scanResourceCriteria")) {
+            JsonNode criteria = request.get("scanResourceCriteria");
+            requireObject(criteria, "scanResourceCriteria");
+            ObjectNode normalized = object();
+            for (String side : List.of("include", "exclude")) {
+                if (!criteria.has(side)) {
+                    continue;
+                }
+                JsonNode conditions = criteria.get(side);
+                requireObject(conditions, "scanResourceCriteria." + side);
+                for (Map.Entry<String, JsonNode> condition : conditions.properties()) {
+                    if (!"EC2_INSTANCE_TAG".equals(condition.getKey())) {
+                        throw badRequest("Unsupported scan criterion: " + condition.getKey());
+                    }
+                    requireObject(condition.getValue(), "scan condition");
+                    JsonNode pairs = condition.getValue().get("mapEquals");
+                    if (pairs == null || !pairs.isArray() || pairs.isEmpty()) {
+                        throw badRequest("mapEquals must contain at least one tag condition.");
+                    }
+                    for (JsonNode pair : pairs) {
+                        requireObject(pair, "mapEquals member");
+                        String tagKey = requireText(pair, "key");
+                        if (tagKey.isEmpty() || tagKey.length() > 128) {
+                            throw badRequest("mapEquals key must contain 1 to 128 characters.");
+                        }
+                        if (pair.has("value") && (!pair.get("value").isTextual()
+                                || pair.get("value").textValue().length() > 256)) {
+                            throw badRequest("mapEquals value must be a string of at most 256 characters.");
+                        }
+                    }
+                }
+                normalized.set(side, conditions.deepCopy());
+            }
+            settings.set("scanResourceCriteria", normalized);
+        }
+        detector.setMalwareScanSettings(settings);
+        detector.setUpdatedAt(isoTimestamp());
+        detectorStore.put(key, detector);
+    }
+
+    /** Floci runs no Extended Threat Detection analysis, so a detector never has investigations. */
+    public ObjectNode listInvestigations(String region, String detectorId, JsonNode request) {
+        getDetector(region, detectorId);
+        if (request.has("maxResults")) {
+            JsonNode maxResults = request.get("maxResults");
+            if (!maxResults.isIntegralNumber() || maxResults.asInt() < 1 || maxResults.asInt() > 50) {
+                throw badRequest("maxResults must be between 1 and 50.");
+            }
+        }
+        if (request.has("sortCriteria")) {
+            JsonNode sort = request.get("sortCriteria");
+            requireObject(sort, "sortCriteria");
+            if (sort.has("orderBy") && !Set.of("ASC", "DESC").contains(requireText(sort, "orderBy"))) {
+                throw badRequest("orderBy must be ASC or DESC.");
+            }
+        }
+        decodeOffset(optionalText(request, "nextToken"), 0);
+        ObjectNode response = object();
+        response.putArray("investigations");
+        return response;
+    }
+
+    /**
+     * Aggregates GuardDuty enablement across the caller's organization. Only the enabled GuardDuty
+     * delegated administrator of an organization may call this, as in AWS.
+     */
+    public ObjectNode getOrganizationStatistics(String region, String accountId) {
+        boolean delegated = organizationAdminAccounts(region).stream()
+                .anyMatch(account -> accountId.equals(account.getAdminAccountId())
+                        && "ENABLED".equals(account.getAdminStatus()));
+        if (!delegated) {
+            throw badRequest("The request is rejected because the current account is not the GuardDuty "
+                    + "delegated administrator account of an organization.");
+        }
+        List<OrganizationAccount> organizationAccounts;
+        try {
+            organizationAccounts = organizationsService == null ? List.of() : organizationsService.listAccounts(accountId);
+        } catch (AwsException e) {
+            organizationAccounts = List.of();
+        }
+        if (organizationAccounts.stream().noneMatch(account -> accountId.equals(account.getId()))) {
+            throw badRequest("The request is rejected because the current account is not a member of an organization.");
+        }
+        Map<String, OrganizationAccount> byId = new LinkedHashMap<>();
+        organizationAccounts.forEach(account -> byId.put(account.getId(), account));
+
+        Map<String, Detector> detectorsByAccount = new LinkedHashMap<>();
+        for (Detector detector : allDetectors(region)) {
+            detectorsByAccount.putIfAbsent(accountIdFromServiceRole(detector.getServiceRole()), detector);
+        }
+        Detector adminDetector = detectorsByAccount.get(accountId);
+        List<String> associated = new ArrayList<>();
+        associated.add(accountId);
+        if (adminDetector != null) {
+            allMembers(region).stream()
+                    .filter(member -> accountId.equals(member.administratorId())
+                            && adminDetector.getId().equals(member.detectorId())
+                            && "Enabled".equals(member.relationshipStatus())
+                            && byId.containsKey(member.accountId()))
+                    .map(MemberAccount::accountId)
+                    .distinct()
+                    .forEach(associated::add);
+        }
+        List<String> active = associated.stream()
+                .filter(id -> "ACTIVE".equals(byId.get(id).getStatus())).toList();
+        List<Detector> enabled = active.stream().map(detectorsByAccount::get)
+                .filter(detector -> detector != null && "ENABLED".equals(detector.getStatus())).toList();
+
+        Map<String, Integer> featureCounts = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> additionalCounts = new LinkedHashMap<>();
+        for (Detector detector : enabled) {
+            if (detector.getFeatures() == null) {
+                continue;
+            }
+            for (DetectorFeature feature : detector.getFeatures()) {
+                if (!"ENABLED".equals(feature.getStatus())) {
+                    continue;
+                }
+                featureCounts.merge(feature.getName(), 1, Integer::sum);
+                Map<String, Integer> additional =
+                        additionalCounts.computeIfAbsent(feature.getName(), name -> new LinkedHashMap<>());
+                if (feature.getAdditionalConfiguration() != null) {
+                    for (DetectorAdditionalConfiguration configuration : feature.getAdditionalConfiguration()) {
+                        if ("ENABLED".equals(configuration.getStatus())) {
+                            additional.merge(configuration.getName(), 1, Integer::sum);
+                        }
+                    }
+                }
+            }
+        }
+
+        ObjectNode response = object();
+        ObjectNode details = response.putObject("organizationDetails");
+        details.put("updatedAt", Instant.now().getEpochSecond());
+        ObjectNode statistics = details.putObject("organizationStatistics");
+        statistics.put("totalAccountsCount", organizationAccounts.size());
+        statistics.put("memberAccountsCount", associated.size());
+        statistics.put("activeAccountsCount", active.size());
+        statistics.put("enabledAccountsCount", enabled.size());
+        ArrayNode byFeature = statistics.putArray("countByFeature");
+        featureCounts.forEach((name, count) -> {
+            ObjectNode feature = byFeature.addObject();
+            feature.put("name", name);
+            feature.put("enabledAccountsCount", count);
+            ArrayNode additional = feature.putArray("additionalConfiguration");
+            additionalCounts.getOrDefault(name, Map.of()).forEach((configuration, configurationCount) ->
+                    additional.addObject().put("name", configuration).put("enabledAccountsCount", configurationCount));
+        });
+        return response;
+    }
+
+    private List<MemberAccount> allMembers(String region) {
+        if (memberStore instanceof AccountAwareStorageBackend<MemberAccount> accountAware) {
+            return accountAware.scanAllAccountEntries(key -> key.startsWith(region + "::")).stream()
+                    .map(AccountAwareStorageBackend.AccountEntry::value).toList();
+        }
+        return memberStore.scan(key -> key.startsWith(region + "::"));
+    }
+
+    private List<Detector> allDetectors(String region) {
+        List<Detector> detectors;
+        if (detectorStore instanceof AccountAwareStorageBackend<Detector> accountAware) {
+            detectors = accountAware.scanAllAccountEntries(key -> key.startsWith(region + "::")).stream()
+                    .map(AccountAwareStorageBackend.AccountEntry::value).toList();
+        } else {
+            detectors = detectorStore.scan(key -> key.startsWith(region + "::"));
+        }
+        return detectors.stream().sorted(Comparator.comparing(Detector::getId)).toList();
     }
 
     private static List<JsonNode> matchingFindings(Detector detector, JsonNode request) {

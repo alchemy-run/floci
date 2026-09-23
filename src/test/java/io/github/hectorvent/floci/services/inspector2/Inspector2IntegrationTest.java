@@ -7,9 +7,11 @@ import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 
 @QuarkusTest
@@ -281,6 +283,207 @@ class Inspector2IntegrationTest {
                 .header("Authorization", auth(account).replace("us-east-1", "us-west-2")).body("{}")
                 .post("/cis/scan-configuration/list").then().statusCode(403)
                 .body("__type", equalTo("AccessDeniedException"));
+    }
+
+    @Test
+    void findingsCoverageAndUsageAreEmptyWithoutAScannerAndValidateInput() {
+        String account = "940000000121";
+        for (String[] route : new String[][]{
+                {"/findings/list", "findings"}, {"/coverage/list", "coveredResources"},
+                {"/usage/list", "totals"}}) {
+            given().contentType("application/json").header("Authorization", auth(account)).body("{}")
+                    .post(route[0]).then().statusCode(200)
+                    .body(route[1], hasSize(0))
+                    .body("nextToken", nullValue());
+            given().contentType("application/json").header("Authorization", auth(account))
+                    .body("{\"maxResults\":0}").post(route[0]).then().statusCode(400)
+                    .body("__type", equalTo("ValidationException"));
+        }
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"filterCriteria\":[]}").post("/findings/list").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"accountIds\":[\"940000000122\"]}").post("/usage/list").then().statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"));
+    }
+
+    @Test
+    void searchVulnerabilitiesAnswersFromTheCatalogAndReportsUnknownIdsAsEmpty() {
+        String account = "940000000131";
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"filterCriteria\":{\"vulnerabilityIds\":[\"CVE-2021-44228\"]}}")
+                .post("/vulnerabilities/search").then().statusCode(200)
+                .body("vulnerabilities", hasSize(1))
+                .body("vulnerabilities[0].id", equalTo("CVE-2021-44228"))
+                .body("vulnerabilities[0].source", equalTo("NVD"))
+                .body("vulnerabilities[0].cvss3.baseScore", equalTo(10.0f))
+                .body("vulnerabilities[0].cisaData.dateAdded", equalTo(1639094400));
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"filterCriteria\":{\"vulnerabilityIds\":[\"CVE-1999-0001\"]}}")
+                .post("/vulnerabilities/search").then().statusCode(200)
+                .body("vulnerabilities", hasSize(0));
+        for (String bad : new String[]{"{}", "{\"filterCriteria\":{\"vulnerabilityIds\":[]}}",
+                "{\"filterCriteria\":{\"vulnerabilityIds\":[\"GHSA-1234\"]}}",
+                "{\"filterCriteria\":{\"vulnerabilityIds\":[\"CVE-2021-1\",\"CVE-2021-2\"]}}"}) {
+            given().contentType("application/json").header("Authorization", auth(account)).body(bad)
+                    .post("/vulnerabilities/search").then().statusCode(400)
+                    .body("__type", equalTo("ValidationException"));
+        }
+    }
+
+    @Test
+    void accountSettingsReflectEnablementAndOrganizationManagement() {
+        String management = "940000000141";
+        String administrator = "940000000142";
+        String member = "940000000143";
+        createOrganization(management, administrator, member);
+
+        given().contentType("application/json").header("Authorization", auth(member)).body("{}")
+                .post("/accountpermissions/list").then().statusCode(200)
+                .body("permissions", hasSize(8));
+        given().contentType("application/json").header("Authorization", auth(member))
+                .body("{\"service\":\"ECR\"}").post("/accountpermissions/list").then().statusCode(200)
+                .body("permissions", hasSize(4))
+                .body("permissions.service", everyItem(equalTo("ECR")));
+        given().contentType("application/json").header("Authorization", auth(member))
+                .body("{\"service\":\"S3\"}").post("/accountpermissions/list").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+
+        String trialBody = "{\"accountIds\":[\"" + member + "\"]}";
+        given().contentType("application/json").header("Authorization", auth(member)).body(trialBody)
+                .post("/freetrialinfo/batchget").then().statusCode(200)
+                .body("accounts", hasSize(1))
+                .body("accounts[0].accountId", equalTo(member))
+                .body("accounts[0].freeTrialInfo", hasSize(0))
+                .body("failedAccounts", hasSize(0));
+        enableAndConverge(member, "ECR");
+        given().contentType("application/json").header("Authorization", auth(member)).body(trialBody)
+                .post("/freetrialinfo/batchget").then().statusCode(200)
+                .body("accounts[0].freeTrialInfo", hasSize(1))
+                .body("accounts[0].freeTrialInfo[0].type", equalTo("ECR"))
+                .body("accounts[0].freeTrialInfo[0].status", equalTo("ACTIVE"))
+                .body("accounts[0].freeTrialInfo[0].start", instanceOf(Number.class))
+                .body("accounts[0].freeTrialInfo[0].end", instanceOf(Number.class));
+        given().contentType("application/json").header("Authorization", auth(member))
+                .body("{\"accountIds\":[\"" + administrator + "\"]}")
+                .post("/freetrialinfo/batchget").then().statusCode(200)
+                .body("accounts", hasSize(0))
+                .body("failedAccounts[0].accountId", equalTo(administrator))
+                .body("failedAccounts[0].code", equalTo("ACCESS_DENIED"));
+
+        given().contentType("application/json").header("Authorization", auth(member)).body("{}")
+                .post("/configuration/get").then().statusCode(200)
+                .body("ecrConfiguration", nullValue())
+                .body("ec2Configuration", nullValue());
+        given().contentType("application/json").header("Authorization", auth(member))
+                .body("{\"accountId\":\"" + administrator + "\"}")
+                .post("/configuration/get").then().statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"));
+
+        designateAdministrator(management, administrator);
+        given().contentType("application/json").header("Authorization", auth(member)).body("{}")
+                .post("/accountpermissions/list").then().statusCode(200)
+                .body("permissions", hasSize(0));
+        given().contentType("application/json").header("Authorization", auth(administrator)).body("{}")
+                .post("/accountpermissions/list").then().statusCode(200)
+                .body("permissions", hasSize(8));
+        given().contentType("application/json").header("Authorization", auth(administrator)).body(trialBody)
+                .post("/freetrialinfo/batchget").then().statusCode(200)
+                .body("accounts[0].accountId", equalTo(member))
+                .body("failedAccounts", hasSize(0));
+        given().contentType("application/json").header("Authorization", auth(administrator))
+                .body("{\"accountId\":\"" + member + "\"}")
+                .post("/configuration/get").then().statusCode(200);
+    }
+
+    @Test
+    void encryptionKeyAndReportStatusReturnTypedNotFound() {
+        String account = "940000000151";
+        given().header("Authorization", auth(account))
+                .queryParam("scanType", "PACKAGE").queryParam("resourceType", "AWS_ECR_CONTAINER_IMAGE")
+                .get("/encryptionkey/get").then().statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        given().header("Authorization", auth(account))
+                .queryParam("scanType", "BOGUS").queryParam("resourceType", "AWS_ECR_CONTAINER_IMAGE")
+                .get("/encryptionkey/get").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+        given().header("Authorization", auth(account)).queryParam("scanType", "PACKAGE")
+                .get("/encryptionkey/get").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"reportId\":\"00000000-0000-0000-0000-000000000000\"}")
+                .post("/reporting/status/get").then().statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"reportId\":\"not-a-report\"}")
+                .post("/reporting/status/get").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void cisScansRequireEnablement() {
+        String account = "940000000161";
+        given().contentType("application/json").header("Authorization", auth(account)).body("{}")
+                .post("/cis/scan/list").then().statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"));
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"sortBy\":\"NAME\"}").post("/cis/scan/list").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+        enableAndConverge(account, "EC2");
+        given().contentType("application/json").header("Authorization", auth(account)).body("{}")
+                .post("/cis/scan/list").then().statusCode(200)
+                .body("scans", hasSize(0));
+    }
+
+    @Test
+    void membersAndDelegatedAdminFollowOrganizationState() {
+        String management = "940000000171";
+        String administrator = "940000000172";
+        String member = "940000000173";
+        String standalone = "950000000174";
+        createOrganization(management, administrator, member);
+
+        given().contentType("application/json").header("Authorization", auth(standalone)).body("{}")
+                .post("/delegatedadminaccounts/get").then().statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"));
+        given().contentType("application/json").header("Authorization", auth(management)).body("{}")
+                .post("/delegatedadminaccounts/get").then().statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+        given().contentType("application/json").header("Authorization", auth(standalone)).body("{}")
+                .post("/members/list").then().statusCode(200)
+                .body("members", hasSize(0));
+
+        designateAdministrator(management, administrator);
+        for (String caller : new String[]{management, administrator, member}) {
+            given().contentType("application/json").header("Authorization", auth(caller)).body("{}")
+                    .post("/delegatedadminaccounts/get").then().statusCode(200)
+                    .body("delegatedAdmin.accountId", equalTo(administrator))
+                    .body("delegatedAdmin.relationshipStatus", equalTo("ENABLED"));
+        }
+        given().contentType("application/json").header("Authorization", auth(member)).body("{}")
+                .post("/members/list").then().statusCode(200)
+                .body("members", hasSize(0));
+        given().contentType("application/json").header("Authorization", auth(administrator)).body("{}")
+                .post("/members/list").then().statusCode(200)
+                .body("members", hasSize(0));
+        given().contentType("application/json").header("Authorization", auth(administrator))
+                .body("{\"onlyAssociated\":false}").post("/members/list").then().statusCode(200)
+                .body("members", hasSize(2))
+                .body("members.relationshipStatus", everyItem(equalTo("CREATED")))
+                .body("members.delegatedAdminAccountId", everyItem(equalTo(administrator)));
+
+        given().contentType("application/json").header("Authorization", auth(administrator))
+                .body("{\"accountIds\":[\"" + member + "\"],\"resourceTypes\":[\"LAMBDA\"]}")
+                .post("/enable").then().statusCode(200);
+        given().contentType("application/json").header("Authorization", auth(administrator)).body("{}")
+                .post("/members/list").then().statusCode(200)
+                .body("members", hasSize(1))
+                .body("members[0].accountId", equalTo(member))
+                .body("members[0].relationshipStatus", equalTo("ENABLED"));
+        given().contentType("application/json").header("Authorization", auth(administrator))
+                .body("{\"maxResults\":51}").post("/members/list").then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
     }
 
     private void enableAndConverge(String account, String resourceType) {

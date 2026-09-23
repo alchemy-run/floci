@@ -24,6 +24,8 @@ public class InspectorState {
     private boolean autoEnableCodeRepository;
     private String deepInspectionStatus = "DEACTIVATED";
     private Map<String, InspectorFilter> filters = new LinkedHashMap<>();
+    /** Epoch seconds at which each resource type was first activated; starts its free trial. */
+    private Map<String, Double> freeTrialStarts = new LinkedHashMap<>();
 
     public InspectorState() {
     }
@@ -59,6 +61,10 @@ public class InspectorState {
     public void setDeepInspectionStatus(String value) { deepInspectionStatus = value; }
     public Map<String, InspectorFilter> getFilters() { return filters; }
     public void setFilters(Map<String, InspectorFilter> filters) { this.filters = filters; }
+    public Map<String, Double> getFreeTrialStarts() { return freeTrialStarts; }
+    public void setFreeTrialStarts(Map<String, Double> freeTrialStarts) {
+        this.freeTrialStarts = freeTrialStarts == null ? new LinkedHashMap<>() : freeTrialStarts;
+    }
 
     public String resourceStatus(String resourceType) {
         return switch (resourceType) {
