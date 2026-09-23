@@ -286,6 +286,19 @@ class CloudWatchMetricsServiceTest {
     }
 
     @Test
+    void manualAlarmStateIsHeldOnlyForAlarmsThatWereSet() {
+        MetricAlarm alarm = new MetricAlarm();
+        alarm.setAlarmName("held-alarm");
+        alarm.setPeriod(60);
+        service.putMetricAlarm(alarm, REGION);
+
+        assertFalse(service.isManualAlarmStateHeld("held-alarm", REGION));
+        service.holdManualAlarmState("held-alarm", REGION);
+        assertTrue(service.isManualAlarmStateHeld("held-alarm", REGION));
+        assertFalse(service.isManualAlarmStateHeld("held-alarm", "eu-west-1"));
+    }
+
+    @Test
     void setAlarmStateOnNonexistentAlarmThrowsResourceNotFound() {
         AwsException ex = assertThrows(AwsException.class,
                 () -> service.setAlarmState("missing-alarm", "ALARM", "reason", null, REGION));

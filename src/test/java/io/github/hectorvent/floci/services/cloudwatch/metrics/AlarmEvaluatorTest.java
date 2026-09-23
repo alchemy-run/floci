@@ -237,6 +237,19 @@ class AlarmEvaluatorTest {
     }
 
     @Test
+    void manuallySetStateIsNotOverwrittenBeforeTheNextPeriod() {
+        stubMetrics(List.of());
+        MetricAlarm alarm = alarm();
+        alarm.setStateValue("ALARM");
+        when(metricsService.isManualAlarmStateHeld(alarm.getAlarmName(), REGION)).thenReturn(true);
+
+        evaluator.evaluate(alarm);
+
+        verify(metricsService, never()).setAlarmState(
+                anyString(), anyString(), anyString(), any(), anyString());
+    }
+
+    @Test
     void treatMissingDataIgnoreStillRetriesDispatchWhileAlreadyInAlarm() {
         stubMetrics(datapoints(80));
         when(handlers.iterator()).thenAnswer(inv -> List.of(handler).iterator());

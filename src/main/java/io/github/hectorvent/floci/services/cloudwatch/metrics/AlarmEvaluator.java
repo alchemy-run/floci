@@ -113,6 +113,9 @@ public class AlarmEvaluator {
             return;
         }
         String region = alarm.getRegion();
+        if (metricsService.isManualAlarmStateHeld(alarm.getAlarmName(), region)) {
+            return;
+        }
         int period = alarm.getPeriod();
         int evaluationPeriods = alarm.getEvaluationPeriods();
         int range = evaluationRange(evaluationPeriods);
@@ -182,7 +185,9 @@ public class AlarmEvaluator {
             }
         }
 
-        if (!newState.equals(alarm.getStateValue())) {
+        // Re-checked: a SetAlarmState may have landed while this tick was evaluating.
+        if (!newState.equals(alarm.getStateValue())
+                && !metricsService.isManualAlarmStateHeld(alarm.getAlarmName(), region)) {
             metricsService.setAlarmState(alarm.getAlarmName(), newState, reason, null, region);
             if (metadataService != null) {
                 metadataService.history(alarm.getAlarmName(), "MetricAlarm", "StateUpdate", reason,

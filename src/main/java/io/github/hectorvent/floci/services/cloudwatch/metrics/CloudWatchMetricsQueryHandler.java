@@ -287,6 +287,7 @@ public class CloudWatchMetricsQueryHandler {
         String reason = params.getFirst("StateReason");
         String reasonData = params.getFirst("StateReasonData");
         metricsService.setAlarmState(name, state, reason, reasonData, region);
+        metricsService.holdManualAlarmState(name, region);
         return Response.ok(AwsQueryResponse.envelopeNoResult("SetAlarmState", null)).build();
     }
 

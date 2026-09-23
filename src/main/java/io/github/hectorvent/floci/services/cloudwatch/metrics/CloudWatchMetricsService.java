@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -29,6 +30,7 @@ public class CloudWatchMetricsService {
 
     private final StorageBackend<String, MetricDatum> metricStore;
     private final StorageBackend<String, MetricAlarm> alarmStore;
+    private final Map<String, Instant> manualStateHeldUntil = new ConcurrentHashMap<>();
     private final RegionResolver regionResolver;
 
     @Inject
@@ -338,6 +340,30 @@ public class CloudWatchMetricsService {
 
         alarmStore.put(key, alarm);
         LOG.infov("SetAlarmState: {0} -> {1}", alarmName, stateValue);
+    }
+
+    /**
+     * Records a SetAlarmState API call. AWS keeps the requested state until the alarm's next
+     * period evaluation, so the evaluator must not overwrite it on its (shorter) tick.
+     */
+    public void holdManualAlarmState(String alarmName, String region) {
+        String key = region + "::" + alarmName;
+        alarmStore.get(key).ifPresent(alarm -> manualStateHeldUntil.put(key,
+                Instant.now().plusSeconds(Math.max(1, alarm.getPeriod()))));
+    }
+
+    /** Whether a SetAlarmState call is still holding this alarm's state. */
+    public boolean isManualAlarmStateHeld(String alarmName, String region) {
+        String key = region + "::" + alarmName;
+        Instant until = manualStateHeldUntil.get(key);
+        if (until == null) {
+            return false;
+        }
+        if (Instant.now().isBefore(until)) {
+            return true;
+        }
+        manualStateHeldUntil.remove(key, until);
+        return false;
     }
 
     public void setAlarmActions(String alarmName, boolean enabled, String region) {

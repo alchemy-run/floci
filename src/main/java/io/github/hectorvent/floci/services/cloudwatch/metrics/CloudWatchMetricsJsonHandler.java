@@ -360,6 +360,7 @@ public class CloudWatchMetricsJsonHandler {
             metadataService.setCompositeState(request, region);
         } else {
             metricsService.setAlarmState(name, state, reason, reasonData, region);
+            metricsService.holdManualAlarmState(name, region);
             if (metadataService != null) metadataService.history(name, "MetricAlarm", "StateUpdate", reason, request, region);
         }
         return Response.ok(objectMapper.createObjectNode()).build();
