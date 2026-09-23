@@ -348,6 +348,23 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void resolveARecord_iotAccountEndpointsMapToFloci() {
+        for (String host : List.of(
+                "a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com",
+                "a1b2c3d4e5f6g7.iot.eu-west-1.amazonaws.com",
+                "a1b2c3d4e5f6g7.credentials.iot.us-east-1.amazonaws.com",
+                "a1b2c3d4e5f6g7.jobs.iot.us-east-1.amazonaws.com",
+                "data-ats.iot.us-west-2.amazonaws.com",
+                "a1b2c3d4e5f6g7-ats.iot.cn-north-1.amazonaws.com.cn")) {
+            assertEquals("172.19.0.2", dns.resolveARecord(host, "172.19.0.2").orElseThrow(), host);
+        }
+        // The control plane is reached through AWS_ENDPOINT_URL and is not an account endpoint.
+        assertTrue(dns.resolveARecord("iot.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("a1b2c3d4e5f6g7.iot.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("a1b2c3d4e5f6g7.other.iot.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
     void resolveARecord_prefersEc2PrivateDnsAddressOverFlociWildcard() {
         assertEquals(
                 "172.16.128.9",

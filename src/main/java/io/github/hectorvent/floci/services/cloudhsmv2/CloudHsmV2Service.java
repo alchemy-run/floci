@@ -123,7 +123,17 @@ public class CloudHsmV2Service {
         cluster.setSubnetIds(new ArrayList<>(SubnetIds));
         Map<String, String> subnetMapping = new LinkedHashMap<>();
         if (ec2Service != null) {
-            List<Subnet> subnets = ec2Service.describeSubnets(region, SubnetIds, Collections.emptyMap());
+            List<Subnet> subnets;
+            try {
+                subnets = ec2Service.describeSubnets(region, SubnetIds, Collections.emptyMap());
+            } catch (AwsException e) {
+                if (e.getErrorCode() != null && e.getErrorCode().startsWith("InvalidSubnetID.")) {
+                    throw new AwsException("CloudHsmInvalidRequestException", e.getMessage(), 400);
+                }
+                throw e;
+            }
+            subnets.stream().map(Subnet::getVpcId).filter(Objects::nonNull).findFirst()
+                    .ifPresent(cluster::setVpcId);
             for (int i = 0; i < SubnetIds.size(); i++) {
                 String subId = SubnetIds.get(i);
                 final int index = i;

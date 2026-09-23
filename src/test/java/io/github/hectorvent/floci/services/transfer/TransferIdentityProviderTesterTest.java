@@ -82,7 +82,10 @@ class TransferIdentityProviderTesterTest {
         AwsException e = assertThrows(AwsException.class, () -> tester.testIdentityProvider(
                 "server-1", null, null, "alice", "pw", "us-east-1"));
         assertEquals("ValidationException", e.getErrorCode());
-        assertTrue(e.getMessage().startsWith("1 validation error detected: Value 'server-1' at 'serverId'"),
+        // AWS reports every violated constraint: 'server-1' breaks both the length and the pattern.
+        assertTrue(e.getMessage().startsWith("2 validation errors detected: Value 'server-1' at 'serverId' "
+                + "failed to satisfy constraint: Member must have length greater than or equal to 19"), e.getMessage());
+        assertTrue(e.getMessage().contains("Member must satisfy regular expression pattern: ^s-([0-9a-f]{17})$"),
                 e.getMessage());
         verifyNoInteractions(transferService);
     }

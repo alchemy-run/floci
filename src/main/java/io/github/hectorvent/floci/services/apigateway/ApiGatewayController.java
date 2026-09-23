@@ -2438,8 +2438,10 @@ public class ApiGatewayController {
             ObjectNode vars = node.putObject("variables");
             s.getVariables().forEach(vars::put);
         }
-        ObjectNode tags = node.putObject("tags");
-        s.getTags().forEach(tags::put);
+        if (s.getTags() != null && !s.getTags().isEmpty()) {
+            ObjectNode tags = node.putObject("tags");
+            s.getTags().forEach(tags::put);
+        }
         if (!s.getMethodSettings().isEmpty()) {
             ObjectNode methodSettings = node.putObject("methodSettings");
             s.getMethodSettings().forEach((key, setting) -> methodSettings.set(key, toMethodSettingNode(setting)));

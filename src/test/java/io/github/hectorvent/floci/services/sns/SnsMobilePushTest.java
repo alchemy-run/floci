@@ -340,7 +340,7 @@ class SnsMobilePushTest {
 
     @Test
     void publish_topicBroadcastToApplicationEndpointsCapturesForEachDevice() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint deviceA = snsService.createPlatformEndpoint(app.getArn(), "fcm-token-a", null, Map.of(), REGION);
         PlatformEndpoint deviceB = snsService.createPlatformEndpoint(app.getArn(), "fcm-token-b", null, Map.of(), REGION);
 
@@ -369,7 +369,7 @@ class SnsMobilePushTest {
 
     @Test
     void publish_topicBroadcastSkipsDisabledEndpointButDeliversToEnabled() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint enabled = snsService.createPlatformEndpoint(app.getArn(), "fcm-token-live", null, Map.of(), REGION);
         PlatformEndpoint disabled = snsService.createPlatformEndpoint(app.getArn(), "fcm-token-dead", null, Map.of(), REGION);
         snsService.setEndpointAttributes(disabled.getArn(), Map.of("Enabled", "false"), REGION);
@@ -387,7 +387,7 @@ class SnsMobilePushTest {
 
     @Test
     void publish_topicBroadcastFallsBackToDefaultWhenPlatformKeyMissing() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint device = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
 
         String topicArn = snsService.createTopic("market-alerts", null, null, REGION).getTopicArn();
@@ -403,7 +403,7 @@ class SnsMobilePushTest {
 
     @Test
     void publish_topicBroadcastRejectsJsonStructureMissingDefaultBeforeFanOut() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint device = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
 
         String topicArn = snsService.createTopic("market-alerts", null, null, REGION).getTopicArn();
@@ -420,7 +420,7 @@ class SnsMobilePushTest {
 
     @Test
     void publish_topicBroadcastRejectsInvalidJsonStructureBeforeFanOut() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint device = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
 
         String topicArn = snsService.createTopic("market-alerts", null, null, REGION).getTopicArn();
@@ -435,7 +435,7 @@ class SnsMobilePushTest {
 
     @Test
     void publishBatch_rejectsEntryWithJsonStructureMissingDefaultWithoutFailingBatch() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint device = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
 
         String topicArn = snsService.createTopic("market-alerts", null, null, REGION).getTopicArn();
@@ -462,7 +462,7 @@ class SnsMobilePushTest {
 
     @Test
     void publishBatch_rejectsEntryWithInvalidJsonStructureWithoutFailingBatch() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", VALID_GCM_ATTRS, REGION);
         PlatformEndpoint device = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
 
         String topicArn = snsService.createTopic("market-alerts", null, null, REGION).getTopicArn();

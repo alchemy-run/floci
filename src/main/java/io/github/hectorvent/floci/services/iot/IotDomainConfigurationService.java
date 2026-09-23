@@ -276,15 +276,16 @@ public class IotDomainConfigurationService {
 
     /**
      * The default-endpoint configurations AWS creates for every account: AWS_MANAGED, ENABLED, no
-     * server certificate, and the address DescribeEndpoint returns as their domain name. They can
-     * be updated and tagged like any other, but not deleted. A stored one whose domain name no
-     * longer matches that address (the emulator restarted with another base URL or
+     * server certificate, and the address DescribeEndpoint returns for their endpoint type as
+     * their domain name. They can be updated and tagged like any other, but not deleted. A stored
+     * one whose domain name no longer matches that address (the emulator restarted with another
      * {@code floci.services.iot.endpoint-address}) takes the current one and keeps everything else.
      */
     private void seedAwsManaged(String region) {
-        String domainName = config.iotEndpointAddress();
+        String accountId = regionResolver.getAccountId();
         synchronized (lock) {
             AWS_MANAGED.forEach((name, serviceType) -> {
+                String domainName = IotEndpoints.address(config, name, accountId, region);
                 String key = key(region, name);
                 IotDomainConfiguration existing = store.get(key).orElse(null);
                 if (existing == null) {

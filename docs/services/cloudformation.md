@@ -24,6 +24,10 @@
 | `GetTemplate` | Retrieve the template body |
 | `GetTemplateSummary` | Summarize a template's Parameters, Resources and Transform sections, by StackName, TemplateBody or TemplateURL |
 | `ValidateTemplate` | Accepted; returns success without validating (stub) |
+| `SignalResource` | - |
+| `DetectStackDrift` | - |
+| `DescribeStackDriftDetectionStatus` | - |
+| `DescribeStackResourceDrifts` | - |
 | `ListStacks` | List stacks by status |
 | `ListExports` | - |
 | `SetStackPolicy` | Accepted; no-op (stub — stack policies are not enforced) |

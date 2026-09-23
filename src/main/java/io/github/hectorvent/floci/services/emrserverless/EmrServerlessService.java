@@ -279,13 +279,17 @@ public class EmrServerlessService {
                 "EMR Serverless session execution is not implemented.", 501);
     }
 
-    public void getResourceDashboard(String applicationId, String resourceId, String resourceType) {
-        getApplication(applicationId);
+    /**
+     * AWS denies GetResourceDashboard for every caller, including {@code Action: "*"}
+     * administrators, before any resource lookup; the message carries no resource.
+     */
+    public void getResourceDashboard(String applicationId, String resourceId, String resourceType,
+                                     String authorization) {
         if (resourceId == null || resourceId.isBlank() || resourceType == null || resourceType.isBlank()) {
             throw new AwsException("ValidationException", "resourceId and resourceType are required", 400);
         }
-        throw new AwsException("UnsupportedOperationException",
-                "EMR Serverless resource dashboards are not implemented.", 501);
+        throw new AwsException("AccessDeniedException", "User: " + jobs.creator(accountId(), authorization)
+                + " is not authorized to perform: emr-serverless:GetResourceDashboard", 403);
     }
 
     private void requireExecutionRequest(JsonNode request) {

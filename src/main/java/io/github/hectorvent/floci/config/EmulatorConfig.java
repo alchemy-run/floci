@@ -44,9 +44,9 @@ public interface EmulatorConfig {
     }
 
     /**
-     * The address IoT Core's DescribeEndpoint returns for every endpoint type, also the domain
-     * name of the AWS-managed domain configurations: {@code floci.services.iot.endpoint-address}
-     * when set, otherwise the host and port of {@link #effectiveBaseUrl()}.
+     * The address Floci's IoT endpoints are reached at: {@code floci.services.iot.endpoint-address}
+     * when set (DescribeEndpoint then returns it for every endpoint type), otherwise the host and
+     * port of {@link #effectiveBaseUrl()}.
      */
     default String iotEndpointAddress() {
         return services().iot().endpointAddress()
@@ -768,6 +768,7 @@ public interface EmulatorConfig {
         OamServiceConfig oam();
         BcmPricingCalculatorServiceConfig bcmPricingCalculator();
         TimestreamInfluxDbServiceConfig timestreamInfluxdb();
+        TimestreamServiceConfig timestream();
         ConfigServiceConfig configservice();
         CloudTrailServiceConfig cloudtrail();
         CloudControlServiceConfig cloudcontrol();
@@ -955,7 +956,9 @@ public interface EmulatorConfig {
          * hostname and clients add their own port: 8883 for MQTT, 443 for HTTPS and MQTT over
          * WebSocket, 8443 for HTTPS with a client certificate. Set it when those ports reach Floci
          * (8883 to the MQTT TLS listener, 443 and 8443 to the HTTPS listener). Unset, DescribeEndpoint
-         * returns the host and port of the base URL. Env: FLOCI_SERVICES_IOT_ENDPOINT_ADDRESS
+         * returns the AWS-shaped account hostname ({@code <prefix>-ats.iot.<region>.amazonaws.com}
+         * and siblings), which Floci's embedded DNS resolves for the containers it runs.
+         * Env: FLOCI_SERVICES_IOT_ENDPOINT_ADDRESS
          */
         Optional<String> endpointAddress();
 
@@ -1177,6 +1180,17 @@ public interface EmulatorConfig {
         boolean enabled();
 
         Optional<String> dockerNetwork();
+
+        /**
+         * When true, build containers use the platform declared by the environment type
+         * ({@code LINUX_CONTAINER} = linux/amd64, {@code ARM_CONTAINER} = linux/arm64).
+         * Disabled by default because foreign-platform containers require host support such
+         * as binfmt_misc or QEMU; the Docker host's native platform is used instead.
+         *
+         * Env var: FLOCI_SERVICES_CODEBUILD_HONOUR_ENVIRONMENT_TYPE
+         */
+        @WithDefault("false")
+        boolean honourEnvironmentType();
     }
 
     interface BatchServiceConfig {
@@ -2263,6 +2277,12 @@ public interface EmulatorConfig {
     }
 
     interface BcmPricingCalculatorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    /** Timestream for LiveAnalytics (timestream-write / timestream-query). */
+    interface TimestreamServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

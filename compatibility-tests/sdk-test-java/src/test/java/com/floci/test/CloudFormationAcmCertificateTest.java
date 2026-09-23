@@ -69,6 +69,8 @@ class CloudFormationAcmCertificateTest {
 
         String arn = output("CertArn");
         assertThat(arn).startsWith("arn:aws:acm:us-east-1:");
+        // DNS validation completes once the certificate's validation CNAME is published.
+        TestFixtures.validateAcmCertificateViaRoute53(acm, arn);
         CertificateDetail created = describe(arn);
         assertThat(created.domainName()).isEqualTo(domainName);
         assertThat(created.status()).isEqualTo(CertificateStatus.ISSUED);

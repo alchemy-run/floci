@@ -23,7 +23,7 @@ import static org.hamcrest.Matchers.not;
  * Control Tower path, so an unrecognised product id still created a real
  * Organizations member account and recorded it under the seeded Account Factory
  * identifiers. These tests pin the three outcomes the request now has to choose
- * between — Account Factory, a plain stored product, and rejection.
+ * between, Account Factory, a plain stored product, and rejection.
  */
 @QuarkusTest
 class ServiceCatalogProvisionProductValidationConsumerTest {
@@ -141,7 +141,7 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
     @Test
     void provisionProduct_ambiguousProductName_returnsDuplicateResourceAndCreatesNoAccount() {
         // A user-created product may share its Name with another (names are not
-        // unique keys); first-match would nondeterministically pick one — including
+        // unique keys); first-match would nondeterministically pick one, including
         // the Account Factory product. Ambiguity must fail, not guess.
         ensureOrganization();
         String email = "ab-ambiguous-name@floci.test";
@@ -213,7 +213,7 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
 
     /**
      * Without {@code AccountEmail} the Account Factory path used to fall through to
-     * Organizations' {@code validateEmail}, which throws {@code InvalidInputException} — an
+     * Organizations' {@code validateEmail}, which throws {@code InvalidInputException}, an
      * Organizations shape, not a Service Catalog one, so a servicecatalog SDK client cannot
      * deserialize it into a typed exception.
      */
@@ -231,7 +231,7 @@ class ServiceCatalogProvisionProductValidationConsumerTest {
     }
 
     /**
-     * The guard belongs on the Account Factory path only — a plain stored product needs no
+     * The guard belongs on the Account Factory path only, a plain stored product needs no
      * email at all, so provisioning one without {@code AccountEmail} must still succeed.
      */
     @Test

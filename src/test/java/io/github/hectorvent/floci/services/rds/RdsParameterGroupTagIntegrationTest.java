@@ -15,7 +15,7 @@ import static org.hamcrest.Matchers.not;
  * Tags on DB parameter groups and DB cluster parameter groups.
  *
  * <p>Both types are taggable on a live account, and both are read by the terraform provider as
- * part of the group's own read — including for DocumentDB, whose cluster parameter groups are
+ * part of the group's own read, including for DocumentDB, whose cluster parameter groups are
  * these records. The ARN is what a caller tags by, so the create response has to carry it.
  */
 @QuarkusTest

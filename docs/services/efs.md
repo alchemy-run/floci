@@ -29,6 +29,7 @@ The EFS emulator provides a metadata control plane for file systems, mount targe
 | `CreateAccessPoint` | - |
 | `DescribeAccessPoints` | - |
 | `DeleteAccessPoint` | - |
+| `DescribeReplicationConfigurations` | - |
 | `PutFileSystemPolicy` | - |
 | `DescribeFileSystemPolicy` | - |
 | `DeleteFileSystemPolicy` | - |

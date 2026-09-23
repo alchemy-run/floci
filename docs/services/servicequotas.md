@@ -6,15 +6,15 @@
 
 Floci answers Service Quotas lookups from a generated in-memory catalog. Every service code
 resolves to a quota list: a curated set with real AWS quota codes where tooling depends on
-them — CodeBuild's `L-2DC20C30` ("Concurrently running builds") and Lambda's `L-B99A9384`
-("Concurrent executions") — plus a deterministic generic set for any other service code. All
+them, CodeBuild's `L-2DC20C30` ("Concurrently running builds") and Lambda's `L-B99A9384`
+("Concurrent executions"), plus a deterministic generic set for any other service code. All
 values are deliberately generous so local pipelines that gate on quota headroom, such
 as AWS Landing Zone Accelerator, never stall on a limit the emulator does not enforce. The
 Organizations `Maximum number of accounts` quota uses AWS quota code `L-E619E033` and a local value
 of 50.
 
 Applied quotas and AWS default quotas return the same data, and quota values are static.
-`RequestServiceQuotaIncrease` is accepted and validated but does not change any quota value —
+`RequestServiceQuotaIncrease` is accepted and validated but does not change any quota value -
 see Limitations.
 
 ## Supported Actions
@@ -22,11 +22,14 @@ see Limitations.
 <!-- floci:actions:start -->
 | Action | Description |
 | --- | --- |
+| `ListServices` | - |
 | `ListServiceQuotas` | Lists the quotas for a service code; generated quotas for unknown codes |
+| `ListAWSDefaultServiceQuotas` | Same as ListServiceQuotas; defaults equal applied values |
 | `GetServiceQuota` | Returns one quota by service and quota code, else `NoSuchResourceException` |
 | `GetAWSDefaultServiceQuota` | Same as GetServiceQuota; defaults equal applied values |
-| `ListAWSDefaultServiceQuotas` | Same as ListServiceQuotas; defaults equal applied values |
 | `RequestServiceQuotaIncrease` | Validates and echoes an increase request as `PENDING`; not persisted, quota unchanged |
+| `GetRequestedServiceQuotaChange` | - |
+| `ListRequestedServiceQuotaChangeHistory` | - |
 | `ListRequestedServiceQuotaChangeHistoryByQuota` | Validates the service/quota pair and returns the locally recorded request history; currently empty for the static catalog |
 <!-- floci:actions:end -->
 
@@ -47,7 +50,7 @@ see Limitations.
   the catalog value after a successful increase request. Quota values remain static by design
   so pipelines never stall on an unenforced limit.
 - `GetRequestedServiceQuotaChange` and `ListRequestedServiceQuotaChangeHistory` are not
-  implemented — there is no request store for them to read.
+  implemented, there is no request store for them to read.
 - `CaseId` is never returned; no support case is opened. `SupportCaseAllowed` in the request is
   accepted and ignored, as the emulator has no case-opening path either way.
 - The quota-increase template operations (`PutServiceQuotaIncreaseRequestIntoTemplate` and

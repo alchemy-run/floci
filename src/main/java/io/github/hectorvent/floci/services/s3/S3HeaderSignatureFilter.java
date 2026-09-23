@@ -27,7 +27,10 @@ import java.util.Optional;
 
 /**
  * Verifies the SigV4 signature carried in the {@code Authorization} header of an S3 request when
- * {@code floci.services.s3.enforce-auth} is enabled.
+ * both {@code floci.services.s3.enforce-auth} and the global {@code floci.auth.validate-signatures}
+ * switch are enabled. With signature validation off, S3 follows every other Floci service and never
+ * verifies the signature; enforce-auth still authorizes the request (bucket policy, ACLs, IAM)
+ * against the caller identity named by the {@code Credential} access key.
  *
  * <p>The presigned placements are already verified elsewhere ({@link PreSignedUrlFilter} for the
  * query string, {@link S3PostPolicySigner} for a browser POST). This filter closes the remaining
@@ -57,9 +60,8 @@ import java.util.Optional;
  *       {@link PreSignedUrlFilter} and {@link S3PostPolicySigner}.</li>
  * </ul>
  *
- * <p>Nothing here runs with the flag off: the filter returns before reading a single header, so
- * the default configuration keeps accepting any well-formed {@code Authorization} header exactly
- * as before.
+ * <p>Nothing here runs with either flag off: the filter returns before reading a single header,
+ * so the default configuration keeps accepting any well-formed {@code Authorization} header.
  */
 @Provider
 @Priority(Priorities.AUTHENTICATION)
@@ -76,19 +78,22 @@ public class S3HeaderSignatureFilter implements ContainerRequestFilter {
 
     private final S3Service s3Service;
     private final IamService iamService;
+    private final PreSignedUrlGenerator signatureSettings;
 
     @Context
     ResourceInfo resourceInfo;
 
     @Inject
-    public S3HeaderSignatureFilter(S3Service s3Service, IamService iamService) {
+    public S3HeaderSignatureFilter(S3Service s3Service, IamService iamService,
+                                   PreSignedUrlGenerator signatureSettings) {
         this.s3Service = s3Service;
         this.iamService = iamService;
+        this.signatureSettings = signatureSettings;
     }
 
     @Override
     public void filter(ContainerRequestContext ctx) throws IOException {
-        if (!s3Service.isAuthEnforced() || !routedToS3()) {
+        if (!s3Service.isAuthEnforced() || !signatureSettings.shouldValidateSignatures() || !routedToS3()) {
             return;
         }
         String authorization = ctx.getHeaderString("Authorization");

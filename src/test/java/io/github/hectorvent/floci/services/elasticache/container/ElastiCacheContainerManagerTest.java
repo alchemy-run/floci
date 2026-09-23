@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -92,6 +93,56 @@ class ElastiCacheContainerManagerTest {
                     "io.floci.resource-id", "my-group",
                     "io.floci.account", "000000000000",
                     "io.floci.region", "us-east-1"));
+        }
+    }
+
+    @Test
+    void tryStartServesValkeyOnTheRequestedPort() throws IOException {
+        try (ServerSocket serverSocket = new ServerSocket(0)) {
+            Thread acceptor = new Thread(() -> {
+                try (Socket socket = serverSocket.accept()) {
+                    socket.getInputStream().read(new byte[1024]);
+                    socket.getOutputStream().write("+PONG\r\n".getBytes(StandardCharsets.UTF_8));
+                    socket.getOutputStream().flush();
+                } catch (IOException e) {
+                    LOG.debugv(e, "Acceptor socket closed during test teardown");
+                }
+            });
+            acceptor.setDaemon(true);
+            acceptor.start();
+
+            ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+            when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerLifecycleManager.ContainerInfo(
+                    "container-id", Map.of(6395,
+                            new ContainerLifecycleManager.EndpointInfo(
+                                    "127.0.0.1", serverSocket.getLocalPort()))));
+
+            ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+            ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+            when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+            when(builder.build()).thenReturn(mock(ContainerSpec.class));
+
+            EmulatorConfig config = mock(EmulatorConfig.class);
+            EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+            EmulatorConfig.ElastiCacheServiceConfig elasticache = mock(EmulatorConfig.ElastiCacheServiceConfig.class);
+            when(config.services()).thenReturn(services);
+            when(services.elasticache()).thenReturn(elasticache);
+            when(elasticache.dockerNetwork()).thenReturn(Optional.empty());
+
+            ContainerDetector containerDetector = mock(ContainerDetector.class);
+            when(containerDetector.isRunningInContainer()).thenReturn(true);
+
+            ElastiCacheContainerManager manager = new ElastiCacheContainerManager(containerBuilder, lifecycleManager,
+                    mock(ContainerLogStreamer.class), containerDetector, config,
+                    new RegionResolver("us-east-1", "000000000000"));
+
+            ElastiCacheContainerHandle handle = manager.tryStart("my-group", "valkey/valkey:7.2", 6395);
+
+            // With Floci in Docker the endpoint is the container itself, so Valkey must listen on
+            // the group's Port for the advertised endpoint to match what CreateReplicationGroup set.
+            verify(builder).withEnv("VALKEY_EXTRA_FLAGS", "--loglevel verbose --port 6395");
+            verify(builder).withExposedPort(6395);
+            assertEquals(serverSocket.getLocalPort(), handle.getPort());
         }
     }
 

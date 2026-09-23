@@ -189,7 +189,7 @@ class ApsControllerIntegrationTest {
             .body("workspace.alias", equalTo("lifecycle-test"))
             .body("workspace.status.statusCode", equalTo("ACTIVE"))
             .body("workspace.prometheusEndpoint",
-                    containsString("://" + workspaceId + ".localhost.floci.io"))
+                    containsString("://aps-workspaces-" + workspaceId + ".localhost.floci.io"))
             // Epoch-seconds number, not an ISO string: restJson1 timestamps with no
             // timestampFormat trait fail SDK deserialization as strings.
             .body("workspace.createdAt", notNullValue())

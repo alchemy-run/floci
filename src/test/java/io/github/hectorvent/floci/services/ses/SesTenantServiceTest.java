@@ -161,12 +161,12 @@ class SesTenantServiceTest {
 
     // Per-account isolation is provided transparently by AccountAwareStorageBackend (which
     // StorageFactory wraps every store in), not by the tenant key, so it is covered by the core
-    // storage tests rather than re-tested here — consistent with the other SES resources.
+    // storage tests rather than re-tested here, consistent with the other SES resources.
 
     @Test
     void getAndDelete_rejectMalformedName() {
         // Unlike CreateTenant, both an absent and an empty name collapse to the service-level
-        // message here (probe-confirmed 2026-08-30) — the Smithy wordings are CreateTenant-only.
+        // message here (probe-confirmed 2026-08-30), the Smithy wordings are CreateTenant-only.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class, () -> service.getTenant("", REGION)).getMessage());
         assertEquals("TenantName cannot be empty",
@@ -429,7 +429,7 @@ class SesTenantServiceTest {
         AwsException empty = assertThrows(AwsException.class,
                 () -> service.tenantForAssociation("", REGION));
         assertEquals("TenantName cannot be empty", empty.getMessage());
-        // An absent TenantName gets the same message (probe-confirmed) — the Smithy not-null
+        // An absent TenantName gets the same message (probe-confirmed), the Smithy not-null
         // variant exists only on CreateTenant.
         AwsException absent = assertThrows(AwsException.class,
                 () -> service.tenantForAssociation(null, REGION));
@@ -499,7 +499,7 @@ class SesTenantServiceTest {
     @Test
     void putSuppressionAttributes_precedenceMatchesAws() {
         // Empty TenantName wins over the enum check; request validation wins over existence. An
-        // absent TenantName gets the same message — no Smithy not-null variant on this operation.
+        // absent TenantName gets the same message, no Smithy not-null variant on this operation.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class, () -> service.putSuppressionAttributes(
                         "", List.of("NOPE"), "TENANT", REGION)).getMessage());
@@ -533,7 +533,7 @@ class SesTenantServiceTest {
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,
                         () -> service.runWithTenant(" ", REGION, t -> null)).getMessage());
-        // An absent TenantName collapses to the same service-level message (probe-confirmed) —
+        // An absent TenantName collapses to the same service-level message (probe-confirmed) -
         // the Smithy not-null variant exists only on CreateTenant.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,
@@ -562,7 +562,7 @@ class SesTenantServiceTest {
         AwsException e = assertThrows(AwsException.class,
                 () -> service.tenantForSending("ghost", REGION, ACCOUNT));
         assertEquals("NotFoundException", e.getErrorCode());
-        // No angle brackets, and the account id is included — unlike the management operations.
+        // No angle brackets, and the account id is included, unlike the management operations.
         assertEquals("Tenant ghost for AwsAccountId " + ACCOUNT + " not found.", e.getMessage());
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,

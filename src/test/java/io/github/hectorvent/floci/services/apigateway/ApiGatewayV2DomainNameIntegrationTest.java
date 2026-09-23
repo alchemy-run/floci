@@ -337,7 +337,7 @@ class ApiGatewayV2DomainNameIntegrationTest {
     @Order(7)
     void rootSpellingsCollapseToOneRecordOnWrite() {
         // The read path has always normalised the root to "(none)"; the write path now does too, so
-        // "/" cannot end up stored beside it as a second record that means the same thing — and a
+        // "/" cannot end up stored beside it as a second record that means the same thing, and a
         // mapping created as "" can be read back as "", which it could not before.
         String otherDomain = "root-spelling.example.com";
         given()

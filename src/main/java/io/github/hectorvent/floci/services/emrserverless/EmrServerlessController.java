@@ -194,8 +194,9 @@ public class EmrServerlessController {
     @Path("/{applicationId}/dashboard")
     public void getResourceDashboard(@PathParam("applicationId") String applicationId,
                                      @QueryParam("resourceId") String resourceId,
-                                     @QueryParam("resourceType") String resourceType) {
-        service.getResourceDashboard(applicationId, resourceId, resourceType);
+                                     @QueryParam("resourceType") String resourceType,
+                                     @HeaderParam("Authorization") String authorization) {
+        service.getResourceDashboard(applicationId, resourceId, resourceType, authorization);
     }
 
     @POST

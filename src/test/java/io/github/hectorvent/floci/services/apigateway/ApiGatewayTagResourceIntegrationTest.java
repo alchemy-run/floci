@@ -8,6 +8,7 @@ import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.nullValue;
 
 @QuarkusTest
 class ApiGatewayTagResourceIntegrationTest {
@@ -64,7 +65,8 @@ class ApiGatewayTagResourceIntegrationTest {
             given().when().delete(apiPath + "/stages/blue").then().statusCode(202);
             assertHttpTagFailure(stageArn, 404, "NotFoundException");
             given().contentType("application/json").body(Map.of("stageName", "blue", "deploymentId", deploymentId))
-                    .when().post(apiPath + "/stages").then().statusCode(201).body("tags", equalTo(Map.of()));
+                    // An untagged stage omits tags, as GetStage does on AWS; ListTags still answers {}.
+                    .when().post(apiPath + "/stages").then().statusCode(201).body("tags", nullValue());
             assertHttpTags(stageArn, Map.of());
             assertHttpIsolation(apiId, apiTags, siblingTags);
         } finally {

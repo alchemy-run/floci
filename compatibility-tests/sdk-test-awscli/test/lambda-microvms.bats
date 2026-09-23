@@ -3,9 +3,34 @@
 #
 # Two AWS service models sit behind these commands: `lambda-microvms` (images
 # and MicroVMs) and `lambda-core` (network connectors). Both sign as lambda.
+#
+# Image versions are built from a real code artifact (a zip with a Dockerfile at
+# its root) fetched from S3, so the file stages one in a bucket it owns and the
+# tests that need a runnable image wait for the build to settle.
+
+load 'test_helper/common-setup'
+
+setup_file() {
+    export CODE_BUCKET="$(unique_name microvm-code)"
+    export CODE_URI="s3://${CODE_BUCKET}/code.zip"
+    local zip_file="${BATS_FILE_TMPDIR}/code.zip"
+    python3 - "$zip_file" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("Dockerfile",
+               "FROM public.ecr.aws/lambda/microvms:al2023-minimal\n"
+               "CMD [\"sleep\", \"infinity\"]\n")
+PY
+    aws_cmd s3api create-bucket --bucket "$CODE_BUCKET" >/dev/null
+    aws_cmd s3api put-object --bucket "$CODE_BUCKET" --key code.zip --body "$zip_file" >/dev/null
+}
+
+teardown_file() {
+    aws_cmd s3api delete-object --bucket "$CODE_BUCKET" --key code.zip >/dev/null 2>&1 || true
+    aws_cmd s3api delete-bucket --bucket "$CODE_BUCKET" >/dev/null 2>&1 || true
+}
 
 setup() {
-    load 'test_helper/common-setup'
     IMAGE_NAME=""
     MICROVM_ID=""
     CONNECTOR_ID=""
@@ -31,7 +56,23 @@ create_image() {
         --name "$name" \
         --base-image-arn "$BASE_IMAGE_ARN" \
         --build-role-arn "$BUILD_ROLE_ARN" \
-        --code-artifact "uri=s3://bucket/code.zip"
+        --code-artifact "uri=$CODE_URI"
+}
+
+# Waits for the image's first version to finish its docker build.
+wait_image_created() {
+    local name="$1" out state
+    for _ in $(seq 1 90); do
+        out=$(aws_cmd lambda-microvms get-microvm-image --image-identifier "$name")
+        state=$(json_get "$out" '.state')
+        case "$state" in
+            CREATED) return 0 ;;
+            CREATE_FAILED) echo "image $name failed to build: $out" >&2; return 1 ;;
+        esac
+        sleep 2
+    done
+    echo "image $name did not reach CREATED: $out" >&2
+    return 1
 }
 
 # ============================================
@@ -55,6 +96,7 @@ create_image() {
 @test "MicroVMs: image settles to CREATED with an active version" {
     IMAGE_NAME=$(unique_name "cli-img")
     create_image "$IMAGE_NAME" >/dev/null
+    wait_image_created "$IMAGE_NAME"
 
     run aws_cmd lambda-microvms get-microvm-image --image-identifier "$IMAGE_NAME"
     assert_success
@@ -76,6 +118,7 @@ create_image() {
 @test "MicroVMs: version and build converge to SUCCESSFUL" {
     IMAGE_NAME=$(unique_name "cli-img")
     create_image "$IMAGE_NAME" >/dev/null
+    wait_image_created "$IMAGE_NAME"
 
     run aws_cmd lambda-microvms list-microvm-image-builds \
         --image-identifier "$IMAGE_NAME" --image-version 1.0
@@ -88,8 +131,9 @@ create_image() {
     run aws_cmd lambda-microvms get-microvm-image-build \
         --image-identifier "$IMAGE_NAME" --image-version 1.0 --build-id "$build_id"
     assert_success
+    # The version is built for the Docker host's architecture.
     arch=$(json_get "$output" '.architecture')
-    [ "$arch" = "ARM_64" ]
+    [ "$arch" = "ARM_64" ] || [ "$arch" = "X86_64" ]
 
     run aws_cmd lambda-microvms get-microvm-image-version \
         --image-identifier "$IMAGE_NAME" --image-version 1.0
@@ -124,14 +168,16 @@ create_image() {
 @test "MicroVMs: run a MicroVM and read it back running" {
     IMAGE_NAME=$(unique_name "cli-img")
     create_image "$IMAGE_NAME" >/dev/null
+    wait_image_created "$IMAGE_NAME"
 
     run aws_cmd lambda-microvms run-microvm --image-identifier "$IMAGE_NAME"
     assert_success
     MICROVM_ID=$(json_get "$output" '.microvmId')
     state=$(json_get "$output" '.state')
     duration=$(json_get "$output" '.maximumDurationInSeconds')
-    [[ "$MICROVM_ID" =~ ^microvm- ]]
-    [ "$state" = "PENDING" ]
+    [[ "$MICROVM_ID" =~ ^mvm- ]]
+    # RunMicrovm returns once the container is started.
+    [ "$state" = "RUNNING" ]
     [ "$duration" = "28800" ]
 
     run aws_cmd lambda-microvms get-microvm --microvm-identifier "$MICROVM_ID"
@@ -149,6 +195,7 @@ create_image() {
 @test "MicroVMs: an image with a running MicroVM refuses delete" {
     IMAGE_NAME=$(unique_name "cli-img")
     create_image "$IMAGE_NAME" >/dev/null
+    wait_image_created "$IMAGE_NAME"
     out=$(aws_cmd lambda-microvms run-microvm --image-identifier "$IMAGE_NAME")
     MICROVM_ID=$(json_get "$out" '.microvmId')
 
@@ -160,6 +207,7 @@ create_image() {
 @test "MicroVMs: terminate is idempotent only once" {
     IMAGE_NAME=$(unique_name "cli-img")
     create_image "$IMAGE_NAME" >/dev/null
+    wait_image_created "$IMAGE_NAME"
     out=$(aws_cmd lambda-microvms run-microvm --image-identifier "$IMAGE_NAME")
     microvm_id=$(json_get "$out" '.microvmId')
 

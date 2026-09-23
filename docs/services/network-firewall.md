@@ -15,6 +15,8 @@ subnets. Floci does not run a packet-inspection data plane.
 | --- | --- |
 | `CreateRuleGroup` | Creates a stateful or stateless rule group. |
 | `DescribeRuleGroup` | Returns a rule group's definition and metadata. |
+| `DescribeRuleGroupSummary` | - |
+| `DescribeRuleGroupMetadata` | - |
 | `UpdateRuleGroup` | Updates a rule group's rules and settings. |
 | `DeleteRuleGroup` | Deletes the specified rule group. |
 | `ListRuleGroups` | Lists the rule groups in the account. |
@@ -23,6 +25,9 @@ subnets. Floci does not run a packet-inspection data plane.
 | `UpdateFirewallPolicy` | Updates a firewall policy's definition. |
 | `DeleteFirewallPolicy` | Deletes the specified firewall policy. |
 | `ListFirewallPolicies` | Lists the firewall policies in the account. |
+| `TagResource` | - |
+| `UntagResource` | - |
+| `ListTagsForResource` | - |
 | `CreateFirewall` | Creates a firewall; status is immediately READY with stable endpoint IDs. |
 | `DescribeFirewall` | Returns the firewall's configuration and sync state. |
 | `DeleteFirewall` | Deletes the specified firewall. |

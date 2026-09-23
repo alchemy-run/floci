@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
  *
  * <p>Phase 2 adds tenant→resource associations, owned here as well ({@code associationStore}); the
  * facade validates that the referenced resource exists before delegating. Phase 3 adds the tenant
- * suppression attributes (stored on the tenant record) — the tenant-scoped suppression list itself
+ * suppression attributes (stored on the tenant record), the tenant-scoped suppression list itself
  * lives in {@code SesSuppressionService} with the account list, and cascades through the
  * {@code DeleteTenant} callback. Tenant-scoped sending is a separate follow-up.
  */
@@ -53,7 +53,7 @@ public class SesTenantService {
     private static final Pattern TENANT_NAME_CHARS = Pattern.compile("[A-Za-z0-9_-]+");
     private static final char[] HEX = "0123456789abcdef".toCharArray();
 
-    // The wire values for ResourceType — the ARN segment, not the SDK enum spelling. Real AWS both
+    // The wire values for ResourceType, the ARN segment, not the SDK enum spelling. Real AWS both
     // returns these and requires them as Filter values; the SDK's EMAIL_IDENTITY-style enum constants
     // are rejected by the service (probe-confirmed 2026-08-28).
     static final String RESOURCE_TYPE_IDENTITY = "identity";
@@ -161,7 +161,7 @@ public class SesTenantService {
     /**
      * Deletes the tenant. {@code dependentCascade} runs inside the lock with the resolved tenant so
      * the facade can cascade state held by other domains (the tenant suppression list); like the
-     * associations, it runs before the tenant record is removed — persistent/wal backends apply each
+     * associations, it runs before the tenant record is removed, persistent/wal backends apply each
      * deletion durably, so a crash mid-cascade must leave the tenant record (a retryable
      * DeleteTenant) rather than orphans no API call can remove.
      */
@@ -293,7 +293,7 @@ public class SesTenantService {
      * service-level message instead of the Smithy one.
      */
     public Tenant tenantForAssociation(String tenantName, String region) {
-        // Absent and empty both get the service-level message here (probe-confirmed 2026-08-30) —
+        // Absent and empty both get the service-level message here (probe-confirmed 2026-08-30) -
         // the Smithy not-null variant exists only on CreateTenant.
         if (tenantName == null || tenantName.isBlank()) {
             throw new AwsException("BadRequestException", "TenantName cannot be empty", 400);
@@ -311,7 +311,7 @@ public class SesTenantService {
      */
     public Tenant tenantForSending(String tenantName, String region, String accountId) {
         // Unreachable through the facade (which treats a null TenantName as a non-tenant send), but
-        // a public helper should fail the AWS way — same guard as runWithTenant.
+        // a public helper should fail the AWS way, same guard as runWithTenant.
         if (tenantName == null || tenantName.isBlank()) {
             throw new AwsException("BadRequestException", "TenantName cannot be empty", 400);
         }
@@ -324,7 +324,7 @@ public class SesTenantService {
      * The send gate: every resource a tenant send uses (From identity, configuration set, template)
      * must be associated with the tenant, or AWS refuses the send with a 403. The bracket list
      * carries every missing ARN (the plural is AWS's own wording even for a single resource; on the
-     * wire AWS spells the body key "Message" — Floci renders its usual error shape instead).
+     * wire AWS spells the body key "Message", Floci renders its usual error shape instead).
      */
     public void requireResourcesAssociated(Tenant tenant, List<AssociationResource> resources,
                                            String region) {
@@ -385,7 +385,7 @@ public class SesTenantService {
     /**
      * Creates the association under the shared lock. The tenant is revalidated (a concurrent
      * {@code DeleteTenant} may have cascaded since the caller resolved it) and
-     * {@code resourceExistenceCheck} — the facade's throwing existence check — runs inside the lock
+     * {@code resourceExistenceCheck}, the facade's throwing existence check, runs inside the lock
      * too, so a backing resource cannot slip through {@link #deleteBackingResource} concurrently and
      * leave an association pointing at a deleted resource.
      */
@@ -490,7 +490,7 @@ public class SesTenantService {
     }
 
     /**
-     * The list operations return everything in one page, so any client-supplied NextToken is invalid —
+     * The list operations return everything in one page, so any client-supplied NextToken is invalid -
      * which is also what AWS answers for a token it cannot decrypt. PageSize is still range-checked.
      */
     public static void validateListPaging(Integer pageSize, String nextToken) {
@@ -542,13 +542,13 @@ public class SesTenantService {
     /**
      * {@code PutTenantSuppressionAttributes}: both members set the block (an empty reason list is a
      * valid state), neither member clears it. Observed precedence: empty TenantName, then the Smithy
-     * enum checks, then duplicates, then the pair rules, then tenant existence — a put on a missing
+     * enum checks, then duplicates, then the pair rules, then tenant existence, a put on a missing
      * tenant still gets its request validated first.
      */
     public void putSuppressionAttributes(String tenantName, List<String> suppressedReasons,
                                          String suppressionScope, String region) {
         // Unlike CreateTenant, an absent TenantName gets the same service-level message as an empty
-        // one here (probe-confirmed 2026-08-30) — no Smithy not-null variant on this operation.
+        // one here (probe-confirmed 2026-08-30), no Smithy not-null variant on this operation.
         if (tenantName == null || tenantName.isBlank()) {
             throw new AwsException("BadRequestException", "TenantName cannot be empty", 400);
         }
@@ -564,7 +564,7 @@ public class SesTenantService {
     }
 
     /**
-     * Resolves the tenant and runs {@code action} under the shared lock — the tenant-scoped
+     * Resolves the tenant and runs {@code action} under the shared lock, the tenant-scoped
      * suppression-list operations go through this so a concurrent {@code DeleteTenant} cascade
      * cannot interleave and leave entries for a deleted tenant.
      */
@@ -584,7 +584,7 @@ public class SesTenantService {
 
     /**
      * Validates the SuppressedReasons/SuppressionScope pair (shared by CreateTenant and
-     * PutTenantSuppressionAttributes) and returns the block to store — {@code null} when neither
+     * PutTenantSuppressionAttributes) and returns the block to store, {@code null} when neither
      * member was given. AWS rejects half a pair with member-specific messages, and an empty reason
      * list without a scope gets its own third wording.
      */
@@ -678,7 +678,7 @@ public class SesTenantService {
     }
 
     // The store is account-scoped transparently by AccountAwareStorageBackend (StorageFactory wraps
-    // every store), so the key only needs region + name — the same convention as the other SES stores.
+    // every store), so the key only needs region + name, the same convention as the other SES stores.
     private static String tenantKey(String region, String tenantName) {
         return tenantKeyPrefix(region) + tenantName;
     }

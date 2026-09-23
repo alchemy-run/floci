@@ -23,6 +23,17 @@ below for what's simplified.
 | `UpdateResourceShare` | Renames a share and/or toggles `allowExternalPrincipals` (`POST /updateresourceshare`) |
 | `AssociateResourceShare` | Adds resource ARNs and/or principals to an existing share (`POST /associateresourceshare`) |
 | `DisassociateResourceShare` | Removes resource ARNs and/or principals from a share (`POST /disassociateresourceshare`) |
+| `GetResourceShareAssociations` | - |
+| `ListPendingInvitationResources` | - |
+| `GetResourcePolicies` | - |
+| `ListPermissions` | - |
+| `GetPermission` | - |
+| `ListPermissionVersions` | - |
+| `CreatePermission` | - |
+| `CreatePermissionVersion` | - |
+| `SetDefaultPermissionVersion` | - |
+| `DeletePermissionVersion` | - |
+| `DeletePermission` | - |
 | `ListPrincipals` | Lists principals associated with visible shares (`POST /listprincipals`) |
 | `TagResource` | Adds/overwrites tags on a resource share (`POST /tagresource`) |
 | `UntagResource` | Removes tags by key from a resource share (`POST /untagresource`) |

@@ -352,7 +352,8 @@ class CloudControlIntegrationTest {
     }
 
     private io.restassured.response.Response jsonRequest(String action, Object body) throws JsonProcessingException {
-        String ct = "application/x-amz-json-1.0";
+        // SSM speaks JSON 1.1; Cloud Control speaks JSON 1.0.
+        String ct = action.startsWith("AmazonSSM.") ? "application/x-amz-json-1.1" : "application/x-amz-json-1.0";
         return given().config(config().encoderConfig(encoderConfig().encodeContentTypeAs(ct, TEXT)))
                 .contentType(ct).header("Authorization", ACCOUNT_A_AUTH).header("X-Amz-Target", action)
                 .body(MAPPER.writeValueAsString(body)).when().post("/");
@@ -372,12 +373,15 @@ class CloudControlIntegrationTest {
     }
 
     private void deleteThroughCloudControl(String ct, String auth, String identifier, String status) {
-        given().config(config().encoderConfig(encoderConfig().encodeContentTypeAs(ct, TEXT)))
+        ExtractableResponse<Response> event = given()
+                .config(config().encoderConfig(encoderConfig().encodeContentTypeAs(ct, TEXT)))
                 .contentType(ct).header("Authorization", auth)
                 .header("X-Amz-Target", "CloudApiService.DeleteResource")
                 .body("{\"TypeName\":\"AWS::EC2::VPC\",\"Identifier\":\"" + identifier + "\"}")
-                .when().post("/").then().statusCode(200)
-                .body("ProgressEvent.OperationStatus", equalTo(status));
+                .when().post("/").then().statusCode(200).extract();
+        String operationStatus = event.path("ProgressEvent.OperationStatus");
+        String statusMessage = event.path("ProgressEvent.StatusMessage");
+        assertEquals(status, operationStatus, statusMessage);
     }
 
     private String awaitIdentifier(String token, String ct) throws InterruptedException {

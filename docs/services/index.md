@@ -64,6 +64,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [RDS](rds.md) | `POST /` with `Action=` param + TCP proxy | Query + wire | [See actions](rds.md) |
 | [RDS Data API](rds-data.md) | `/Execute`, `/BeginTransaction`, `/CommitTransaction`, `/RollbackTransaction` | REST JSON | 4 |
 | [Timestream for InfluxDB](timestream-influxdb.md) | `POST /` + `X-Amz-Target: AmazonTimestreamInfluxDB.*` + InfluxDB container | JSON 1.0 + InfluxDB HTTP | 24 |
+| [Timestream for LiveAnalytics](timestream.md) | `POST /` + `X-Amz-Target: Timestream_20181101.*` (not-onboarded account) | JSON 1.0 | 30 |
 | [MSK](msk.md) | `/v1/clusters/...`, `/api/v2/clusters/...` + Redpanda broker | REST JSON + Kafka | 8 |
 | [Amazon MQ](amazonmq.md) | `/v1/brokers/...` + RabbitMQ broker | REST JSON + AMQP | 5 |
 | [Athena](athena.md) | `POST /` + `X-Amz-Target: AmazonAthena.*` | JSON 1.1 | [See actions](athena.md) |

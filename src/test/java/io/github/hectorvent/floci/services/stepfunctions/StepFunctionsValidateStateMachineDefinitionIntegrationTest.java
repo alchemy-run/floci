@@ -304,7 +304,10 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
                 .body("result", equalTo("FAIL"))
                 .body("diagnostics.size()", greaterThanOrEqualTo(1))
                 .body("diagnostics[0].severity", equalTo("ERROR"))
-                .body("diagnostics[0].code", equalTo("SCHEMA_VALIDATION_FAILED"));
+                // AWS reports an unresolvable StartAt as a dangling transition target at /StartAt,
+                // the same "MISSING_TRANSITION_TARGET: Missing 'Next' target" CreateStateMachine uses.
+                .body("diagnostics[0].code", equalTo("MISSING_TRANSITION_TARGET"))
+                .body("diagnostics[0].location", equalTo("/StartAt"));
     }
 
     @Test

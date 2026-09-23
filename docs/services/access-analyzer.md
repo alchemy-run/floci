@@ -14,6 +14,37 @@ Floci supports the analyzer lifecycle used by local governance workflows.
 | `ListAnalyzers` | - |
 | `CreateAnalyzer` | - |
 | `DeleteAnalyzer` | - |
+| `GetAnalyzer` | - |
+| `UpdateAnalyzer` | - |
+| `CreateArchiveRule` | - |
+| `GetArchiveRule` | - |
+| `ListArchiveRules` | - |
+| `UpdateArchiveRule` | - |
+| `DeleteArchiveRule` | - |
+| `ApplyArchiveRule` | - |
+| `ValidatePolicy` | - |
+| `CheckNoNewAccess` | - |
+| `CheckAccessNotGranted` | - |
+| `CheckNoPublicAccess` | - |
+| `ListFindings` | - |
+| `ListFindingsV2` | - |
+| `ListAnalyzedResources` | - |
+| `GetFinding` | - |
+| `GetFindingV2` | - |
+| `GetFindingRecommendation` | - |
+| `GenerateRecommendation` | - |
+| `GetFindingsStatistics` | - |
+| `UpdateFindings` | - |
+| `GetAnalyzedResource` | - |
+| `StartResourceScan` | - |
+| `CreateAccessPreview` | - |
+| `ListAccessPreviews` | - |
+| `GetAccessPreview` | - |
+| `ListAccessPreviewFindings` | - |
+| `ListPolicyGenerations` | - |
+| `StartPolicyGeneration` | - |
+| `GetGeneratedPolicy` | - |
+| `CancelPolicyGeneration` | - |
 <!-- floci:actions:end -->
 
 Analyzer state is account and Region scoped and persisted through `StorageFactory`.

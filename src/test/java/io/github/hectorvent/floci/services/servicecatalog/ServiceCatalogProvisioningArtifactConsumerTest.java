@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *
  * <p>New class, not appended to an existing one, so falsifiability isolates per
  * operation (CS-001). {@code ListProvisioningArtifactsForServiceAction} always
- * returns an empty list — no association between service actions and provisioning
+ * returns an empty list, no association between service actions and provisioning
  * artifacts is tracked for this specific listing (documented as a limitation, not a
  * bug: unlike {@code ListServiceActions} before this session's fix, nothing else in
  * the codebase persists data this operation could read).

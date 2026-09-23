@@ -9,10 +9,21 @@ Floci implements the REST JSON Detective organization and behavior-graph operati
 | --- | --- |
 | `ListOrganizationAdminAccounts` | Lists the Detective administrator account configured for the organization. |
 | `EnableOrganizationAdminAccount` | Designates a Detective administrator account and enables its organization behavior graph. |
+| `CreateGraph` | - |
+| `DeleteGraph` | - |
 | `ListGraphs` | Lists behavior graphs for the current account and Region. |
 | `DescribeOrganizationConfiguration` | Returns the organization auto-enable setting for a behavior graph. |
 | `UpdateOrganizationConfiguration` | Updates the organization auto-enable setting for a behavior graph. |
 | `ListMembers` | Lists organization member accounts in a behavior graph. |
+| `GetMembers` | - |
+| `ListInvitations` | - |
+| `ListInvestigations` | - |
+| `ListDatasourcePackages` | - |
+| `UpdateDatasourcePackages` | - |
+| `StartInvestigation` | - |
+| `GetInvestigation` | - |
+| `ListIndicators` | - |
+| `UpdateInvestigationState` | - |
 | `CreateMembers` | Enables organization accounts as behavior-graph members. |
 | `StartMonitoringMember` | Starts data contribution for an accepted but disabled member account. |
 <!-- floci:actions:end -->

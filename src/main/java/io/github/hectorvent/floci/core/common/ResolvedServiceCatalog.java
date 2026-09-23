@@ -599,6 +599,12 @@ public class ResolvedServiceCatalog {
                         "timestreaminfluxdb", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonTimestreamInfluxDB."), Set.of("timestream-influxdb"), Set.of(), Set.of()),
+                // Timestream for LiveAnalytics: timestream-write and timestream-query share the
+                // signing name and the Timestream_20181101 target prefix.
+                descriptor("timestream", "timestream", config.services().timestream().enabled(), true,
+                        "timestream", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("Timestream_20181101."), Set.of("timestream"), Set.of(), Set.of()),
                 descriptor("bcm-data-exports", "bcmdataexports", config.services().bcmDataExports().enabled(), true,
                         "bcmdataexports", config.storage().mode(), 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

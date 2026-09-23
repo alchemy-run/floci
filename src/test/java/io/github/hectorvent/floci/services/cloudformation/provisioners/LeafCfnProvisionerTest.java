@@ -10,6 +10,7 @@ import io.github.hectorvent.floci.services.ecr.model.Repository;
 import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription;
 import io.github.hectorvent.floci.services.kms.KmsService;
+import io.github.hectorvent.floci.services.kms.model.KmsAlias;
 import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.ssm.SsmService;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -133,6 +135,66 @@ class LeafCfnProvisionerTest {
 
             verify(kms, never()).createAlias(anyString(), anyString(), anyString());
             assertEquals("alias/app", r.getPhysicalId());
+        }
+
+        @Test
+        void keyUpdateReusesTheLiveKeyAndConvergesDescriptionAndTags() {
+            KmsKey key = new KmsKey();
+            key.setKeyId("k-123");
+            key.setArn("arn:aws:kms:us-east-1:000000000000:key/k-123");
+            key.setDescription("old");
+            key.setTags(new HashMap<>(Map.of("stale", "1")));
+            when(kms.describeKey("k-123", REGION)).thenReturn(key);
+            ProvisionContext update = new ProvisionContext(engine, REGION, "000000000000", "my-stack", "k-123");
+
+            StackResource r = resource("Key", "AWS::KMS::Key");
+            provisioner.provision(r, props("""
+                    {"Description": "new", "Tags": [{"Key": "env", "Value": "dev"}]}
+                    """), update);
+
+            verify(kms, never()).createKey(any(), any(), any(), anyString());
+            verify(kms).updateKeyDescription("k-123", "new", REGION);
+            verify(kms).untagResource("k-123", List.of("stale"), REGION);
+            verify(kms).tagResource("k-123", Map.of("env", "dev"), REGION);
+            assertEquals("k-123", r.getPhysicalId());
+        }
+
+        @Test
+        void aliasUpdateWithTheSameTargetLeavesTheAliasAlone() {
+            KmsKey key = new KmsKey();
+            key.setKeyId("k-123");
+            when(kms.describeKey("k-123", REGION)).thenReturn(key);
+            when(kms.listAliases(REGION)).thenReturn(List.of(
+                    new KmsAlias(
+                            "alias/app", "arn:aws:kms:us-east-1:000000000000:alias/app", "k-123")));
+            ProvisionContext update = new ProvisionContext(engine, REGION, "000000000000", "my-stack", "alias/app");
+
+            StackResource r = resource("Alias", "AWS::KMS::Alias");
+            provisioner.provision(r, props("""
+                    {"AliasName": "alias/app", "TargetKeyId": "k-123"}
+                    """), update);
+
+            verify(kms, never()).createAlias(anyString(), anyString(), anyString());
+            verify(kms, never()).updateAlias(anyString(), anyString(), anyString());
+            assertEquals("alias/app", r.getPhysicalId());
+        }
+
+        @Test
+        void aliasUpdateWithANewTargetRepointsTheAlias() {
+            KmsKey key = new KmsKey();
+            key.setKeyId("k-456");
+            when(kms.describeKey("k-456", REGION)).thenReturn(key);
+            when(kms.listAliases(REGION)).thenReturn(List.of(
+                    new KmsAlias(
+                            "alias/app", "arn:aws:kms:us-east-1:000000000000:alias/app", "k-123")));
+            ProvisionContext update = new ProvisionContext(engine, REGION, "000000000000", "my-stack", "alias/app");
+
+            provisioner.provision(resource("Alias", "AWS::KMS::Alias"), props("""
+                    {"AliasName": "alias/app", "TargetKeyId": "k-456"}
+                    """), update);
+
+            verify(kms, never()).createAlias(anyString(), anyString(), anyString());
+            verify(kms).updateAlias("alias/app", "k-456", REGION);
         }
 
         @Test

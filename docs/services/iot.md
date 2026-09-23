@@ -114,7 +114,16 @@ Differences from AWS: AWS rejects an unregistered, inactive or expired certifica
 
 ### Endpoint address
 
-`DescribeEndpoint` returns `host:4566` by default, the host and port of Floci's base URL, because that is where the HTTP data plane lives and IoT Data clients build `https://<endpointAddress>` from it. The four AWS-managed domain configurations report the same value as their `domainName`.
+`DescribeEndpoint` returns the AWS-shaped account hostname by default, one per endpoint type, with a 14-character prefix derived from the account ID:
+
+| Endpoint type | Address |
+|---|---|
+| `iot:Data-ATS` (default) | `<prefix>-ats.iot.<region>.amazonaws.com` |
+| `iot:Data` | `<prefix>.iot.<region>.amazonaws.com` |
+| `iot:CredentialProvider` | `<prefix>.credentials.iot.<region>.amazonaws.com` |
+| `iot:Jobs` | `<prefix>.jobs.iot.<region>.amazonaws.com` |
+
+The four AWS-managed domain configurations report the address of their type as their `domainName`. Floci's embedded DNS resolves these names (and the SDK's default `data-ats.iot.<region>.amazonaws.com`) to Floci for the Lambda, ECS and other containers it runs, and the generated server certificate covers them for `us-east-1`, so a workload that dials the advertised endpoint on 443 or 8883 reaches Floci. From the host they resolve to real AWS unless you add a DNS or `/etc/hosts` entry.
 
 AWS returns a bare hostname and lets each client add its own port: 8883 for MQTT with a client certificate, 443 for HTTPS and MQTT over WebSocket, 8443 for HTTPS with a client certificate. With TLS enabled, Floci serves MQTT on 8883 and HTTPS on 443 next to 4566. When those ports reach Floci, set `FLOCI_SERVICES_IOT_ENDPOINT_ADDRESS` and `DescribeEndpoint` answers like AWS:
 
@@ -132,7 +141,7 @@ services:
       - "8443:443"    # optional: the HTTPS port AWS uses with client certificates
 ```
 
-The value is a hostname or `host:port`, never a URL, and is returned as is for every endpoint type: AWS hands out one hostname per type (`iot:Data-ATS`, `iot:Data`, `iot:Jobs`, `iot:CredentialProvider`), Floci answers all four with this one. The name is added to the generated server certificate, like `FLOCI_HOSTNAME`, so devices verify it on 8883 and 443; a name under `localhost.floci.io` resolves to `127.0.0.1` on its own, any other needs a DNS or `/etc/hosts` entry. Floci does not detect published ports itself: unset, or set to an empty value, `DescribeEndpoint` keeps returning `host:4566`, so the plain `-p 4566:4566` setup keeps working for IoT Data clients.
+The value is a hostname or `host:port`, never a URL, and is returned as is for every endpoint type in place of the per-type AWS hostnames. The name is added to the generated server certificate, like `FLOCI_HOSTNAME`, so devices verify it on 8883 and 443; a name under `localhost.floci.io` resolves to `127.0.0.1` on its own, any other needs a DNS or `/etc/hosts` entry. Floci does not detect published ports itself: unset, or set to an empty value, `DescribeEndpoint` returns the AWS-shaped hostnames above. Host-side IoT Data clients that build `https://<endpointAddress>` from `DescribeEndpoint` with only `-p 4566:4566` published should set it to `localhost:4566`.
 
 ### MQTT over WebSocket
 

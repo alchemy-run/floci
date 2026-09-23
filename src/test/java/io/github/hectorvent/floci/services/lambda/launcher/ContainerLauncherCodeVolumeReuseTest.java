@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
  * populated volume and mount it as-is instead of re-copying its (e.g. ~34k) files.
  *
  * <p>Uses a subclass that overrides {@code populateCodeVolume} (rather than a Mockito spy) so the
- * internal self-call from {@code ensureCodeVolume} is intercepted — a spy would not intercept it.
+ * internal self-call from {@code ensureCodeVolume} is intercepted, a spy would not intercept it.
  */
 class ContainerLauncherCodeVolumeReuseTest {
 

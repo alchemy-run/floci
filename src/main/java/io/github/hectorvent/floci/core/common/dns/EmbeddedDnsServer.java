@@ -260,7 +260,22 @@ public class EmbeddedDnsServer {
      * through {@code AWS_ENDPOINT_URL}).
      */
     static boolean isAwsDataPlaneHost(String name) {
-        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name);
+        return isSyncStatesHost(name) || isAppSyncHost(name) || isExecuteApiHost(name) || isIotHost(name);
+    }
+
+    /**
+     * IoT Core account endpoints as DescribeEndpoint returns them
+     * ({@code {prefix}-ats.iot.{region}.amazonaws.com}, {@code {prefix}.iot...},
+     * {@code {prefix}.credentials.iot...}, {@code {prefix}.jobs.iot...}) and the SDK's default
+     * data-plane host {@code data-ats.iot.{region}.amazonaws.com}, so devices and functions that
+     * connect to the advertised endpoint reach Floci's HTTPS and MQTT listeners.
+     */
+    static boolean isIotHost(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        return name.toLowerCase().matches(
+                "[a-z0-9-]+\\.((credentials|jobs)\\.)?iot\\.[a-z0-9-]+\\.amazonaws\\.com(\\.cn)?");
     }
 
     /**

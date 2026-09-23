@@ -28,6 +28,14 @@ state backed by a live Flink job on Floci's Docker network.
 | `DescribeApplicationSnapshot` | Returns details about an application snapshot |
 | `ListApplicationSnapshots` | Lists the snapshots for an application |
 | `DeleteApplicationSnapshot` | Deletes an application snapshot |
+| `UpdateApplicationMaintenanceConfiguration` | - |
+| `AddApplicationCloudWatchLoggingOption` | - |
+| `DeleteApplicationCloudWatchLoggingOption` | - |
+| `ListApplicationVersions` | - |
+| `DescribeApplicationVersion` | - |
+| `ListApplicationOperations` | - |
+| `DescribeApplicationOperation` | - |
+| `RollbackApplication` | - |
 <!-- floci:actions:end -->
 
 ## How it works

@@ -62,7 +62,7 @@ class ApsServiceTest {
         assertEquals("ACTIVE", workspace.getStatus());
         assertEquals("arn:aws:aps:us-east-1:000000000000:workspace/" + workspace.getWorkspaceId(),
                 workspace.getArn());
-        assertEquals("https://" + workspace.getWorkspaceId() + ".localhost.floci.io:4566/workspaces/"
+        assertEquals("https://aps-workspaces-" + workspace.getWorkspaceId() + ".localhost.floci.io:4566/workspaces/"
                 + workspace.getWorkspaceId() + "/", workspace.getPrometheusEndpoint());
         Mockito.verifyNoInteractions(backend);
         assertNotNull(workspace.getCreatedAt());

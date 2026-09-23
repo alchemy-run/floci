@@ -131,7 +131,11 @@ class IotTest {
     @Test
     void describedEndpointServesSignedDataPlaneRequests() {
         String address = iot.describeEndpoint(r -> r.endpointType("iot:Data-ATS")).endpointAddress();
-        URI endpoint = URI.create(TestFixtures.endpoint().getScheme() + "://" + address);
+        // AWS returns a bare hostname (<prefix>-ats.iot.<region>.amazonaws.com) and the client picks
+        // the port. Floci's embedded DNS, injected into this container, resolves it to Floci.
+        URI gateway = TestFixtures.endpoint();
+        String authority = address.contains(":") || gateway.getPort() < 0 ? address : address + ":" + gateway.getPort();
+        URI endpoint = URI.create(gateway.getScheme() + "://" + authority);
         String topic = "devices/java-iot/endpoint-route";
         try (IotDataPlaneClient data = IotDataPlaneClient.builder()
                 .endpointOverride(endpoint).region(Region.US_EAST_1)

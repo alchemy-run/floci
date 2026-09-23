@@ -582,6 +582,29 @@ class DynamoDbJsonHandlerTest {
     }
 
     @Test
+    void executeTransactionWritesReturnAnEmptyItemResponsePerStatement() throws Exception {
+        createUsersTable("us-east-1");
+        service.putItem("Users", item("userId", "u1", "name", "Ada"), "us-east-1");
+        service.putItem("Users", item("userId", "u2", "name", "Grace"), "us-east-1");
+
+        ObjectNode request = mapper.createObjectNode();
+        ArrayNode statements = request.putArray("TransactStatements");
+        statements.addObject()
+                .put("Statement", "DELETE FROM \"Users\" WHERE userId=?")
+                .set("Parameters", mapper.createArrayNode().add(attributeValue("S", "u1")));
+        statements.addObject()
+                .put("Statement", "UPDATE \"Users\" SET nick='Hopper' WHERE userId=?")
+                .set("Parameters", mapper.createArrayNode().add(attributeValue("S", "u2")));
+
+        Response response = handler.handle("ExecuteTransaction", request, "us-east-1");
+        assertEquals(200, response.getStatus());
+        JsonNode body = mapper.convertValue(response.getEntity(), JsonNode.class);
+        assertEquals(2, body.path("Responses").size());
+        assertTrue(body.path("Responses").get(0).isEmpty());
+        assertTrue(body.path("Responses").get(1).isEmpty());
+    }
+
+    @Test
     void onDemandBackupRoundTripAndRestoreConflict() throws Exception {
         createUsersTable("us-east-1");
         service.putItem("Users", item("userId", "u1"), "us-east-1");

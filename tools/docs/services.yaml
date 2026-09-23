@@ -375,6 +375,10 @@ services:
     doc: docs/services/timestream-influxdb.md
     sources:
       - { path: src/main/java/io/github/hectorvent/floci/services/timestreaminfluxdb/TimestreamInfluxDbJsonHandler.java, mode: switch }
+  - service: timestream
+    doc: docs/services/timestream.md
+    sources:
+      - { path: src/main/java/io/github/hectorvent/floci/services/timestream/TimestreamJsonHandler.java, mode: switch }
   - service: sqs
     doc: docs/services/sqs.md
     sources:

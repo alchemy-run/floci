@@ -30,12 +30,12 @@ import java.util.regex.Pattern;
  * exactly as a login would, and reports the provider's raw answer.
  *
  * <ul>
- *   <li>{@code AWS_LAMBDA} — invokes the configured function through Floci's Lambda runtime with
+ *   <li>{@code AWS_LAMBDA}, invokes the configured function through Floci's Lambda runtime with
  *       the Transfer Family identity-provider event.</li>
- *   <li>{@code API_GATEWAY} — calls {@code GET {Url}/servers/{serverId}/users/{username}/config}
+ *   <li>{@code API_GATEWAY}, calls {@code GET {Url}/servers/{serverId}/users/{username}/config}
  *       with the {@code Password} header and {@code protocol}/{@code sourceIp} query parameters;
  *       AWS-style {@code execute-api} hosts are routed to Floci's path-style API Gateway plane.</li>
- *   <li>{@code SERVICE_MANAGED} — rejected with {@code InvalidRequestException}, as in AWS.</li>
+ *   <li>{@code SERVICE_MANAGED}, rejected with {@code InvalidRequestException}, as in AWS.</li>
  * </ul>
  */
 @ApplicationScoped

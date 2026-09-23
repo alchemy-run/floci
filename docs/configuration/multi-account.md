@@ -169,14 +169,14 @@ bucket in one account and reads it from another (see [S3](../services/s3.md#glob
 
 Floci does not currently perform general SigV4 validation for `Authorization` headers. Only the access key ID matters for account resolution, so the secret access key can be any non-empty string.
 
-`FLOCI_AUTH_VALIDATE_SIGNATURES` currently applies only to S3 presigned URL validation. It does not authenticate general service requests or protect IAM and STS account routing. To validate S3 presigned URLs:
+`FLOCI_AUTH_VALIDATE_SIGNATURES` currently applies only to S3: presigned URL validation, and SigV4 `Authorization` header verification when `FLOCI_SERVICES_S3_ENFORCE_AUTH` is also `true`. It does not authenticate other service requests or protect IAM and STS account routing. To validate S3 signatures:
 
 ```bash
 FLOCI_AUTH_VALIDATE_SIGNATURES=true
 FLOCI_AUTH_PRESIGN_SECRET=your-secret   # for pre-signed URL verification
 ```
 
-When `validate-signatures` is `false` (the default), S3 presigned URL signatures are not verified. Account routing remains AKID-based regardless of this setting.
+When `validate-signatures` is `false` (the default), S3 header and presigned URL signatures are not verified; with `FLOCI_SERVICES_S3_ENFORCE_AUTH` on, S3 still authorizes requests as the principal named by the access key ID. Account routing remains AKID-based regardless of this setting.
 
 ## Persistence and Account Isolation
 
@@ -188,4 +188,4 @@ Storage keys are namespaced per account at the persistence layer. When using `pe
 |---|---|---|
 | `FLOCI_DEFAULT_ACCOUNT_ID` | `000000000000` | Account ID used when the AKID does not resolve directly or through a stored credential |
 | `FLOCI_DEFAULT_REGION` | `us-east-1` | Region used when not derivable from the `Authorization` header |
-| `FLOCI_AUTH_VALIDATE_SIGNATURES` | `false` | Verify S3 presigned URL signatures |
+| `FLOCI_AUTH_VALIDATE_SIGNATURES` | `false` | Verify S3 presigned URL signatures, and S3 header signatures when S3 enforce-auth is on |

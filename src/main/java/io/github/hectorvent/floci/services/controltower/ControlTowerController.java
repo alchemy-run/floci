@@ -22,7 +22,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * AWS Control Tower (Smithy restJson1) — the operations that unblock LZA's Prepare stage with
+ * AWS Control Tower (Smithy restJson1), the operations that unblock LZA's Prepare stage with
  * {@code controlTower.enable: true}: the landing-zone lifecycle (list/get/create/update/delete/reset),
  * operation polling for both landing zones and baselines, and the baseline surface
  * (list, list/get enabled, enable, reset, update).
@@ -36,7 +36,7 @@ import java.util.List;
  * (see {@link io.github.hectorvent.floci.services.rum.RumController}).
  *
  * <p>Note that every landing-zone URI spells "landingzone" as ONE word, {@code /create-landingzone}
- * included — that is how the AWS Control Tower model defines them.
+ * included, that is how the AWS Control Tower model defines them.
  */
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)

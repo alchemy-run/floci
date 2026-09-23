@@ -31,7 +31,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Amazon Managed Service for Prometheus (Smithy restJson1, SigV4 scope {@code aps}) — the
+ * Amazon Managed Service for Prometheus (Smithy restJson1, SigV4 scope {@code aps}), the
  * workspace lifecycle, rule and alert definitions, logging, policies, and anomaly detector metadata.
  * Configuration storage does not enable rule evaluation, alert delivery, or anomaly execution.
  * Tagging goes through the shared

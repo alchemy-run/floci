@@ -80,8 +80,17 @@ public class ElastiCacheContainerManager {
      *         container was created
      */
     public ElastiCacheContainerHandle tryStart(String groupId, String image) {
+        return tryStart(groupId, image, BACKEND_PORT);
+    }
+
+    /**
+     * As {@link #tryStart(String, String)}, with Valkey listening on {@code backendPort} inside
+     * the container. When Floci runs in Docker the group's endpoint is the container address, so
+     * this is the port clients are told to use and must match the group's {@code Port}.
+     */
+    public ElastiCacheContainerHandle tryStart(String groupId, String image, int backendPort) {
         try {
-            ElastiCacheContainerHandle handle = start(groupId, image);
+            ElastiCacheContainerHandle handle = start(groupId, image, List.of(), backendPort);
             dockerUnavailableLogged = false;
             return handle;
         } catch (RuntimeException e) {
@@ -128,6 +137,11 @@ public class ElastiCacheContainerManager {
      * Cluster-mode nodes use this to pass {@code --cluster-enabled} and announce settings.
      */
     public ElastiCacheContainerHandle start(String groupId, String image, List<String> extraServerFlags) {
+        return start(groupId, image, extraServerFlags, BACKEND_PORT);
+    }
+
+    private ElastiCacheContainerHandle start(String groupId, String image, List<String> extraServerFlags,
+                                             int backendPort) {
         LOG.infov("Starting ElastiCache backend container for group: {0}", groupId);
 
         String containerName = containerName(groupId);
@@ -136,6 +150,9 @@ public class ElastiCacheContainerManager {
         lifecycleManager.removeIfExists(containerName);
 
         StringBuilder serverFlags = new StringBuilder("--loglevel verbose");
+        if (backendPort != BACKEND_PORT) {
+            serverFlags.append(" --port ").append(backendPort);
+        }
         for (String flag : extraServerFlags) {
             serverFlags.append(' ').append(flag);
         }
@@ -152,16 +169,16 @@ public class ElastiCacheContainerManager {
                         "elasticache", groupId, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
 
         if (!containerDetector.isRunningInContainer()) {
-            specBuilder.withDynamicPort(BACKEND_PORT);
+            specBuilder.withDynamicPort(backendPort);
         } else {
-            specBuilder.withExposedPort(BACKEND_PORT);
+            specBuilder.withExposedPort(backendPort);
         }
 
         ContainerSpec spec = specBuilder.build();
 
         // Create and start container
         ContainerInfo info = lifecycleManager.createAndStart(spec);
-        EndpointInfo endpoint = info.getEndpoint(BACKEND_PORT);
+        EndpointInfo endpoint = info.getEndpoint(backendPort);
 
         LOG.infov("ElastiCache backend for group {0}: {1}", groupId, endpoint);
 

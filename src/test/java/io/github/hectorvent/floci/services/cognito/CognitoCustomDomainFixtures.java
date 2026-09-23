@@ -2,7 +2,7 @@ package io.github.hectorvent.floci.services.cognito;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
+import io.github.hectorvent.floci.services.acm.AcmDnsValidation;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
 
@@ -51,18 +51,13 @@ final class CognitoCustomDomainFixtures {
                 """.formatted(domain, poolId, certificateArn);
     }
 
+    /** A custom domain needs an ISSUED certificate, so its DNS validation record is published first. */
     static String requestCertificate(String domainName) throws Exception {
-        return RestAssuredJsonUtils.awsActionJson("CertificateManager", "RequestCertificate",
-                certificateRequest(domainName)).path("CertificateArn").asText();
+        return AcmDnsValidation.requestIssuedCertificate(domainName);
     }
 
     static String requestCertificateAs(String accountId, String domainName) throws Exception {
-        return awsJsonAs(accountId, "CertificateManager", "RequestCertificate", certificateRequest(domainName))
-                .path("CertificateArn").asText();
-    }
-
-    private static String certificateRequest(String domainName) {
-        return "{\"DomainName\": \"" + domainName + "\", \"ValidationMethod\": \"DNS\"}";
+        return AcmDnsValidation.requestIssuedCertificateAs(accountId, domainName);
     }
 
     static JsonNode awsJsonAs(String accountId, String target, String action, String body) throws Exception {

@@ -48,8 +48,7 @@ class CloudControlServiceTest {
         doAnswer(invocation -> {
             when(ec2.describeVpcs("us-east-1", List.of(), Map.of())).thenReturn(List.of());
             return null;
-        }).when(provisioner).deleteStandalone("AWS::EC2::VPC", "vpc-account-a", "us-east-1",
-                "111111111111", Map.of("VpcId", "vpc-account-a"));
+        }).when(ec2).deleteVpc("us-east-1", "vpc-account-a");
         when(provisioner.provisionStandalone(eq("AWS::EC2::VPC"),
                 any(), eq("us-east-1"),
                 eq("111111111111"))).thenReturn(resource);
@@ -83,16 +82,16 @@ class CloudControlServiceTest {
         CloudControlService.ProgressEvent deniedDelete = service.deleteResource(
                 "us-east-1", "222222222222", "AWS::EC2::VPC", "vpc-account-a");
         assertEquals("FAILED", deniedDelete.operationStatus());
-        verify(provisioner, never()).deleteStandalone(anyString(),
-                anyString(), anyString(),
-                anyString(), anyMap());
+        verify(ec2, never()).deleteVpc(anyString(), anyString());
 
         when(ec2.describeVpcs("us-east-1", List.of(), Map.of())).thenReturn(List.of(vpc));
         CloudControlService.ProgressEvent deleted = service.deleteResource(
                 "us-east-1", "111111111111", "AWS::EC2::VPC", "vpc-account-a");
         assertEquals("SUCCESS", deleted.operationStatus());
-        verify(provisioner).deleteStandalone("AWS::EC2::VPC", "vpc-account-a", "us-east-1",
-                "111111111111", Map.of("VpcId", "vpc-account-a"));
+        verify(ec2).deleteVpc("us-east-1", "vpc-account-a");
+        verify(provisioner, never()).deleteStandalone(anyString(),
+                anyString(), anyString(),
+                anyString(), anyMap());
         service.shutdown();
     }
 

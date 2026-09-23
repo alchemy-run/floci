@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Answers.RETURNS_DEEP_STUBS;
 import static org.mockito.Answers.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -52,7 +53,7 @@ class Ec2CreateImageCaptureTest {
                 mock(DockerHostResolver.class),
                 dockerClient,
                 mock(PortAllocator.class),
-                mock(EmulatorConfig.class),
+                mock(EmulatorConfig.class, RETURNS_DEEP_STUBS),
                 mock(Ec2MetadataServer.class),
                 mock(Ec2PortForwardManager.class),
                 mock(RegionResolver.class),

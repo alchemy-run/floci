@@ -2219,7 +2219,8 @@ class CognitoServiceTest {
         UserPool pool = service.createUserPool(Map.of("PoolName", "TestPool"), "us-east-1");
         service.adminCreateUser(pool.getId(), "bob", Map.of("email", "bob@example.com"), null);
         service.adminSetUserPassword(pool.getId(), "bob", "Perm1!", true);
-        UserPoolClient client = service.createUserPoolClient(pool.getId(), "c", false, false, List.of(), List.of());
+        // The AWS default ExplicitAuthFlows omit USER_PASSWORD_AUTH, so the client enables it.
+        UserPoolClient client = clientWithFlows(pool, "ALLOW_USER_PASSWORD_AUTH");
         Map<String, Object> result = service.initiateAuth(client.getClientId(), "USER_PASSWORD_AUTH",
                 Map.of("USERNAME", "bob", "PASSWORD", "Perm1!"));
         String accessToken = (String) ((Map<String, Object>) result.get("AuthenticationResult")).get("AccessToken");

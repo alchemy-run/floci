@@ -20,6 +20,15 @@ For running SQL without a PostgreSQL wire connection (the way Lambda and Step Fu
 | `CreateCluster` | Create a cluster and start a PostgreSQL container for it |
 | `DescribeClusters` | List clusters and their connection details |
 | `DeleteCluster` | Stop and remove a cluster and its container |
+| `DescribeClusterDbRevisions` | - |
+| `DescribeResize` | - |
+| `GetReservedNodeExchangeOfferings` | - |
+| `CreateEventSubscription` | - |
+| `ModifyEventSubscription` | - |
+| `DeleteEventSubscription` | - |
+| `DescribeEventSubscriptions` | - |
+| `DescribeEvents` | - |
+| `CopyClusterSnapshot` | - |
 | `CreateClusterSnapshot` | Back up a cluster to a SQL dump via `pg_dump` |
 | `DescribeClusterSnapshots` | List snapshots, optionally filtered by snapshot or cluster identifier |
 | `DeleteClusterSnapshot` | Remove a snapshot and its stored dump |
@@ -28,6 +37,7 @@ For running SQL without a PostgreSQL wire connection (the way Lambda and Step Fu
 | `DescribeClusterParameterGroups` | List parameter groups, optionally filtered by name |
 | `DescribeClusterParameters` | Return the parameters of a group, with any values set by `ModifyClusterParameterGroup` |
 | `ModifyClusterParameterGroup` | Update parameter values on a group |
+| `ResetClusterParameterGroup` | - |
 | `DeleteClusterParameterGroup` | Remove a parameter group |
 | `CreateTags` | Add or overwrite tags on a cluster, snapshot, subnet group, parameter group or snapshot copy grant |
 | `DeleteTags` | Remove tags by key from a resource |
@@ -49,6 +59,9 @@ For running SQL without a PostgreSQL wire connection (the way Lambda and Step Fu
 | `RebootCluster` | Restart a cluster's container |
 | `GetClusterCredentials` | Issue a short-lived DbUser / DbPassword pair the auth proxy and Data API accept for a non-master user |
 | `GetClusterCredentialsWithIAM` | Issue short-lived credentials with the DbUser derived from the caller's IAM identity |
+| `TagValues` | - |
+| `SourceIds` | - |
+| `EventCategories` | - |
 <!-- floci:actions:end -->
 
 ### Snapshot copy grants

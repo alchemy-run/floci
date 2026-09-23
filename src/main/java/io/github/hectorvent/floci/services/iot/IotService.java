@@ -221,11 +221,11 @@ public class IotService {
 
     public String describeEndpoint(String endpointType) {
         String effectiveType = endpointType == null || endpointType.isBlank() ? DEFAULT_ENDPOINT_TYPE : endpointType;
-        if (!Set.of(DEFAULT_ENDPOINT_TYPE, "iot:Data", "iot:Jobs", "iot:CredentialProvider").contains(effectiveType)) {
+        if (!IotEndpoints.TYPES.contains(effectiveType)) {
             throw new AwsException("InvalidRequestException", "Unsupported endpoint type: " + effectiveType, 400);
         }
         startMqttIfEnabled();
-        return config.iotEndpointAddress();
+        return IotEndpoints.address(config, effectiveType, regionResolver.getAccountId(), regionResolver.getRegion());
     }
 
     public Thing createThing(String thingName, Map<String, String> attributes, String region) {

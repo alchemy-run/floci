@@ -76,7 +76,9 @@ class TestACMCertificateLifecycle:
                     )
                     issued = acm_client.describe_certificate(CertificateArn=arn)["Certificate"]
                     assert issued["Status"] == "ISSUED"
-                    assert issued["KeyAlgorithm"] == key_algorithm
+                    # RequestCertificate takes RSA_2048 / EC_prime256v1, but ACM reports the
+                    # key algorithm of a certificate as RSA-2048 / EC-prime256v1.
+                    assert issued["KeyAlgorithm"] == key_algorithm.replace("_", "-")
                     assert issued["DomainValidationOptions"]
                     assert all(
                         option["ValidationStatus"] == "SUCCESS"

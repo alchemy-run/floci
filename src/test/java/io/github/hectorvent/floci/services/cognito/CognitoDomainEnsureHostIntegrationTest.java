@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cognito;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.config.TlsCertificateManager;
+import io.github.hectorvent.floci.services.acm.AcmDnsValidation;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
@@ -97,8 +98,7 @@ class CognitoDomainEnsureHostIntegrationTest {
     }
 
     private static String requestCertificate(String domain) throws Exception {
-        return RestAssuredJsonUtils.awsActionJson("CertificateManager", "RequestCertificate",
-                "{\"DomainName\": \"" + domain + "\", \"ValidationMethod\": \"DNS\"}").path("CertificateArn").asText();
+        return AcmDnsValidation.requestIssuedCertificate(domain);
     }
 
     private static String createPool() throws Exception {

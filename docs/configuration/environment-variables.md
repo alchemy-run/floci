@@ -20,7 +20,7 @@ Floci is configured exclusively through environment variables. Every option belo
 
 | Variable | Default | Description |
 |---|---|---|
-| `FLOCI_AUTH_VALIDATE_SIGNATURES` | `false` | When `true`, verifies S3 presigned URL signatures |
+| `FLOCI_AUTH_VALIDATE_SIGNATURES` | `false` | When `true`, verifies S3 presigned URL signatures, and S3 header signatures when `FLOCI_SERVICES_S3_ENFORCE_AUTH` is on |
 | `FLOCI_AUTH_PRESIGN_SECRET` | `local-emulator-secret` | Secret used to sign and verify pre-signed URLs |
 
 ## Network Exposure
@@ -351,7 +351,7 @@ See [Initialization Hooks](./initialization-hooks.md) for lifecycle phases and s
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_IOT_ENABLED` | `true` | Enable the IoT Core service |
-| `FLOCI_SERVICES_IOT_ENDPOINT_ADDRESS` | _(none)_ | Value `DescribeEndpoint` returns for every endpoint type, and the domain name of the AWS-managed domain configurations. Set it to a bare hostname when the AWS IoT ports (8883, 443, 8443) reach Floci; the name is added to the server certificate. Defaults to the host and port of `FLOCI_BASE_URL`, with `FLOCI_HOSTNAME` applied |
+| `FLOCI_SERVICES_IOT_ENDPOINT_ADDRESS` | _(none)_ | Value `DescribeEndpoint` returns for every endpoint type, and the domain name of the AWS-managed domain configurations. Set it to a bare hostname when the AWS IoT ports (8883, 443, 8443) reach Floci; the name is added to the server certificate. Unset, `DescribeEndpoint` returns the AWS-shaped account hostname per endpoint type (`<prefix>-ats.iot.<region>.amazonaws.com` and siblings) |
 | `FLOCI_SERVICES_IOT_RULE_SQL_STRICT` | `false` | Reject topic rules whose SQL falls outside the evaluated subset, as AWS does |
 | `FLOCI_SERVICES_IOT_MQTT_ENABLED` | `true` | Run the embedded MQTT broker |
 | `FLOCI_SERVICES_IOT_MQTT_AUTO_START` | `false` | Start the broker at boot instead of on the first IoT API call |

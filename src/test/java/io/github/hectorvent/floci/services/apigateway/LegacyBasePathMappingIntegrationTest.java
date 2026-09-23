@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  *
  * <p>Such a record sits under the key {@code ""} while reporting {@code (none)} from its own field,
  * because {@link BasePathMapping} normalises in its constructor. No endpoint can create one now, so
- * the state is seeded through the same storage backend the service uses — the factory hands out one
+ * the state is seeded through the same storage backend the service uses, the factory hands out one
  * backend per file.
  */
 @QuarkusTest

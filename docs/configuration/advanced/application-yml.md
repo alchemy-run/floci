@@ -321,6 +321,7 @@ All keys in this table are declared on `EmulatorConfig` and accept environment v
 | `FLOCI_SERVICES_SES_SMTP_PASS`                     | *(unset)*        | SMTP authentication password                                  |
 | `FLOCI_SERVICES_SES_SMTP_STARTTLS`                 | `DISABLED`       | STARTTLS mode: `DISABLED`, `OPTIONAL`, or `REQUIRED`          |
 | `FLOCI_SERVICES_LAMBDA_HONOUR_ARCHITECTURES`       | `false`          | Select the declared Lambda architecture for Docker image pulls and containers |
+| `FLOCI_SERVICES_CODEBUILD_HONOUR_ENVIRONMENT_TYPE` | `false`          | Run CodeBuild `LINUX_CONTAINER`/`ARM_CONTAINER` builds on their declared Docker platform |
 | `FLOCI_SERVICES_LAMBDA_ZIP_MAX_ENTRIES`            | `100000`         | Maximum number of entries accepted in a Lambda ZIP archive |
 | `FLOCI_SERVICES_LAMBDA_HOT_RELOAD_ENABLED`         | `false`          | Enable bind-mount hot-reload mode (`S3Bucket=hot-reload`)     |
 | `FLOCI_SERVICES_LAMBDA_HOT_RELOAD_ALLOWED_PATHS`   | *(unset)*        | Comma-separated list of host paths allowed as bind-mount roots; unset = any absolute path |

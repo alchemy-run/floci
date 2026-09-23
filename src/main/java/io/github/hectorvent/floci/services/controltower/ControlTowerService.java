@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Control Tower landing-zone and baseline emulation, backed by the configured Floci storage mode.
  *
  * <p>Pre-seeds exactly one active landing zone on first read (lazy seed) so LZA's Prepare stage
- * never observes an empty {@code ListLandingZones} result — an empty list is LZA's create-path
+ * never observes an empty {@code ListLandingZones} result, an empty list is LZA's create-path
  * trigger. {@link #updateLandingZone} is a
  * reconciliation sink: it stores whatever manifest LZA sends and reports success, so any mismatch
  * between the seed and LZA's computed config self-heals on the first {@code UpdateLandingZone}
@@ -697,7 +697,7 @@ public class ControlTowerService {
     }
 
     /**
-     * Looks up an operation type without creating a ledger — read paths must never materialize a
+     * Looks up an operation type without creating a ledger, read paths must never materialize a
      * scope, or an unauthenticated caller could grow the map one bogus account at a time.
      */
     private String recordedOperationType(String accountId, String region, String operationIdentifier) {
@@ -767,7 +767,7 @@ public class ControlTowerService {
 
     /**
      * The model pins {@code baselineVersion} to {@code \d+(?:\.\d+){0,2}} with a maximum length of
-     * 10, on both EnableBaseline and UpdateEnabledBaseline — the value is stored verbatim, so an
+     * 10, on both EnableBaseline and UpdateEnabledBaseline, the value is stored verbatim, so an
      * unchecked one would persist a version AWS never accepts.
      */
     private static void requireBaselineVersion(String baselineVersion) {

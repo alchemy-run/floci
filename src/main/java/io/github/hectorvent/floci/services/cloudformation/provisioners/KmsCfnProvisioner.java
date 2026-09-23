@@ -1,11 +1,15 @@
 package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.kms.KmsService;
+import io.github.hectorvent.floci.services.kms.model.KmsAlias;
+import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -41,7 +45,27 @@ public class KmsCfnProvisioner implements CfnResourceProvisioner {
     private void provisionKey(StackResource r, JsonNode props, ProvisionContext ctx) {
         String description = ctx.resolveOptional(props, "Description");
         Map<String, String> tags = parseCfnTags(props != null ? props.get("Tags") : null, ctx);
-        var key = kmsService.createKey(description, null, tags, ctx.region());
+        KmsKey existing = ctx.isUpdate() ? liveKey(ctx.priorPhysicalId(), ctx.region()) : null;
+        KmsKey key;
+        if (existing != null) {
+            // Description and Tags are mutable on AWS::KMS::Key, so an update converges the key it
+            // already manages instead of minting a new one and orphaning every alias and grant.
+            String desiredDescription = description != null ? description : "";
+            String currentDescription = existing.getDescription() != null ? existing.getDescription() : "";
+            if (!desiredDescription.equals(currentDescription)) {
+                kmsService.updateKeyDescription(existing.getKeyId(), desiredDescription, ctx.region());
+            }
+            List<String> stale = ProvisionContext.staleTagKeys(existing.getTags(), tags);
+            if (!stale.isEmpty()) {
+                kmsService.untagResource(existing.getKeyId(), stale, ctx.region());
+            }
+            if (!tags.isEmpty()) {
+                kmsService.tagResource(existing.getKeyId(), tags, ctx.region());
+            }
+            key = existing;
+        } else {
+            key = kmsService.createKey(description, null, tags, ctx.region());
+        }
         r.setPhysicalId(key.getKeyId());
         r.getAttributes().put("Arn", key.getArn());
         r.getAttributes().put("KeyId", key.getKeyId());
@@ -51,11 +75,37 @@ public class KmsCfnProvisioner implements CfnResourceProvisioner {
         String aliasName = ctx.resolveOptional(props, "AliasName");
         String targetKeyId = ctx.resolveOptional(props, "TargetKeyId");
         if (aliasName != null && targetKeyId != null) {
-            kmsService.createAlias(aliasName, targetKeyId, ctx.region());
+            KmsAlias existing = ctx.reusesPriorEntity(aliasName) ? liveAlias(aliasName, ctx.region()) : null;
+            if (existing == null) {
+                kmsService.createAlias(aliasName, targetKeyId, ctx.region());
+            } else if (!kmsService.describeKey(targetKeyId, ctx.region()).getKeyId()
+                    .equals(existing.getTargetKeyId())) {
+                // TargetKeyId is the one mutable property; UpdateAlias is its update handler.
+                kmsService.updateAlias(aliasName, targetKeyId, ctx.region());
+            }
         }
         r.setPhysicalId(aliasName != null
                 ? aliasName
                 : "alias/cfn-" + UUID.randomUUID().toString().substring(0, 8));
+    }
+
+    private KmsKey liveKey(String keyId, String region) {
+        try {
+            KmsKey key = kmsService.describeKey(keyId, region);
+            return "PendingDeletion".equals(key.getKeyState()) ? null : key;
+        } catch (AwsException e) {
+            if ("NotFoundException".equals(e.getErrorCode())) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private KmsAlias liveAlias(String aliasName, String region) {
+        return kmsService.listAliases(region).stream()
+                .filter(alias -> aliasName.equals(alias.getAliasName()))
+                .findFirst()
+                .orElse(null);
     }
 
     @Override

@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit test for the extracted account domain: the account sending-enabled flag and
- * the VDM attributes. The service is constructed with just its own two stores — no 14-argument
+ * the VDM attributes. The service is constructed with just its own two stores, no 14-argument
  * SesService needed.
  */
 class SesAccountServiceTest {
@@ -90,7 +90,7 @@ class SesAccountServiceTest {
         assertEquals("https://example.com", d.websiteUrl());
         assertEquals("GRANTED", d.reviewStatus());
         // ProductionAccessEnabled is stored as given (the GetAccount top-level flag stays true
-        // regardless — asserted at the controller layer).
+        // regardless, asserted at the controller layer).
         assertTrue(d.productionAccessEnabled());
         assertTrue(service.findAccountDetails("eu-west-1").isEmpty());
     }

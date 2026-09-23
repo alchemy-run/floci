@@ -37,13 +37,13 @@ import java.util.UUID;
  * list's Id by Name via {@code ListFirewallDomainLists}, so the AWS-managed
  * lists must exist without any create call. Their ids are derived
  * deterministically from region+name so they are stable across restarts
- * without needing storage — this predates the rest of this class and is left
+ * without needing storage, this predates the rest of this class and is left
  * untouched; only custom (created) resources use the stores below.</p>
  *
  * <p>All create/update operations complete synchronously: real AWS transitions
  * resources through CREATING/UPDATING before a terminal state; this emulator
  * returns the terminal state immediately (same convention as
- * {@code ServiceCatalogService.copyProduct} and others — see CS-021).</p>
+ * {@code ServiceCatalogService.copyProduct} and others, see CS-021).</p>
  */
 @ApplicationScoped
 public class Route53ResolverService {
@@ -749,17 +749,17 @@ public class Route53ResolverService {
      * Route 53 Resolver creates are idempotent on {@code CreatorRequestId}: replaying a
      * token returns the resource it originally created rather than allocating a second
      * one. Called after the request's own validation so a replayed token never excuses a
-     * malformed body. A blank/absent token opts out — those creates always allocate.
+     * malformed body. A blank/absent token opts out, those creates always allocate.
      *
      * <p>The scan-then-put pair is only atomic because every create method is
-     * {@code synchronized} — two overlapping retries with the same token would otherwise
+     * {@code synchronized}, two overlapping retries with the same token would otherwise
      * both miss the scan and persist twice.</p>
      *
      * <p>Idempotency is scoped to one region, as in AWS: Route 53 Resolver is regional, so
      * the same token in {@code us-east-1} and {@code us-west-2} identifies two independent
      * resources. The stores are account-partitioned by {@code AccountAwareStorageBackend}
      * but carry no region in their keys, so the candidate's region comes from the ARN this
-     * service built for it — keeping the region off the wire response, which the modeled
+     * service built for it, keeping the region off the wire response, which the modeled
      * shapes have no field for. Same intent as {@code FisService.idempotencyKey} and
      * {@code BedrockAgentCoreControlService.tokenKey}, which fold the region into the key.</p>
      */
@@ -819,17 +819,17 @@ public class Route53ResolverService {
      * addresses recorded at create time, since the stored resource keeps only
      * {@code IpAddressCount}.
      *
-     * <p>Order is not significant — the request list is a set of addresses, and a retry that
-     * merely reorders it is the same request — so both sides are normalised before comparing.</p>
+     * <p>Order is not significant, the request list is a set of addresses, and a retry that
+     * merely reorders it is the same request, so both sides are normalised before comparing.</p>
      *
      * <p>A stored endpoint with no recorded addresses is reported as a conflict rather than
      * waved through. Falling back to comparing {@code IpAddressCount} would accept a retry
-     * that kept the count but changed a subnet or address — the precise case this check
-     * exists to catch — so the weaker comparison is not a lenient version of this check, it
+     * that kept the count but changed a subnet or address, the precise case this check
+     * exists to catch, so the weaker comparison is not a lenient version of this check, it
      * is a silently wrong one. With nothing to compare against, the honest answer is that
      * sameness cannot be established: a spurious {@code ResourceExistsException} is loud and
-     * recoverable, a wrong success is neither. No released build can reach this state — the
-     * endpoint store itself is new in the same change as this record — so the only ways in
+     * recoverable, a wrong success is neither. No released build can reach this state, the
+     * endpoint store itself is new in the same change as this record, so the only ways in
      * are a write interrupted between the two stores, or state left by an intermediate build
      * of this branch.</p>
      */
@@ -850,7 +850,7 @@ public class Route53ResolverService {
      *
      * <p>Ordered by {@link #canonicalKey}, not by {@code toString}: a node serialises its
      * members in insertion order, so two requests carrying the same addresses written with
-     * their members in a different order sort differently and compare unequal — an
+     * their members in a different order sort differently and compare unequal, an
      * equivalent retry rejected as a conflict. JSON member order is not significant, so the
      * key must not depend on it.</p>
      */
@@ -899,11 +899,11 @@ public class Route53ResolverService {
 
     /**
      * Rejects a value the botocore model does not list in the member's enum. Accepting one
-     * stores a resource AWS would never have created — a rule whose {@code RuleType} is not
+     * stores a resource AWS would never have created, a rule whose {@code RuleType} is not
      * a {@code RuleTypeOption} is then handed back by Get/List as though it were real.
      *
      * <p>The caller passes the error code its own operation models, because the two families
-     * in this service do not share one — see {@link #INVALID_PARAMETER} and
+     * in this service do not share one, see {@link #INVALID_PARAMETER} and
      * {@link #VALIDATION}.</p>
      */
     private static void requireEnum(String value, String field, List<String> allowed, String errorCode) {

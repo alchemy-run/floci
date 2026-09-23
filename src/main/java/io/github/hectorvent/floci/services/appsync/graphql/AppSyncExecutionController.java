@@ -171,7 +171,7 @@ public class AppSyncExecutionController {
                     AppSyncErrorFormatter.MSG_UNABLE_TO_PARSE);
         }
         // Blank queries are valid GraphQL-over-HTTP JSON and become SyntaxError (HTTP 200)
-        // via graphql-java — not MalformedHttpRequestException (400).
+        // via graphql-java, not MalformedHttpRequestException (400).
         String query = queryNode.asText();
 
         Map<String, Object> variables = null;

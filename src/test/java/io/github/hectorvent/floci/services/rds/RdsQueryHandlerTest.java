@@ -2803,7 +2803,7 @@ class RdsQueryHandlerTest {
 
     @Test
     void deleteDbSnapshot_missingReturnsNotFound() {
-        when(service.getDbSnapshot("missing", null)).thenThrow(new AwsException("DBSnapshotNotFound",
+        when(service.deleteDbSnapshot("missing", null)).thenThrow(new AwsException("DBSnapshotNotFound",
                 "DBSnapshot missing not found.", 404));
 
         MultivaluedMap<String, String> p = params();

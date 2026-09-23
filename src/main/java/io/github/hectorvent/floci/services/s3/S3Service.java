@@ -1526,6 +1526,8 @@ public class S3Service implements Resettable, ResourceProvider {
             deleteFile(bucketName, key);
             deleteAllAnnotationsFor(annotationParentKey(bucketName, key, null));
             LOG.debugv("Permanently deleted null version: {0}/{1}", bucketName, key);
+            // Versions written before versioning was suspended become current again.
+            promoteMostRecentVersion(bucketName, key);
             fireNotifications(bucketName, key, "ObjectRemoved:Delete", null);
             return existing;
         } else if (versionId != null) {
@@ -1545,28 +1547,11 @@ public class S3Service implements Resettable, ResourceProvider {
             objectStore.get(latestKey).ifPresent(latest -> {
                 if (versionId.equals(reportedVersionId(latest))) {
                     String vPrefix = versionedKey(bucketName, key, "");
-                    List<S3Object> remaining = objectStore.scan(k -> k.startsWith(vPrefix));
-                    if (remaining.isEmpty()) {
+                    if (objectStore.scan(k -> k.startsWith(vPrefix)).isEmpty()) {
                         objectStore.delete(latestKey);
                         deleteFile(bucketName, key);
                     } else {
-                        S3Object newLatest = remaining.stream()
-                                .max(Comparator.comparing(S3Object::getLastModified))
-                                .orElseThrow();
-                        newLatest.setLatest(true);
-                        objectStore.put(versionedKey(bucketName, key, newLatest.getVersionId()), newLatest);
-                        objectStore.put(latestKey, newLatest);
-                        // Delete markers have no versioned file — readVersionedFile throws in persistent mode.
-                        if (newLatest.isDeleteMarker()) {
-                            deleteFile(bucketName, key);
-                        } else {
-                            byte[] promotedData = readVersionedFile(bucketName, key, newLatest.getVersionId());
-                            if (promotedData != null) {
-                                writeFile(bucketName, key, promotedData);
-                            } else {
-                                deleteFile(bucketName, key);
-                            }
-                        }
+                        promoteMostRecentVersion(bucketName, key);
                     }
                 }
             });
@@ -1584,6 +1569,31 @@ public class S3Service implements Resettable, ResourceProvider {
             LOG.debugv("Deleted object: {0}/{1}", bucketName, key);
             fireNotifications(bucketName, key, "ObjectRemoved:Delete", null);
             return null;
+        }
+    }
+
+    /** Makes the most recently written remaining version (or delete marker) the current object. */
+    private void promoteMostRecentVersion(String bucketName, String key) {
+        String vPrefix = versionedKey(bucketName, key, "");
+        S3Object newLatest = objectStore.scan(k -> k.startsWith(vPrefix)).stream()
+                .max(Comparator.comparing(S3Object::getLastModified))
+                .orElse(null);
+        if (newLatest == null) {
+            return;
+        }
+        newLatest.setLatest(true);
+        objectStore.put(versionedKey(bucketName, key, newLatest.getVersionId()), newLatest);
+        objectStore.put(objectKey(bucketName, key), newLatest);
+        // Delete markers have no versioned file; readVersionedFile throws in persistent mode.
+        if (newLatest.isDeleteMarker()) {
+            deleteFile(bucketName, key);
+        } else {
+            byte[] promotedData = readVersionedFile(bucketName, key, newLatest.getVersionId());
+            if (promotedData != null) {
+                writeFile(bucketName, key, promotedData);
+            } else {
+                deleteFile(bucketName, key);
+            }
         }
     }
 

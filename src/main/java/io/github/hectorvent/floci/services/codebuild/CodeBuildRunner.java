@@ -260,9 +260,13 @@ public class CodeBuildRunner implements ContainerTeardown {
                             "codebuild", buildId, regionResolver.getAccountId(), region))
                     .build();
 
-            String environmentType = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
-            String platform = "ARM_CONTAINER".equals(environmentType) ? "linux/arm64" : "linux/amd64";
-            containerId = lifecycleManager.create(spec, platform);
+            if (config.services().codebuild().honourEnvironmentType()) {
+                String environmentType = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
+                String platform = "ARM_CONTAINER".equals(environmentType) ? "linux/arm64" : "linux/amd64";
+                containerId = lifecycleManager.create(spec, platform);
+            } else {
+                containerId = lifecycleManager.create(spec);
+            }
             runningContainers.put(executionId, containerId);
             if (stopFlag.get()) { finishStopped(build); return; }
             lifecycleManager.startCreated(containerId, spec);

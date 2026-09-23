@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
 import io.github.hectorvent.floci.services.cloudwatch.metricstreams.CloudWatchMetricStreamsService;
@@ -51,6 +52,12 @@ class CloudWatchMetricsJsonHandlerTest {
         CloudWatchMetricStreamsService metricStreamsService = new CloudWatchMetricStreamsService(
                 new InMemoryStorage<>(), new RegionResolver(REGION, "000000000000"));
         handler = new CloudWatchMetricsJsonHandler(service, dashboardsService, metricStreamsService, MAPPER);
+        RegionResolver regions = new RegionResolver(REGION, "000000000000");
+        CloudWatchMetadataService metadata = new CloudWatchMetadataService(
+                new InMemoryStorage<>(), regions, MAPPER, service);
+        handler.metadataService = metadata;
+        handler.insightsService = new CloudWatchInsightsService(
+                AccountAwareStorageBackend.inMemory("000000000000"), MAPPER, regions, metadata);
     }
 
     /**

@@ -112,8 +112,11 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
             return;
         }
 
-        // Verify signature: SigV4 when enforce-auth is enabled, custom when validateSignatures is enabled
-        if (s3Service.isAuthEnforced()) {
+        // Cryptographic verification follows the global validate-signatures switch: full SigV4
+        // when S3 enforce-auth is also on, Floci's own HMAC otherwise. With the switch off,
+        // enforce-auth still authorizes the request against the X-Amz-Credential identity.
+        boolean verifySigV4 = s3Service.isAuthEnforced() && presignGenerator.shouldValidateSignatures();
+        if (verifySigV4) {
             String credential = queryParams.getFirst("X-Amz-Credential");
             String decodedCredential = URLDecoder.decode(credential, StandardCharsets.UTF_8);
             String[] credParts = decodedCredential.split("/");
@@ -135,7 +138,7 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
                 requestContext.abortWith(errorResponse(403, "SignatureDoesNotMatch",
                         "The request signature we calculated does not match the signature you provided."));
             }
-        } else if (presignGenerator.shouldValidateSignatures()) {
+        } else if (!s3Service.isAuthEnforced() && presignGenerator.shouldValidateSignatures()) {
             String path = requestContext.getUriInfo().getPath();
             String[] parts = path.split("/", 3);
             if (parts.length < 3) {
@@ -159,7 +162,7 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
         // but a URL that lists content-type in X-Amz-SignedHeaders must reject
         // a mismatched Content-Type the same way real S3 does (403).
         String signedHeaders = maybeUrlDecode(queryParams.getFirst("X-Amz-SignedHeaders"));
-        if (!s3Service.isAuthEnforced()
+        if (!verifySigV4
                 && S3PresignedSignature.signedHeadersInclude(signedHeaders, "content-type")
                 && !signedContentTypeMatches(requestContext, queryParams, signedHeaders, amzDate, signature)) {
             requestContext.abortWith(errorResponse(403, "SignatureDoesNotMatch",

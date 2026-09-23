@@ -9,6 +9,12 @@
 <!-- floci:actions:start -->
 | Action | Description |
 | --- | --- |
+| `CreateApplication` | - |
+| `GetApplication` | - |
+| `UpdateApplication` | - |
+| `DeleteApplication` | - |
+| `ListApplications` | - |
+| `ListApplicationAssociations` | - |
 | `CreateEventIntegration` | Create an event integration; returns its ARN |
 | `GetEventIntegration` | Get an event integration by name, including tags |
 | `UpdateEventIntegration` | Change an event integration's description |
@@ -20,6 +26,9 @@
 | `UpdateDataIntegration` | Change a data integration's name or description |
 | `DeleteDataIntegration` | Delete a data integration |
 | `ListDataIntegrations` | List data integration summaries |
+| `ListDataIntegrationAssociations` | - |
+| `CreateDataIntegrationAssociation` | - |
+| `UpdateDataIntegrationAssociation` | - |
 | `ListTagsForResource` | List tags on either integration type (`GET /tags/{resourceArn}`) |
 | `TagResource` | Tag either integration type (`POST /tags/{resourceArn}`) |
 | `UntagResource` | Remove tags (`DELETE /tags/{resourceArn}?tagKeys=`) |

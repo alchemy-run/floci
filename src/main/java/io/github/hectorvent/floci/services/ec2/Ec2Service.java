@@ -4010,7 +4010,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
      * <p>The add/remove parameters are set operations. AWS accepts an id that is already
      * associated, or a removal of one that is not, without complaint, so this is
      * idempotent on both sides. {@code resetPolicy} returns the endpoint to the default
-     * full-access policy, modelled here as carrying no document at all.
+     * full-access policy document, which DescribeVpcEndpoints then reports.
      */
     public VpcEndpoint modifyVpcEndpoint(String region, String endpointId,
                                          List<String> addRouteTableIds, List<String> removeRouteTableIds,
@@ -4463,9 +4463,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
         // The conflict scan and the store must be one step under the VPC's lock, or two
         // overlapping creates in flight together both pass the scan before either is stored.
         // The topology lock, outermost, keeps DeleteVpc from removing the VPC in between.
+        // Lock against the resolved VPC: a substituted foreign id has no store row.
         synchronized (attachmentTopologyLock(region)) {
-            getRequiredVpc(region, vpcId);
-            synchronized (lockFor(key(region, vpcId))) {
+            getRequiredVpc(region, vpc.getVpcId());
+            synchronized (lockFor(key(region, vpc.getVpcId()))) {
                 rejectConflictingSubnetCidr(region, vpcId, cidrBlock);
                 subnets.put(key(region, subnetId), subnet);
             }

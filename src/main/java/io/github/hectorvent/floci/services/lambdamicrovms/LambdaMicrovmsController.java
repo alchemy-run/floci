@@ -289,7 +289,7 @@ public class LambdaMicrovmsController {
      * more than one member each.
      *
      * <p>{@code CREATE} and {@code UPDATE} return full detail and differ only
-     * in the state they claim and in tags — create sends tags as null, update
+     * in the state they claim and in tags, create sends tags as null, update
      * omits the member. {@code GET} is a much smaller summary carrying tags as
      * an object, and {@code LIST} is smaller again, without tags or
      * updatedAt.</p>

@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * S3 bucket names are globally unique in AWS: a bucket lives in one account but is legitimately
- * reachable cross-account (subject to policy). The Landing Zone Accelerator relies on this — every
+ * reachable cross-account (subject to policy). The Landing Zone Accelerator relies on this, every
  * member account publishes CDK assets to one shared {@code cdk-accel-assets-<mgmt>-<region>} bucket
  * owned by the management account. floci's default per-account bucket isolation breaks that path.
  *
@@ -111,7 +111,7 @@ class S3GlobalBucketNamespaceTest {
      * Cross-account bucket-config <em>mutation</em>. LZA's {@code Custom::S3PutBucketReplication}
      * custom resource runs a Lambda in the source (member) account that owns the bucket, but that
      * Lambda calls back into floci under the default/management account context. The mutation must
-     * resolve the bucket cross-account (not 404) AND persist back to the <em>owner's</em> partition —
+     * resolve the bucket cross-account (not 404) AND persist back to the <em>owner's</em> partition -
      * a naive resolve-then-{@code put} would fork a phantom bucket into the caller's partition and
      * silently lose the config on the real bucket.
      */
@@ -151,7 +151,7 @@ class S3GlobalBucketNamespaceTest {
      * The write side of {@code Custom::S3PutBucketReplication} resolves and persists cross-account
      * (see {@link #putBucketReplicationResolvesAndWritesBackToOwnerCrossAccount}); the read side
      * must resolve just as far, or the custom resource's own follow-up
-     * {@code GetBucketReplication} — and any other management-account reader — sees
+     * {@code GetBucketReplication}, and any other management-account reader, sees
      * {@code NoSuchBucket} on a bucket that plainly exists in its owning account.
      */
     @Test
@@ -178,7 +178,7 @@ class S3GlobalBucketNamespaceTest {
 
     /**
      * Bucket-policy operations were left on the direct {@code bucketStore.get}/{@code put} path when
-     * global namespace resolution was added — unlike replication and object read/write, they never got
+     * global namespace resolution was added, unlike replication and object read/write, they never got
      * wired through {@code resolveBucket}/{@code mutateBucket}. A management-account caller (as the LZA
      * Logging stage's policy-application step runs) must be able to put/get/delete a policy on a bucket
      * owned by a member account.

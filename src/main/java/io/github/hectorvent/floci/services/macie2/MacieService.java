@@ -146,7 +146,7 @@ public class MacieService implements Resettable {
     public MacieState requireSession(String region) {
         MacieState state = state(region);
         if (!state.isEnabled()) {
-            throw notFound("Macie is not enabled for this account.");
+            throw notEnabled();
         }
         return state;
     }
@@ -298,13 +298,13 @@ public class MacieService implements Resettable {
     public MacieState requireAdministratorSession(String region, String callerAccountId) {
         MacieState state = states.getForAccount(callerAccountId, region).orElseGet(MacieState::new);
         if (state.getAdminAccountId() == null && !state.isEnabled()) {
-            throw notFound("Macie is not enabled for this account.");
+            throw notEnabled();
         }
         if (!callerAccountId.equals(state.getAdminAccountId())) {
             throw accessDenied();
         }
         if (!state.isEnabled()) {
-            throw notFound("Macie is not enabled for this account.");
+            throw notEnabled();
         }
         return state;
     }
@@ -410,7 +410,7 @@ public class MacieService implements Resettable {
     private MacieState requireSessionForAccount(String region, String accountId) {
         MacieState state = states.getForAccount(accountId, region).orElseGet(MacieState::new);
         if (!state.isEnabled()) {
-            throw new AwsException("AccessDeniedException", "Macie is not enabled for this account.", 403);
+            throw notEnabled();
         }
         return state;
     }
@@ -1147,6 +1147,11 @@ public class MacieService implements Resettable {
 
     private static AwsException notFound(String message) {
         return new AwsException("ResourceNotFoundException", message, 404);
+    }
+
+    /** AWS rejects every Macie operation with AccessDeniedException until Macie is enabled. */
+    private static AwsException notEnabled() {
+        return new AwsException("AccessDeniedException", "Macie is not enabled for this account.", 403);
     }
 
     private static AwsException accessDenied() {

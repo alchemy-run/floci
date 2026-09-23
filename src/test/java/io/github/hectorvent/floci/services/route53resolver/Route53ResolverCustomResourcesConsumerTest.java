@@ -346,7 +346,7 @@ class Route53ResolverCustomResourcesConsumerTest {
         String first = call("CreateResolverEndpoint", body)
                 .then().statusCode(200).extract().path("ResolverEndpoint.Id");
 
-        // A genuine retry must still be idempotent — the stricter comparison must not turn
+        // A genuine retry must still be idempotent, the stricter comparison must not turn
         // every retry into a conflict.
         call("CreateResolverEndpoint", body)
         .then()

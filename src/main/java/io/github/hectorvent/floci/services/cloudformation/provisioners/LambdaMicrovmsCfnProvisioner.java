@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
  * <p>Connector configuration nests under
  * {@code Configuration.VpcEgressConfiguration}, whose {@code SecurityGroupIds}
  * entries commonly arrive as {@code Fn::GetAtt} references to a security
- * group's {@code GroupId} — each array element resolves through the engine
+ * group's {@code GroupId}, each array element resolves through the engine
  * individually. An image's {@code EgressNetworkConnectors} likewise arrive as
  * references to connector ARNs.</p>
  */

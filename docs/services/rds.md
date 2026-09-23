@@ -15,6 +15,7 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 | --- | --- |
 | `CreateDBInstance` | Start a new database instance |
 | `DescribeDBInstances` | List instances and their connection info : the list form includes DocumentDB and Neptune instances and takes an `engine` filter |
+| `DescribeDBEngineVersions` | - |
 | `DeleteDBInstance` | Stop and remove an instance |
 | `ModifyDBInstance` | Update instance settings |
 | `RebootDBInstance` | Restart a database instance |

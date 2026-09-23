@@ -35,13 +35,14 @@ import java.util.TreeSet;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * What a deployment tool does with a custom domain: request an ACM certificate for it, create
- * the API Gateway domain name with that certificate, then reach https://&lt;domain&gt; with a
- * client that trusts only the chain ACM returned. DNS is not involved: the socket goes to the
- * Floci host and carries the domain as SNI, which is what a hosts-file or local DNS setup does.
+ * What a deployment tool does with a custom domain: request an ACM certificate for it, publish
+ * its DNS validation record in Route 53, create the API Gateway domain name with the issued
+ * certificate, then reach https://&lt;domain&gt; with a client that trusts only the chain ACM
+ * returned. The socket goes to the Floci host and carries the domain as SNI, which is what a
+ * hosts-file or local DNS setup does.
  *
  * <p>Needs Floci with FLOCI_TLS_ENABLED=true; skipped otherwise. Floci-only: on AWS the
- * certificate would wait for DNS validation.
+ * validation record would have to be served by the domain's real DNS.
  */
 class CustomDomainTlsTest {
 
@@ -84,6 +85,7 @@ class CustomDomainTlsTest {
     @Test
     void clientTrustingOnlyTheAcmChainReachesTheCustomDomain() throws Exception {
         certificateArn = acm.requestCertificate(b -> b.domainName(domainName).validationMethod("DNS")).certificateArn();
+        TestFixtures.validateAcmCertificateViaRoute53(acm, certificateArn);
         GetCertificateResponse issued = acm.getCertificate(b -> b.certificateArn(certificateArn));
         assertThat(issued.certificate()).contains("BEGIN CERTIFICATE");
         assertThat(issued.certificateChain()).contains("BEGIN CERTIFICATE");

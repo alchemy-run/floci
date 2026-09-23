@@ -3006,7 +3006,12 @@ public class DynamoDbJsonHandler {
             DynamoDbService.TransactWriteResult result = dynamoDbService.transactWriteItems(transactItems, region,
                     request.path("ClientRequestToken").asText(null), request);
             ObjectNode resp = objectMapper.createObjectNode();
-            resp.set("Responses", objectMapper.createArrayNode());
+            // One ItemResponse per statement, in order. A write without RETURNING has no Item, so
+            // each slot is an empty object rather than the list being empty.
+            ArrayNode responses = resp.putArray("Responses");
+            for (int i = 0; i < statements.size(); i++) {
+                responses.addObject();
+            }
             addTransactWriteConsumedCapacity(resp, request, result);
             return Response.ok(resp).build();
         } catch (TransactionCanceledException e) {

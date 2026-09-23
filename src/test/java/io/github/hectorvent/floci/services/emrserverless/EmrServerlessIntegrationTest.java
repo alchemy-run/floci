@@ -339,7 +339,11 @@ public class EmrServerlessIntegrationTest {
                         .body("message", containsString("execution role does not exist"));
                 givenReq().queryParam("resourceId", "00abcdefabcdef01")
                         .queryParam("resourceType", "SPARK_DRIVER").get(path + "/dashboard").then()
-                        .statusCode(501).body("__type", equalTo("UnsupportedOperationException"));
+                        .statusCode(403).body("__type", equalTo("AccessDeniedException"))
+                        .body("message", matchesPattern("User: arn:aws:\\S+ is not authorized "
+                                + "to perform: emr-serverless:GetResourceDashboard"));
+                givenReq().queryParam("resourceType", "SPARK_DRIVER").get(path + "/dashboard").then()
+                        .statusCode(400).body("__type", equalTo("ValidationException"));
                 givenReq().get(path + "/jobruns").then().statusCode(200).body("jobRuns", empty());
                 givenReq().get(path + "/sessions").then().statusCode(200).body("sessions", empty());
                 givenReq().get(path).then().statusCode(200).body("application.state", equalTo("CREATED"));
@@ -352,8 +356,8 @@ public class EmrServerlessIntegrationTest {
         givenReq().body(executionRequest).post("/applications/0000000000000000/jobruns").then()
                 .statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
         givenReq().queryParam("resourceId", "00abcdefabcdef01").queryParam("resourceType", "SPARK_DRIVER")
-                .get("/applications/0000000000000000/dashboard").then().statusCode(404)
-                .body("__type", equalTo("ResourceNotFoundException"));
+                .get("/applications/0000000000000000/dashboard").then().statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"));
     }
 
     @Test

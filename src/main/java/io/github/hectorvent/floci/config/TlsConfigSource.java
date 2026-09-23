@@ -78,6 +78,8 @@ public class TlsConfigSource implements ConfigSource {
                 "sync-states.us-east-1.amazonaws.com", "sync-states-fips.us-east-1.amazonaws.com",
                 "*.us-east-1.amazonaws.com", "*.appsync-api.us-east-1.amazonaws.com",
                 "*.execute-api.us-east-1.amazonaws.com",
+                "*.iot.us-east-1.amazonaws.com", "*.credentials.iot.us-east-1.amazonaws.com",
+                "*.jobs.iot.us-east-1.amazonaws.com",
                 "*.lambda-microvm.us-east-1.localhost.floci.io"));
         for (String region : AwsRegions.ALL) {
             sans.add("*.dkr.ecr." + region + ".localhost.floci.io");

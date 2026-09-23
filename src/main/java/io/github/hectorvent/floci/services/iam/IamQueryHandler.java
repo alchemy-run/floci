@@ -1313,7 +1313,7 @@ public class IamQueryHandler {
             } catch (AwsException ignored) {}
         }
         return xml.end("Roles")
-                .start("Tags").raw(tagsXml(p.getTags())).end("Tags")
+                .raw(tagsElement(p.getTags()))
                 .build();
     }
 

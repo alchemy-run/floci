@@ -248,7 +248,9 @@ class Ec2FlowLogIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("DescribeFlowLogsResponse.flowLogSet.item.flowLogId", equalTo(flowLogId));
+            // Other suites share the emulator, so the unfiltered page may hold more than this log.
+            .body("DescribeFlowLogsResponse.flowLogSet.item.find { it.flowLogId == '" + flowLogId + "' }.flowLogId",
+                    equalTo(flowLogId));
     }
 
     @Test

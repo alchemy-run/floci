@@ -157,6 +157,12 @@ class EksPodIdentityTest {
             eks.createCluster(request -> request.name(cluster).roleArn("arn:aws:iam::" + ACCOUNT + ":role/cluster")
                     .resourcesVpcConfig(VpcConfigRequest.builder().build()));
             try {
+                // Add-on APIs require an ACTIVE cluster, and CreateCluster returns while it is CREATING.
+                try (EksWaiter waiter = eks.waiter()) {
+                    assertThat(waiter.waitUntilClusterActive(request -> request.name(cluster),
+                            options -> options.maxAttempts(12).waitTimeout(Duration.ofSeconds(60)))
+                            .matched().response()).isPresent();
+                }
                 assertThat(eks.listAddons(request -> request.clusterName(cluster)).addons()).isEmpty();
                 assertThatThrownBy(() -> eks.createAddon(request -> request.clusterName(cluster).addonName("vpc-cni")))
                         .isInstanceOf(InvalidParameterException.class);

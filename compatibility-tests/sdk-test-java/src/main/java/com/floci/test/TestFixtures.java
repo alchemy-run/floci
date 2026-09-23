@@ -1007,6 +1007,65 @@ public final class TestFixtures {
         throw new IllegalStateException("SES identity was not verified after publishing DKIM records for " + domain);
     }
 
+    /**
+     * Issues a DNS-validated ACM certificate the way AWS does: publishes each validation CNAME in
+     * a public hosted zone, waits for ISSUED, then removes the records and the zone. ACM keeps
+     * the certificate issued once validation succeeded.
+     */
+    public static void validateAcmCertificateViaRoute53(AcmClient acm, String certificateArn) {
+        software.amazon.awssdk.services.acm.model.CertificateDetail pending =
+                acm.describeCertificate(b -> b.certificateArn(certificateArn)).certificate();
+        List<ResourceRecordSet> records = pending.domainValidationOptions().stream()
+                .map(software.amazon.awssdk.services.acm.model.DomainValidation::resourceRecord)
+                .map(record -> ResourceRecordSet.builder()
+                        .name(record.name())
+                        .type(record.typeAsString())
+                        .ttl(60L)
+                        .resourceRecords(ResourceRecord.builder().value(record.value()).build())
+                        .build())
+                .toList();
+        String zoneName = pending.domainName().startsWith("*.")
+                ? pending.domainName().substring(2) : pending.domainName();
+
+        try (Route53Client route53 = route53Client()) {
+            String zoneId = stripHostedZonePrefix(route53.createHostedZone(CreateHostedZoneRequest.builder()
+                    .name(zoneName)
+                    .callerReference(uniqueName("acm-validation-zone"))
+                    .build()).hostedZone().id());
+            try {
+                changeRecords(route53, zoneId, records, ChangeAction.UPSERT);
+                try {
+                    for (int i = 0; i < 10; i++) {
+                        if (acm.describeCertificate(b -> b.certificateArn(certificateArn)).certificate().status()
+                                == software.amazon.awssdk.services.acm.model.CertificateStatus.ISSUED) {
+                            return;
+                        }
+                        Thread.sleep(100L);
+                    }
+                    throw new IllegalStateException("ACM certificate " + certificateArn
+                            + " was not issued after publishing its validation records");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted while waiting for ACM validation", e);
+                } finally {
+                    changeRecords(route53, zoneId, records, ChangeAction.DELETE);
+                }
+            } finally {
+                route53.deleteHostedZone(b -> b.id(zoneId));
+            }
+        }
+    }
+
+    private static void changeRecords(Route53Client route53, String zoneId, List<ResourceRecordSet> records,
+                                      ChangeAction action) {
+        route53.changeResourceRecordSets(ChangeResourceRecordSetsRequest.builder()
+                .hostedZoneId(zoneId)
+                .changeBatch(ChangeBatch.builder().changes(records.stream()
+                        .map(record -> Change.builder().action(action).resourceRecordSet(record).build())
+                        .toList()).build())
+                .build());
+    }
+
     private static String stripHostedZonePrefix(String hostedZoneId) {
         String prefix = "/hostedzone/";
         return hostedZoneId != null && hostedZoneId.startsWith(prefix)

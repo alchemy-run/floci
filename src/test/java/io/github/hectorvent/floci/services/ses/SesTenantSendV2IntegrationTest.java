@@ -15,11 +15,11 @@ import static org.hamcrest.Matchers.notNullValue;
 /**
  * Integration tests for SES v2 tenant-scoped sending (Phase 4): the {@code TenantName} member on
  * {@code SendEmail} and {@code SendBulkEmail}. A send whose resources are not associated with the
- * tenant is refused with a 403 {@code AccessDeniedException} listing every missing ARN — probed for
+ * tenant is refused with a 403 {@code AccessDeniedException} listing every missing ARN, probed for
  * the From identity (exact-address precedence included) and the configuration set; the
  * stored-template gate is inferred from the association model, not observed. The send-path
  * tenant-not-found wording differs from the management operations (no angle brackets, account id
- * included, probe-confirmed). The tenant's SendingStatus is not checked — nothing can move it off
+ * included, probe-confirmed). The tenant's SendingStatus is not checked, nothing can move it off
  * ENABLED in the emulator.
  */
 @QuarkusTest
@@ -211,7 +211,7 @@ class SesTenantSendV2IntegrationTest {
                 .when().post("/v2/email/outbound-emails").then().statusCode(200)
                 .body("MessageId", notNullValue());
 
-        // An exact-address identity takes precedence over the (associated) domain identity — the
+        // An exact-address identity takes precedence over the (associated) domain identity, the
         // probed AWS 403 named the address identity's ARN in exactly this setup.
         v2().body("{\"EmailIdentity\":\"" + FROM + "\"}")
                 .when().post("/v2/email/identities").then().statusCode(200);
@@ -252,7 +252,7 @@ class SesTenantSendV2IntegrationTest {
                 .when().put("/v2/email/identities/" + DOMAIN + "/configuration-set")
                 .then().statusCode(200);
 
-        // No explicit ConfigurationSetName — the identity's default is the effective one, and it
+        // No explicit ConfigurationSetName, the identity's default is the effective one, and it
         // needs the association just the same.
         v2().body(simpleSend(TENANT, ""))
                 .when().post("/v2/email/outbound-emails").then().statusCode(403)
@@ -279,7 +279,7 @@ class SesTenantSendV2IntegrationTest {
                         + "\"DefaultContent\":{\"Template\":{\"TemplateName\":\"" + TEMPLATE + "\","
                         + "\"TemplateData\":\"{}\"}},\"BulkEmailEntries\":[]}")
                 .when().post("/v2/email/outbound-bulk-emails").then().statusCode(400);
-        // An all-blank inline template is a shape error too — 400 before the ghost tenant's 404.
+        // An all-blank inline template is a shape error too, 400 before the ghost tenant's 404.
         v2().body("{\"FromEmailAddress\":\"" + FROM + "\",\"TenantName\":\"ghost-tenant\","
                         + "\"DefaultContent\":{\"Template\":{\"TemplateContent\":{},"
                         + "\"TemplateData\":\"{}\"}},"

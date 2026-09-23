@@ -44,4 +44,5 @@ An image-local entry point such as `local:///usr/lib/spark/examples/src/main/pyt
 * **Bounded local execution**: One worker runs at a time with one CPU and 1536 MiB of container memory. The pending queue is limited to 32 jobs and a five-minute wait. Requested cloud capacity does not expand these local limits.
 * **Image-local Spark only**: S3 entry points, Hive, streaming, VPC-attached workers, per-worker specifications, configuration overrides, execution-policy overrides, and automatic retries are unsupported.
 * **Instant application Start/Stop**: Application state changes immediately; compute is allocated only when a job runs. Active jobs must terminate before the application can be stopped or deleted.
-* **Interactive execution**: Sessions and dashboards remain unsupported and return explicit errors rather than synthetic activity or entitlement denials.
+* **Interactive execution**: Sessions and job-run dashboards remain unsupported and return explicit errors rather than synthetic activity.
+* **Resource dashboards**: `GET /applications/{applicationId}/dashboard` (GetResourceDashboard) answers `AccessDeniedException` for every caller, matching AWS, where the operation is service-gated even for administrators.

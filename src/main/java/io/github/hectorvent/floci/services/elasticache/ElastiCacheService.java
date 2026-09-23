@@ -256,7 +256,9 @@ public class ElastiCacheService implements ResourceProvider {
             // derived from configuration and need no Docker, so the group is created and reaches
             // 'available' even when no daemon is reachable. Only connecting to the cache needs
             // the container.
-            handle = containerManager.tryStart(groupId, image);
+            // Valkey listens on the group's port, so the endpoint reports the same Port whether
+            // it names the proxy or (with Floci in Docker) the cache container itself.
+            handle = containerManager.tryStart(groupId, image, proxyPort);
 
             String endpointHost = resolveEndpointHost();
             Endpoint endpoint = endpointFor(handle, proxyPort);
@@ -630,7 +632,7 @@ public class ElastiCacheService implements ResourceProvider {
         String groupId = group.getReplicationGroupId();
         String image = config.services().elasticache().defaultImage();
         try {
-            ElastiCacheContainerHandle handle = containerManager.tryStart(groupId, image);
+            ElastiCacheContainerHandle handle = containerManager.tryStart(groupId, image, group.getProxyPort());
             synchronized (lockFor("rg:" + groupId)) {
                 if (restoreTargetLost(groupId)) {
                     abandonRestoredContainer(groupId, handle);
@@ -1379,6 +1381,11 @@ public class ElastiCacheService implements ResourceProvider {
         LOG.infov("Deleted cache subnet group {0}", name);
     }
 
+    private static AwsException invalidSubnets(List<String> subnetIds) {
+        return new AwsException("InvalidParameterValue",
+                "Some input subnets in :[" + String.join(", ", subnetIds) + "] are invalid.", 400);
+    }
+
     private CacheSubnetGroup buildSubnetGroup(String name, String description, List<String> subnetIds) {
         if (subnetIds == null || subnetIds.isEmpty()) {
             throw new AwsException("InvalidParameterValue",
@@ -1387,10 +1394,18 @@ public class ElastiCacheService implements ResourceProvider {
         // The caller's region, not the configured default: subnets exist in the region they were
         // created in, and the ARN this group is reported under is built from that same region.
         String region = regionResolver.getRegion();
-        List<Subnet> resolved = ec2Service.describeSubnets(region, subnetIds, Map.of());
+        List<Subnet> resolved;
+        try {
+            resolved = ec2Service.describeSubnets(region, subnetIds, Map.of());
+        } catch (AwsException e) {
+            // EC2 rejects an unknown id outright; ElastiCache reports it as its own invalid-subnet error.
+            if (e.getErrorCode() != null && e.getErrorCode().startsWith("InvalidSubnetID.")) {
+                throw invalidSubnets(subnetIds);
+            }
+            throw e;
+        }
         if (resolved.size() != subnetIds.size()) {
-            throw new AwsException("InvalidParameterValue",
-                    "Some input subnets in :[" + String.join(", ", subnetIds) + "] are invalid.", 400);
+            throw invalidSubnets(subnetIds);
         }
 
         String vpcId = resolved.getFirst().getVpcId();

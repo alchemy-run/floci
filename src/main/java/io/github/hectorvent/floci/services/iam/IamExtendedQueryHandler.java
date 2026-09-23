@@ -106,7 +106,6 @@ public class IamExtendedQueryHandler {
                 case "GetContextKeysForPrincipalPolicy" -> handleGetContextKeysForPrincipalPolicy(params);
                 case "SimulateCustomPolicy" -> handleSimulateCustomPolicy(params);
                 case "GetAccessKeyLastUsed" -> handleGetAccessKeyLastUsed(params);
-                case "ListInstanceProfileTags" -> handleListInstanceProfileTags(params);
                 default -> null;
             });
         } catch (AwsException e) {
@@ -780,21 +779,6 @@ public class IamExtendedQueryHandler {
                 .elem("Region", "N/A")
                 .end("AccessKeyLastUsed");
         return ok("GetAccessKeyLastUsed", xml.build());
-    }
-
-    private Response handleTagInstanceProfile(MultivaluedMap<String, String> params) {
-        iamService.tagInstanceProfile(params.getFirst("InstanceProfileName"), extractTags(params));
-        return okNoResult("TagInstanceProfile");
-    }
-
-    private Response handleUntagInstanceProfile(MultivaluedMap<String, String> params) {
-        iamService.untagInstanceProfile(params.getFirst("InstanceProfileName"), extractTagKeys(params));
-        return okNoResult("UntagInstanceProfile");
-    }
-
-    private Response handleListInstanceProfileTags(MultivaluedMap<String, String> params) {
-        return ok("ListInstanceProfileTags",
-                tagsResult(iamService.listInstanceProfileTags(params.getFirst("InstanceProfileName"))));
     }
 
     // =========================================================================

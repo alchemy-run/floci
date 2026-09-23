@@ -31,8 +31,9 @@ class MacieSessionIntegrationTest {
 
     @Test
     void sessionLifecycleRetainsMetadataAndCleansUpMembers() {
-        request(ACCOUNT, EAST).get("/macie").then().statusCode(404)
-                .body("__type", equalTo("ResourceNotFoundException"));
+        request(ACCOUNT, EAST).get("/macie").then().statusCode(403)
+                .body("__type", equalTo("AccessDeniedException"))
+                .body("message", equalTo("Macie is not enabled for this account."));
         request(ACCOUNT, EAST).body("{}").post("/macie").then().statusCode(200);
         String createdAt = request(ACCOUNT, EAST).get("/macie").then().statusCode(200)
                 .body("status", equalTo("ENABLED"))
@@ -57,9 +58,9 @@ class MacieSessionIntegrationTest {
         request(ACCOUNT, EAST).get("/macie").then().statusCode(200)
                 .body("findingPublishingFrequency", equalTo("FIFTEEN_MINUTES"));
         request(ACCOUNT, EAST).delete("/macie").then().statusCode(200);
-        request(ACCOUNT, EAST).get("/macie").then().statusCode(404);
-        request(ACCOUNT, EAST).delete("/macie").then().statusCode(404);
-        request(ACCOUNT, EAST).body("{}").patch("/macie").then().statusCode(404);
+        request(ACCOUNT, EAST).get("/macie").then().statusCode(403);
+        request(ACCOUNT, EAST).delete("/macie").then().statusCode(403);
+        request(ACCOUNT, EAST).body("{}").patch("/macie").then().statusCode(403);
         request(ACCOUNT, EAST).body("{\"status\":\"PAUSED\",\"findingPublishingFrequency\":\"ONE_HOUR\"}")
                 .post("/macie").then().statusCode(200);
         request(ACCOUNT, EAST).get("/macie").then().statusCode(200)
@@ -73,10 +74,10 @@ class MacieSessionIntegrationTest {
         request(ACCOUNT, EAST).body("{\"findingPublishingFrequency\":\"ONE_HOUR\"}")
                 .post("/macie").then().statusCode(200);
         for (String[] scope : new String[][]{{OTHER, EAST}, {ACCOUNT, WEST}}) {
-            request(scope[0], scope[1]).get("/macie").then().statusCode(404);
+            request(scope[0], scope[1]).get("/macie").then().statusCode(403);
             request(scope[0], scope[1]).body("{\"status\":\"PAUSED\"}")
-                    .patch("/macie").then().statusCode(404);
-            request(scope[0], scope[1]).delete("/macie").then().statusCode(404);
+                    .patch("/macie").then().statusCode(403);
+            request(scope[0], scope[1]).delete("/macie").then().statusCode(403);
             request(scope[0], scope[1]).body("{}").post("/macie").then().statusCode(200);
         }
         for (String[] scope : new String[][]{{ACCOUNT, EAST}, {OTHER, WEST}}) {
@@ -103,7 +104,7 @@ class MacieSessionIntegrationTest {
             request(ACCOUNT, EAST).body(body).post("/macie").then().statusCode(400)
                     .body("__type", equalTo("ValidationException"));
         }
-        request(ACCOUNT, EAST).get("/macie").then().statusCode(404);
+        request(ACCOUNT, EAST).get("/macie").then().statusCode(403);
         request(ACCOUNT, EAST).body("{}").post("/macie").then().statusCode(200);
         request(ACCOUNT, EAST).body("{\"status\":\"PAUSED\",\"findingPublishingFrequency\":\"BAD\"}")
                 .patch("/macie").then().statusCode(400);
@@ -137,13 +138,13 @@ class MacieSessionIntegrationTest {
         }
         for (String[] scope : new String[][]{{OTHER, EAST}, {ACCOUNT, WEST}}) {
             request(scope[0], scope[1]).body(input).post("/custom-data-identifiers/test")
-                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+                    .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
             request(scope[0], scope[1]).body("{}").post("/macie").then().statusCode(200);
             request(scope[0], scope[1]).body(input).post("/custom-data-identifiers/test")
                     .then().statusCode(200).body("matchCount", equalTo(2));
         }
         request(ACCOUNT, EAST).delete("/macie").then().statusCode(200);
-        request(ACCOUNT, EAST).body(input).post("/custom-data-identifiers/test").then().statusCode(404);
+        request(ACCOUNT, EAST).body(input).post("/custom-data-identifiers/test").then().statusCode(403);
         request(OTHER, EAST).body(input).post("/custom-data-identifiers/test")
                 .then().statusCode(200).body("matchCount", equalTo(2));
     }
@@ -151,7 +152,7 @@ class MacieSessionIntegrationTest {
     @Test
     void membershipReadsDoNotInventAdministratorsInvitationsOrAnalysis() {
         for (String path : new String[]{"/administrator", "/invitations", "/invitations/count"}) {
-            request(ACCOUNT, EAST).get(path).then().statusCode(404);
+            request(ACCOUNT, EAST).get(path).then().statusCode(403);
         }
         request(ACCOUNT, EAST).body("{}").post("/macie").then().statusCode(200);
         request(ACCOUNT, EAST).get("/administrator").then().statusCode(200).body(equalTo("{}"));
@@ -164,7 +165,7 @@ class MacieSessionIntegrationTest {
         request(OTHER, EAST).body("{}").post("/macie").then().statusCode(200);
         request(OTHER, EAST).get("/invitations/count").then().statusCode(200).body("invitationsCount", equalTo(0));
         request(OTHER, EAST).get("/administrator").then().statusCode(200).body(equalTo("{}"));
-        request(ACCOUNT, WEST).get("/invitations/count").then().statusCode(404);
+        request(ACCOUNT, WEST).get("/invitations/count").then().statusCode(403);
         request(ACCOUNT, EAST).body("{}").post("/findings").then().statusCode(200)
                 .body("findingIds", hasSize(0));
         request(ACCOUNT, EAST).body("{}").post("/jobs").then().statusCode(400)

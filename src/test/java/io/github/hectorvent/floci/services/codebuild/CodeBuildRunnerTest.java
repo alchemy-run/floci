@@ -83,6 +83,22 @@ class CodeBuildRunnerTest {
     }
 
     @Test
+    void usesHostPlatformUnlessEnvironmentTypeIsHonoured() {
+        Harness harness = new Harness(false);
+        harness.run();
+        assertEquals("SUCCEEDED", harness.build.getBuildStatus());
+        verify(harness.lifecycle).create(harness.spec);
+        verify(harness.lifecycle, never()).create(eq(harness.spec), anyString());
+
+        Harness arm = new Harness(true);
+        arm.build.getEnvironment().setType("ARM_CONTAINER");
+        when(arm.lifecycle.create(arm.spec, "linux/arm64")).thenReturn("worker");
+        arm.run();
+        assertEquals("SUCCEEDED", arm.build.getBuildStatus());
+        verify(arm.lifecycle).create(arm.spec, "linux/arm64");
+    }
+
+    @Test
     void pullFailurePreservesFaultAndDiagnosticContext() {
         Harness harness = new Harness();
         when(harness.lifecycle.create(harness.spec, "linux/amd64"))
@@ -139,11 +155,11 @@ class CodeBuildRunnerTest {
         assertTrue(missingExit.failed());
         assertTrue(missingExit.errorMessage().contains("without an exit code"));
 
-        when(harness.execStart.exec(any())).thenAnswer(invocation -> {
+        doAnswer(invocation -> {
             ResultCallback<Frame> callback = invocation.getArgument(0);
             callback.onError(new IllegalStateException("stream disconnected"));
             return callback;
-        });
+        }).when(harness.execStart).exec(any());
         CodeBuildRunner.PhaseResult streamFailure = harness.runner.runPhase("worker", "/", List.of(),
                 List.of("echo hello"), 1, harness.stop);
         assertTrue(streamFailure.failed());
@@ -181,13 +197,19 @@ class CodeBuildRunnerTest {
         final CodeBuildRunner runner;
 
         Harness() {
+            this(true);
+        }
+
+        Harness(boolean honourEnvironmentType) {
             EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+            when(config.services().codebuild().honourEnvironmentType()).thenReturn(honourEnvironmentType);
             RegionResolver regionResolver = mock(RegionResolver.class);
             when(regionResolver.getAccountId()).thenReturn("000000000000");
             when(logStreamer.generateLogStreamName(anyString())).thenReturn("build-log");
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
             when(builder.build()).thenReturn(spec);
             when(lifecycle.create(spec, "linux/amd64")).thenReturn("worker");
+            when(lifecycle.create(spec)).thenReturn("worker");
             when(docker.execCreateCmd("worker")).thenReturn(execCreate);
             ExecCreateCmdResponse created = mock(ExecCreateCmdResponse.class);
             when(created.getId()).thenReturn("exec");

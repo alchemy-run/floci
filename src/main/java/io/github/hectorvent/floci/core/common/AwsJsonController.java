@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsJsonHandler;
 import io.github.hectorvent.floci.services.swf.SwfJsonHandler;
+import io.github.hectorvent.floci.services.timestream.TimestreamJsonHandler;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.TimestreamInfluxDbJsonHandler;
 import io.github.hectorvent.floci.services.verifiedpermissions.VerifiedPermissionsJsonHandler;
 import jakarta.inject.Inject;
@@ -57,6 +58,7 @@ public class AwsJsonController {
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
     private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
+    private final TimestreamJsonHandler timestreamJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -72,7 +74,8 @@ public class AwsJsonController {
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
-                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler) {
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler,
+                             TimestreamJsonHandler timestreamJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -90,6 +93,7 @@ public class AwsJsonController {
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
         this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
+        this.timestreamJsonHandler = timestreamJsonHandler;
     }
 
     @POST
@@ -152,6 +156,7 @@ public class AwsJsonController {
                 case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
                 case "bcm-pricing-calculator" -> bcmPricingCalculatorJsonHandler.handle(action, request, region);
                 case "timestream-influxdb" -> timestreamInfluxDbJsonHandler.handle(action, request, region);
+                case "timestream" -> timestreamJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

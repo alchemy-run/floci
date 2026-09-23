@@ -691,7 +691,9 @@ public class VpcNetworkManager {
     private String materialise(VpcBinding vpc) {
         synchronized (vpc) {
             if (vpc.created) {
-                attachCurrentContainer(vpc, null);
+                // A network retained across restarts is marked created at plan time, so its
+                // endpoints have not been read yet; Docker rejects a duplicate connect.
+                attachCurrentContainer(vpc, vpc.flociContainerId == null ? inspectQuietly(vpc) : null);
                 return vpc.networkName;
             }
             Network existing = null;
@@ -752,6 +754,18 @@ public class VpcNetworkManager {
                         vpc.networkName, vpc.vpcId, vpc.effective, e.getMessage());
                 return null;
             }
+        }
+    }
+
+    private Network inspectQuietly(VpcBinding vpc) {
+        if (currentContainerNetworkResolver == null) {
+            return null;
+        }
+        try {
+            return dockerClient.inspectNetworkCmd().withNetworkId(vpc.networkName).exec();
+        } catch (Exception e) {
+            LOG.debugv("Could not inspect VPC network {0}: {1}", vpc.networkName, e.getMessage());
+            return null;
         }
     }
 

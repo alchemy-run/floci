@@ -64,7 +64,7 @@ class CloudWatchMetadataHandlerTest {
                  "Period":60,"EvaluationPeriods":1,"Threshold":10,"ComparisonOperator":"GreaterThanThreshold"}
                 """);
         call("PutCompositeAlarm", """
-                {"AlarmName":"aggregate","AlarmRule":"ALARM(\"errors\") AND NOT FALSE",
+                {"AlarmName":"aggregate","AlarmRule":"ALARM(\\"errors\\") AND NOT FALSE",
                  "Tags":[{"Key":"owner","Value":"test"}]}
                 """);
         String arn = "arn:aws:cloudwatch:us-east-1:000000000000:alarm:aggregate";

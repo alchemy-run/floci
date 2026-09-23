@@ -2360,10 +2360,13 @@ class S3AuthEnforcementIntegrationTest {
                 """;
     }
 
+    /** Enforce-auth with cryptographic signature verification switched on. */
     public static final class S3AuthProfile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.s3.enforce-auth", "true");
+            return Map.of(
+                    "floci.services.s3.enforce-auth", "true",
+                    "floci.auth.validate-signatures", "true");
         }
     }
 }

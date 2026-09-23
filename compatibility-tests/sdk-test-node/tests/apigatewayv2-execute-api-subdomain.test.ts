@@ -15,7 +15,7 @@
  *    (the defect that consolidating onto `ApiGatewayExecuteApiHostFilter` fixes).
  *
  * Routing is exercised deterministically by overriding the `Host` header to the
- * execute-api form while the connection still targets the real test endpoint — this
+ * execute-api form while the connection still targets the real test endpoint, this
  * avoids depending on wildcard `*.localhost` DNS resolution.
  */
 
@@ -49,7 +49,7 @@ function authority(): string {
 
 /**
  * Floci's advertised local execute-api domain, e.g. `{apiId}.execute-api.localhost.floci.io:4566`
- * (regionless — see docs/services/api-gateway.md and the TLS SANs). This is the host form these
+ * (regionless, see docs/services/api-gateway.md and the TLS SANs). This is the host form these
  * end-to-end tests exercise: it is what floci actually serves/routes, and the region is recovered
  * by a cross-region apiId lookup rather than a host label. The region-bearing AWS shape
  * (`{apiId}.execute-api.{region}.amazonaws.com`) is covered by the Java filter/resolver unit tests.
@@ -283,10 +283,12 @@ describe('API Gateway v2 execute-api subdomain routing', () => {
       if (ws.readyState !== WebSocket.CLOSED) ws.close();
     }
 
-    // Sanity: the region-less PATH form (/ws/{apiId}/{stage}) resolves only the default region and
-    // must NOT connect to this ap-northeast-2 API — confirming the execute-api host is what routed it.
+    // Sanity: the handshake is only accepted for an API that exists. The region-less PATH form
+    // (/ws/{apiId}/{stage}) is what Floci hands containerised Lambdas in place of the regional
+    // wss:// invoke URL, so it resolves an apiId across regions as well; an unknown apiId must
+    // still be refused.
     await expect(new Promise<WebSocket>((resolve, reject) => {
-      const bad = new WebSocket(`ws://${authority()}/ws/${apiId}/${stage}`);
+      const bad = new WebSocket(`ws://${authority()}/ws/nosuchapi0/${stage}`);
       bad.on('open', () => resolve(bad));
       bad.on('error', (err) => reject(err));
     })).rejects.toBeTruthy();
@@ -301,7 +303,7 @@ describe('API Gateway v2 execute-api subdomain routing', () => {
     const stage = 'prod';
     const apiId = await createWsApiWithStage('builtin-suffix', region, stage);
 
-    // Host is {apiId}.execute-api.localhost.floci.io:4566 — NO region label. The old parser
+    // Host is {apiId}.execute-api.localhost.floci.io:4566, NO region label. The old parser
     // read "localhost" as the region and the lookup missed; the consolidated filter resolves
     // the API by id across regions and still routes @connections to the controller (410 Gone),
     // not S3.

@@ -139,7 +139,7 @@ public class ServiceCatalogService {
     /**
      * AWS refuses to delete a portfolio that "has associated products, users, constraints, or
      * shared accounts" rather than cascading. Every one of those rows carries the portfolio's
-     * id in {@code PortfolioId} — products, principals and constraints alike — so a single scan
+     * id in {@code PortfolioId}, products, principals and constraints alike, so a single scan
      * covers the documented list. Tag-option associations key off {@code ResourceId} instead and
      * are deliberately not counted: they are absent from AWS's list, and the previous cascade
      * never removed them either, so nothing is orphaned that was not orphaned before.
@@ -371,7 +371,7 @@ public class ServiceCatalogService {
                 parameters.put(text(parameter, "Key"), text(parameter, "Value")));
         String email = parameters.get("AccountEmail");
         if (email == null || email.isBlank()) {
-            // Without this, Organizations' validateEmail raises InvalidInputException — an
+            // Without this, Organizations' validateEmail raises InvalidInputException, an
             // Organizations shape a servicecatalog client cannot deserialize. Keep every error
             // a Service Catalog caller sees inside the Service Catalog model, the same way the
             // createAccount failure below is translated.
@@ -502,7 +502,7 @@ public class ServiceCatalogService {
 
     /**
      * AWS refuses to delete a product that "is associated with a portfolio". Only the portfolio
-     * association blocks — a product carrying just service-action associations or constraints is
+     * association blocks, a product carrying just service-action associations or constraints is
      * still deletable, and those rows are cleaned up below as before.
      */
     public void deleteProduct(String id) {
@@ -652,7 +652,7 @@ public class ServiceCatalogService {
     static final List<String> ORGANIZATION_NODE_TYPES =
             List.of("ORGANIZATION", "ORGANIZATIONAL_UNIT", "ACCOUNT");
 
-    /** botocore {@code DescribePortfolioShareType} — a superset of the node types above. */
+    /** botocore {@code DescribePortfolioShareType}, a superset of the node types above. */
     static final List<String> DESCRIBE_PORTFOLIO_SHARE_TYPES =
             List.of("ACCOUNT", "ORGANIZATION", "ORGANIZATIONAL_UNIT", "ORGANIZATION_MEMBER_ACCOUNT");
 
@@ -661,7 +661,7 @@ public class ServiceCatalogService {
 
     /**
      * Rejects a value botocore does not list in the member's enum. Accepting one leaves the
-     * emulator holding state AWS would never have created — a portfolio share keyed by an
+     * emulator holding state AWS would never have created, a portfolio share keyed by an
      * unmodelled node type is reported back by DescribePortfolioShares as though real.
      */
     static void requireEnum(String value, String field, List<String> allowed) {

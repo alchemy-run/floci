@@ -33,6 +33,14 @@ Floci emulates the Amazon EMR (Elastic MapReduce) management API. Clusters (job 
 | `DescribeSecurityConfiguration` | Returns a security configuration |
 | `DeleteSecurityConfiguration` | Deletes a security configuration |
 | `ListSecurityConfigurations` | Lists all security configurations |
+| `ListReleaseLabels` | - |
+| `DescribeReleaseLabel` | - |
+| `ListSupportedInstanceTypes` | - |
+| `CreateStudio` | - |
+| `DescribeStudio` | - |
+| `ListStudios` | - |
+| `UpdateStudio` | - |
+| `DeleteStudio` | - |
 | `AddTags` | Adds tags to a cluster |
 | `RemoveTags` | Removes tags from a cluster |
 <!-- floci:actions:end -->

@@ -20,6 +20,25 @@ Set `FLOCI_SERVICES_MEMORYDB_MOCK=true` to manage clusters as control-plane-only
 | `UpdateCluster` | Update mutable cluster attributes (e.g. description) |
 | `DeleteCluster` | Stop and remove a cluster |
 | `CreateUser` | - |
+| `UpdateUser` | - |
+| `CreateParameterGroup` | - |
+| `DescribeParameterGroups` | - |
+| `DescribeParameters` | - |
+| `UpdateParameterGroup` | - |
+| `ResetParameterGroup` | - |
+| `DeleteParameterGroup` | - |
+| `CreateSubnetGroup` | - |
+| `DescribeSubnetGroups` | - |
+| `UpdateSubnetGroup` | - |
+| `DeleteSubnetGroup` | - |
+| `CreateSnapshot` | - |
+| `DescribeSnapshots` | - |
+| `CopySnapshot` | - |
+| `DeleteSnapshot` | - |
+| `DescribeEvents` | - |
+| `DescribeEngineVersions` | - |
+| `DescribeServiceUpdates` | - |
+| `BatchUpdateCluster` | - |
 | `DescribeUsers` | - |
 | `DeleteUser` | - |
 | `CreateACL` | - |

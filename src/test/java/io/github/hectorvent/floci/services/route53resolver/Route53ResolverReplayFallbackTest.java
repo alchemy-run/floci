@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * What {@code CreateResolverEndpoint} does when a stored endpoint has no recorded
- * {@code IpAddressRequests} — a state the public API cannot produce, so it needs the
+ * {@code IpAddressRequests}, a state the public API cannot produce, so it needs the
  * hermetic constructor.
  *
  * <p>The recorded addresses are what a replayed {@code CreatorRequestId} is checked

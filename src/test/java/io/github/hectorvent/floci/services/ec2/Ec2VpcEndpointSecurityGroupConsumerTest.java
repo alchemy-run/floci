@@ -4,11 +4,9 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
 
 /**
@@ -184,7 +182,10 @@ class Ec2VpcEndpointSecurityGroupConsumerTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body(not(containsString("policyDocument")));
+            // AWS resets to (and describes) the default full-access policy rather than dropping it.
+            .body("DescribeVpcEndpointsResponse.vpcEndpointSet.item.policyDocument",
+                    equalTo("{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                            + "\"Principal\":\"*\",\"Action\":\"*\",\"Resource\":\"*\"}]}"));
     }
 
     @Test

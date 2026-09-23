@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
  * Evaluates every CloudWatch alarm that carries metric-math configuration
  * (namespace/metricName/period/evaluationPeriods/comparisonOperator), transitions its
  * {@code StateValue} the way real CloudWatch would, and while it is in {@code ALARM}
- * dispatches {@code AlarmActions} through {@link AlarmActionHandler} on every tick — not
+ * dispatches {@code AlarmActions} through {@link AlarmActionHandler} on every tick, not
  * just the first transition into that state, so an action deferred by a handler (e.g. a
  * scaling policy still in cooldown) is retried on a later tick rather than dropped for as
  * long as the breach continues.
@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
  * auto-create alarms for) is evaluated identically to one Floci synthesized itself.</p>
  *
  * <p>The value handed to {@link AlarmActionHandler#handle} is always the most recent
- * <em>breaching</em> datapoint, not simply the most recent one chronologically — the two can
+ * <em>breaching</em> datapoint, not simply the most recent one chronologically, the two can
  * differ once {@code TreatMissingData} lets missing periods themselves cause an {@code ALARM}
  * transition, and dispatching a non-breaching real reading in that case would push a handler's
  * math in the wrong direction. When {@code TreatMissingData=breaching} reaches {@code ALARM}
@@ -93,13 +93,13 @@ public class AlarmEvaluator {
     }
 
     /**
-     * Queries the <em>evaluation range</em> — more periods than {@code evaluationPeriods} — and
+     * Queries the <em>evaluation range</em>, more periods than {@code evaluationPeriods}, and
      * resolves the state with CloudWatch's documented precedence ("How alarm state is evaluated
      * when data is missing"): real datapoints reaching further back are preferred, and {@code
      * TreatMissingData} only fills what real data cannot cover.
      *
      * <p>Once the range holds at least {@code evaluationPeriods} real datapoints, the most recent
-     * of those decide the state and {@code TreatMissingData} is not consulted at all — AWS: "the
+     * of those decide the state and {@code TreatMissingData} is not consulted at all, AWS: "the
      * value you set for how to treat missing data is not needed and is ignored". Reaching further
      * back is precisely what makes that branch reachable, so widening the query narrows how often
      * the fallback applies without changing what any of its modes mean.</p>
@@ -213,7 +213,7 @@ public class AlarmEvaluator {
      * breaching datapoint during the Evaluation Periods number of data points is at least as old
      * as the value of Datapoints to Alarm" and every more recent datapoint is breaching or
      * missing. A lone breach at the very end of the window ({@code - - - - X}) deliberately does
-     * not qualify — the next datapoint may be non-breaching — while one that has already aged past
+     * not qualify, the next datapoint may be non-breaching, while one that has already aged past
      * {@code DatapointsToAlarm} ({@code - - X - -}) does, even with fewer real datapoints than M.
      *
      * <p>"All other" spans the whole evaluation range, not just the most recent {@code

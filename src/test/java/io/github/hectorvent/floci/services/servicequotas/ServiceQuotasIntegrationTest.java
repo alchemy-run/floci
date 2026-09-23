@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Integration tests for the Service Quotas service.
- * Protocol: JSON 1.1 — Content-Type: application/x-amz-json-1.1,
+ * Protocol: JSON 1.1, Content-Type: application/x-amz-json-1.1,
  * X-Amz-Target: ServiceQuotasV20190624.&lt;Action&gt;
  */
 @QuarkusTest

@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.hasItem;
  * <p>New class, not appended to an existing one, so falsifiability isolates per
  * operation (CS-001). {@code describeCopyProductStatus} looked up a token via
  * {@code associationStore} that {@code copyProduct} (already {@code accepted} from
- * earlier this session) never persisted — same shape as issues 0020/0021. Fixed by
+ * earlier this session) never persisted, same shape as issues 0020/0021. Fixed by
  * having {@code copyProduct} store a status row under the token it returns.
  */
 @QuarkusTest

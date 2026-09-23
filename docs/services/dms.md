@@ -14,8 +14,35 @@ those subnets actually have.
 | Action | Description |
 | --- | --- |
 | `CreateReplicationSubnetGroup` | Creates a replication subnet group from existing EC2 subnets. |
+| `ModifyReplicationSubnetGroup` | - |
 | `DescribeReplicationSubnetGroups` | Lists replication subnet groups, optionally filtered by identifier. |
 | `DeleteReplicationSubnetGroup` | Deletes the specified replication subnet group. |
+| `CreateEndpoint` | - |
+| `ModifyEndpoint` | - |
+| `DeleteEndpoint` | - |
+| `DescribeEndpoints` | - |
+| `DescribeEndpointSettings` | - |
+| `CreateReplicationInstance` | - |
+| `ModifyReplicationInstance` | - |
+| `RebootReplicationInstance` | - |
+| `DeleteReplicationInstance` | - |
+| `DescribeReplicationInstances` | - |
+| `DescribeReplicationInstanceTaskLogs` | - |
+| `DescribeOrderableReplicationInstances` | - |
+| `TestConnection` | - |
+| `DescribeConnections` | - |
+| `RefreshSchemas` | - |
+| `DescribeRefreshSchemasStatus` | - |
+| `DescribeSchemas` | - |
+| `DescribeReplicationTasks` | - |
+| `StartReplicationTask` | - |
+| `StopReplicationTask` | - |
+| `DescribeTableStatistics` | - |
+| `ReloadTables` | - |
+| `DescribeReplications` | - |
+| `StartReplication` | - |
+| `StopReplication` | - |
+| `DescribeEvents` | - |
 | `ListTagsForResource` | Lists the tags on one or more DMS resource ARNs. |
 | `AddTagsToResource` | Merges tags into the resource, overwriting by key. |
 | `RemoveTagsFromResource` | Removes the named tag keys from the resource. |

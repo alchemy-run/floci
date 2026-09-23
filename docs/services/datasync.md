@@ -57,6 +57,11 @@ tasks and tagging. The task-execution data plane is not emulated.
 | `UpdateTask` | Change a task's name, options, filters, schedule or reporting |
 | `DeleteTask` | Delete a task |
 | `ListTasks` | Page through tasks, optionally filtered by `LocationId` or `CreationTime` |
+| `StartTaskExecution` | - |
+| `DescribeTaskExecution` | - |
+| `ListTaskExecutions` | - |
+| `UpdateTaskExecution` | - |
+| `CancelTaskExecution` | - |
 | `TagResource` | Tag an agent, location or task by ARN |
 | `UntagResource` | Remove tags from an agent, location or task by ARN |
 | `ListTagsForResource` | List an agent's, location's or task's tags |

@@ -11,6 +11,12 @@ Floci implements the Amazon Inspector organization operations used by local secu
 <!-- floci:actions:start -->
 | Action | Description |
 | --- | --- |
+| `CreateFilter` | - |
+| `UpdateFilter` | - |
+| `DeleteFilter` | - |
+| `ListFilters` | - |
+| `GetEc2DeepInspectionConfiguration` | - |
+| `ListCisScanConfigurations` | - |
 | `ListDelegatedAdminAccounts` | - |
 | `EnableDelegatedAdminAccount` | - |
 | `DisableDelegatedAdminAccount` | - |

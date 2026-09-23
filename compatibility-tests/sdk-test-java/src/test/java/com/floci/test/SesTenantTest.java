@@ -12,7 +12,6 @@ import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.AlreadyExistsException;
 import software.amazon.awssdk.services.sesv2.model.BadRequestException;
 import software.amazon.awssdk.services.sesv2.model.CreateConfigurationSetRequest;
-import software.amazon.awssdk.services.sesv2.model.CreateEmailIdentityRequest;
 import software.amazon.awssdk.services.sesv2.model.CreateTenantRequest;
 import software.amazon.awssdk.services.sesv2.model.CreateTenantResponse;
 import software.amazon.awssdk.services.sesv2.model.DeleteConfigurationSetRequest;
@@ -47,8 +46,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * associations (CreateTenantResourceAssociation / DeleteTenantResourceAssociation /
  * ListTenantResources / ListResourceTenants), and tenant suppression (PutTenantSuppressionAttributes
  * plus the TenantName-scoped suppression-list operations). One AWS quirk drives the association
- * assertions: the service's wire values for ResourceType — in responses and as the RESOURCE_TYPE
- * filter value — are the ARN segments (identity / configuration-set / template), not the SDK's
+ * assertions: the service's wire values for ResourceType, in responses and as the RESOURCE_TYPE
+ * filter value, are the ARN segments (identity / configuration-set / template), not the SDK's
  * EMAIL_IDENTITY-style enum constants. Real AWS rejects the enum spelling as a filter and returns
  * values the SDK maps to UNKNOWN_TO_SDK_VERSION, so the test asserts resourceTypeAsString. The
  * suppression block asserts the all-or-nothing attribute pair (a bare TenantName clears it), the
@@ -73,7 +72,8 @@ class SesTenantTest {
     @BeforeAll
     static void setup() {
         sesV2 = TestFixtures.sesV2Client();
-        sesV2.createEmailIdentity(CreateEmailIdentityRequest.builder().emailIdentity(IDENTITY).build());
+        // Tenant sends from this domain (order 22), and SES only sends from verified identities.
+        TestFixtures.verifySesDomainIdentityViaRoute53(sesV2, IDENTITY);
         sesV2.createConfigurationSet(CreateConfigurationSetRequest.builder()
                 .configurationSetName(CONFIG_SET).build());
         sesV2.putSuppressedDestination(r -> r.emailAddress(ACCOUNT_ADDR)

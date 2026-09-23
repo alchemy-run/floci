@@ -98,6 +98,13 @@ class EksServiceTest {
         return testConfig(true);
     }
 
+    /** An EksService whose requests arrive in {@code region}, sharing this test's EC2 state. */
+    private EksService eksServiceInRegion(String region) {
+        return new EksService(storageFactory, testConfig(), new RegionResolver(region, "000000000000"), null,
+                ec2Service, new EksOidcService(storageFactory, new ObjectMapper()), mock(EksAccessEntryService.class),
+                mock(EksPodIdentityAssociationService.class));
+    }
+
     private EmulatorConfig testConfig(boolean mock) {
         EmulatorConfig.EksServiceConfig eksConfig = proxy(EmulatorConfig.EksServiceConfig.class,
                 (proxy, method, args) -> switch (method.getName()) {
@@ -1233,7 +1240,9 @@ class EksServiceTest {
         assertFalse(ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()).isEmpty());
 
         service.deleteCluster("cluster-to-delete");
-        assertTrue(ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()).isEmpty());
+        AwsException gone = assertThrows(AwsException.class,
+                () -> ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()));
+        assertEquals("InvalidGroup.NotFound", gone.getErrorCode());
     }
 
     @Test
@@ -2282,6 +2291,8 @@ class EksServiceTest {
 
     @Test
     void createNodeGroupUsesClusterRegionForArnAndLaunchTemplate() {
+        // Clusters are regional, so the node group request is made in the cluster's region.
+        EksService eksService = eksServiceInRegion("eu-west-1");
         Cluster cluster = new Cluster();
         cluster.setName("regional-cluster");
         cluster.setArn("arn:aws:eks:eu-west-1:000000000000:cluster/regional-cluster");
@@ -2302,6 +2313,7 @@ class EksServiceTest {
 
     @Test
     void createNodeGroupValidatesLaunchTemplateInClusterRegion() {
+        EksService eksService = eksServiceInRegion("eu-west-1");
         Cluster cluster = new Cluster();
         cluster.setName("eu-cluster");
         cluster.setArn("arn:aws:eks:eu-west-1:000000000000:cluster/eu-cluster");

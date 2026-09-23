@@ -105,14 +105,14 @@ class Ec2PublicIpOnLaunchTest {
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.defaultAccountId()).thenReturn("000000000000");
         // mock() == true short-circuits the container launch in runInstances, so
-        // no Docker is needed — the associatePublicIp flag is set before that.
+        // no Docker is needed, the associatePublicIp flag is set before that.
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.Ec2ServiceConfig ec2Cfg = mock(EmulatorConfig.Ec2ServiceConfig.class);
         when(config.services()).thenReturn(services);
         when(services.ec2()).thenReturn(ec2Cfg);
         when(ec2Cfg.mock()).thenReturn(true);
         Ec2ImageCatalog imageCatalog = new Ec2ImageCatalog();
-        // A mock container manager makes launch() a no-op — the associatePublicIp
+        // A mock container manager makes launch() a no-op, the associatePublicIp
         // flag is set on the instance BEFORE launch, so no Docker is needed here.
         return new Ec2Service(config, mock(Ec2ContainerManager.class), mock(Ec2PortForwardManager.class),
                 new AmiImageResolver(imageCatalog), imageCatalog,

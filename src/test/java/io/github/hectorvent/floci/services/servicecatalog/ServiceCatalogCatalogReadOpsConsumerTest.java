@@ -151,7 +151,7 @@ class ServiceCatalogCatalogReadOpsConsumerTest {
     /**
      * {@code Type} selects which share flavour to report and botocore pins it to
      * {@code DescribePortfolioShareType}. An unmodelled value used to match nothing and
-     * return an empty list — a client filtering on a typo saw "no shares", not an error.
+     * return an empty list, a client filtering on a typo saw "no shares", not an error.
      */
     @Test
     void describePortfolioShares_unknownType_returnsInvalidParameters() {

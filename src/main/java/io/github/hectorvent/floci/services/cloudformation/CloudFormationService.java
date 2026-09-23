@@ -1467,7 +1467,19 @@ public class CloudFormationService implements ResourceProvider {
                                 resDef.path("UpdateReplacePolicy").asText(null));
                     }
                     if ("CREATE_COMPLETE".equals(resource.getStatus())) {
-                        resource.setExpectedProperties(engine.resolveNode(props));
+                        // ssm-secure is legal only on properties that resolve it themselves (RDS
+                        // master credentials), so the drift baseline keeps those references
+                        // verbatim instead of re-resolving them through the general stage, which
+                        // rejects them, and instead of persisting the secure value in stack state.
+                        CloudFormationTemplateEngine expectedEngine = new CloudFormationTemplateEngine(
+                                accountId, region, stack.getStackName(),
+                                stack.getStackId(), resolvedParams, physicalIds, resourceAttrs, conditions,
+                                mappings, objectMapper,
+                                name -> exports.get(accountExportKey(accountId, exportKey(region, name))),
+                                value -> value.contains("{{resolve:ssm-secure:")
+                                        ? value
+                                        : dynamicReferences.resolveDynamicReferences(value, region, false));
+                        resource.setExpectedProperties(expectedEngine.resolveNode(props));
                     }
                     resource.setUpdateReplacePolicy(
                             resDef.path("UpdateReplacePolicy").asText(null));

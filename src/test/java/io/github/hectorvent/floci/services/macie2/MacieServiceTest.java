@@ -421,6 +421,6 @@ class MacieServiceTest {
         assertFalse(service.state(REGION).isEnabled());
         AwsException error = assertThrows(AwsException.class,
                 () -> service.requireAdministratorSession(REGION, ADMIN_ACCOUNT));
-        assertEquals("ResourceNotFoundException", error.getErrorCode());
+        assertEquals("AccessDeniedException", error.getErrorCode());
     }
 }

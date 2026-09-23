@@ -13,6 +13,15 @@ Floci supports alternate-contact management over the AWS REST JSON protocol.
 | --- | --- |
 | `PutAlternateContact` | - |
 | `GetAlternateContact` | - |
+| `DeleteAlternateContact` | - |
+| `GetAccountInformation` | - |
+| `PutAccountName` | - |
+| `GetContactInformation` | - |
+| `PutContactInformation` | - |
+| `ListRegions` | - |
+| `GetRegionOptStatus` | - |
+| `EnableRegion` | - |
+| `DisableRegion` | - |
 <!-- floci:actions:end -->
 
 Alternate contacts are isolated by caller account and stored through `StorageFactory`.

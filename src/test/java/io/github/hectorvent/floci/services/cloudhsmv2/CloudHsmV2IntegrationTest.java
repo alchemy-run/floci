@@ -19,9 +19,42 @@ class CloudHsmV2IntegrationTest {
 
     private static final String CONTENT_TYPE = "application/x-amz-json-1.1";
     private static final String TARGET_PREFIX = "BaldrApiService.";
+    private static final String EC2_AUTH =
+            "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/ec2/aws4_request";
 
     private String createdClusterId;
     private String createdHsmId;
+    private String subnetId;
+
+    /**
+     * A real subnet in us-east-1a: CreateCluster resolves its subnets through EC2, so an id that
+     * EC2 does not know is rejected, and the HSM tests place HSMs in us-east-1a.
+     */
+    private String subnetId() {
+        if (subnetId == null) {
+            String vpcId = given()
+                .formParam("Action", "CreateVpc")
+                .formParam("CidrBlock", "10.77.0.0/16")
+                .header("Authorization", EC2_AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .extract().path("CreateVpcResponse.vpc.vpcId");
+            subnetId = given()
+                .formParam("Action", "CreateSubnet")
+                .formParam("VpcId", vpcId)
+                .formParam("CidrBlock", "10.77.1.0/24")
+                .formParam("AvailabilityZone", "us-east-1a")
+                .header("Authorization", EC2_AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .extract().path("CreateSubnetResponse.subnet.subnetId");
+        }
+        return subnetId;
+    }
 
     @BeforeAll
     static void configureRestAssured() {
@@ -39,9 +72,9 @@ class CloudHsmV2IntegrationTest {
             .body("""
                 {
                     "HsmType": "hsm1.medium",
-                    "SubnetIds": ["subnet-abcdef01"]
+                    "SubnetIds": ["%s"]
                 }
-                """)
+                """.formatted(subnetId()))
         .when()
             .post("/")
         .then()
@@ -116,6 +149,26 @@ class CloudHsmV2IntegrationTest {
             .statusCode(400)
             .body("__type", equalTo("CloudHsmInvalidRequestException"));
     }
+    @Test
+    @Order(5)
+    void createClusterWithUnknownSubnetFails() {
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "CreateCluster")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "HsmType": "hsm1.medium",
+                    "SubnetIds": ["subnet-00000000000000000"]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("CloudHsmInvalidRequestException"))
+            .body("message", containsString("subnet-00000000000000000"));
+    }
+
     // ──────────────────────────── DescribeClusters ────────────────────────────
 
     @Test
@@ -714,9 +767,9 @@ class CloudHsmV2IntegrationTest {
             .body("""
                 {
                     "HsmType": "hsm1.medium",
-                    "SubnetIds": ["subnet-policy01"]
+                    "SubnetIds": ["%s"]
                 }
-                """)
+                """.formatted(subnetId()))
         .when()
             .post("/")
         .then()
@@ -750,9 +803,9 @@ class CloudHsmV2IntegrationTest {
             .body("""
                 {
                     "HsmType": "hsm1.medium",
-                    "SubnetIds": ["subnet-temptest01"]
+                    "SubnetIds": ["%s"]
                 }
-                """)
+                """.formatted(subnetId()))
         .when()
             .post("/")
         .then()
@@ -850,9 +903,9 @@ class CloudHsmV2IntegrationTest {
             .body("""
                 {
                     "HsmType": "hsm1.medium",
-                    "SubnetIds": ["subnet-deletetest"]
+                    "SubnetIds": ["%s"]
                 }
-                """)
+                """.formatted(subnetId()))
         .when()
             .post("/")
         .then()
@@ -915,7 +968,7 @@ class CloudHsmV2IntegrationTest {
         String clusterId = given()
             .header("X-Amz-Target", TARGET_PREFIX + "CreateCluster")
             .contentType(CONTENT_TYPE)
-            .body("{\"HsmType\":\"hsm1.medium\",\"SubnetIds\":[\"subnet-abcdef99\"]}")
+            .body("{\"HsmType\":\"hsm1.medium\",\"SubnetIds\":[\"" + subnetId() + "\"]}")
         .when().post("/")
         .then().statusCode(200).extract().jsonPath().getString("Cluster.ClusterId");
 

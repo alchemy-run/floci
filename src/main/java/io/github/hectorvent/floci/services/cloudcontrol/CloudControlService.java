@@ -369,6 +369,9 @@ public class CloudControlService {
         try {
             RequestScopes.runAs(accountId, () -> {
                 if ("AWS::SSM::Parameter".equals(typeName)) ssmBackend.delete(identifier, region);
+                // The CloudFormation VPC provisioner leaves VPCs to stack teardown; Cloud Control
+                // deletes the VPC itself, surfacing DependencyViolation like AWS does.
+                else if ("AWS::EC2::VPC".equals(typeName)) ec2Service.deleteVpc(region, identifier);
                 else provisioner.deleteStandalone(typeName, identifier, region, accountId, attributes);
             });
             boolean exists = listResources(region, accountId, typeName).stream()

@@ -6,9 +6,9 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.macie2.Macie2Client;
+import software.amazon.awssdk.services.macie2.model.AccessDeniedException;
 import software.amazon.awssdk.services.macie2.model.ConflictException;
 import software.amazon.awssdk.services.macie2.model.GetMacieSessionResponse;
-import software.amazon.awssdk.services.macie2.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.macie2.model.ValidationException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,7 +28,7 @@ class MacieSessionLifecycleTest {
              Macie2Client foreign = client(OTHER, Region.US_EAST_1);
              Macie2Client otherRegion = client(ACCOUNT, Region.US_WEST_2)) {
             assertThatThrownBy(() -> owner.getMacieSession(request -> {}))
-                    .isInstanceOf(ResourceNotFoundException.class);
+                    .isInstanceOf(AccessDeniedException.class);
             assertThatThrownBy(() -> owner.enableMacie(request -> request.status("DISABLED")))
                     .isInstanceOf(ValidationException.class);
             owner.enableMacie(request -> request.status("ENABLED").findingPublishingFrequency("SIX_HOURS"));
@@ -42,11 +42,11 @@ class MacieSessionLifecycleTest {
                 assertThatThrownBy(() -> owner.enableMacie(request -> {})).isInstanceOf(ConflictException.class);
                 for (Macie2Client isolated : new Macie2Client[]{foreign, otherRegion}) {
                     assertThatThrownBy(() -> isolated.getMacieSession(request -> {}))
-                            .isInstanceOf(ResourceNotFoundException.class);
+                            .isInstanceOf(AccessDeniedException.class);
                     assertThatThrownBy(() -> isolated.updateMacieSession(request -> request.status("PAUSED")))
-                            .isInstanceOf(ResourceNotFoundException.class);
+                            .isInstanceOf(AccessDeniedException.class);
                     assertThatThrownBy(() -> isolated.disableMacie(request -> {}))
-                            .isInstanceOf(ResourceNotFoundException.class);
+                            .isInstanceOf(AccessDeniedException.class);
                 }
                 owner.createMember(request -> request.account(account -> account
                         .accountId(OTHER).email("member@example.com")));
@@ -66,9 +66,9 @@ class MacieSessionLifecycleTest {
                         .isEqualTo("FIFTEEN_MINUTES");
                 owner.disableMacie(request -> {});
                 assertThatThrownBy(() -> owner.getMacieSession(request -> {}))
-                        .isInstanceOf(ResourceNotFoundException.class);
+                        .isInstanceOf(AccessDeniedException.class);
                 assertThatThrownBy(() -> owner.disableMacie(request -> {}))
-                        .isInstanceOf(ResourceNotFoundException.class);
+                        .isInstanceOf(AccessDeniedException.class);
                 owner.enableMacie(request -> request.status("PAUSED").findingPublishingFrequency("ONE_HOUR"));
                 assertThat(owner.getMacieSession(request -> {}).findingPublishingFrequencyAsString())
                         .isEqualTo("ONE_HOUR");
@@ -76,7 +76,7 @@ class MacieSessionLifecycleTest {
             } finally {
                 try {
                     owner.disableMacie(request -> {});
-                } catch (ResourceNotFoundException expected) {
+                } catch (AccessDeniedException expected) {
                     // A failure after the explicit disable leaves no session to clean up.
                 }
             }
@@ -108,7 +108,7 @@ class MacieSessionLifecycleTest {
                 for (Macie2Client isolated : new Macie2Client[]{foreign, otherRegion}) {
                     assertThatThrownBy(() -> isolated.testCustomDataIdentifier(
                             request -> request.regex("EMP-[0-9]{8}").sampleText("EMP-12345678")))
-                            .isInstanceOf(ResourceNotFoundException.class);
+                            .isInstanceOf(AccessDeniedException.class);
                 }
                 assertThat(owner.testCustomDataIdentifier(request -> request.regex("EMP-[0-9]{8}")
                         .sampleText("no identifiers")).matchCount()).isZero();
@@ -116,9 +116,9 @@ class MacieSessionLifecycleTest {
                 assertThat(owner.listInvitations(request -> {}).invitations()).isEmpty();
                 assertThat(owner.getInvitationsCount(request -> {}).invitationsCount()).isZero();
                 assertThatThrownBy(() -> foreign.listInvitations(request -> {}))
-                        .isInstanceOf(ResourceNotFoundException.class);
+                        .isInstanceOf(AccessDeniedException.class);
                 assertThatThrownBy(() -> otherRegion.getAdministratorAccount(request -> {}))
-                        .isInstanceOf(ResourceNotFoundException.class);
+                        .isInstanceOf(AccessDeniedException.class);
                 assertThatThrownBy(() -> owner.createSampleFindings(request -> {}))
                         .isInstanceOf(ValidationException.class).hasMessageContaining("does not support Macie");
             } finally {

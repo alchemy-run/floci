@@ -462,7 +462,7 @@ public class EmrServerlessJobService implements ContainerTeardown, Resettable {
         }
     }
 
-    private String creator(String account, String authorization) {
+    String creator(String account, String authorization) {
         if (authorization != null && authorization.contains("Credential=")) {
             String key = authorization.substring(authorization.indexOf("Credential=") + 11).split("/", 2)[0];
             CallerContext caller = iam.resolveCallerContext(key);

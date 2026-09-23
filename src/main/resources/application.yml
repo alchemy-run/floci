@@ -645,6 +645,7 @@ floci:
     codebuild:
       enabled: true
       # docker-network: floci-network
+      honour-environment-type: false          # true = run LINUX_CONTAINER as linux/amd64 and ARM_CONTAINER as linux/arm64
     sagemaker:
       enabled: true
       # docker-network: floci-network

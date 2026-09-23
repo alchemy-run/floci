@@ -35,6 +35,27 @@ Floci emulates SageMaker control-plane APIs and runs real Docker containers for 
 | `DescribeTrainingJob` | Returns a training job's status, scoped to the calling region. |
 | `ListTrainingJobs` | Lists training jobs for the calling region; supports `NameContains`, `StatusEquals`, `MaxResults`, and `NextToken`. |
 | `StopTrainingJob` | Stops a training job that is `InProgress` or `Stopping`; a no-op against a job already in a terminal state. |
+| `CreateFeatureGroup` | - |
+| `DescribeFeatureGroup` | - |
+| `UpdateFeatureGroup` | - |
+| `DeleteFeatureGroup` | - |
+| `ListFeatureGroups` | - |
+| `CreateCluster` | - |
+| `DescribeCluster` | - |
+| `DeleteCluster` | - |
+| `ListClusters` | - |
+| `ListClusterNodes` | - |
+| `DescribeClusterNode` | - |
+| `CreateClusterSchedulerConfig` | - |
+| `DescribeClusterSchedulerConfig` | - |
+| `UpdateClusterSchedulerConfig` | - |
+| `DeleteClusterSchedulerConfig` | - |
+| `ListClusterSchedulerConfigs` | - |
+| `CreateComputeQuota` | - |
+| `DescribeComputeQuota` | - |
+| `UpdateComputeQuota` | - |
+| `DeleteComputeQuota` | - |
+| `ListComputeQuotas` | - |
 | `AddTags` | Adds tags to a model, endpoint config, endpoint, or training job identified by ARN. |
 | `ListTags` | Lists tags for a model, endpoint config, endpoint, or training job identified by ARN. |
 | `DeleteTags` | Removes tags by key from a model, endpoint config, endpoint, or training job identified by ARN. |

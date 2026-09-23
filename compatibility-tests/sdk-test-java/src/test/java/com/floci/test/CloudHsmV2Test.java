@@ -3,6 +3,7 @@ package com.floci.test;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.cloudhsmv2.CloudHsmV2Client;
 import software.amazon.awssdk.services.cloudhsmv2.model.*;
+import software.amazon.awssdk.services.ec2.Ec2Client;
 
 import java.util.List;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -27,13 +28,28 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CloudHsmV2Test {
 
     private final CloudHsmV2Client client = TestFixtures.cloudHsmV2Client();
+    private final Ec2Client ec2 = TestFixtures.ec2Client();
+
+    /**
+     * CreateCluster resolves its subnets through EC2, as AWS does, so the cluster needs real
+     * subnets: one in us-east-1a and one in us-east-1b, the zones the HSMs are placed in.
+     */
+    private String[] clusterSubnetIds() {
+        String vpcId = ec2.createVpc(r -> r.cidrBlock("10.0.0.0/16")).vpc().vpcId();
+        String a = ec2.createSubnet(r -> r.vpcId(vpcId).cidrBlock("10.0.1.0/24")
+                .availabilityZone("us-east-1a")).subnet().subnetId();
+        String b = ec2.createSubnet(r -> r.vpcId(vpcId).cidrBlock("10.0.2.0/24")
+                .availabilityZone("us-east-1b")).subnet().subnetId();
+        return new String[] {a, b};
+    }
 
     @Test
     public void testFullLifecycle() {
+        String[] subnetIds = clusterSubnetIds();
         // 1. Create Cluster
         CreateClusterResponse createClusterResponse = client.createCluster(r -> r
                 .hsmType("hsm1.medium")
-                .subnetIds("subnet-1", "subnet-2")
+                .subnetIds(subnetIds)
                 .mode(ClusterMode.FIPS)
                 .networkType(NetworkType.IPV4)
                 .backupRetentionPolicy(b -> b.type("DAYS").value("30"))
@@ -113,9 +129,10 @@ public class CloudHsmV2Test {
 
     @Test
     public void testDeleteHsmSelectors() {
+        String[] subnetIds = clusterSubnetIds();
         CreateClusterResponse createClusterResponse = client.createCluster(r -> r
                 .hsmType("hsm1.medium")
-                .subnetIds("subnet-1", "subnet-2")
+                .subnetIds(subnetIds)
         );
         String clusterId = createClusterResponse.cluster().clusterId();
         DescribeClustersResponse initDescribe = client.describeClusters(r -> r
