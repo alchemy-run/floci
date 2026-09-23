@@ -315,7 +315,7 @@ public class AutoScalingQueryHandler {
         // DescribeAutoScalingGroups' response, not only reachable via DescribeWarmPool -
         // terraform-aws-autoscaling's warm_pool example reads the group's warm pool state this
         // way. Shared with handleDescribeWarmPool so the two never drift.
-        appendWarmPoolConfigurationXml(xml, service.describeWarmPool(asg.getRegion(), asg.getAutoScalingGroupName()));
+        appendWarmPoolConfigurationXml(xml, service.warmPoolForSnapshot(asg.getRegion(), asg.getAutoScalingGroupName()));
 
         xml.start("AvailabilityZones");
         for (String az : asg.getAvailabilityZones()) { xml.elem("member", az); }

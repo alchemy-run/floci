@@ -1041,6 +1041,19 @@ class AutoScalingServiceTest {
     }
 
     @Test
+    void describeSnapshotSurvivesAConcurrentGroupDelete() {
+        service.putWarmPool(REGION, "test-asg", null, 1, "Stopped", false);
+        List<AutoScalingGroup> snapshot = service.describeAutoScalingGroups(REGION, List.of());
+        assertTrue(snapshot.stream().anyMatch(g -> g.getAutoScalingGroupName().equals("test-asg")));
+
+        service.deleteAutoScalingGroup(REGION, "test-asg", true);
+
+        for (AutoScalingGroup asg : snapshot) {
+            assertNull(service.warmPoolForSnapshot(asg.getRegion(), asg.getAutoScalingGroupName()));
+        }
+    }
+
+    @Test
     void createAutoScalingGroupStoresTheOptionalFieldsAndLeavesUnsetOnesNull() {
         service.createAutoScalingGroup(REGION, "optional-asg", null, null, null, null,
                 attributeBasedPolicy(2, 2048),

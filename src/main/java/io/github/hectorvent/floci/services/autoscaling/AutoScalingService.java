@@ -1012,6 +1012,15 @@ public class AutoScalingService {
         return warmPools.get(warmPoolKey(region, asgName));
     }
 
+    /**
+     * Warm pool for a group already captured in a describe snapshot. Unlike
+     * {@link #describeWarmPool}, a concurrent delete of the group yields null instead of
+     * failing the whole DescribeAutoScalingGroups response.
+     */
+    WarmPoolConfiguration warmPoolForSnapshot(String region, String asgName) {
+        return warmPools.get(warmPoolKey(region, asgName));
+    }
+
     public void deleteWarmPool(String region, String asgName, boolean forceDelete) {
         requireGroup(region, asgName);
         warmPools.remove(warmPoolKey(region, asgName));
