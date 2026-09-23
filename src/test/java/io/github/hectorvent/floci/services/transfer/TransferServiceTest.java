@@ -238,4 +238,33 @@ class TransferServiceTest {
         assertTrue(cleared.getEndpointDetails().isEmpty());
         assertTrue(cleared.getIdentityProviderDetails().isEmpty());
     }
+
+    /** Token "MA==" violates the modeled CallbackToken word-character pattern. */
+    @Test
+    void sendWorkflowStepStateRejectsMalformedTokenWithValidationException() {
+        AwsException e = assertThrows(AwsException.class, () -> service.sendWorkflowStepState(
+                "w-1234567890abcdef0", "00000000-0000-0000-0000-000000000000", "MA==", "SUCCESS"));
+        assertEquals("ValidationException", e.getErrorCode());
+        assertEquals(400, e.getHttpStatus());
+        assertTrue(e.getMessage().startsWith("1 validation error detected: Value 'MA==' at 'token'"),
+                e.getMessage());
+    }
+
+    @Test
+    void sendWorkflowStepStateReportsEveryViolation() {
+        AwsException e = assertThrows(AwsException.class, () -> service.sendWorkflowStepState(
+                "workflow", "not-a-uuid", null, "DONE"));
+        assertEquals("ValidationException", e.getErrorCode());
+        assertTrue(e.getMessage().startsWith("6 validation errors detected: "), e.getMessage());
+    }
+
+    @Test
+    void sendWorkflowStepStateOnUnknownWorkflowIsResourceNotFound() {
+        AwsException e = assertThrows(AwsException.class, () -> service.sendWorkflowStepState(
+                "w-1234567890abcdef0", "00000000-0000-0000-0000-000000000000", "abc123", "SUCCESS"));
+        assertEquals("ResourceNotFoundException", e.getErrorCode());
+        assertEquals(404, e.getHttpStatus());
+        assertEquals("w-1234567890abcdef0", e.getExtendedData().get("Resource"));
+        assertEquals("Workflow", e.getExtendedData().get("ResourceType"));
+    }
 }

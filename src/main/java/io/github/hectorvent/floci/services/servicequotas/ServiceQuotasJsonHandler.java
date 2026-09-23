@@ -28,36 +28,58 @@ public class ServiceQuotasJsonHandler {
     public Response handle(String action, JsonNode request, String region, String accountId) {
         LOG.debugv("ServiceQuotas action: {0}", action);
         return switch (action) {
-            case "ListServiceQuotas" -> handleListServiceQuotas(request, region, accountId);
-            case "GetServiceQuota" -> handleGetServiceQuota(request, region, accountId);
-            case "GetAWSDefaultServiceQuota" -> handleGetServiceQuota(request, region, accountId);
-            case "ListAWSDefaultServiceQuotas" -> handleListServiceQuotas(request, region, accountId);
-            case "RequestServiceQuotaIncrease" -> handleRequestServiceQuotaIncrease(request, region, accountId);
+            case "ListServices" -> Response.ok(service.listServices(
+                    stringOrNull(request, "NextToken"), integerOrNull(request, "MaxResults"))).build();
+            case "ListServiceQuotas" -> Response.ok(service.listServiceQuotas(
+                    stringOrNull(request, "ServiceCode"),
+                    stringOrNull(request, "QuotaCode"),
+                    stringOrNull(request, "QuotaAppliedAtLevel"),
+                    stringOrNull(request, "NextToken"),
+                    integerOrNull(request, "MaxResults"),
+                    region, accountId)).build();
+            case "ListAWSDefaultServiceQuotas" -> Response.ok(service.listAwsDefaultServiceQuotas(
+                    stringOrNull(request, "ServiceCode"),
+                    stringOrNull(request, "NextToken"),
+                    integerOrNull(request, "MaxResults"),
+                    region)).build();
+            case "GetServiceQuota" -> Response.ok(service.getServiceQuota(
+                    stringOrNull(request, "ServiceCode"),
+                    stringOrNull(request, "QuotaCode"),
+                    region, accountId)).build();
+            case "GetAWSDefaultServiceQuota" -> Response.ok(service.getAwsDefaultServiceQuota(
+                    stringOrNull(request, "ServiceCode"),
+                    stringOrNull(request, "QuotaCode"),
+                    region)).build();
+            case "RequestServiceQuotaIncrease" -> Response.ok(service.requestServiceQuotaIncrease(
+                    stringOrNull(request, "ServiceCode"),
+                    stringOrNull(request, "QuotaCode"),
+                    doubleOrNull(request, "DesiredValue"),
+                    stringOrNull(request, "ContextId"),
+                    region, accountId)).build();
+            case "GetRequestedServiceQuotaChange" -> Response.ok(service.getRequestedServiceQuotaChange(
+                    stringOrNull(request, "RequestId"), region, accountId)).build();
+            case "ListRequestedServiceQuotaChangeHistory" ->
+                    Response.ok(service.listRequestedServiceQuotaChangeHistory(
+                            stringOrNull(request, "ServiceCode"),
+                            stringOrNull(request, "Status"),
+                            stringOrNull(request, "QuotaRequestedAtLevel"),
+                            stringOrNull(request, "NextToken"),
+                            integerOrNull(request, "MaxResults"),
+                            region, accountId)).build();
             case "ListRequestedServiceQuotaChangeHistoryByQuota" ->
                     Response.ok(service.listRequestedServiceQuotaChangeHistoryByQuota(
-                            stringOrNull(request, "ServiceCode"), stringOrNull(request, "QuotaCode"),
-                            stringOrNull(request, "NextToken"), integerOrNull(request, "MaxResults"))).build();
+                            stringOrNull(request, "ServiceCode"),
+                            stringOrNull(request, "QuotaCode"),
+                            stringOrNull(request, "Status"),
+                            stringOrNull(request, "QuotaRequestedAtLevel"),
+                            stringOrNull(request, "NextToken"),
+                            integerOrNull(request, "MaxResults"),
+                            region, accountId)).build();
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: ServiceQuotasV20190624." + action))
                     .build();
         };
-    }
-
-    private Response handleListServiceQuotas(JsonNode request, String region, String accountId) {
-        return Response.ok(service.listServiceQuotas(
-                stringOrNull(request, "ServiceCode"),
-                stringOrNull(request, "QuotaCode"),
-                stringOrNull(request, "NextToken"),
-                integerOrNull(request, "MaxResults"),
-                region, accountId)).build();
-    }
-
-    private Response handleGetServiceQuota(JsonNode request, String region, String accountId) {
-        return Response.ok(service.getServiceQuota(
-                stringOrNull(request, "ServiceCode"),
-                stringOrNull(request, "QuotaCode"),
-                region, accountId)).build();
     }
 
     private static String stringOrNull(JsonNode node, String field) {
@@ -68,15 +90,6 @@ public class ServiceQuotasJsonHandler {
     private static Integer integerOrNull(JsonNode node, String field) {
         JsonNode value = node == null ? null : node.get(field);
         return (value != null && value.isNumber()) ? value.asInt() : null;
-    }
-
-    private Response handleRequestServiceQuotaIncrease(JsonNode request, String region, String accountId) {
-        return Response.ok(service.requestServiceQuotaIncrease(
-                stringOrNull(request, "ServiceCode"),
-                stringOrNull(request, "QuotaCode"),
-                doubleOrNull(request, "DesiredValue"),
-                stringOrNull(request, "ContextId"),
-                region, accountId)).build();
     }
 
     private static Double doubleOrNull(JsonNode node, String field) {

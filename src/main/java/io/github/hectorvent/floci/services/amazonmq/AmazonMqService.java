@@ -172,6 +172,41 @@ public class AmazonMqService implements ResourceProvider {
         return storage.scan(k -> true);
     }
 
+    // --- Tags (broker ARNs; CreateTags/DeleteTags/ListTags on /v1/tags/{arn}) ---
+
+    public Map<String, String> listBrokerTags(String brokerArn) {
+        Map<String, String> tags = brokerByArn(brokerArn).getTags();
+        return tags != null ? new HashMap<>(tags) : new HashMap<>();
+    }
+
+    public void tagBroker(String brokerArn, Map<String, String> tags) {
+        Broker broker = brokerByArn(brokerArn);
+        Map<String, String> merged = broker.getTags() != null ? new HashMap<>(broker.getTags()) : new HashMap<>();
+        if (tags != null) {
+            merged.putAll(tags);
+        }
+        broker.setTags(merged);
+        storage.put(broker.getBrokerId(), broker);
+    }
+
+    public void untagBroker(String brokerArn, List<String> tagKeys) {
+        Broker broker = brokerByArn(brokerArn);
+        if (broker.getTags() != null && tagKeys != null) {
+            Map<String, String> remaining = new HashMap<>(broker.getTags());
+            tagKeys.forEach(remaining::remove);
+            broker.setTags(remaining);
+        }
+        storage.put(broker.getBrokerId(), broker);
+    }
+
+    private Broker brokerByArn(String brokerArn) {
+        return storage.scan(k -> true).stream()
+                .filter(b -> brokerArn.equals(b.getBrokerArn()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Can't find requested resource [" + brokerArn + "].", 404));
+    }
+
     @Override
     public List<ExplorerResource> getResources() {
         List<ExplorerResource> resources = new ArrayList<>();

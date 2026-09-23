@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOpti
 import io.github.hectorvent.floci.services.opensearch.model.ClusterConfig;
 import io.github.hectorvent.floci.services.opensearch.model.Domain;
 import io.github.hectorvent.floci.services.opensearch.model.DomainEndpointOptions;
+import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
@@ -22,12 +23,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +44,9 @@ public class OpenSearchService implements ResourceProvider {
     private static final Logger LOG = Logger.getLogger(OpenSearchService.class);
 
     private static final String DEFAULT_ENGINE_VERSION = OpenSearchVersions.DEFAULT_VERSION;
+
+    private static final Set<String> MAINTENANCE_ACTIONS =
+            Set.of("REBOOT_NODE", "RESTART_SEARCH_PROCESS", "RESTART_DASHBOARD");
 
     private final StorageBackend<String, Domain> domainStore;
     private final EmulatorConfig config;
@@ -261,6 +267,117 @@ public class OpenSearchService implements ResourceProvider {
         domain.setEngineVersion(targetVersion);
         domainStore.put(domainName, domain);
         return domain;
+    }
+
+    /**
+     * Lookup used by the operations (DescribeDomainHealth, DescribeDomainNodes,
+     * DescribeDomainChangeProgress, GetDomainMaintenanceStatus,
+     * ListDomainMaintenances) on which AWS reports a missing domain as
+     * {@code BaseException} rather than {@code ResourceNotFoundException}.
+     */
+    public Domain describeDomainOrBaseException(String domainName) {
+        return domainStore.get(domainName)
+                .orElseThrow(() -> new AwsException("BaseException",
+                        "Domain not found: " + domainName, 400));
+    }
+
+    /** A data node of a domain as reported by DescribeDomainNodes. */
+    public record DomainNode(String nodeId, String nodeType, String availabilityZone,
+                             String instanceType, String nodeStatus, String storageType,
+                             String storageVolumeType, String storageSize) {}
+
+    /** One data node per configured instance, spread over the domain's availability zones. */
+    public List<DomainNode> describeDomainNodes(String domainName) {
+        return nodesOf(describeDomainOrBaseException(domainName));
+    }
+
+    public DomainMaintenance startDomainMaintenance(String domainName, String action, String nodeId) {
+        Domain domain = describeDomain(domainName);
+        if (action == null || !MAINTENANCE_ACTIONS.contains(action)) {
+            throw new AwsException("ValidationException",
+                    "Action must be one of " + MAINTENANCE_ACTIONS + ".", 400);
+        }
+        if (nodeId != null && nodesOf(domain).stream().noneMatch(n -> n.nodeId().equals(nodeId))) {
+            throw new AwsException("ValidationException",
+                    "Node " + nodeId + " does not belong to domain " + domainName + ".", 400);
+        }
+
+        Instant now = Instant.now();
+        DomainMaintenance maintenance = new DomainMaintenance();
+        maintenance.setMaintenanceId(UUID.randomUUID().toString());
+        maintenance.setAction(action);
+        maintenance.setNodeId(nodeId);
+        maintenance.setCreatedAt(now);
+        maintenance.setStatus("COMPLETED");
+
+        boolean restartsSearchProcess = !"RESTART_DASHBOARD".equals(action);
+        if (restartsSearchProcess && !config.services().opensearch().mock()
+                && domain.getContainerId() != null) {
+            // The single backing container hosts every node, so a node reboot
+            // and a search-process restart both restart that container.
+            try {
+                if (domainManager.tryStartDomain(domain)) {
+                    domain.setProcessing(true);
+                } else {
+                    maintenance.setStatus("FAILED");
+                    maintenance.setStatusMessage("No Docker daemon is reachable to restart the domain.");
+                }
+            } catch (RuntimeException e) {
+                maintenance.setStatus("FAILED");
+                maintenance.setStatusMessage(e.getMessage());
+            }
+        }
+        maintenance.setUpdatedAt(Instant.now());
+
+        domain.getMaintenances().add(maintenance);
+        domainStore.put(domainName, domain);
+        return maintenance;
+    }
+
+    public DomainMaintenance getDomainMaintenanceStatus(String domainName, String maintenanceId) {
+        Domain domain = describeDomainOrBaseException(domainName);
+        if (maintenanceId == null || maintenanceId.isBlank()) {
+            throw new AwsException("ValidationException", "maintenanceId is required.", 400);
+        }
+        return domain.getMaintenances().stream()
+                .filter(m -> maintenanceId.equals(m.getMaintenanceId()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Maintenance not found: " + maintenanceId, 409));
+    }
+
+    public List<DomainMaintenance> listDomainMaintenances(String domainName, String action, String status) {
+        Domain domain = describeDomainOrBaseException(domainName);
+        return domain.getMaintenances().stream()
+                .filter(m -> action == null || action.isBlank() || action.equals(m.getAction()))
+                .filter(m -> status == null || status.isBlank() || status.equals(m.getStatus()))
+                .toList();
+    }
+
+    private List<DomainNode> nodesOf(Domain domain) {
+        ClusterConfig cc = domain.getClusterConfig() != null ? domain.getClusterConfig() : new ClusterConfig();
+        EbsOptions ebs = domain.getEbsOptions() != null ? domain.getEbsOptions() : new EbsOptions();
+        String region = domain.getArn() != null
+                ? AwsArnUtils.parse(domain.getArn()).region()
+                : regionResolver.getDefaultRegion();
+        int zones = cc.isZoneAwarenessEnabled() ? 2 : 1;
+        String nodeStatus = domain.isProcessing() ? "NotAvailable" : "Active";
+
+        List<DomainNode> nodes = new ArrayList<>();
+        for (int i = 0; i < Math.max(cc.getInstanceCount(), 1); i++) {
+            String nodeId = UUID.nameUUIDFromBytes((domain.getArn() + "/data/" + i)
+                    .getBytes(StandardCharsets.UTF_8)).toString().replace("-", "");
+            nodes.add(new DomainNode(
+                    nodeId,
+                    "Data",
+                    region + (char) ('a' + (i % zones)),
+                    cc.getInstanceType(),
+                    nodeStatus,
+                    ebs.isEbsEnabled() ? "ebs" : "instance",
+                    ebs.isEbsEnabled() ? ebs.getVolumeType() : null,
+                    ebs.isEbsEnabled() ? String.valueOf(ebs.getVolumeSize()) : null));
+        }
+        return nodes;
     }
 
     private Domain findByArn(String arn) {

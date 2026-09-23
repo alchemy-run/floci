@@ -1,14 +1,23 @@
 package io.github.hectorvent.floci.services.ram;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ram.model.PrincipalAssociation;
+import io.github.hectorvent.floci.services.ram.model.RamPermission;
+import io.github.hectorvent.floci.services.ram.model.RamPermission.PermissionVersion;
 import io.github.hectorvent.floci.services.ram.model.ResourceShare;
 import io.github.hectorvent.floci.services.ram.model.ResourceShareInvitation;
+import io.github.hectorvent.floci.services.ram.model.ShareAssociation;
 import io.github.hectorvent.floci.services.ram.model.SharedResource;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.organizations.model.Organization;
@@ -16,8 +25,12 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -54,12 +67,30 @@ public class RamService {
             List.of("PENDING", "ACTIVE", "FAILED", "DELETING", "DELETED");
     /** An AWS account id, as opposed to an organization/OU principal ARN. */
     private static final Pattern ACCOUNT_ID_PRINCIPAL = Pattern.compile("\\d{12}");
+    private static final List<String> ASSOCIATION_TYPES = List.of("PRINCIPAL", "RESOURCE", "SOURCE");
+    private static final List<String> ASSOCIATION_STATUSES = List.of("ASSOCIATING", "ASSOCIATED", "FAILED",
+            "DISASSOCIATING", "DISASSOCIATED", "SUSPENDED", "SUSPENDING", "RESTORING");
+    private static final List<String> PERMISSION_TYPE_FILTERS = List.of("ALL", "AWS_MANAGED", "CUSTOMER_MANAGED");
+    private static final List<String> REGION_SCOPE_FILTERS = List.of("ALL", "REGIONAL", "GLOBAL");
+    /** CreatePermission's name constraint: 1-36 word characters, periods, or hyphens. */
+    private static final Pattern PERMISSION_NAME = Pattern.compile("[\\w.-]{1,36}");
+    /** A RAM resource type, e.g. {@code appsync:Apis} or {@code ec2:Subnet}. */
+    private static final Pattern RESOURCE_TYPE = Pattern.compile("[a-z0-9-]+:[A-Za-z0-9]+");
+    /** RAM caps a customer managed permission at five versions that are not deleted. */
+    private static final int MAX_PERMISSION_VERSIONS = 5;
+    private static final int MAX_RESULTS_LIMIT = 500;
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     private final StorageFactory storageFactory;
     private final OrganizationsService organizationsService;
     private StorageBackend<String, ResourceShare> shares;
     private StorageBackend<String, Boolean> settings;
     private StorageBackend<String, ResourceShareInvitation> invitations;
+    private StorageBackend<String, RamPermission> permissions;
+
+    /** One page of a paginated read plus the token for the next page (null on the last page). */
+    public record Page<T>(List<T> items, String nextToken) {}
 
     @Inject
     public RamService(StorageFactory storageFactory, OrganizationsService organizationsService) {
@@ -80,6 +111,8 @@ public class RamService {
                 new TypeReference<Map<String, Boolean>>() {});
         invitations = storageFactory.create("ram", "ram-resource-share-invitations.json",
                 new TypeReference<Map<String, ResourceShareInvitation>>() {});
+        permissions = storageFactory.create("ram", "ram-permissions.json",
+                new TypeReference<Map<String, RamPermission>>() {});
     }
 
     public boolean enableSharingWithAwsOrganization() {
@@ -110,10 +143,31 @@ public class RamService {
     public ResourceShare createResourceShare(String name, List<String> principals,
                                              List<String> resourceArns, boolean allowExternalPrincipals,
                                              String region, String owningAccountId) {
+        return createResourceShare(name, principals, resourceArns, List.of(), List.of(), Map.of(),
+                allowExternalPrincipals, region, owningAccountId);
+    }
+
+    /**
+     * @param permissionArns managed permissions to attach; each must be an AWS managed permission
+     *                       or a customer managed permission the caller owns
+     * @param tags           tags applied to the share at creation
+     */
+    public ResourceShare createResourceShare(String name, List<String> principals, List<String> resourceArns,
+                                             List<String> sources, List<String> permissionArns,
+                                             Map<String, String> tags, boolean allowExternalPrincipals,
+                                             String region, String owningAccountId) {
+        requireValidArns(resourceArns);
+        requireValidArns(permissionArns);
+        for (String permissionArn : permissionArns) {
+            requirePermission(permissionArn, owningAccountId);
+        }
         String arn = "arn:aws:ram:" + region + ":" + owningAccountId
                 + ":resource-share/" + UUID.randomUUID();
         ResourceShare share = new ResourceShare(
-                arn, name, owningAccountId, principals, resourceArns, allowExternalPrincipals);
+                arn, name, owningAccountId, principals, resourceArns, allowExternalPrincipals)
+                .withSources(List.copyOf(new LinkedHashSet<>(sources)))
+                .withPermissionArns(List.copyOf(new LinkedHashSet<>(permissionArns)))
+                .withTags(tags);
         ResourceShare stored = putForOwner(share);
         inviteAccountPrincipals(stored, principals);
         return stored;
@@ -349,6 +403,13 @@ public class RamService {
 
     public ResourceShare associateResourceShare(String resourceShareArn, List<String> resourceArns,
                                                 List<String> principals, String callerAccountId) {
+        return associateResourceShare(resourceShareArn, resourceArns, principals, List.of(), callerAccountId);
+    }
+
+    public ResourceShare associateResourceShare(String resourceShareArn, List<String> resourceArns,
+                                                List<String> principals, List<String> sources,
+                                                String callerAccountId) {
+        requireValidArns(resourceArns);
         // The read, the merged write, and the resulting invitation creation must all happen as
         // one operation: two concurrent associates for different principals on the same share
         // must not each read the pre-update share and overwrite each other's addition, which
@@ -357,7 +418,8 @@ public class RamService {
             ResourceShare share = requireOwnedShare(resourceShareArn, callerAccountId);
             ResourceShare updated = share.withPrincipalsAndResources(
                     mergeDistinct(share.getPrincipals(), principals),
-                    mergeDistinct(share.getResourceArns(), resourceArns));
+                    mergeDistinct(share.getResourceArns(), resourceArns))
+                    .withSources(mergeDistinct(share.getSources(), sources));
             ResourceShare stored = putForOwner(updated);
             // Only newly-added principals: re-associating one already on the share (or one that
             // already has a live invitation) must not spawn a second invitation.
@@ -368,11 +430,575 @@ public class RamService {
 
     public ResourceShare disassociateResourceShare(String resourceShareArn, List<String> resourceArns,
                                                     List<String> principals, String callerAccountId) {
-        ResourceShare share = requireOwnedShare(resourceShareArn, callerAccountId);
-        ResourceShare updated = share.withPrincipalsAndResources(
-                withoutAll(share.getPrincipals(), principals),
-                withoutAll(share.getResourceArns(), resourceArns));
-        return putForOwner(updated);
+        return disassociateResourceShare(resourceShareArn, resourceArns, principals, List.of(), callerAccountId);
+    }
+
+    public ResourceShare disassociateResourceShare(String resourceShareArn, List<String> resourceArns,
+                                                    List<String> principals, List<String> sources,
+                                                    String callerAccountId) {
+        synchronized (this) {
+            ResourceShare share = requireOwnedShare(resourceShareArn, callerAccountId);
+            ResourceShare updated = share.withPrincipalsAndResources(
+                    withoutAll(share.getPrincipals(), principals),
+                    withoutAll(share.getResourceArns(), resourceArns))
+                    .withSources(withoutAll(share.getSources(), sources));
+            return putForOwner(updated);
+        }
+    }
+
+    /**
+     * The owner's view of what its shares are associated with. A deleted share reports its
+     * former associations as DISASSOCIATED, since deleting a share disassociates everything.
+     *
+     * @param associationType   {@code PRINCIPAL}, {@code RESOURCE}, or {@code SOURCE} (required)
+     * @param resourceShareArns restrict to these shares; an ARN the caller does not own is
+     *                          UnknownResourceException
+     * @param resourceArn       only valid with {@code RESOURCE}
+     * @param principal         only valid with {@code PRINCIPAL}
+     */
+    public List<ShareAssociation> getResourceShareAssociations(String callerAccountId, String associationType,
+                                                               List<String> resourceShareArns, String resourceArn,
+                                                               String principal, String associationStatus) {
+        if (associationType == null || !ASSOCIATION_TYPES.contains(associationType)) {
+            throw new AwsException("InvalidParameterException",
+                    "associationType is required and must be one of " + ASSOCIATION_TYPES + ".", 400);
+        }
+        if (associationStatus != null && !ASSOCIATION_STATUSES.contains(associationStatus)) {
+            throw new AwsException("InvalidParameterException",
+                    "associationStatus must be one of " + ASSOCIATION_STATUSES + ".", 400);
+        }
+        if (resourceArn != null && !"RESOURCE".equals(associationType)) {
+            throw new AwsException("InvalidParameterException",
+                    "resourceArn can be specified only when associationType is RESOURCE.", 400);
+        }
+        if (principal != null && !"PRINCIPAL".equals(associationType)) {
+            throw new AwsException("InvalidParameterException",
+                    "principal can be specified only when associationType is PRINCIPAL.", 400);
+        }
+        requireValidArns(resourceShareArns);
+        if (resourceArn != null) {
+            requireValidArns(List.of(resourceArn));
+        }
+
+        List<ResourceShare> owned = allShares().stream()
+                .filter(share -> share.getOwningAccountId().equals(callerAccountId))
+                .sorted(Comparator.comparing(ResourceShare::getCreationTime)
+                        .thenComparing(ResourceShare::getResourceShareArn))
+                .toList();
+        for (String requested : resourceShareArns) {
+            if (owned.stream().noneMatch(share -> share.getResourceShareArn().equals(requested))) {
+                throw new AwsException("UnknownResourceException",
+                        "ResourceShare " + requested + " could not be found.", 400);
+            }
+        }
+
+        List<ShareAssociation> result = new ArrayList<>();
+        for (ResourceShare share : owned) {
+            if (!resourceShareArns.isEmpty() && !resourceShareArns.contains(share.getResourceShareArn())) {
+                continue;
+            }
+            String status = "DELETED".equals(share.getStatus()) ? "DISASSOCIATED" : "ASSOCIATED";
+            if (associationStatus != null && !associationStatus.equals(status)) {
+                continue;
+            }
+            List<String> entities = switch (associationType) {
+                case "PRINCIPAL" -> share.getPrincipals();
+                case "RESOURCE" -> share.getResourceArns();
+                default -> share.getSources();
+            };
+            for (String entity : entities) {
+                if (resourceArn != null && !resourceArn.equals(entity)) {
+                    continue;
+                }
+                if (principal != null && !principal.equals(entity)) {
+                    continue;
+                }
+                boolean external = "PRINCIPAL".equals(associationType)
+                        && isExternalPrincipal(share.getOwningAccountId(), entity);
+                result.add(new ShareAssociation(share.getResourceShareArn(), share.getName(), entity,
+                        associationType, status, share.getCreationTime(), share.getLastUpdatedTime(), external));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * An account principal outside the owner's organization is external; organization and OU
+     * principals can only name the owner's own organization, and IAM role/user principals
+     * are judged by the account in their ARN.
+     */
+    boolean isExternalPrincipal(String ownerAccountId, String principal) {
+        String accountId;
+        if (ACCOUNT_ID_PRINCIPAL.matcher(principal).matches()) {
+            accountId = principal;
+        } else {
+            String[] arn = principal.split(":", 6);
+            if (arn.length != 6 || !"iam".equals(arn[2])) {
+                return false;
+            }
+            accountId = arn[4];
+        }
+        if (accountId.equals(ownerAccountId)) {
+            return false;
+        }
+        return !isMemberOfSameOrganization(ownerAccountId, accountId);
+    }
+
+    /**
+     * The resources of a share the caller was invited to but has not accepted yet.
+     *
+     * @param resourceRegionScope {@code ALL} (default), {@code REGIONAL}, or {@code GLOBAL}
+     */
+    public List<SharedResource> listPendingInvitationResources(String callerAccountId,
+                                                               String resourceShareInvitationArn,
+                                                               String resourceRegionScope) {
+        if (resourceShareInvitationArn == null || resourceShareInvitationArn.isEmpty()) {
+            throw new AwsException("MissingRequiredParameterException",
+                    "resourceShareInvitationArn is required.", 400);
+        }
+        if (!isValidArn(resourceShareInvitationArn)) {
+            throw new AwsException("MalformedArnException",
+                    "The specified Amazon Resource Name (ARN) has a format that isn't valid: "
+                            + resourceShareInvitationArn, 400);
+        }
+        if (resourceRegionScope != null && !REGION_SCOPE_FILTERS.contains(resourceRegionScope)) {
+            throw new AwsException("InvalidParameterException",
+                    "resourceRegionScope must be one of " + REGION_SCOPE_FILTERS + ".", 400);
+        }
+        ResourceShareInvitation invitation = allInvitations().stream()
+                .filter(i -> i.resourceShareInvitationArn().equals(resourceShareInvitationArn))
+                .filter(i -> i.receiverAccountId().equals(callerAccountId))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceShareInvitationArnNotFoundException",
+                        "ResourceShareInvitation " + resourceShareInvitationArn + " does not exist.", 400));
+        if ("REJECTED".equals(invitation.status())) {
+            throw new AwsException("ResourceShareInvitationAlreadyRejectedException",
+                    "ResourceShareInvitation " + resourceShareInvitationArn + " has already been rejected.", 400);
+        }
+        // Floci models every shared resource as regional.
+        if ("GLOBAL".equals(resourceRegionScope)) {
+            return List.of();
+        }
+        List<SharedResource> result = new ArrayList<>();
+        for (ResourceShare share : allShares()) {
+            if (!share.getResourceShareArn().equals(invitation.resourceShareArn())
+                    || "DELETED".equals(share.getStatus())) {
+                continue;
+            }
+            for (String resourceArn : share.getResourceArns()) {
+                result.add(new SharedResource(resourceArn, ramResourceType(resourceArn),
+                        share.getResourceShareArn(), "AVAILABLE"));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * The resource-based policies RAM generates for the caller's shared resources: one per live
+     * share (with principals) containing the resource, granting the share's principals the
+     * actions of the share's managed permission for that resource type (or the AWS managed
+     * default for the type when the share names none). A resource the caller has not shared has
+     * no RAM policy, so it contributes nothing.
+     *
+     * @param principal only policies of shares associated with this principal, or null for any
+     */
+    public List<String> getResourcePolicies(String callerAccountId, List<String> resourceArns, String principal) {
+        if (resourceArns.isEmpty()) {
+            throw new AwsException("MissingRequiredParameterException", "resourceArns is required.", 400);
+        }
+        requireValidArns(resourceArns);
+        List<ResourceShare> owned = allShares().stream()
+                .filter(share -> share.getOwningAccountId().equals(callerAccountId))
+                .filter(share -> !"DELETED".equals(share.getStatus()))
+                .sorted(Comparator.comparing(ResourceShare::getCreationTime)
+                        .thenComparing(ResourceShare::getResourceShareArn))
+                .toList();
+        List<String> policies = new ArrayList<>();
+        for (String resourceArn : resourceArns) {
+            String resourceType = ramResourceType(resourceArn);
+            for (ResourceShare share : owned) {
+                if (!share.getResourceArns().contains(resourceArn) || share.getPrincipals().isEmpty()) {
+                    continue;
+                }
+                if (principal != null && !share.getPrincipals().contains(principal)) {
+                    continue;
+                }
+                Optional<JsonNode> template = sharePolicyTemplate(share, resourceType, callerAccountId);
+                if (template.isEmpty()) {
+                    continue;
+                }
+                policies.add(resourcePolicy(template.get(), share.getPrincipals(), resourceArn));
+            }
+        }
+        return policies;
+    }
+
+    private Optional<JsonNode> sharePolicyTemplate(ResourceShare share, String resourceType,
+                                                   String callerAccountId) {
+        Optional<RamPermission> permission = share.getPermissionArns().stream()
+                .map(arn -> findPermission(arn, callerAccountId))
+                .flatMap(Optional::stream)
+                .filter(p -> p.resourceType().equalsIgnoreCase(resourceType))
+                .findFirst()
+                .or(() -> RamManagedPermissionCatalog.defaultFor(resourceType));
+        return permission.map(p -> parseTemplate(p.defaultVersionEntry().policyTemplate()));
+    }
+
+    private static String resourcePolicy(JsonNode template, List<String> principals, String resourceArn) {
+        ObjectNode statement = JSON.createObjectNode();
+        statement.put("Effect", "Allow");
+        ObjectNode principalNode = statement.putObject("Principal");
+        ArrayNode aws = principalNode.putArray("AWS");
+        principals.forEach(aws::add);
+        statement.set("Action", template.path("Action"));
+        statement.put("Resource", resourceArn);
+        if (template.has("Condition")) {
+            statement.set("Condition", template.get("Condition"));
+        }
+        ObjectNode policy = JSON.createObjectNode();
+        policy.put("Version", "2012-10-17");
+        policy.putArray("Statement").add(statement);
+        return policy.toString();
+    }
+
+    // ── Managed permissions ────────────────────────────────────────────────────────────────
+
+    /**
+     * AWS managed permissions plus the caller's customer managed permissions in {@code region}.
+     *
+     * @param resourceType   case-insensitive resource type filter, or null for any
+     * @param permissionType {@code ALL} (default), {@code AWS_MANAGED}, or {@code CUSTOMER_MANAGED}
+     */
+    public List<RamPermission> listPermissions(String callerAccountId, String region, String resourceType,
+                                               String permissionType) {
+        String type = permissionType == null ? "ALL" : permissionType;
+        if (!PERMISSION_TYPE_FILTERS.contains(type)) {
+            throw new AwsException("InvalidParameterException",
+                    "permissionType must be one of " + PERMISSION_TYPE_FILTERS + ".", 400);
+        }
+        List<RamPermission> result = new ArrayList<>();
+        if (!"CUSTOMER_MANAGED".equals(type)) {
+            result.addAll(RamManagedPermissionCatalog.all());
+        }
+        if (!"AWS_MANAGED".equals(type)) {
+            ownedPermissions(callerAccountId).stream()
+                    .filter(p -> region.equals(AwsArnUtils.parse(p.arn()).region()))
+                    .sorted(Comparator.comparing(RamPermission::name))
+                    .forEach(result::add);
+        }
+        if (resourceType != null) {
+            result.removeIf(p -> !p.resourceType().equalsIgnoreCase(resourceType));
+        }
+        return result;
+    }
+
+    /** @return the permission and the version requested (the default version when null) */
+    public Map.Entry<RamPermission, PermissionVersion> getPermission(String callerAccountId, String permissionArn,
+                                                                     Integer permissionVersion) {
+        RamPermission permission = requirePermission(permissionArn, callerAccountId);
+        if (permissionVersion == null) {
+            return Map.entry(permission, permission.defaultVersionEntry());
+        }
+        PermissionVersion version = permission.findVersion(permissionVersion)
+                .orElseThrow(() -> new AwsException("InvalidParameterException",
+                        "Version " + permissionVersion + " of permission " + permissionArn
+                                + " does not exist.", 400));
+        return Map.entry(permission, version);
+    }
+
+    public List<PermissionVersion> listPermissionVersions(String callerAccountId, String permissionArn) {
+        return requirePermission(permissionArn, callerAccountId).versions().stream()
+                .sorted(Comparator.comparingInt(PermissionVersion::version))
+                .toList();
+    }
+
+    public RamPermission createPermission(String callerAccountId, String region, String name, String resourceType,
+                                          String policyTemplate, Map<String, String> tags) {
+        if (name == null || !PERMISSION_NAME.matcher(name).matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "name must be 1-36 characters of letters, digits, underscores, periods, or hyphens.", 400);
+        }
+        if (resourceType == null || !RESOURCE_TYPE.matcher(resourceType).matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "resourceType must have the form <service>:<ResourceType>.", 400);
+        }
+        String template = validatePolicyTemplate(policyTemplate, resourceType);
+        String arn = AwsArnUtils.Arn.of("ram", region, callerAccountId, "permission/" + name).toString();
+        synchronized (this) {
+            if (findOwnedPermission(arn, callerAccountId).isPresent()) {
+                throw new AwsException("PermissionAlreadyExistsException",
+                        "A permission named " + name + " already exists in this account and Region.", 400);
+            }
+            Instant now = Instant.now();
+            RamPermission permission = new RamPermission(arn, name, resourceType, "CUSTOMER_MANAGED", false,
+                    callerAccountId, 1, List.of(new PermissionVersion(1, template, false, now, now)),
+                    now, now, tags);
+            putPermission(permission);
+            return permission;
+        }
+    }
+
+    /** The new version becomes the default; the previous default becomes UNATTACHABLE. */
+    public RamPermission createPermissionVersion(String callerAccountId, String permissionArn,
+                                                 String policyTemplate) {
+        synchronized (this) {
+            RamPermission permission = requireCustomerManaged(permissionArn, callerAccountId,
+                    "InvalidParameterException");
+            String template = validatePolicyTemplate(policyTemplate, permission.resourceType());
+            long live = permission.versions().stream().filter(v -> !v.deleted()).count();
+            if (live >= MAX_PERMISSION_VERSIONS) {
+                throw new AwsException("PermissionVersionsLimitExceededException",
+                        "Permission " + permissionArn + " already has the maximum of "
+                                + MAX_PERMISSION_VERSIONS + " versions.", 400);
+            }
+            int next = permission.versions().stream().mapToInt(PermissionVersion::version).max().orElse(0) + 1;
+            Instant now = Instant.now();
+            List<PermissionVersion> versions = new ArrayList<>(permission.versions());
+            versions.add(new PermissionVersion(next, template, false, now, now));
+            RamPermission updated = permission.withVersions(versions, next, now);
+            putPermission(updated);
+            return updated;
+        }
+    }
+
+    public RamPermission setDefaultPermissionVersion(String callerAccountId, String permissionArn, int version) {
+        synchronized (this) {
+            RamPermission permission = requireCustomerManaged(permissionArn, callerAccountId,
+                    "InvalidParameterException");
+            PermissionVersion target = permission.findVersion(version)
+                    .filter(v -> !v.deleted())
+                    .orElseThrow(() -> new AwsException("InvalidParameterException",
+                            "Version " + version + " of permission " + permissionArn + " does not exist.", 400));
+            RamPermission updated = permission.withVersions(permission.versions(), target.version(), Instant.now());
+            putPermission(updated);
+            return updated;
+        }
+    }
+
+    /**
+     * The default version cannot be deleted, nor can a version still attached to a live share.
+     *
+     * @return the permission after the deletion
+     */
+    public RamPermission deletePermissionVersion(String callerAccountId, String permissionArn, int version) {
+        synchronized (this) {
+            RamPermission permission = requireCustomerManaged(permissionArn, callerAccountId,
+                    "OperationNotPermittedException");
+            PermissionVersion target = permission.findVersion(version)
+                    .filter(v -> !v.deleted())
+                    .orElseThrow(() -> new AwsException("InvalidParameterException",
+                            "Version " + version + " of permission " + permissionArn + " does not exist.", 400));
+            if (target.version() == permission.defaultVersion()) {
+                throw new AwsException("OperationNotPermittedException",
+                        "You can't delete the default version of a permission.", 400);
+            }
+            Instant now = Instant.now();
+            List<PermissionVersion> versions = permission.versions().stream()
+                    .map(v -> v.version() == version ? v.markDeleted(now) : v)
+                    .toList();
+            RamPermission updated = permission.withVersions(versions, permission.defaultVersion(), now);
+            putPermission(updated);
+            return updated;
+        }
+    }
+
+    /** A permission attached to a live resource share cannot be deleted. */
+    public void deletePermission(String callerAccountId, String permissionArn) {
+        synchronized (this) {
+            RamPermission permission = requireCustomerManaged(permissionArn, callerAccountId,
+                    "OperationNotPermittedException");
+            boolean attached = allShares().stream()
+                    .filter(share -> !"DELETED".equals(share.getStatus()))
+                    .anyMatch(share -> share.getPermissionArns().contains(permission.arn()));
+            if (attached) {
+                throw new AwsException("OperationNotPermittedException",
+                        "Permission " + permissionArn + " is associated with a resource share.", 400);
+            }
+            if (permissions instanceof AccountAwareStorageBackend<RamPermission> accountAware) {
+                accountAware.deleteForAccount(callerAccountId, permission.arn());
+            } else {
+                permissions.delete(permission.arn());
+            }
+        }
+    }
+
+    public void tagPermission(String permissionArn, Map<String, String> newTags, String callerAccountId) {
+        synchronized (this) {
+            RamPermission permission = requireTaggablePermission(permissionArn, callerAccountId);
+            Map<String, String> merged = new LinkedHashMap<>(permission.tags());
+            merged.putAll(newTags);
+            putPermission(permission.withTags(merged));
+        }
+    }
+
+    public void untagPermission(String permissionArn, List<String> tagKeys, String callerAccountId) {
+        synchronized (this) {
+            RamPermission permission = requireTaggablePermission(permissionArn, callerAccountId);
+            Map<String, String> remaining = new LinkedHashMap<>(permission.tags());
+            tagKeys.forEach(remaining::remove);
+            putPermission(permission.withTags(remaining));
+        }
+    }
+
+    private RamPermission requireTaggablePermission(String permissionArn, String callerAccountId) {
+        requireValidArns(List.of(permissionArn));
+        if (RamManagedPermissionCatalog.find(permissionArn).isPresent()) {
+            throw new AwsException("InvalidParameterException",
+                    "AWS managed permissions cannot be tagged.", 400);
+        }
+        return findOwnedPermission(permissionArn, callerAccountId)
+                .orElseThrow(() -> new AwsException("ResourceArnNotFoundException",
+                        "The resource " + permissionArn + " could not be found.", 400));
+    }
+
+    /**
+     * Resolves a customer managed permission the caller owns. An AWS managed permission answers
+     * with {@code awsManagedErrorCode}, since the caller can read but never mutate it.
+     */
+    private RamPermission requireCustomerManaged(String permissionArn, String callerAccountId,
+                                                 String awsManagedErrorCode) {
+        RamPermission permission = requirePermission(permissionArn, callerAccountId);
+        if (!permission.isCustomerManaged()) {
+            throw new AwsException(awsManagedErrorCode,
+                    "AWS managed permission " + permissionArn + " cannot be modified.", 400);
+        }
+        return permission;
+    }
+
+    private RamPermission requirePermission(String permissionArn, String callerAccountId) {
+        if (permissionArn == null || !isValidArn(permissionArn)) {
+            throw new AwsException("MalformedArnException",
+                    "The specified Amazon Resource Name (ARN) has a format that isn't valid: " + permissionArn, 400);
+        }
+        return findPermission(permissionArn, callerAccountId).orElseThrow(() -> unknownPermission(permissionArn));
+    }
+
+    private static AwsException unknownPermission(String permissionArn) {
+        return new AwsException("UnknownResourceException",
+                "Permission " + permissionArn + " could not be found.", 400);
+    }
+
+    private Optional<RamPermission> findPermission(String permissionArn, String callerAccountId) {
+        return RamManagedPermissionCatalog.find(permissionArn)
+                .or(() -> findOwnedPermission(permissionArn, callerAccountId));
+    }
+
+    private Optional<RamPermission> findOwnedPermission(String permissionArn, String callerAccountId) {
+        return ownedPermissions(callerAccountId).stream()
+                .filter(p -> p.arn().equals(permissionArn))
+                .findFirst();
+    }
+
+    private List<RamPermission> ownedPermissions(String callerAccountId) {
+        if (permissions instanceof AccountAwareStorageBackend<RamPermission> accountAware) {
+            return accountAware.scanForAccount(callerAccountId, key -> true);
+        }
+        return permissions.scan(key -> true).stream()
+                .filter(p -> callerAccountId.equals(p.ownerAccountId()))
+                .toList();
+    }
+
+    private void putPermission(RamPermission permission) {
+        if (permissions instanceof AccountAwareStorageBackend<RamPermission> accountAware) {
+            accountAware.putForAccount(permission.ownerAccountId(), permission.arn(), permission);
+            return;
+        }
+        permissions.put(permission.arn(), permission);
+    }
+
+    /**
+     * A RAM policy template is a single statement body: {@code Effect} (only {@code Allow}),
+     * {@code Action}, and an optional {@code Condition}. The share supplies Principal and
+     * Resource, so a template naming them is malformed. Every action must belong to the
+     * resource type's service.
+     *
+     * @return the template as submitted
+     */
+    private static String validatePolicyTemplate(String policyTemplate, String resourceType) {
+        if (policyTemplate == null || policyTemplate.isBlank()) {
+            throw new AwsException("MalformedPolicyTemplateException", "policyTemplate is required.", 400);
+        }
+        JsonNode template = parseTemplate(policyTemplate);
+        if (!template.isObject()) {
+            throw new AwsException("MalformedPolicyTemplateException",
+                    "The policy template must be a JSON object.", 400);
+        }
+        for (Iterator<String> it = template.fieldNames(); it.hasNext(); ) {
+            String field = it.next();
+            if (!List.of("Effect", "Action", "Condition").contains(field)) {
+                throw new AwsException("MalformedPolicyTemplateException",
+                        "The policy template contains an unsupported element: " + field + ".", 400);
+            }
+        }
+        if (template.has("Effect") && !"Allow".equals(template.path("Effect").asText())) {
+            throw new AwsException("InvalidPolicyException",
+                    "Managed permission policy templates only support Effect Allow.", 400);
+        }
+        JsonNode action = template.path("Action");
+        List<String> actions = new ArrayList<>();
+        if (action.isTextual()) {
+            actions.add(action.asText());
+        } else if (action.isArray()) {
+            action.forEach(a -> actions.add(a.isTextual() ? a.asText() : ""));
+        }
+        if (actions.isEmpty()) {
+            throw new AwsException("MalformedPolicyTemplateException",
+                    "The policy template must specify at least one Action.", 400);
+        }
+        String service = resourceType.substring(0, resourceType.indexOf(':'));
+        for (String a : actions) {
+            if (!a.startsWith(service + ":") || a.length() == service.length() + 1) {
+                throw new AwsException("InvalidPolicyException",
+                        "Action " + a + " is not supported for resource type " + resourceType + ".", 400);
+            }
+        }
+        if (template.has("Condition") && !template.get("Condition").isObject()) {
+            throw new AwsException("MalformedPolicyTemplateException",
+                    "The policy template Condition must be a JSON object.", 400);
+        }
+        return policyTemplate;
+    }
+
+    private static JsonNode parseTemplate(String policyTemplate) {
+        try {
+            return JSON.readTree(policyTemplate);
+        } catch (JsonProcessingException e) {
+            throw new AwsException("MalformedPolicyTemplateException",
+                    "The policy template is not valid JSON.", 400);
+        }
+    }
+
+    /**
+     * Offset pagination over an already-ordered result. {@code maxResults} is 1-500 like RAM;
+     * a token floci did not issue is InvalidNextTokenException.
+     */
+    public static <T> Page<T> paginate(List<T> all, Integer maxResults, String nextToken) {
+        if (maxResults != null && (maxResults < 1 || maxResults > MAX_RESULTS_LIMIT)) {
+            throw new AwsException("InvalidParameterException",
+                    "maxResults must be between 1 and " + MAX_RESULTS_LIMIT + ".", 400);
+        }
+        int start = 0;
+        if (nextToken != null && !nextToken.isEmpty()) {
+            try {
+                start = Integer.parseInt(new String(Base64.getUrlDecoder().decode(nextToken),
+                        StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException e) {
+                throw invalidNextToken();
+            }
+            if (start < 0 || start > all.size()) {
+                throw invalidNextToken();
+            }
+        }
+        int end = maxResults == null ? all.size() : (int) Math.min(all.size(), (long) start + maxResults);
+        String next = end < all.size()
+                ? Base64.getUrlEncoder().withoutPadding()
+                        .encodeToString(Integer.toString(end).getBytes(StandardCharsets.UTF_8))
+                : null;
+        return new Page<>(List.copyOf(all.subList(start, end)), next);
+    }
+
+    private static AwsException invalidNextToken() {
+        return new AwsException("InvalidNextTokenException", "The specified value for nextToken isn't valid.", 400);
     }
 
     /**
@@ -397,7 +1023,8 @@ public class RamService {
             }
             for (String principal : share.getPrincipals()) {
                 result.add(new PrincipalAssociation(principal, share.getResourceShareArn(),
-                        share.getCreationTime(), share.getLastUpdatedTime(), false));
+                        share.getCreationTime(), share.getLastUpdatedTime(),
+                        isExternalPrincipal(share.getOwningAccountId(), principal)));
             }
         }
         return result;

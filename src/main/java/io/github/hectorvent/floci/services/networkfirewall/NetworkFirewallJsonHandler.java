@@ -19,19 +19,20 @@ public class NetworkFirewallJsonHandler {
     public Response handle(String action, JsonNode request, String region, String accountId) {
         return switch (action) {
             case "CreateRuleGroup" -> ok(service.createRuleGroup(request, region, accountId));
-            case "DescribeRuleGroup" -> ok(service.describeRuleGroup(
-                    textOrNull(request, "RuleGroupArn"), textOrNull(request, "RuleGroupName")));
+            case "DescribeRuleGroup" -> ok(service.describeRuleGroup(request, region, accountId));
+            case "DescribeRuleGroupSummary" -> ok(service.describeRuleGroupSummary(request, region, accountId));
+            case "DescribeRuleGroupMetadata" -> ok(service.describeRuleGroupMetadata(request, region, accountId));
             case "UpdateRuleGroup" -> ok(service.updateRuleGroup(request, region, accountId));
-            case "DeleteRuleGroup" -> ok(service.deleteRuleGroup(
-                    textOrNull(request, "RuleGroupArn"), textOrNull(request, "RuleGroupName")));
-            case "ListRuleGroups" -> ok(service.listRuleGroups(textOrNull(request, "Type")));
+            case "DeleteRuleGroup" -> ok(service.deleteRuleGroup(request, region, accountId));
+            case "ListRuleGroups" -> ok(service.listRuleGroups(request));
             case "CreateFirewallPolicy" -> ok(service.createFirewallPolicy(request, region, accountId));
-            case "DescribeFirewallPolicy" -> ok(service.describeFirewallPolicy(
-                    textOrNull(request, "FirewallPolicyArn"), textOrNull(request, "FirewallPolicyName")));
+            case "DescribeFirewallPolicy" -> ok(service.describeFirewallPolicy(request, region, accountId));
             case "UpdateFirewallPolicy" -> ok(service.updateFirewallPolicy(request, region, accountId));
-            case "DeleteFirewallPolicy" -> ok(service.deleteFirewallPolicy(
-                    textOrNull(request, "FirewallPolicyArn"), textOrNull(request, "FirewallPolicyName")));
-            case "ListFirewallPolicies" -> ok(service.listFirewallPolicies());
+            case "DeleteFirewallPolicy" -> ok(service.deleteFirewallPolicy(request, region, accountId));
+            case "ListFirewallPolicies" -> ok(service.listFirewallPolicies(request));
+            case "TagResource" -> ok(service.tagResource(request));
+            case "UntagResource" -> ok(service.untagResource(request));
+            case "ListTagsForResource" -> ok(service.listTagsForResource(request));
             case "CreateFirewall" -> ok(service.createFirewall(request, region, accountId));
             case "DescribeFirewall" -> Response.ok(service.describeFirewall(
                     textOrNull(request, "FirewallArn"),

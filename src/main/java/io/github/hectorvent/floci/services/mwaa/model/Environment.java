@@ -103,6 +103,11 @@ public class Environment {
     @JsonIgnore
     private String dbPassword;
 
+    // Airflow "admin" web/API user password; InvokeRestApi authenticates to the Airflow REST API
+    // with it. In-memory only, like dbPassword.
+    @JsonIgnore
+    private String airflowAdminPassword;
+
     public Environment() {}
 
     public String getName() { return name; }
@@ -191,6 +196,9 @@ public class Environment {
 
     public String getDbPassword() { return dbPassword; }
     public void setDbPassword(String dbPassword) { this.dbPassword = dbPassword; }
+
+    public String getAirflowAdminPassword() { return airflowAdminPassword; }
+    public void setAirflowAdminPassword(String airflowAdminPassword) { this.airflowAdminPassword = airflowAdminPassword; }
 
     @RegisterForReflection
     @JsonIgnoreProperties(ignoreUnknown = true)

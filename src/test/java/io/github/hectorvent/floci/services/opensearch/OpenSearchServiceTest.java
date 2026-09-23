@@ -1,15 +1,18 @@
 package io.github.hectorvent.floci.services.opensearch;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.services.opensearch.model.Domain;
+import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeast;
@@ -97,5 +100,66 @@ class OpenSearchServiceTest {
         service.pollReadiness();
         assertFalse(service.describeDomain("ready-recovery").isProcessing());
         verify(domainManager, atLeast(2)).isReady(any());
+    }
+
+    @Test
+    void healthLookupOfMissingDomainIsBaseExceptionWhileMaintenanceStartIsResourceNotFound() {
+        AwsException health = assertThrows(AwsException.class,
+                () -> service.describeDomainNodes("absent-domain"));
+        assertEquals("BaseException", health.getErrorCode());
+        assertEquals(400, health.getHttpStatus());
+
+        AwsException start = assertThrows(AwsException.class,
+                () -> service.startDomainMaintenance("absent-domain", "REBOOT_NODE", null));
+        assertEquals("ResourceNotFoundException", start.getErrorCode());
+        assertEquals(409, start.getHttpStatus());
+    }
+
+    @Test
+    void searchProcessRestartRestartsTheBackingContainer() {
+        when(domainManager.tryStartDomain(any())).thenAnswer(inv -> {
+            inv.<Domain>getArgument(0).setContainerId("container-1");
+            return true;
+        });
+        when(domainManager.isReady(any())).thenReturn(true);
+        service.createDomain("restart-domain", "OpenSearch_2.11", null, null, null, "us-east-1");
+        service.pollReadiness();
+
+        DomainMaintenance maintenance =
+                service.startDomainMaintenance("restart-domain", "RESTART_SEARCH_PROCESS", null);
+
+        assertEquals("COMPLETED", maintenance.getStatus());
+        assertTrue(service.describeDomain("restart-domain").isProcessing(),
+                "the restarted container is processing until the poller sees it ready");
+        verify(domainManager, Mockito.times(2)).tryStartDomain(any());
+        assertEquals(maintenance.getMaintenanceId(), service.getDomainMaintenanceStatus(
+                "restart-domain", maintenance.getMaintenanceId()).getMaintenanceId());
+    }
+
+    @Test
+    void restartWithoutReachableDockerIsRecordedAsFailed() {
+        when(domainManager.tryStartDomain(any()))
+                .thenAnswer(inv -> {
+                    inv.<Domain>getArgument(0).setContainerId("container-1");
+                    return true;
+                })
+                .thenReturn(false);
+        service.createDomain("docker-gone", "OpenSearch_2.11", null, null, null, "us-east-1");
+
+        DomainMaintenance maintenance =
+                service.startDomainMaintenance("docker-gone", "REBOOT_NODE", null);
+
+        assertEquals("FAILED", maintenance.getStatus());
+        assertEquals(1, service.listDomainMaintenances("docker-gone", null, "FAILED").size());
+    }
+
+    @Test
+    void unknownMaintenanceActionIsRejected() {
+        when(osConfig.mock()).thenReturn(true);
+        service.createDomain("action-domain", "OpenSearch_2.11", null, null, null, "us-east-1");
+
+        AwsException e = assertThrows(AwsException.class,
+                () -> service.startDomainMaintenance("action-domain", "SHUTDOWN", null));
+        assertEquals("ValidationException", e.getErrorCode());
     }
 }

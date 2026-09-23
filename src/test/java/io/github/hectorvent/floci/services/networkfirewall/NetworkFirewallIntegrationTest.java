@@ -816,6 +816,287 @@ class NetworkFirewallIntegrationTest {
             .body("UpdateToken", not(emptyOrNullString()));
     }
 
+    @Test
+    void createRuleGroup_withSuricataRules_describesThemAsRulesStringWithActiveStatus() {
+        String name = "rules-string-rule-group";
+        String rules = "pass tcp any any -> any 80 (msg:\"allow http\"; sid:100001; rev:1;)";
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"Rules\":" + json(rules) + ",\"Description\":\"v1\"}")
+            .statusCode(200)
+            .body("UpdateToken", not(emptyOrNullString()))
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(ruleGroupArn("stateful", name)))
+            .body("RuleGroupResponse.RuleGroupStatus", equalTo("ACTIVE"))
+            .body("RuleGroupResponse.Capacity", equalTo(100))
+            .body("RuleGroupResponse", not(hasKey("Rules")))
+            .body("RuleGroupResponse", not(hasKey("ResourceArn")));
+
+        call("DescribeRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\"}")
+            .statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo(rules))
+            .body("RuleGroupResponse.RuleGroupStatus", equalTo("ACTIVE"))
+            .body("RuleGroupResponse.Description", equalTo("v1"))
+            .body("RuleGroupResponse.Type", equalTo("STATEFUL"));
+    }
+
+    @Test
+    void createRuleGroup_withBothRuleGroupAndRules_isRejected() {
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"both-definitions-rule-group\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":10,\"Rules\":\"pass ip any any -> any any (sid:1;)\","
+                + "\"RuleGroup\":{\"RulesSource\":{\"RulesString\":\"pass ip any any -> any any (sid:1;)\"}}}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+    }
+
+    @Test
+    void describeRuleGroup_byNameAndType_distinguishesStatelessFromStateful() {
+        String name = "same-name-both-types";
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":10,\"Rules\":\"pass ip any any -> any any (sid:1;)\"}")
+            .statusCode(200);
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATELESS\","
+                + "\"Capacity\":10,\"RuleGroup\":" + STATELESS_DEFINITION + "}")
+            .statusCode(200);
+
+        call("DescribeRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATELESS\"}")
+            .statusCode(200)
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(ruleGroupArn("stateless", name)));
+        call("DescribeRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\"}")
+            .statusCode(200)
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(ruleGroupArn("stateful", name)));
+    }
+
+    @Test
+    void updateRuleGroup_byArnOnly_updatesInPlaceAndKeepsIdentityCapacityAndTags() {
+        // Regression: UpdateRuleGroup used to delete and re-create the rule group from the
+        // update request, which carries no RuleGroupName or Capacity when addressed by ARN,
+        // so it failed with "RuleGroupName is required." after already deleting the group.
+        String name = "update-in-place-rule-group";
+        String arn = ruleGroupArn("stateful", name);
+        String ruleGroupId = call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":100,\"Rules\":\"pass tcp any any -> any 80 (sid:1;)\",\"Description\":\"v1\","
+                + "\"Tags\":[{\"Key\":\"fixture\",\"Value\":\"nfw\"}]}")
+            .statusCode(200)
+            .extract().path("RuleGroupResponse.RuleGroupId");
+        String token = call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        String newToken = call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\",\"UpdateToken\":\"" + token
+                + "\",\"Type\":\"STATEFUL\",\"Rules\":\"drop tcp any any -> any 23 (sid:2;)\",\"Description\":\"v2\"}")
+            .statusCode(200)
+            .body("UpdateToken", not(equalTo(token)))
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(arn))
+            .body("RuleGroupResponse.RuleGroupId", equalTo(ruleGroupId))
+            .extract().path("UpdateToken");
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("UpdateToken", equalTo(newToken))
+            .body("RuleGroup.RulesSource.RulesString", equalTo("drop tcp any any -> any 23 (sid:2;)"))
+            .body("RuleGroupResponse.Description", equalTo("v2"))
+            .body("RuleGroupResponse.Capacity", equalTo(100))
+            .body("RuleGroupResponse.RuleGroupId", equalTo(ruleGroupId))
+            .body("RuleGroupResponse.Tags.find { it.Key == 'fixture' }.Value", equalTo("nfw"));
+    }
+
+    @Test
+    void updateRuleGroup_withStaleOrMissingToken_isRejectedAndLeavesTheRuleGroupIntact() {
+        String name = "stale-token-rule-group";
+        String arn = ruleGroupArn("stateful", name);
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":10,\"Rules\":\"pass tcp any any -> any 80 (sid:1;)\"}")
+            .statusCode(200);
+
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\","
+                + "\"UpdateToken\":\"00000000-0000-0000-0000-000000000000\","
+                + "\"Rules\":\"drop tcp any any -> any 23 (sid:2;)\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidTokenException"));
+        call("UpdateRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\","
+                + "\"Rules\":\"drop tcp any any -> any 23 (sid:2;)\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("RuleGroup.RulesSource.RulesString", equalTo("pass tcp any any -> any 80 (sid:1;)"));
+    }
+
+    @Test
+    void updateFirewallPolicy_byArnOnly_updatesInPlace() {
+        String name = "update-in-place-policy";
+        String arn = policyArn(name);
+        call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"" + name + "\",\"Description\":\"pass\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}")
+            .statusCode(200)
+            .body("FirewallPolicyResponse.FirewallPolicyStatus", equalTo("ACTIVE"));
+        String token = call("DescribeFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .extract().path("UpdateToken");
+
+        call("UpdateFirewallPolicy", "{\"FirewallPolicyArn\":\"" + arn + "\",\"UpdateToken\":\"" + token + "\","
+                + "\"Description\":\"drop\",\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:drop\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:drop\"]}}")
+            .statusCode(200)
+            .body("FirewallPolicyResponse.FirewallPolicyArn", equalTo(arn))
+            .body("UpdateToken", not(equalTo(token)));
+
+        call("DescribeFirewallPolicy", "{\"FirewallPolicyName\":\"" + name + "\"}")
+            .statusCode(200)
+            .body("FirewallPolicy.StatelessDefaultActions", contains("aws:drop"))
+            .body("FirewallPolicyResponse.Description", equalTo("drop"))
+            .body("FirewallPolicyResponse.FirewallPolicyStatus", equalTo("ACTIVE"));
+    }
+
+    @Test
+    void deleteRuleGroup_referencedByAPolicy_isRejectedUntilThePolicyIsDeleted() {
+        String groupName = "referenced-rule-group";
+        String groupArn = ruleGroupArn("stateful", groupName);
+        String policyName = "referencing-policy";
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + groupName + "\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":10,\"Rules\":\"pass tcp any any -> any 443 (sid:1;)\"}")
+            .statusCode(200);
+        call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"" + policyName + "\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:forward_to_sfe\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:forward_to_sfe\"],"
+                + "\"StatefulRuleGroupReferences\":[{\"ResourceArn\":\"" + groupArn + "\"}]}}")
+            .statusCode(200);
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + groupArn + "\"}")
+            .statusCode(200)
+            .body("RuleGroupResponse.NumberOfAssociations", equalTo(1));
+        call("DeleteRuleGroup", "{\"RuleGroupArn\":\"" + groupArn + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidOperationException"));
+
+        call("DeleteFirewallPolicy", "{\"FirewallPolicyArn\":\"" + policyArn(policyName) + "\"}")
+            .statusCode(200)
+            .body("FirewallPolicyResponse.FirewallPolicyArn", equalTo(policyArn(policyName)))
+            .body("FirewallPolicyResponse.FirewallPolicyStatus", equalTo("DELETING"));
+        call("DeleteRuleGroup", "{\"RuleGroupArn\":\"" + groupArn + "\"}")
+            .statusCode(200)
+            .body("RuleGroupResponse.RuleGroupArn", equalTo(groupArn))
+            .body("RuleGroupResponse.RuleGroupStatus", equalTo("DELETING"));
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + groupArn + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void deleteFirewallPolicy_associatedWithAFirewall_isRejected() {
+        String name = "InUsePolicyFirewall";
+        String policyName = name + "-policy";
+        call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"" + policyName + "\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}")
+            .statusCode(200);
+        createFirewall(name, "", "subnet-2222222222222222a");
+
+        call("DeleteFirewallPolicy", "{\"FirewallPolicyName\":\"" + policyName + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidOperationException"));
+    }
+
+    @Test
+    void tagResource_untagResource_andListTagsForResource_coverRuleGroupsPoliciesAndFirewalls() {
+        String groupArn = ruleGroupArn("stateful", "tagged-rule-group");
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"tagged-rule-group\",\"Type\":\"STATEFUL\","
+                + "\"Capacity\":10,\"Rules\":\"pass tcp any any -> any 80 (sid:1;)\","
+                + "\"Tags\":[{\"Key\":\"keep\",\"Value\":\"1\"},{\"Key\":\"drop\",\"Value\":\"1\"}]}")
+            .statusCode(200);
+        call("CreateFirewallPolicy", "{\"FirewallPolicyName\":\"tagged-policy\","
+                + "\"FirewallPolicy\":{\"StatelessDefaultActions\":[\"aws:pass\"],"
+                + "\"StatelessFragmentDefaultActions\":[\"aws:pass\"]}}")
+            .statusCode(200);
+        createFirewall("TaggedFirewall", "", "subnet-2222222222222222b");
+
+        for (String arn : new String[] {groupArn, policyArn("tagged-policy"), firewallArn("TaggedFirewall")}) {
+            call("TagResource", "{\"ResourceArn\":\"" + arn + "\","
+                    + "\"Tags\":[{\"Key\":\"keep\",\"Value\":\"2\"},{\"Key\":\"added\",\"Value\":\"yes\"}]}")
+                .statusCode(200);
+            call("UntagResource", "{\"ResourceArn\":\"" + arn + "\",\"TagKeys\":[\"drop\"]}")
+                .statusCode(200);
+            call("ListTagsForResource", "{\"ResourceArn\":\"" + arn + "\"}")
+                .statusCode(200)
+                .body("Tags.find { it.Key == 'keep' }.Value", equalTo("2"))
+                .body("Tags.find { it.Key == 'added' }.Value", equalTo("yes"))
+                .body("Tags.Key", not(hasItem("drop")));
+        }
+
+        call("DescribeRuleGroup", "{\"RuleGroupArn\":\"" + groupArn + "\"}")
+            .statusCode(200)
+            .body("RuleGroupResponse.Tags.Key", hasItems("keep", "added"))
+            .body("RuleGroupResponse.Tags", hasSize(2));
+        call("DescribeFirewall", "{\"FirewallArn\":\"" + firewallArn("TaggedFirewall") + "\"}")
+            .statusCode(200)
+            .body("Firewall.Tags.Key", hasItems("keep", "added"));
+    }
+
+    @Test
+    void tagResource_onAnUnknownArn_returnsResourceNotFound() {
+        call("TagResource", "{\"ResourceArn\":\"" + ruleGroupArn("stateful", "no-such-tagged-group") + "\","
+                + "\"Tags\":[{\"Key\":\"k\",\"Value\":\"v\"}]}")
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void describeRuleGroupSummary_reportsTheConfiguredRuleOptions() {
+        String name = "summary-rule-group";
+        String rules = "pass tcp any any -> any 443 (msg:\"allow https\"; sid:100001; rev:1;)\n"
+                + "# a comment line\n"
+                + "drop tcp any any -> any 23 (msg:\"block \\\"telnet\\\"; now\"; sid:100002; metadata:team net;)";
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\",\"Capacity\":10,"
+                + "\"Rules\":" + json(rules) + ",\"SummaryConfiguration\":{\"RuleOptions\":[\"SID\",\"MSG\"]}}")
+            .statusCode(200);
+
+        call("DescribeRuleGroupSummary", "{\"RuleGroupArn\":\"" + ruleGroupArn("stateful", name) + "\"}")
+            .statusCode(200)
+            .body("RuleGroupName", equalTo(name))
+            .body("Summary.RuleSummaries", hasSize(2))
+            .body("Summary.RuleSummaries[0].SID", equalTo("100001"))
+            .body("Summary.RuleSummaries[0].Msg", equalTo("allow https"))
+            .body("Summary.RuleSummaries[1].SID", equalTo("100002"))
+            .body("Summary.RuleSummaries[1].Msg", equalTo("block \"telnet\"; now"))
+            .body("Summary.RuleSummaries[1]", not(hasKey("Metadata")));
+    }
+
+    @Test
+    void describeRuleGroupMetadata_returnsCapacityAndTypeWithoutTheDefinition() {
+        String name = "metadata-rule-group";
+        call("CreateRuleGroup", "{\"RuleGroupName\":\"" + name + "\",\"Type\":\"STATEFUL\",\"Capacity\":10,"
+                + "\"Description\":\"meta\",\"RuleGroup\":{\"RulesSource\":{\"RulesString\":"
+                + "\"pass tcp any any -> any 80 (sid:1;)\"},\"StatefulRuleOptions\":{\"RuleOrder\":\"STRICT_ORDER\"}}}")
+            .statusCode(200);
+
+        call("DescribeRuleGroupMetadata", "{\"RuleGroupArn\":\"" + ruleGroupArn("stateful", name) + "\"}")
+            .statusCode(200)
+            .body("RuleGroupArn", equalTo(ruleGroupArn("stateful", name)))
+            .body("RuleGroupName", equalTo(name))
+            .body("Capacity", equalTo(10))
+            .body("Type", equalTo("STATEFUL"))
+            .body("Description", equalTo("meta"))
+            .body("StatefulRuleOptions.RuleOrder", equalTo("STRICT_ORDER"))
+            .body("$", not(hasKey("RuleGroup")));
+    }
+
+    private static final String STATELESS_DEFINITION = "{\"RulesSource\":{\"StatelessRulesAndCustomActions\":"
+            + "{\"StatelessRules\":[{\"Priority\":1,\"RuleDefinition\":{\"Actions\":[\"aws:pass\"],"
+            + "\"MatchAttributes\":{\"Protocols\":[6]}}}]}}}";
+
+    private static String ruleGroupArn(String kind, String name) {
+        return "arn:aws:network-firewall:us-east-1:723679240095:" + kind + "-rulegroup/" + name;
+    }
+
+    private static String policyArn(String name) {
+        return "arn:aws:network-firewall:us-east-1:723679240095:firewall-policy/" + name;
+    }
+
+    private static String json(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"";
+    }
+
     private static String currentUpdateToken(String firewallName) {
         return call("DescribeFirewall", "{\"FirewallArn\":\"" + firewallArn(firewallName) + "\"}")
             .statusCode(200)

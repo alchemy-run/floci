@@ -6,6 +6,8 @@ import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -77,6 +79,44 @@ class Ec2RunInstancesNetworkInterfaceTest {
         int preAt = script.indexOf("if [ -n \"$pre\" ]; then $pre");
         int envAt = script.indexOf(". \"$envfile\"");
         assertTrue(preAt >= 0 && envAt > preAt, "EnvironmentFile must be sourced after ExecStartPre");
+    }
+
+    @Test
+    void systemctlShimRestartsUnitWhenStalePidfileNamesAnotherProcess() throws Exception {
+        String shim = Ec2ContainerManager.systemctlShimInstallCommand()[2];
+        String body = shim.substring(shim.indexOf("<<'SHIM'\n") + 9, shim.lastIndexOf("\nSHIM"));
+        Path root = Files.createTempDirectory("shim");
+        try {
+            Path script = root.resolve("systemctl");
+            Files.writeString(script, body.replace("/etc/systemd/system", root + "/units")
+                    .replace("/var/run/", root + "/run/").replace("/var/log/", root + "/log/"));
+            Files.createDirectories(root.resolve("units"));
+            Files.createDirectories(root.resolve("run"));
+            Files.createDirectories(root.resolve("log"));
+            Path marker = root.resolve("started");
+            Files.writeString(root.resolve("units/app.service"),
+                    "[Service]\nExecStart=touch " + marker + "\n");
+            // A live process that is not the unit loop, as after a container reboot.
+            Process unrelated = new ProcessBuilder("sleep", "30").start();
+            try {
+                Files.writeString(root.resolve("run/app.pid"), Long.toString(unrelated.pid()));
+                Process shimRun = new ProcessBuilder("sh", script.toString(), "enable", "--now", "app.service").start();
+                assertEquals(0, shimRun.waitFor());
+                for (int i = 0; i < 50 && !Files.exists(marker); i++) {
+                    Thread.sleep(100);
+                }
+                assertTrue(Files.exists(marker), "stale pidfile must not suppress the unit start");
+                long loopPid = Long.parseLong(Files.readString(root.resolve("run/app.pid")).trim());
+                assertTrue(loopPid != unrelated.pid());
+                ProcessHandle.of(loopPid).ifPresent(ProcessHandle::destroy);
+            } finally {
+                unrelated.destroy();
+            }
+        } finally {
+            try (var files = Files.walk(root)) {
+                files.sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
     }
 
     @Test

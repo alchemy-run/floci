@@ -10,7 +10,6 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.matchesRegex;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Wire-level tests for {@code ServiceQuotasV20190624.RequestServiceQuotaIncrease}.
@@ -21,12 +20,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * {@code UnknownOperationException}. A green run therefore proves the operation is
  * reachable by name, which a service-level test could not (CS-001).
  *
- * <p><strong>Known limitation asserted here deliberately:</strong> the emulator does not
- * persist increase requests. {@code GetRequestedServiceQuotaChange} and
- * {@code ListRequestedServiceQuotaChangeHistory} are unsupported, so a request is
- * observable only in the response that creates it. {@code Status} is therefore always
- * {@code PENDING} and never advances. Documented in {@code docs/services/servicequotas.md}
- * per CS-021.
+ * <p><strong>Known limitation asserted here deliberately:</strong> the emulator has no approval
+ * process, so {@code Status} is always {@code PENDING} and never advances, and the applied quota
+ * value never changes. Requests are recorded and observable through
+ * {@code GetRequestedServiceQuotaChange} and the request-history operations. Every test uses a
+ * distinct quota because an open request blocks a second one for the same quota, as in AWS.
  */
 @QuarkusTest
 class RequestServiceQuotaIncreaseConsumerTest {
@@ -58,7 +56,7 @@ class RequestServiceQuotaIncreaseConsumerTest {
                 + "\",\"DesiredValue\":9000}")
         .then()
             .statusCode(200)
-            .body("RequestedQuota.Id", matchesRegex("[0-9A-F]{8}"))
+            .body("RequestedQuota.Id", matchesRegex("[0-9a-f]{32}"))
             .body("RequestedQuota.ServiceCode", equalTo("codebuild"))
             .body("RequestedQuota.ServiceName", equalTo("AWS CodeBuild"))
             .body("RequestedQuota.QuotaCode", equalTo(CONCURRENT_BUILDS_QUOTA))
@@ -76,47 +74,52 @@ class RequestServiceQuotaIncreaseConsumerTest {
     }
 
     @Test
-    void requestIncrease_generatedQuotaOnUnknownService_resolves() {
-        String quotaCode = ServiceQuotasService.syntheticQuotaCode("widgetfactory", "Resources per Region");
-        request("{\"ServiceCode\":\"widgetfactory\",\"QuotaCode\":\"" + quotaCode
-                + "\",\"DesiredValue\":1}")
+    void requestIncrease_unknownService_returnsNoSuchResource() {
+        request("{\"ServiceCode\":\"widgetfactory\",\"QuotaCode\":\"L-12345678\",\"DesiredValue\":1}")
         .then()
-            .statusCode(200)
-            .body("RequestedQuota.QuotaCode", equalTo(quotaCode))
-            .body("RequestedQuota.QuotaName", equalTo("Resources per Region"))
-            .body("RequestedQuota.ServiceCode", equalTo("widgetfactory"));
+            .statusCode(400)
+            .body("__type", equalTo("NoSuchResourceException"));
     }
 
-    /** The id must be stable so a caller can correlate a repeated request. */
+    /** An open request for the quota blocks another submission, as in AWS. */
     @Test
-    void requestIncrease_sameQuotaTwice_returnsSameId() {
+    void requestIncrease_sameQuotaTwice_rejectsTheSecondWithResourceAlreadyExists() {
         String body = "{\"ServiceCode\":\"lambda\",\"QuotaCode\":\"L-B99A9384\",\"DesiredValue\":2000}";
-        String first = request(body).then().statusCode(200)
-                .extract().path("RequestedQuota.Id");
-        String second = request(body).then().statusCode(200)
-                .extract().path("RequestedQuota.Id");
-        assertEquals(first, second);
+        request(body).then().statusCode(200);
+        request(body)
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ResourceAlreadyExistsException"));
     }
 
     @Test
     void requestIncrease_withContextId_emitsQuotaContext() {
-        request("{\"ServiceCode\":\"lambda\",\"QuotaCode\":\"L-B99A9384\",\"DesiredValue\":10,"
+        request("{\"ServiceCode\":\"lambda\",\"QuotaCode\":\"L-9FEE3D26\",\"DesiredValue\":600,"
                 + "\"ContextId\":\"arn:aws:lambda:us-east-1:000000000000:function:fn\"}")
         .then()
             .statusCode(200)
             .body("RequestedQuota.QuotaContext.ContextId",
                     equalTo("arn:aws:lambda:us-east-1:000000000000:function:fn"))
-            .body("RequestedQuota.QuotaContext.ContextScope", equalTo("RESOURCE"));
+            .body("RequestedQuota.QuotaContext.ContextScope", equalTo("RESOURCE"))
+            .body("RequestedQuota.QuotaRequestedAtLevel", equalTo("RESOURCE"));
     }
 
     /** An unmodelled-by-the-emulator field must be absent, not null-valued or invented. */
     @Test
     void requestIncrease_withoutContextId_omitsQuotaContextAndCaseId() {
-        request("{\"ServiceCode\":\"lambda\",\"QuotaCode\":\"L-B99A9384\",\"DesiredValue\":10}")
+        request("{\"ServiceCode\":\"ec2\",\"QuotaCode\":\"L-0263D0A3\",\"DesiredValue\":10}")
         .then()
             .statusCode(200)
             .body("RequestedQuota.QuotaContext", nullValue())
             .body("RequestedQuota.CaseId", nullValue());
+    }
+
+    @Test
+    void requestIncrease_desiredValueNotAboveCurrentValue_returnsIllegalArgument() {
+        request("{\"ServiceCode\":\"vpc\",\"QuotaCode\":\"L-A4707A72\",\"DesiredValue\":5}")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("IllegalArgumentException"));
     }
 
     @Test

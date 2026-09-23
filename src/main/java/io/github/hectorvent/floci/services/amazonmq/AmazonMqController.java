@@ -1,6 +1,10 @@
 package io.github.hectorvent.floci.services.amazonmq;
 
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.amazonmq.model.Broker;
+import io.github.hectorvent.floci.services.amazonmq.model.MqConfiguration;
 import io.github.hectorvent.floci.services.amazonmq.model.MqUser;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -21,16 +25,34 @@ import java.util.Map;
 @Consumes(MediaType.APPLICATION_JSON)
 public class AmazonMqController {
 
+    /** {@link AmazonMqRouteFilter} rewrites mq-signed {@code /v1/configurations} requests here. */
+    private static final String CONFIGURATIONS = AmazonMqRouteFilter.INTERNAL_PREFIX + "/v1/configurations";
+
+    /**
+     * Engine versions DescribeBrokerEngineTypes reports, mirroring the AWS catalog. Only
+     * RabbitMQ brokers are provisioned; ActiveMQ is listed because configurations for it
+     * are real control-plane documents here.
+     */
+    private static final Map<String, List<String>> ENGINE_VERSIONS = engineVersions();
+
     private final AmazonMqService service;
+    private final AmazonMqConfigurationService configurations;
 
     @Inject
-    public AmazonMqController(AmazonMqService service) {
+    public AmazonMqController(AmazonMqService service, AmazonMqConfigurationService configurations) {
         this.service = service;
+        this.configurations = configurations;
     }
 
     @POST
     @Path("/v1/brokers")
     public Response createBroker(Map<String, Object> request) {
+        if (request.get("configuration") instanceof Map<?, ?> reference) {
+            configurations.validateBrokerReference(
+                    reference.get("id") == null ? null : String.valueOf(reference.get("id")),
+                    integer(reference.get("revision")),
+                    str(request, "engineType"));
+        }
         CreateBrokerParams params = new CreateBrokerParams(
                 str(request, "brokerName"),
                 str(request, "engineType"),
@@ -156,7 +178,189 @@ public class AmazonMqController {
         return Response.ok(Map.of()).build();
     }
 
+    // --- broker engine types ---
+
+    @GET
+    @Path("/v1/broker-engine-types")
+    public Response describeBrokerEngineTypes(@QueryParam("engineType") String engineType,
+                                              @QueryParam("maxResults") String maxResultsParam,
+                                              @QueryParam("nextToken") String nextToken) {
+        Integer maxResults = Pagination.parseMaxResults(maxResultsParam, "BadRequestException");
+        if (maxResults != null && (maxResults < 5 || maxResults > 100)) {
+            throw new AwsException("BadRequestException", "maxResults must be between 5 and 100", 400);
+        }
+        List<Map<String, Object>> engines = new ArrayList<>();
+        ENGINE_VERSIONS.forEach((engine, versions) -> {
+            if (engineType != null && !engineType.isBlank() && !engine.equalsIgnoreCase(engineType)) {
+                return;
+            }
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("engineType", engine);
+            entry.put("engineVersions", versions.stream().map(v -> Map.of("name", v)).toList());
+            engines.add(entry);
+        });
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("brokerEngineTypes", engines);
+        body.put("maxResults", maxResults != null ? maxResults : 100);
+        return Response.ok(body).build();
+    }
+
+    private static Map<String, List<String>> engineVersions() {
+        Map<String, List<String>> versions = new LinkedHashMap<>();
+        versions.put(AmazonMqConfigurationService.ENGINE_ACTIVEMQ, List.of("5.18", "5.17.6", "5.16.7", "5.15.16"));
+        versions.put(AmazonMqConfigurationService.ENGINE_RABBITMQ, List.of("3.13"));
+        return versions;
+    }
+
+    // --- configurations ---
+
+    @POST
+    @Path(CONFIGURATIONS)
+    public Response createConfiguration(Map<String, Object> request) {
+        MqConfiguration c = configurations.createConfiguration(
+                str(request, "name"),
+                str(request, "engineType"),
+                str(request, "engineVersion"),
+                str(request, "authenticationStrategy"),
+                tags(request.get("tags")));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("arn", c.getArn());
+        body.put("authenticationStrategy", c.getAuthenticationStrategy());
+        body.put("created", c.getCreated().toString());
+        body.put("id", c.getId());
+        body.put("latestRevision", revisionSummary(c.latestRevision()));
+        body.put("name", c.getName());
+        return Response.ok(body).build();
+    }
+
+    @GET
+    @Path(CONFIGURATIONS)
+    public Response listConfigurations(@QueryParam("maxResults") String maxResultsParam,
+                                       @QueryParam("nextToken") String nextToken) {
+        PaginatedResult<MqConfiguration> page = configurations.listConfigurations(
+                Pagination.parseMaxResults(maxResultsParam, "BadRequestException"), nextToken);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("configurations", page.items().stream().map(AmazonMqController::configurationView).toList());
+        if (maxResultsParam != null && !maxResultsParam.isBlank()) {
+            body.put("maxResults", Integer.parseInt(maxResultsParam));
+        }
+        if (page.nextToken() != null) {
+            body.put("nextToken", page.nextToken());
+        }
+        return Response.ok(body).build();
+    }
+
+    @GET
+    @Path(CONFIGURATIONS + "/{configuration-id}")
+    public Response describeConfiguration(@PathParam("configuration-id") String configurationId) {
+        return Response.ok(configurationView(configurations.describeConfiguration(configurationId))).build();
+    }
+
+    @PUT
+    @Path(CONFIGURATIONS + "/{configuration-id}")
+    public Response updateConfiguration(@PathParam("configuration-id") String configurationId,
+                                        Map<String, Object> request) {
+        Map<String, Object> safeRequest = request != null ? request : Map.of();
+        MqConfiguration c = configurations.updateConfiguration(configurationId,
+                str(safeRequest, "data"), str(safeRequest, "description"));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("arn", c.getArn());
+        body.put("created", c.getCreated().toString());
+        body.put("id", c.getId());
+        body.put("latestRevision", revisionSummary(c.latestRevision()));
+        body.put("name", c.getName());
+        // Floci does not sanitize ActiveMQ documents, so there is never anything to warn about.
+        body.put("warnings", List.of());
+        return Response.ok(body).build();
+    }
+
+    @DELETE
+    @Path(CONFIGURATIONS + "/{configuration-id}")
+    public Response deleteConfiguration(@PathParam("configuration-id") String configurationId) {
+        configurations.deleteConfiguration(configurationId);
+        return Response.ok(Map.of("configurationId", configurationId)).build();
+    }
+
+    @GET
+    @Path(CONFIGURATIONS + "/{configuration-id}/revisions")
+    public Response listConfigurationRevisions(@PathParam("configuration-id") String configurationId,
+                                               @QueryParam("maxResults") String maxResultsParam,
+                                               @QueryParam("nextToken") String nextToken) {
+        PaginatedResult<MqConfiguration.Revision> page = configurations.listConfigurationRevisions(
+                configurationId, Pagination.parseMaxResults(maxResultsParam, "BadRequestException"), nextToken);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("configurationId", configurationId);
+        body.put("revisions", page.items().stream().map(AmazonMqController::revisionSummary).toList());
+        if (maxResultsParam != null && !maxResultsParam.isBlank()) {
+            body.put("maxResults", Integer.parseInt(maxResultsParam));
+        }
+        if (page.nextToken() != null) {
+            body.put("nextToken", page.nextToken());
+        }
+        return Response.ok(body).build();
+    }
+
+    @GET
+    @Path(CONFIGURATIONS + "/{configuration-id}/revisions/{configuration-revision}")
+    public Response describeConfigurationRevision(@PathParam("configuration-id") String configurationId,
+                                                  @PathParam("configuration-revision") String revision) {
+        MqConfiguration.Revision r = configurations.describeConfigurationRevision(configurationId, revision);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("configurationId", configurationId);
+        body.put("created", r.getCreated().toString());
+        body.put("data", r.getData());
+        if (r.getDescription() != null) {
+            body.put("description", r.getDescription());
+        }
+        return Response.ok(body).build();
+    }
+
+    private static Map<String, Object> configurationView(MqConfiguration c) {
+        MqConfiguration.Revision latest = c.latestRevision();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("arn", c.getArn());
+        body.put("authenticationStrategy", c.getAuthenticationStrategy());
+        body.put("created", c.getCreated().toString());
+        body.put("description", latest != null && latest.getDescription() != null ? latest.getDescription() : "");
+        // AWS echoes the display casing ("ActiveMQ"), not the request enum.
+        body.put("engineType", AmazonMqConfigurationService.displayEngine(c.getEngineType()));
+        body.put("engineVersion", c.getEngineVersion());
+        body.put("id", c.getId());
+        body.put("latestRevision", revisionSummary(latest));
+        body.put("name", c.getName());
+        body.put("tags", c.getTags());
+        return body;
+    }
+
+    private static Map<String, Object> revisionSummary(MqConfiguration.Revision r) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (r == null) {
+            return body;
+        }
+        body.put("created", r.getCreated().toString());
+        if (r.getDescription() != null) {
+            body.put("description", r.getDescription());
+        }
+        body.put("revision", r.getRevision());
+        return body;
+    }
+
     // --- request parsing helpers ---
+
+    private static Integer integer(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        if (raw instanceof Number n) {
+            return n.intValue();
+        }
+        try {
+            return Integer.parseInt(raw.toString());
+        } catch (NumberFormatException e) {
+            throw new AwsException("BadRequestException",
+                    "The configuration revision [" + raw + "] is not a valid revision number.", 400);
+        }
+    }
 
     private static String str(Map<String, Object> request, String key) {
         Object value = request.get(key);

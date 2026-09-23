@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -46,10 +47,8 @@ class DmsServiceTest {
     @SuppressWarnings({"unchecked", "rawtypes"})
     void setUp() {
         StorageFactory storageFactory = mock(StorageFactory.class);
-        AccountAwareStorageBackend<ReplicationSubnetGroup> store =
-                AccountAwareStorageBackend.inMemory(ACCOUNT_ID);
-        when(storageFactory.create(eq("dms"), eq("dms-replication-subnet-groups.json"), any(TypeReference.class)))
-                .thenReturn((AccountAwareStorageBackend) store);
+        when(storageFactory.create(eq("dms"), anyString(), any(TypeReference.class)))
+                .thenAnswer(invocation -> (AccountAwareStorageBackend) AccountAwareStorageBackend.inMemory(ACCOUNT_ID));
 
         Ec2Service ec2Service = mock(Ec2Service.class);
         when(ec2Service.describeSubnets(eq(REGION), anyList(), anyMap())).thenAnswer(invocation -> {
@@ -58,7 +57,8 @@ class DmsServiceTest {
         });
         RegionResolver regionResolver = mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn(ACCOUNT_ID);
-        service = new DmsService(storageFactory, ec2Service, regionResolver);
+        service = new DmsService(storageFactory, ec2Service, regionResolver, mock(DmsConnectivityProbe.class),
+                mock(DmsEventPublisher.class), new InlineExecutorService());
     }
 
     @Test

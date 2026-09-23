@@ -21,11 +21,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class TransferService {
 
     private static final String CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
+    private static final Pattern WORKFLOW_ID = Pattern.compile("w-([a-z0-9]{17})");
+    private static final Pattern EXECUTION_ID = Pattern.compile(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+    private static final Pattern CALLBACK_TOKEN = Pattern.compile("\\w+");
 
     private final AccountAwareStorageBackend<Server> serverStore;
     private final AccountAwareStorageBackend<User> userStore;
@@ -277,6 +282,32 @@ public class TransferService {
         }
         user.setSshPublicKeys(keys);
         putUser(user);
+    }
+
+    // ── Workflows ─────────────────────────────────────────────────────────────
+
+    /**
+     * Reports a custom workflow step's outcome. Floci does not implement Transfer workflows
+     * (CreateWorkflow is unsupported and no workflow ever executes), so after request validation
+     * the workflow can never be found.
+     */
+    public void sendWorkflowStepState(String workflowId, String executionId, String token, String status) {
+        new TransferRequestValidator()
+                .required("workflowId", workflowId)
+                .length("workflowId", workflowId, 19, 19, false)
+                .pattern("workflowId", workflowId, WORKFLOW_ID, "^w-([a-z0-9]{17})$")
+                .required("executionId", executionId)
+                .length("executionId", executionId, 36, 36, false)
+                .pattern("executionId", executionId, EXECUTION_ID,
+                        "^[0-9a-fA-F]{8}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{4}\\-[0-9a-fA-F]{12}$")
+                .required("token", token)
+                .length("token", token, 1, 64, false)
+                .pattern("token", token, CALLBACK_TOKEN, "^\\w+$")
+                .required("status", status)
+                .oneOf("status", status, List.of("SUCCESS", "FAILURE"))
+                .validate();
+        throw new AwsException("ResourceNotFoundException", "Unknown workflow", 404,
+                Map.of("Resource", workflowId, "ResourceType", "Workflow"));
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────────

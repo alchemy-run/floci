@@ -343,6 +343,11 @@ public class MwaaService implements TagHandler {
                 "WebServerHostname", hostnameFromUrl(environment.getWebserverUrl()));
     }
 
+    /** True when environments run without Airflow containers ({@code floci.services.mwaa.mock}). */
+    public boolean isMockMode() {
+        return config.services().mwaa().mock();
+    }
+
     boolean isValidCliToken(String environmentIdentity, String token) {
         Set<String> tokens = cliTokensByEnvironment.get(environmentIdentity);
         return tokens != null && tokens.contains(token);

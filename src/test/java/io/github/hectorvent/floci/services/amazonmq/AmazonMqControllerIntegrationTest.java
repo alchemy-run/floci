@@ -4,7 +4,10 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
@@ -99,6 +102,173 @@ class AmazonMqControllerIntegrationTest {
                 .body("{\"password\":\"AnotherPass99\",\"consoleAccess\":false}")
                 .post("/v1/brokers/{id}/users/alice", brokerId)
                 .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+    }
+
+    private static String mqAuth(String region) {
+        return "AWS4-HMAC-SHA256 Credential=test/20260922/" + region
+                + "/mq/aws4_request, SignedHeaders=host, Signature=test";
+    }
+
+    private static final String MQ_AUTH = mqAuth("us-east-1");
+
+    @Test
+    void describeMissingConfigurationIsNotFound() {
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}", "c-00000000-0000-0000-0000-000000000000")
+        .then()
+            .statusCode(404)
+            .header("X-Amzn-Errortype", "NotFoundException")
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    void configurationLifecyclePublishesRevisions() {
+        String id = given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("""
+                {"name": "it-config", "engineType": "ACTIVEMQ", "engineVersion": "5.18",
+                 "tags": {"team": "messaging"}}
+                """)
+        .when()
+            .post("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .body("arn", containsString(":configuration:c-"))
+            .body("latestRevision.revision", equalTo(1))
+            .extract().path("id");
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(200)
+            .body("name", equalTo("it-config"))
+            .body("engineType", equalTo("ActiveMQ"))
+            .body("engineVersion", equalTo("5.18"))
+            .body("tags.team", equalTo("messaging"));
+
+        String xml = "<broker xmlns=\"http://activemq.apache.org/schema/core\"><plugins/></broker>";
+        String data = java.util.Base64.getEncoder().encodeToString(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"data\": \"" + data + "\", \"description\": \"custom\"}")
+        .when()
+            .put("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(200)
+            .body("id", equalTo(id))
+            .body("latestRevision.revision", equalTo(2))
+            .body("warnings", hasSize(0));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}/revisions/2", id)
+        .then()
+            .statusCode(200)
+            .body("data", equalTo(data))
+            .body("description", equalTo("custom"));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}/revisions", id)
+        .then()
+            .statusCode(200)
+            .body("revisions.revision", contains(1, 2));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .body("configurations.id", hasItem(id));
+
+        // Another region does not see it.
+        given().header("Authorization", mqAuth("eu-west-1"))
+            .get("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(404);
+
+        given().header("Authorization", MQ_AUTH)
+            .delete("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(200)
+            .body("configurationId", equalTo(id));
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/configurations/{id}", id)
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
+    }
+
+    @Test
+    void configurationTagsUseV1TagsPath() {
+        String arn = given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"name\": \"it-config-tags\", \"engineType\": \"RABBITMQ\"}")
+        .when()
+            .post("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .extract().path("arn");
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"tags\": {\"env\": \"dev\", \"owner\": \"me\"}}")
+        .when()
+            .post("/v1/tags/{arn}", arn)
+        .then()
+            .statusCode(204);
+
+        given().header("Authorization", MQ_AUTH)
+            .queryParam("tagKeys", "owner")
+        .when()
+            .delete("/v1/tags/{arn}", arn)
+        .then()
+            .statusCode(204);
+
+        given().header("Authorization", MQ_AUTH)
+            .get("/v1/tags/{arn}", arn)
+        .then()
+            .statusCode(200)
+            .body("tags.env", equalTo("dev"))
+            .body("tags.owner", nullValue());
+    }
+
+    @Test
+    void unsignedConfigurationsPathStillReachesMsk() {
+        // MSK owns /v1/configurations too; only mq-signed requests are rerouted.
+        given().contentType("application/json")
+            .body("""
+                {"name": "it-msk-config", "kafkaVersions": ["3.6.0"],
+                 "serverProperties": "YXV0by5jcmVhdGUudG9waWNzLmVuYWJsZT10cnVl"}
+                """)
+        .when()
+            .post("/v1/configurations")
+        .then()
+            .statusCode(200)
+            .body("arn", containsString(":kafka:"));
+    }
+
+    @Test
+    void describeBrokerEngineTypesFiltersByEngine() {
+        given().header("Authorization", MQ_AUTH)
+            .queryParam("engineType", "ACTIVEMQ")
+        .when()
+            .get("/v1/broker-engine-types")
+        .then()
+            .statusCode(200)
+            .body("brokerEngineTypes", hasSize(1))
+            .body("brokerEngineTypes[0].engineType", equalTo("ACTIVEMQ"))
+            .body("brokerEngineTypes[0].engineVersions[0].name", equalTo("5.18"));
+    }
+
+    @Test
+    void createBrokerRejectsMissingConfigurationReference() {
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("""
+                {"brokerName": "it-badconfig", "engineType": "RABBITMQ",
+                 "deploymentMode": "SINGLE_INSTANCE", "hostInstanceType": "mq.t3.micro",
+                 "configuration": {"id": "c-00000000-0000-0000-0000-000000000000", "revision": 1},
+                 "users": [{"username": "admin", "password": "AdminPass123", "consoleAccess": true}]}
+                """)
+        .when()
+            .post("/v1/brokers")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("NotFoundException"));
     }
 
     @Test

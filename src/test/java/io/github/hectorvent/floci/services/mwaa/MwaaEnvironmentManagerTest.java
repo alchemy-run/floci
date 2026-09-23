@@ -220,6 +220,30 @@ class MwaaEnvironmentManagerTest {
     }
 
     @Test
+    void airflowRestApiAcceptsBasicAuthForTheRecordedAdminUser() {
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+        when(lifecycleManager.create(any())).thenReturn("airflow-container-id");
+        when(lifecycleManager.startCreated(eq("airflow-container-id"), any())).thenReturn(
+                new ContainerInfo("airflow-container-id", Map.of(8080, new EndpointInfo("172.18.0.5", 8080))));
+        Environment environment = new Environment();
+        environment.setName("my-env");
+        // A user option must not be able to switch the REST API auth backend InvokeRestApi relies on.
+        environment.setAirflowConfigurationOptions(Map.of("api.auth_backends", "airflow.api.auth.backend.deny_all"));
+
+        manager.startAirflowContainer(environment, "2.10.5", "172.18.0.9", "db-secret-pw", null);
+
+        ArgumentCaptor<ContainerSpec> captor = ArgumentCaptor.forClass(ContainerSpec.class);
+        verify(lifecycleManager).create(captor.capture());
+        List<String> env = captor.getValue().env();
+        assertTrue(env.contains("AIRFLOW__API__AUTH_BACKENDS="
+                + "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"));
+        assertFalse(env.contains("AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.deny_all"));
+        assertTrue(env.contains("_AIRFLOW_WWW_USER_PASSWORD=" + environment.getAirflowAdminPassword()));
+        assertTrue(MwaaEnvironmentManager.airflowBootstrapScript()
+                .contains("export AIRFLOW__API__AUTH_BACKENDS=\"$_FLOCI_ORIG_AIRFLOW__API__AUTH_BACKENDS\""));
+    }
+
+    @Test
     void airflowContainerGetsPointedBackAtFlociForItsOwnAwsSdkCalls() {
         ContainerSpec spec = startAirflowAndCaptureSpec(false);
 

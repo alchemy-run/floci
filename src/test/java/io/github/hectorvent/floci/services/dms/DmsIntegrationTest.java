@@ -13,8 +13,11 @@ import java.util.List;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,6 +34,7 @@ class DmsIntegrationTest {
             "AWS4-HMAC-SHA256 Credential=" + ACCOUNT_ID + "/20260101/us-east-1/dms/aws4_request";
     private static final String SUBNET_A = "subnet-default-us-east-1-a";
     private static final String SUBNET_B = "subnet-default-us-east-1-b";
+    private static final String SUBNET_C = "subnet-default-us-east-1-c";
 
     @BeforeAll
     static void configureRestAssured() {
@@ -278,13 +282,285 @@ class DmsIntegrationTest {
 
     @Test
     void unsupportedDmsActionReportsUnknownOperation() {
-        dms("CreateReplicationInstance")
+        dms("CreateReplicationTask")
                 .body("{}")
         .when()
                 .post("/")
         .then()
                 .statusCode(404)
                 .body("__type", equalTo("UnknownOperationException"));
+    }
+
+    @Test
+    void modifySubnetGroupSwapsSubnetsAndDescription() {
+        dms("CreateReplicationSubnetGroup")
+                .body(createBody("tf-modify"))
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+
+        dms("ModifyReplicationSubnetGroup")
+                .body("{\"ReplicationSubnetGroupIdentifier\":\"tf-modify\","
+                        + "\"ReplicationSubnetGroupDescription\":\"updated\","
+                        + "\"SubnetIds\":[\"" + SUBNET_A + "\",\"" + SUBNET_C + "\"]}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("ReplicationSubnetGroup.ReplicationSubnetGroupDescription", equalTo("updated"))
+                .body("ReplicationSubnetGroup.Subnets.SubnetIdentifier", contains(SUBNET_A, SUBNET_C));
+
+        dms("ModifyReplicationSubnetGroup")
+                .body("{\"ReplicationSubnetGroupIdentifier\":\"tf-modify-absent\","
+                        + "\"SubnetIds\":[\"" + SUBNET_A + "\",\"" + SUBNET_B + "\"]}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundFault"));
+
+        dms("DeleteReplicationSubnetGroup")
+                .body("{\"ReplicationSubnetGroupIdentifier\":\"tf-modify\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+    }
+
+    @Test
+    void endpointLifecycleNeverReturnsSecrets() {
+        String endpointArn = dms("CreateEndpoint")
+                .body("{\"EndpointIdentifier\":\"it-endpoint\",\"EndpointType\":\"source\","
+                        + "\"EngineName\":\"mysql\",\"ServerName\":\"source-db.example.com\",\"Port\":3306,"
+                        + "\"Username\":\"admin\",\"Password\":\"hunter2\",\"DatabaseName\":\"app\","
+                        + "\"MySQLSettings\":{\"Password\":\"hunter2\",\"EventsPollInterval\":5},"
+                        + "\"Tags\":[{\"Key\":\"team\",\"Value\":\"data\"}]}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("Endpoint.EndpointType", equalTo("SOURCE"))
+                .body("Endpoint.EngineName", equalTo("mysql"))
+                .body("Endpoint.Status", equalTo("active"))
+                .body("Endpoint.Password", nullValue())
+                .body("Endpoint.MySQLSettings.Password", nullValue())
+                .body("Endpoint.MySQLSettings.EventsPollInterval", equalTo(5))
+                .body("Endpoint.EndpointArn", containsString(":endpoint:"))
+                .extract().path("Endpoint.EndpointArn");
+
+        dms("DescribeEndpoints")
+                .body("{\"Filters\":[{\"Name\":\"endpoint-id\",\"Values\":[\"it-endpoint\"]}]}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("Endpoints", hasSize(1))
+                .body("Endpoints[0].EndpointArn", equalTo(endpointArn))
+                .body("Endpoints[0].ServerName", equalTo("source-db.example.com"))
+                .body("Endpoints[0].Port", equalTo(3306));
+
+        dms("ModifyEndpoint")
+                .body("{\"EndpointArn\":\"" + endpointArn + "\",\"EndpointType\":\"source\","
+                        + "\"EngineName\":\"mysql\",\"Port\":3307,\"Username\":\"readonly\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("Endpoint.EndpointArn", equalTo(endpointArn))
+                .body("Endpoint.Port", equalTo(3307))
+                .body("Endpoint.Username", equalTo("readonly"));
+
+        dms("ListTagsForResource")
+                .body("{\"ResourceArn\":\"" + endpointArn + "\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("TagList.Key", contains("team"));
+
+        dms("DescribeSchemas")
+                .body("{\"EndpointArn\":\"" + endpointArn + "\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidResourceStateFault"));
+
+        dms("DescribeRefreshSchemasStatus")
+                .body("{\"EndpointArn\":\"" + endpointArn + "\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundFault"));
+
+        dms("DescribeConnections")
+                .body("{\"Filters\":[{\"Name\":\"endpoint-arn\",\"Values\":[\"" + endpointArn + "\"]}]}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundFault"));
+
+        dms("DeleteEndpoint")
+                .body("{\"EndpointArn\":\"" + endpointArn + "\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("Endpoint.Status", equalTo("deleting"));
+
+        dms("DescribeEndpoints")
+                .body("{\"Filters\":[{\"Name\":\"endpoint-id\",\"Values\":[\"it-endpoint\"]}]}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundFault"));
+    }
+
+    @Test
+    void deletingANonexistentReplicationInstanceFaults() {
+        dms("DeleteReplicationInstance")
+                .body("{\"ReplicationInstanceArn\":\"arn:aws:dms:us-east-1:" + ACCOUNT_ID
+                        + ":rep:AAAAAAAAAAAAAAAAAAAAAAAAAA\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundFault"));
+    }
+
+    @Test
+    void replicationInstanceLifecycleSettlesAndBlocksItsSubnetGroup() {
+        dms("CreateReplicationSubnetGroup")
+                .body(createBody("it-instance-group"))
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+
+        String instanceArn = dms("CreateReplicationInstance")
+                .body("{\"ReplicationInstanceIdentifier\":\"it-instance\","
+                        + "\"ReplicationInstanceClass\":\"dms.t3.micro\",\"AllocatedStorage\":20,"
+                        + "\"ReplicationSubnetGroupIdentifier\":\"it-instance-group\","
+                        + "\"PubliclyAccessible\":false,\"MultiAZ\":false}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("ReplicationInstance.ReplicationInstanceStatus", equalTo("creating"))
+                .body("ReplicationInstance.ReplicationInstanceArn", containsString(":rep:"))
+                .body("ReplicationInstance.ReplicationSubnetGroup.VpcId", equalTo("vpc-default-us-east-1"))
+                .body("ReplicationInstance.VpcSecurityGroups.VpcSecurityGroupId", contains("sg-default-us-east-1"))
+                .extract().path("ReplicationInstance.ReplicationInstanceArn");
+
+        dms("DescribeReplicationInstances")
+                .body("{\"Filters\":[{\"Name\":\"replication-instance-id\",\"Values\":[\"it-instance\"]}]}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("ReplicationInstances", hasSize(1))
+                .body("ReplicationInstances[0].ReplicationInstanceStatus", equalTo("available"))
+                .body("ReplicationInstances[0].ReplicationInstanceClass", equalTo("dms.t3.micro"))
+                .body("ReplicationInstances[0].AllocatedStorage", equalTo(20));
+
+        dms("DescribeReplicationInstanceTaskLogs")
+                .body("{\"ReplicationInstanceArn\":\"" + instanceArn + "\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("ReplicationInstanceArn", equalTo(instanceArn))
+                .body("ReplicationInstanceTaskLogs", hasSize(0));
+
+        dms("DeleteReplicationSubnetGroup")
+                .body("{\"ReplicationSubnetGroupIdentifier\":\"it-instance-group\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidResourceStateFault"));
+
+        dms("DeleteReplicationInstance")
+                .body("{\"ReplicationInstanceArn\":\"" + instanceArn + "\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("ReplicationInstance.ReplicationInstanceStatus", equalTo("deleting"));
+
+        dms("DescribeEvents")
+                .body("{\"SourceType\":\"replication-instance\",\"SourceIdentifier\":\"it-instance\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("Events.EventCategories.flatten()", hasItems("creation", "deletion"));
+
+        dms("DeleteReplicationSubnetGroup")
+                .body("{\"ReplicationSubnetGroupIdentifier\":\"it-instance-group\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+    }
+
+    @Test
+    void catalogueDescribesAreNonEmpty() {
+        dms("DescribeOrderableReplicationInstances")
+                .body("{}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("OrderableReplicationInstances.ReplicationInstanceClass", hasItem("dms.t3.micro"));
+
+        dms("DescribeEndpointSettings")
+                .body("{\"EngineName\":\"mysql\"}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200)
+                .body("EndpointSettings.Name", hasItem("EventsPollInterval"));
+
+        dms("DescribeEvents")
+                .body("{\"SourceType\":\"replication-instance\",\"Duration\":60}")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(200);
+    }
+
+    @Test
+    void taskAndReplicationOperationsFaultForResourcesThatDoNotExist() {
+        String taskArn = "arn:aws:dms:us-east-1:" + ACCOUNT_ID + ":task:AAAAAAAAAAAAAAAAAAAAAAAAAA";
+        String configArn = "arn:aws:dms:us-east-1:" + ACCOUNT_ID + ":replication-config:AAAAAAAAAAAAAAAAAAAAAAAAAA";
+        List<String[]> calls = List.of(
+                new String[] {"DescribeReplicationTasks",
+                        "{\"Filters\":[{\"Name\":\"replication-task-id\",\"Values\":[\"alchemy-nonexistent-task\"]}]}"},
+                new String[] {"StartReplicationTask",
+                        "{\"ReplicationTaskArn\":\"" + taskArn + "\",\"StartReplicationTaskType\":\"start-replication\"}"},
+                new String[] {"StopReplicationTask", "{\"ReplicationTaskArn\":\"" + taskArn + "\"}"},
+                new String[] {"DescribeTableStatistics", "{\"ReplicationTaskArn\":\"" + taskArn + "\"}"},
+                new String[] {"ReloadTables", "{\"ReplicationTaskArn\":\"" + taskArn + "\","
+                        + "\"TablesToReload\":[{\"SchemaName\":\"public\",\"TableName\":\"nonexistent\"}]}"},
+                new String[] {"DescribeReplications",
+                        "{\"Filters\":[{\"Name\":\"replication-config-arn\",\"Values\":[\"" + configArn + "\"]}]}"},
+                new String[] {"StartReplication",
+                        "{\"ReplicationConfigArn\":\"" + configArn + "\",\"StartReplicationType\":\"start-replication\"}"},
+                new String[] {"StopReplication", "{\"ReplicationConfigArn\":\"" + configArn + "\"}"});
+        for (String[] call : calls) {
+            dms(call[0])
+                    .body(call[1])
+            .when()
+                    .post("/")
+            .then()
+                    .statusCode(400)
+                    .body("__type", equalTo("ResourceNotFoundFault"));
+        }
     }
 
     @Test
