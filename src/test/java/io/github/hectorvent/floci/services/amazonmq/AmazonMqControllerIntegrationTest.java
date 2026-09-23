@@ -104,6 +104,91 @@ class AmazonMqControllerIntegrationTest {
                 .then().statusCode(404).body("__type", equalTo("NotFoundException"));
     }
 
+    @Test
+    void promoteRequiresReplicaBroker() {
+        String missing = "b-00000000-0000-0000-0000-000000000000";
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"mode\":\"SWITCHOVER\"}")
+                .post("/v1/brokers/{id}/promote", missing)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        String brokerId = createRabbitBroker("it-promote");
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"mode\":\"SWITCHOVER\"}")
+                .post("/v1/brokers/{id}/promote", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"))
+                .body("message", containsString("replica"));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"mode\":\"SIDEWAYS\"}")
+                .post("/v1/brokers/{id}/promote", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{}")
+                .post("/v1/brokers/{id}/promote", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+    }
+
+    @Test
+    void updateUserFollowsUserApiRules() {
+        String missing = "b-00000000-0000-0000-0000-000000000000";
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"consoleAccess\":true}")
+                .put("/v1/brokers/{id}/users/alice", missing)
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        String brokerId = createRabbitBroker("it-update-user");
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"consoleAccess\":true}")
+                .put("/v1/brokers/{id}/users/alice", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+    }
+
+    @Test
+    void updateBrokerStagesPendingChangesUntilReboot() {
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"autoMinorVersionUpgrade\":true}")
+                .put("/v1/brokers/{id}", "b-00000000-0000-0000-0000-000000000000")
+                .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        String brokerId = createRabbitBroker("it-update-broker");
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"engineVersion\":\"9.9\"}")
+                .put("/v1/brokers/{id}", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("{\"dataReplicationMode\":\"CRDR\"}")
+                .put("/v1/brokers/{id}", brokerId)
+                .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .body("""
+                    {"autoMinorVersionUpgrade": true, "hostInstanceType": "mq.m5.large",
+                     "maintenanceWindowStartTime": {"dayOfWeek": "MONDAY", "timeOfDay": "03:00", "timeZone": "UTC"},
+                     "logs": {"general": true}}
+                    """)
+                .put("/v1/brokers/{id}", brokerId)
+                .then().statusCode(200)
+                .body("brokerId", equalTo(brokerId))
+                .body("hostInstanceType", equalTo("mq.m5.large"))
+                .body("autoMinorVersionUpgrade", equalTo(true));
+
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}", brokerId)
+                .then().statusCode(200)
+                .body("hostInstanceType", equalTo("mq.t3.micro"))
+                .body("pendingHostInstanceType", equalTo("mq.m5.large"))
+                .body("autoMinorVersionUpgrade", equalTo(true))
+                .body("maintenanceWindowStartTime.dayOfWeek", equalTo("MONDAY"))
+                .body("logs.general", equalTo(true));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+                .post("/v1/brokers/{id}/reboot", brokerId)
+                .then().statusCode(200);
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}", brokerId)
+                .then().statusCode(200)
+                .body("hostInstanceType", equalTo("mq.m5.large"))
+                .body("pendingHostInstanceType", nullValue());
+    }
+
     private static String mqAuth(String region) {
         return "AWS4-HMAC-SHA256 Credential=test/20260922/" + region
                 + "/mq/aws4_request, SignedHeaders=host, Signature=test";

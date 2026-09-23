@@ -113,7 +113,89 @@ public class AmazonMqController {
         body.put("created", b.getCreated());
         body.put("brokerInstances", b.getBrokerInstances());
         body.put("tags", b.getTags());
+        body.put("authenticationStrategy", AmazonMqService.effectiveAuthenticationStrategy(b));
+        body.put("dataReplicationMode", "NONE");
+        putIfPresent(body, "pendingEngineVersion", b.getPendingEngineVersion());
+        putIfPresent(body, "pendingHostInstanceType", b.getPendingHostInstanceType());
+        putIfPresent(body, "pendingAuthenticationStrategy", b.getPendingAuthenticationStrategy());
+        putIfPresent(body, "maintenanceWindowStartTime", b.getMaintenanceWindowStartTime());
+        putIfPresent(body, "logs", b.getLogs());
+        putIfPresent(body, "securityGroups", b.getSecurityGroups());
+        if (b.getConfigurationId() != null || b.getPendingConfigurationId() != null) {
+            Map<String, Object> configurations = new LinkedHashMap<>();
+            if (b.getConfigurationId() != null) {
+                configurations.put("current", configurationRef(b.getConfigurationId(), b.getConfigurationRevision()));
+            }
+            if (b.getPendingConfigurationId() != null) {
+                configurations.put("pending",
+                        configurationRef(b.getPendingConfigurationId(), b.getPendingConfigurationRevision()));
+            }
+            body.put("configurations", configurations);
+        }
         return body;
+    }
+
+    private static Map<String, Object> configurationRef(String id, Integer revision) {
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("id", id);
+        if (revision != null) {
+            ref.put("revision", revision);
+        }
+        return ref;
+    }
+
+    private static void putIfPresent(Map<String, Object> body, String key, Object value) {
+        if (value != null) {
+            body.put(key, value);
+        }
+    }
+
+    @PUT
+    @Path("/v1/brokers/{broker-id}")
+    public Response updateBroker(@PathParam("broker-id") String brokerId, Map<String, Object> request) {
+        Broker existing = service.describeBroker(brokerId);
+        String configurationId = null;
+        Integer configurationRevision = null;
+        if (request.get("configuration") instanceof Map<?, ?> reference) {
+            configurationId = reference.get("id") == null ? null : String.valueOf(reference.get("id"));
+            configurationRevision = integer(reference.get("revision"));
+            configurations.validateBrokerReference(configurationId, configurationRevision, existing.getEngineType());
+        }
+        Broker broker = service.updateBroker(brokerId, new AmazonMqService.BrokerUpdate(
+                request.get("autoMinorVersionUpgrade") instanceof Boolean flag ? flag : null,
+                str(request, "engineVersion"),
+                str(request, "hostInstanceType"),
+                str(request, "authenticationStrategy"),
+                configurationId,
+                configurationRevision,
+                objectMap(request.get("maintenanceWindowStartTime")),
+                objectMap(request.get("logs")),
+                strList(request.get("securityGroups")),
+                str(request, "dataReplicationMode")));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("brokerId", broker.getBrokerId());
+        body.put("autoMinorVersionUpgrade", broker.isAutoMinorVersionUpgrade());
+        body.put("authenticationStrategy", broker.getPendingAuthenticationStrategy() != null
+                ? broker.getPendingAuthenticationStrategy() : AmazonMqService.effectiveAuthenticationStrategy(broker));
+        body.put("engineVersion", broker.getPendingEngineVersion() != null
+                ? broker.getPendingEngineVersion() : broker.getEngineVersion());
+        body.put("hostInstanceType", broker.getPendingHostInstanceType() != null
+                ? broker.getPendingHostInstanceType() : broker.getHostInstanceType());
+        body.put("dataReplicationMode", "NONE");
+        if (configurationId != null) {
+            body.put("configuration", configurationRef(configurationId, configurationRevision));
+        }
+        putIfPresent(body, "maintenanceWindowStartTime", broker.getMaintenanceWindowStartTime());
+        putIfPresent(body, "logs", broker.getLogs());
+        putIfPresent(body, "securityGroups", broker.getSecurityGroups());
+        return Response.ok(body).build();
+    }
+
+    @POST
+    @Path("/v1/brokers/{broker-id}/promote")
+    public Response promote(@PathParam("broker-id") String brokerId, Map<String, Object> request) {
+        service.promote(brokerId, request == null ? null : str(request, "mode"));
+        return Response.ok(Map.of("brokerId", brokerId)).build();
     }
 
     @DELETE
@@ -155,6 +237,14 @@ public class AmazonMqController {
         body.put("consoleAccess", user.isConsoleAccess());
         body.put("groups", user.getGroups());
         return Response.ok(body).build();
+    }
+
+    @PUT
+    @Path("/v1/brokers/{broker-id}/users/{username}")
+    public Response updateUser(@PathParam("broker-id") String brokerId,
+                               @PathParam("username") String username) {
+        service.updateUser(brokerId, username);
+        return Response.ok(Map.of()).build();
     }
 
     @GET
@@ -208,7 +298,7 @@ public class AmazonMqController {
     private static Map<String, List<String>> engineVersions() {
         Map<String, List<String>> versions = new LinkedHashMap<>();
         versions.put(AmazonMqConfigurationService.ENGINE_ACTIVEMQ, List.of("5.18", "5.17.6", "5.16.7", "5.15.16"));
-        versions.put(AmazonMqConfigurationService.ENGINE_RABBITMQ, List.of("3.13"));
+        versions.put(AmazonMqConfigurationService.ENGINE_RABBITMQ, AmazonMqService.RABBITMQ_ENGINE_VERSIONS);
         return versions;
     }
 
@@ -378,6 +468,15 @@ public class AmazonMqController {
             for (Object o : list) {
                 result.add(String.valueOf(o));
             }
+            return result;
+        }
+        return null;
+    }
+
+    private static Map<String, Object> objectMap(Object raw) {
+        if (raw instanceof Map<?, ?> map) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            map.forEach((k, v) -> result.put(String.valueOf(k), v));
             return result;
         }
         return null;

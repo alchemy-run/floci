@@ -40,14 +40,16 @@ public class LakeFormationController {
     private final ObjectMapper mapper;
     private final RegionResolver regionResolver;
     private final LakeFormationCatalogService catalog;
+    private final LakeFormationDataAccessService dataAccess;
 
     @Inject
     public LakeFormationController(LakeFormationService service, ObjectMapper mapper, RegionResolver regionResolver,
-                                   LakeFormationCatalogService catalog) {
+                                   LakeFormationCatalogService catalog, LakeFormationDataAccessService dataAccess) {
         this.service = service;
         this.mapper = mapper;
         this.regionResolver = regionResolver;
         this.catalog = catalog;
+        this.dataAccess = dataAccess;
     }
 
     private JsonNode parse(String body) {
@@ -186,6 +188,33 @@ public class LakeFormationController {
     public Response getDataLakePrincipal(@Context HttpHeaders headers, String body) {
         parse(body);
         return handleResponse(catalog.getDataLakePrincipal(headers.getHeaderString("Authorization")));
+    }
+
+    @POST
+    @Path("/GetEffectivePermissionsForPath")
+    public Response getEffectivePermissionsForPath(@Context HttpHeaders headers, String body) {
+        return handleResponse(dataAccess.getEffectivePermissionsForPath(regionResolver.resolveRegion(headers), parse(body)));
+    }
+
+    @POST
+    @Path("/GetTemporaryGlueTableCredentials")
+    public Response getTemporaryGlueTableCredentials(@Context HttpHeaders headers, String body) {
+        return handleResponse(dataAccess.getTemporaryGlueTableCredentials(regionResolver.resolveRegion(headers),
+                parse(body), headers.getHeaderString("Authorization")));
+    }
+
+    @POST
+    @Path("/GetTemporaryGluePartitionCredentials")
+    public Response getTemporaryGluePartitionCredentials(@Context HttpHeaders headers, String body) {
+        return handleResponse(dataAccess.getTemporaryGluePartitionCredentials(regionResolver.resolveRegion(headers),
+                parse(body), headers.getHeaderString("Authorization")));
+    }
+
+    @POST
+    @Path("/GetTemporaryDataLocationCredentials")
+    public Response getTemporaryDataLocationCredentials(@Context HttpHeaders headers, String body) {
+        return handleResponse(dataAccess.getTemporaryDataLocationCredentials(regionResolver.resolveRegion(headers),
+                parse(body), headers.getHeaderString("Authorization")));
     }
 
     @POST

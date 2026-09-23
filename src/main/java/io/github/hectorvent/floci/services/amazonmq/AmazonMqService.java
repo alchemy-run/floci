@@ -41,6 +41,7 @@ public class AmazonMqService implements ResourceProvider {
     private static final String ENGINE_RABBITMQ = "RABBITMQ";
     private static final String DEFAULT_ENGINE_VERSION = "3.13";
     private static final String DEPLOYMENT_SINGLE_INSTANCE = "SINGLE_INSTANCE";
+    static final List<String> RABBITMQ_ENGINE_VERSIONS = List.of("3.13");
 
     private final StorageBackend<String, Broker> storage;
     private final EmulatorConfig config;
@@ -253,8 +254,125 @@ public class AmazonMqService implements ResourceProvider {
                             + broker.getBrokerState() + "; it must be RUNNING", 400);
         }
         // RebootBroker is asynchronous and returns the broker to RUNNING. This tier
-        // does not cycle the container, so the broker simply stays RUNNING.
+        // does not cycle the container, so the broker simply stays RUNNING. A reboot
+        // applies the changes UpdateBroker left pending.
+        if (applyPendingChanges(broker)) {
+            putBroker(broker);
+        }
         return broker;
+    }
+
+    private static boolean applyPendingChanges(Broker broker) {
+        boolean changed = false;
+        if (broker.getPendingEngineVersion() != null) {
+            broker.setEngineVersion(broker.getPendingEngineVersion());
+            broker.setPendingEngineVersion(null);
+            changed = true;
+        }
+        if (broker.getPendingHostInstanceType() != null) {
+            broker.setHostInstanceType(broker.getPendingHostInstanceType());
+            broker.setPendingHostInstanceType(null);
+            changed = true;
+        }
+        if (broker.getPendingAuthenticationStrategy() != null) {
+            broker.setAuthenticationStrategy(broker.getPendingAuthenticationStrategy());
+            broker.setPendingAuthenticationStrategy(null);
+            changed = true;
+        }
+        if (broker.getPendingConfigurationId() != null) {
+            broker.setConfigurationId(broker.getPendingConfigurationId());
+            broker.setConfigurationRevision(broker.getPendingConfigurationRevision());
+            broker.setPendingConfigurationId(null);
+            broker.setPendingConfigurationRevision(null);
+            changed = true;
+        }
+        return changed;
+    }
+
+    /**
+     * UpdateBroker. {@code autoMinorVersionUpgrade}, the maintenance window, logs and security
+     * groups apply immediately; engine version, instance type, authentication strategy and
+     * configuration become pending changes that the next RebootBroker applies.
+     */
+    public Broker updateBroker(String brokerId, BrokerUpdate update) {
+        Broker broker = describeBroker(brokerId);
+        if (update.dataReplicationMode() != null && !"NONE".equals(update.dataReplicationMode())) {
+            throw new AwsException("BadRequestException",
+                    "Data replication mode " + update.dataReplicationMode()
+                            + " is not supported for RabbitMQ brokers", 400);
+        }
+        if (update.engineVersion() != null && !RABBITMQ_ENGINE_VERSIONS.contains(update.engineVersion())) {
+            throw new AwsException("BadRequestException",
+                    "Broker engine version [" + update.engineVersion() + "] is not supported for RabbitMQ", 400);
+        }
+        if (update.hostInstanceType() != null && !update.hostInstanceType().matches("mq\\.[a-z0-9]+\\.[a-z0-9]+")) {
+            throw new AwsException("BadRequestException",
+                    "Broker instance type [" + update.hostInstanceType() + "] is not valid", 400);
+        }
+        if (update.authenticationStrategy() != null
+                && !Set.of("SIMPLE", "LDAP", "CONFIG_MANAGED").contains(update.authenticationStrategy())) {
+            throw new AwsException("BadRequestException",
+                    "Authentication strategy [" + update.authenticationStrategy() + "] is not valid", 400);
+        }
+        if (update.logs() != null && Boolean.TRUE.equals(update.logs().get("audit"))) {
+            throw new AwsException("BadRequestException", "Audit logs are not supported for RabbitMQ brokers", 400);
+        }
+        if (update.autoMinorVersionUpgrade() != null) {
+            broker.setAutoMinorVersionUpgrade(update.autoMinorVersionUpgrade());
+        }
+        if (update.engineVersion() != null && !update.engineVersion().equals(broker.getEngineVersion())) {
+            broker.setPendingEngineVersion(update.engineVersion());
+        }
+        if (update.hostInstanceType() != null && !update.hostInstanceType().equals(broker.getHostInstanceType())) {
+            broker.setPendingHostInstanceType(update.hostInstanceType());
+        }
+        if (update.authenticationStrategy() != null
+                && !update.authenticationStrategy().equals(effectiveAuthenticationStrategy(broker))) {
+            broker.setPendingAuthenticationStrategy(update.authenticationStrategy());
+        }
+        if (update.configurationId() != null) {
+            broker.setPendingConfigurationId(update.configurationId());
+            broker.setPendingConfigurationRevision(update.configurationRevision());
+        }
+        if (update.maintenanceWindowStartTime() != null) {
+            broker.setMaintenanceWindowStartTime(new HashMap<>(update.maintenanceWindowStartTime()));
+        }
+        if (update.logs() != null) {
+            broker.setLogs(new HashMap<>(update.logs()));
+        }
+        if (update.securityGroups() != null) {
+            broker.setSecurityGroups(new ArrayList<>(update.securityGroups()));
+        }
+        putBroker(broker);
+        return broker;
+    }
+
+    static String effectiveAuthenticationStrategy(Broker broker) {
+        return broker.getAuthenticationStrategy() != null ? broker.getAuthenticationStrategy() : "SIMPLE";
+    }
+
+    /** Parsed UpdateBroker request; {@code null} members leave the broker's value unchanged. */
+    public record BrokerUpdate(Boolean autoMinorVersionUpgrade, String engineVersion, String hostInstanceType,
+                               String authenticationStrategy, String configurationId, Integer configurationRevision,
+                               Map<String, Object> maintenanceWindowStartTime, Map<String, Object> logs,
+                               List<String> securityGroups, String dataReplicationMode) {}
+
+    /**
+     * Promote applies only to the replica broker of a cross-Region data replication (CRDR)
+     * pair. RabbitMQ brokers never belong to one, so an existing broker always rejects it.
+     */
+    public void promote(String brokerId, String mode) {
+        if (mode == null || mode.isBlank()) {
+            throw new AwsException("BadRequestException", "The request must include the mode parameter.", 400);
+        }
+        if (!"SWITCHOVER".equals(mode) && !"FAILOVER".equals(mode)) {
+            throw new AwsException("BadRequestException",
+                    "The mode [" + mode + "] is not valid. Valid values: SWITCHOVER, FAILOVER.", 400);
+        }
+        Broker broker = describeBroker(brokerId);
+        throw new AwsException("BadRequestException",
+                "Broker [" + broker.getBrokerId() + "] is not a replica broker in a data replication pair "
+                        + "(DataReplicationMode is NONE).", 400);
     }
 
     private void applyLocalEndpoints(Broker broker) {
@@ -318,6 +436,11 @@ public class AmazonMqService implements ResourceProvider {
     }
 
     public List<MqUser> listUsers(String brokerId) {
+        describeBroker(brokerId);
+        throw userApiNotSupported();
+    }
+
+    public void updateUser(String brokerId, String username) {
         describeBroker(brokerId);
         throw userApiNotSupported();
     }

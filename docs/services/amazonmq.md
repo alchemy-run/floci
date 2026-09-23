@@ -18,7 +18,9 @@ Only the **RabbitMQ** engine and the `SINGLE_INSTANCE` deployment mode are suppo
 | `DescribeBroker` | Get broker metadata, state, and connection endpoints |
 | `ListBrokers` | List all emulated brokers |
 | `DeleteBroker` | Stops and removes the RabbitMQ container |
-| `RebootBroker` | Reboots the broker |
+| `RebootBroker` | Reboots the broker and applies pending `UpdateBroker` changes |
+| `UpdateBroker` | Applies `AutoMinorVersionUpgrade`, maintenance window, logs and security groups immediately; engine version, instance type, authentication strategy and configuration stay pending until `RebootBroker` |
+| `Promote` | Rejected with `BadRequestException`: only a replica broker in a cross-Region data replication (CRDR) pair can be promoted, and RabbitMQ brokers never belong to one |
 
 ### User management
 
