@@ -187,7 +187,12 @@ public class AwsQueryController {
             "ModifyLaunchTemplate", "DeleteLaunchTemplate",
             "DescribeNetworkInterfaces",
             "CreateFlowLogs", "DescribeFlowLogs", "DeleteFlowLogs",
-            "CreateVolume", "DescribeVolumes", "DeleteVolume", "AttachVolume", "DetachVolume"
+            "CreateVolume", "DescribeVolumes", "DeleteVolume", "AttachVolume", "DetachVolume",
+            "CreateClientVpnEndpoint", "DescribeClientVpnEndpoints", "ModifyClientVpnEndpoint",
+            "DeleteClientVpnEndpoint", "AssociateClientVpnTargetNetwork", "DisassociateClientVpnTargetNetwork",
+            "DescribeClientVpnTargetNetworks", "AuthorizeClientVpnIngress", "RevokeClientVpnIngress",
+            "DescribeClientVpnAuthorizationRules", "CreateClientVpnRoute", "DeleteClientVpnRoute",
+            "DescribeClientVpnRoutes"
     );
 
     private final CloudFormationQueryHandler cloudFormationQueryHandler;

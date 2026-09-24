@@ -35,6 +35,8 @@ public class Ec2HttpPortMux {
 
     private static final Logger LOG = Logger.getLogger(Ec2HttpPortMux.class);
     static final String NGINX_IMAGE = "nginx:alpine";
+    /** 75 attempts, 200 ms apart: up to 15 s for nginx to come up before giving up on the mux. */
+    static final int RELOAD_ATTEMPTS = 75;
 
     private final DockerClient dockerClient;
     private final ContainerBuilder containerBuilder;
@@ -316,8 +318,10 @@ public class Ec2HttpPortMux {
     }
 
     private boolean reloadNginx(String containerId) throws Exception {
+        // A freshly started mux has no nginx master (and no pid file) until the image's
+        // entrypoint scripts finish, which takes well over a second on a loaded Docker VM.
         Exception last = null;
-        for (int attempt = 0; attempt < 5; attempt++) {
+        for (int attempt = 0; attempt < RELOAD_ATTEMPTS; attempt++) {
             try {
                 if (tryReloadNginx(containerId)) {
                     return true;

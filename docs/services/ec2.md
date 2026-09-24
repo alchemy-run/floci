@@ -164,7 +164,7 @@ Floci seeds the following resources on first use in each region so Terraform, th
 | Default Subnet (AZ a) | `subnet-default-a` | CIDR `172.31.0.0/20` |
 | Default Subnet (AZ b) | `subnet-default-b` | CIDR `172.31.16.0/20` |
 | Default Subnet (AZ c) | `subnet-default-c` | CIDR `172.31.32.0/20` |
-| Default Security Group | `sg-default` | `groupName=default`, all-traffic egress |
+| Default Security Group | `sg-default` | `groupName=default`, all-traffic ingress from its own members and all-traffic egress to `0.0.0.0/0` |
 | Default Internet Gateway | `igw-default` | Attached to default VPC |
 | Main Route Table | `rtb-default` | Associated with default VPC |
 | Default Network ACL | `acl-default` | Allow-all, associated with the default subnets |
@@ -201,7 +201,7 @@ longer flips the record to `terminated`.
 |--------|-------------|
 | CreateVpc | Creates a VPC with the requested CIDR block. |
 | DescribeVpcs | Lists or returns stored VPCs. |
-| DeleteVpc | Deletes a VPC and its default security group and rules, main route table, and default network ACL, including their tags. Remaining subnets, non-default groups/tables/ACLs, live instances, network interfaces, gateways, or endpoints cause `DependencyViolation`. |
+| DeleteVpc | Deletes a VPC and its default security group and rules, main route table, and default network ACL, including their tags. Remaining subnets, non-default groups/tables/ACLs, live instances, network interfaces, gateways, endpoints, or a Client VPN endpoint in the VPC cause `DependencyViolation`. |
 | ModifyVpcAttribute | Updates supported VPC attributes. |
 | DescribeVpcAttribute | Returns a supported VPC attribute. |
 | DescribeVpcEndpointServices | Returns an empty local VPC endpoint service catalog. |
@@ -239,7 +239,7 @@ longer flips the record to `terminated`.
 |--------|-------------|
 | CreateSubnet | Creates a subnet in a VPC. |
 | DescribeSubnets | Lists or returns stored subnets. A missing `SubnetId` is `InvalidSubnetID.NotFound`. |
-| DeleteSubnet | Deletes a subnet from the local EC2 store. |
+| DeleteSubnet | Deletes a subnet from the local EC2 store. A subnet associated with a Client VPN endpoint is `DependencyViolation`. |
 | ModifySubnetAttribute | Updates supported subnet attributes. |
 
 ### Security Groups
@@ -248,7 +248,7 @@ longer flips the record to `terminated`.
 |--------|-------------|
 | CreateSecurityGroup | Creates a security group in a VPC. |
 | DescribeSecurityGroups | Lists or returns stored security groups. A missing `GroupId` is `InvalidGroup.NotFound`. |
-| DeleteSecurityGroup | Deletes a security group from the local EC2 store. |
+| DeleteSecurityGroup | Deletes a security group from the local EC2 store. A VPC's `default` group is `CannotDelete` (it is removed with its VPC), and a group a Client VPN endpoint uses is `DependencyViolation`. |
 | AuthorizeSecurityGroupIngress | Adds inbound permissions. Sources may be IPv4 ranges, IPv6 ranges, or another security group (`UserIdGroupPairs`, sent on the wire as `Groups`); prefix list sources are not stored. One rule is stored per source, each carrying its own description. |
 | AuthorizeSecurityGroupEgress | Adds outbound permissions, with the same source types as the inbound call. |
 | RevokeSecurityGroupIngress | Removes inbound permissions. Matches on protocol and port range only, so it removes every permission on that port regardless of source. |
@@ -258,6 +258,28 @@ longer flips the record to `terminated`.
 | ModifySecurityGroupRules | Updates supported fields on security group rules. |
 | UpdateSecurityGroupRuleDescriptionsIngress | Updates descriptions on matching inbound security group rules. |
 | UpdateSecurityGroupRuleDescriptionsEgress | Updates descriptions on matching outbound security group rules. |
+
+Every VPC's default security group starts the way AWS creates it: one inbound rule allowing all traffic (`IpProtocol=-1`) from the group itself (`UserIdGroupPairs` / `ReferencedGroupInfo` naming its own id) and one outbound rule allowing all traffic to `0.0.0.0/0`. Both are ordinary rules with `sgr-` ids that `DescribeSecurityGroupRules` lists and that can be revoked, modified and re-authorized. Default groups persisted by an earlier Floci version keep the rules they were stored with.
+
+### Client VPN
+
+| Action | Description |
+|--------|-------------|
+| CreateClientVpnEndpoint | Creates an endpoint in `pending-associate`. Validates authentication options, the `/12`-`/22` client CIDR, transport, port (443 or 1194), DNS servers, session timeout, logging, connect-handler and banner options, the VPC (`InvalidVpcID.NotFound`) and its security groups (the VPC's default group when none are given). Certificate ARNs must be ACM ARNs in the endpoint's region and must exist in Floci ACM; they are marked in use until the endpoint is deleted. Honors `ClientToken` and `client-vpn-endpoint` tag specifications. `TransitGatewayConfiguration` is rejected. |
+| DescribeClientVpnEndpoints | Lists or returns endpoints. Unknown ids are `InvalidClientVpnEndpointId.NotFound`. Filters: `endpoint-id`, `transport-protocol`, `tag:<key>`, `tag-key`, `tag-value`. `MaxResults` (5-1000) / `NextToken`. |
+| ModifyClientVpnEndpoint | Updates the server certificate, logging, DNS servers, port, description, split tunnel, VPC and security groups (the VPC's default group when only `VpcId` is given), self-service portal, connect handler, session timeout, banner, route enforcement and disconnect-on-timeout. Changing the VPC of an endpoint with associated subnets is `InvalidParameterValue`. |
+| DeleteClientVpnEndpoint | Deletes the endpoint, its tags and its certificate usage. An endpoint with associated target networks is `DependencyViolation`. |
+| AssociateClientVpnTargetNetwork | Associates a subnet (`InvalidClientVpnSubnetId.NotFound`, `InvalidClientVpnDuplicateAssociationException`, `InvalidClientVpnSubnetId.DuplicateAz`, `InvalidClientVpnSubnetId.OverlappingCidr`). The first association binds an endpoint created without a VPC to the subnet's VPC. Adds the automatic route to the VPC CIDR (`Origin=associate`) and makes the endpoint `available`. |
+| DisassociateClientVpnTargetNetwork | Removes an association (`InvalidClientVpnAssociationIdNotFound`) and every route targeting its subnet; the last one returns the endpoint to `pending-associate`. |
+| DescribeClientVpnTargetNetworks | Lists associations. Filters: `association-id`, `target-network-id`, `vpc-id`. |
+| AuthorizeClientVpnIngress | Adds an authorization rule for one access group or all groups (`InvalidClientVpnDuplicateAuthorizationRule`). |
+| RevokeClientVpnIngress | Removes a rule (`InvalidClientVpnEndpointAuthorizationRuleNotFound`). |
+| DescribeClientVpnAuthorizationRules | Lists rules. Filters: `description`, `destination-cidr`, `group-id`. |
+| CreateClientVpnRoute | Adds a route through an associated subnet (`InvalidClientVpnActiveAssociationNotFound`, `InvalidClientVpnDuplicateRoute`). |
+| DeleteClientVpnRoute | Deletes a manually added route (`InvalidClientVpnRouteNotFound`); routes added by an association cannot be deleted. |
+| DescribeClientVpnRoutes | Lists routes. Filters: `destination-cidr`, `origin`, `target-subnet`. |
+
+Client VPN is a control plane only: no VPN server runs and clients cannot connect. Mutations answer with the transitional status AWS returns (`associating`, `authorizing`, `creating`, `deleting`, ...), and the stored state settles at once, so the next describe reports `associated` / `active` and deleted records are gone. Connection-log groups and connect-handler Lambda ARNs are recorded but not checked against CloudWatch Logs or Lambda, and when only a log group is given Floci names the stream itself, as AWS does. `DescribeTags` classifies `cvpn-endpoint-*` ids as `client-vpn-endpoint`.
 
 ### Key Pairs
 

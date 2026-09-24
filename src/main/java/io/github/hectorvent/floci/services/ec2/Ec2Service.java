@@ -748,14 +748,24 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
         defaultSg.setOwnerId(callerAccountId());
         defaultSg.setRegion(region);
 
+        // AWS seeds every default group with all-traffic ingress from its own members.
+        IpPermission ingressSelf = new IpPermission();
+        ingressSelf.setIpProtocol("-1");
+        UserIdGroupPair self = new UserIdGroupPair();
+        self.setGroupId(securityGroupId);
+        self.setUserId(defaultSg.getOwnerId());
+        ingressSelf.getUserIdGroupPairs().add(self);
+        defaultSg.getIpPermissions().add(ingressSelf);
+
         // Default egress: all traffic
         IpPermission egressAll = new IpPermission();
         egressAll.setIpProtocol("-1");
         egressAll.getIpRanges().add(new IpRange("0.0.0.0/0"));
         defaultSg.getIpPermissionsEgress().add(egressAll);
         securityGroups.put(key(region, securityGroupId), defaultSg);
-        // Persist the default egress rule as a SecurityGroupRule so that
-        // DescribeSecurityGroupRules can find it immediately (#1093).
+        // Persist the default rules as SecurityGroupRules so that
+        // DescribeSecurityGroupRules can find them immediately (#1093).
+        createRules(region, securityGroupId, ingressSelf, false);
         createRules(region, securityGroupId, egressAll, true);
     }
 
@@ -4656,8 +4666,14 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
     public void deleteSecurityGroup(String region, String groupId) {
         ensureDefaultResources(region);
         synchronized (lockFor(key(region, groupId))) {
-            if (securityGroups.get(key(region, groupId)).isEmpty()) {
+            SecurityGroup group = securityGroups.get(key(region, groupId)).orElse(null);
+            if (group == null) {
                 throw new AwsException("InvalidGroup.NotFound", "The security group '" + groupId + "' does not exist", 400);
+            }
+            // A VPC's default group lives exactly as long as its VPC; DeleteVpc removes it.
+            if ("default".equals(group.getGroupName()) && group.getVpcId() != null) {
+                throw new AwsException("CannotDelete", "the specified group: \"" + groupId
+                        + "\" name: \"default\" cannot be deleted by a user", 400);
             }
             deleteSecurityGroupRecords(region, groupId);
         }
@@ -6930,6 +6946,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
         return List.copyOf(tags.get(resourceId).orElse(List.of()));
     }
 
+    /** Drops every tag on a resource another EC2 control plane (Client VPN) has deleted. */
+    public void deleteResourceTags(String resourceId) {
+        tags.delete(resourceId);
+    }
+
     public List<Map<String, String>> describeTags(String region, Map<String, List<String>> filters) {
         ensureDefaultResources(region);
         List<String> filterResourceIds   = filters != null ? filters.get("resource-id")   : null;
@@ -7028,6 +7049,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
         if (resourceId.startsWith("dopt-")) return "dhcp-options";
         if (resourceId.startsWith("acl-")) return "network-acl";
         if (resourceId.startsWith("fl-")) return "vpc-flow-log";
+        if (resourceId.startsWith("cvpn-endpoint-")) return "client-vpn-endpoint";
         return "unknown";
     }
 
