@@ -153,6 +153,25 @@ class OpenSearchServiceTest {
         assertEquals(1, service.listDomainMaintenances("docker-gone", null, "FAILED").size());
     }
 
+    /**
+     * DescribeDomain reports the gateway host clients sign requests for, never the backing
+     * container's internal http:// URL (clients prepend https:// to the endpoint).
+     */
+    @Test
+    void publicEndpointIsTheGatewayHostOnceAnEngineBacksTheDomain() {
+        when(domainManager.tryStartDomain(any())).thenAnswer(inv -> {
+            inv.<Domain>getArgument(0).setEndpoint("http://172.17.0.5:9200");
+            return true;
+        });
+        Domain started = service.createDomain("with-engine", "OpenSearch_2.11", null, null, null, "eu-west-1");
+        assertEquals("with-engine.eu-west-1.es.localhost.floci.io:4566", service.publicEndpoint(started));
+        assertEquals("http://172.17.0.5:9200", started.getEndpoint());
+
+        when(osConfig.mock()).thenReturn(true);
+        Domain mocked = service.createDomain("no-engine", "OpenSearch_2.11", null, null, null, "us-east-1");
+        assertEquals("", service.publicEndpoint(mocked));
+    }
+
     @Test
     void unknownMaintenanceActionIsRejected() {
         when(osConfig.mock()).thenReturn(true);

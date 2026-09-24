@@ -1,16 +1,22 @@
 package io.github.hectorvent.floci.services.docdb;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.docdb.container.DocDbContainerHandle;
 import io.github.hectorvent.floci.services.docdb.container.DocDbContainerManager;
 import io.github.hectorvent.floci.services.docdb.model.DocDbCluster;
 import io.github.hectorvent.floci.services.docdb.model.DocDbInstance;
+import io.github.hectorvent.floci.services.docdb.proxy.DocDbProxyManager;
+import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
+import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -28,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Objects;
@@ -50,12 +57,19 @@ public class DocDbService {
             "8.0.0", "docdb8.0",
             "8.0.1", "docdb8.0");
     private static final int MONGO_PORT = 27017;
+    private static final int MIN_CLUSTER_PORT = 1150;
+    private static final int MAX_CLUSTER_PORT = 65535;
+    // DocumentDB master user secrets are the RDS-managed kind, named rds!cluster-...
+    private static final String MANAGED_SECRET_OWNING_SERVICE = "rds";
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final StorageBackend<String, DocDbCluster> clusters;
     private final StorageBackend<String, DocDbInstance> instances;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final DocDbContainerManager containerManager;
+    private final DocDbProxyManager proxyManager;
+    private final SecretsManagerService secretsManagerService;
     // DocumentDB subnet groups and cluster parameter groups are the RDS records reached through
     // the rds scope; security groups are EC2's; a KMS key is resolved to its ARN as on AWS
     private final RdsService rdsService;
@@ -173,13 +187,17 @@ public class DocDbService {
     public DocDbService(EmulatorConfig config,
                         RegionResolver regionResolver,
                         DocDbContainerManager containerManager,
+                        DocDbProxyManager proxyManager,
                         StorageFactory storageFactory,
                         RdsService rdsService,
                         Ec2Service ec2Service,
-                        KmsService kmsService) {
+                        KmsService kmsService,
+                        SecretsManagerService secretsManagerService) {
         this.config = config;
         this.regionResolver = regionResolver;
         this.containerManager = containerManager;
+        this.proxyManager = proxyManager;
+        this.secretsManagerService = secretsManagerService;
         this.rdsService = rdsService;
         this.ec2Service = ec2Service;
         this.kmsService = kmsService;
@@ -187,6 +205,18 @@ public class DocDbService {
                 new TypeReference<Map<String, DocDbCluster>>() {});
         this.instances = storageFactory.create("docdb", "docdb-instances.json",
                 new TypeReference<Map<String, DocDbInstance>>() {});
+    }
+
+    /** Without Secrets Manager: a cluster asking for a managed master user secret is refused. */
+    DocDbService(EmulatorConfig config,
+                 RegionResolver regionResolver,
+                 DocDbContainerManager containerManager,
+                 StorageFactory storageFactory,
+                 RdsService rdsService,
+                 Ec2Service ec2Service,
+                 KmsService kmsService) {
+        this(config, regionResolver, containerManager, new DocDbProxyManager(null), storageFactory,
+                rdsService, ec2Service, kmsService, null);
     }
 
     // ── Clusters ──────────────────────────────────────────────────────────────
@@ -202,17 +232,44 @@ public class DocDbService {
                                         String masterUsername, String masterPassword,
                                         boolean iamEnabled, DocDbClusterSettings settings,
                                         Map<String, String> tags) {
+        return createDbCluster(id, engineVersion, masterUsername, masterPassword, iamEnabled, settings, tags,
+                null, false, null);
+    }
+
+    /**
+     * Creates a cluster. Its endpoints are AWS-shaped hostnames under Floci's DNS suffix, and in
+     * container mode a listener serves it on {@code requestedPort}, 27017 when omitted as on AWS,
+     * in front of a MongoDB replica set. Clusters with TLS enabled share the port, told apart by
+     * hostname; one that cannot be served there gets the next port that can serve it.
+     *
+     * <p>With {@code manageMasterUserPassword} the master password is generated and kept in a
+     * Secrets Manager secret the cluster reports as its {@code MasterUserSecret}.
+     */
+    public DocDbCluster createDbCluster(String id, String engineVersion,
+                                        String masterUsername, String masterPassword,
+                                        boolean iamEnabled, DocDbClusterSettings settings,
+                                        Map<String, String> tags, Integer requestedPort,
+                                        boolean manageMasterUserPassword, String masterUserSecretKmsKeyId) {
         String region = regionResolver.getRegion();
         settings.validate();
+        validateMasterUserPassword(masterPassword, manageMasterUserPassword, masterUserSecretKmsKeyId);
+        if (requestedPort != null && (requestedPort < MIN_CLUSTER_PORT || requestedPort > MAX_CLUSTER_PORT)) {
+            throw new AwsException("InvalidParameterValue", "Invalid port " + requestedPort
+                    + ": the port must be between " + MIN_CLUSTER_PORT + " and " + MAX_CLUSTER_PORT + ".", 400);
+        }
         String effectiveEngineVersion = requireKnownEngineVersion(engineVersion);
         // every reference checked and every default chosen before a container is started
         DocDbClusterSettings resolved = resolveClusterSettings(settings, null, effectiveEngineVersion, region);
+        String secretKmsKeyArn = manageMasterUserPassword
+                ? resolveSecretKmsKeyArn(masterUserSecretKmsKeyId, region) : null;
         synchronized (lockFor("cluster:" + key(region, id))) {
             if (findCluster(region, id).isPresent()) {
                 throw new AwsException("DBClusterAlreadyExistsFault",
                         "DocDB cluster " + id + " already exists.", 400);
             }
 
+            String accountId = regionResolver.getAccountId();
+            String password = manageMasterUserPassword ? generatedMasterPassword() : masterPassword;
             DocDbCluster cluster = new DocDbCluster();
             cluster.setDbClusterIdentifier(id);
             cluster.setStatus("available");
@@ -224,45 +281,171 @@ public class DocDbService {
                     .replace("-", "").substring(0, 24).toUpperCase());
             cluster.setCreatedAt(Instant.now());
             cluster.setDbClusterMembers(new ArrayList<>());
+            cluster.setEndpoint(DocDbEndpoints.cluster(id, accountId, region, dnsSuffix()));
+            cluster.setReaderEndpoint(DocDbEndpoints.reader(id, accountId, region, dnsSuffix()));
+            cluster.setPort(requestedPort != null ? requestedPort : MONGO_PORT);
             resolved.applyTo(cluster);
             if (tags != null && !tags.isEmpty()) {
                 cluster.setTags(new LinkedHashMap<>(tags));
             }
 
-            if (config.services().docdb().mock()) {
-                LOG.infov("Creating DocDB cluster {0} in mock mode (no container)", id);
-                cluster.setEndpoint("localhost");
-                cluster.setReaderEndpoint("localhost");
-                cluster.setPort(MONGO_PORT);
-            } else {
-                String image = config.services().docdb().defaultImage();
-                LOG.infov("Creating DocDB cluster {0}, image={1}", id, image);
-                // A cluster record is metadata: its identifier, ARN and tags need no Docker, so the
-                // cluster is created and reaches 'available' even when no daemon is reachable. Only
-                // connecting to the database needs the container.
-                DocDbContainerHandle handle = containerManager.tryStart(id, image, masterUsername, masterPassword);
-                if (handle != null) {
-                    cluster.setEndpoint(handle.getHost());
-                    cluster.setReaderEndpoint(handle.getHost());
-                    cluster.setPort(handle.getPort());
-                    cluster.setContainerId(handle.getContainerId());
-                    cluster.setContainerHost(handle.getHost());
-                    cluster.setContainerPort(handle.getPort());
+            boolean provisioned = false;
+            try {
+                if (manageMasterUserPassword) {
+                    attachManagedMasterUserSecret(cluster, password, secretKmsKeyArn, region);
+                }
+                if (config.services().docdb().mock()) {
+                    LOG.infov("Creating DocDB cluster {0} in mock mode (no container)", id);
                 } else {
-                    cluster.setEndpoint(resolveEndpointHost());
-                    cluster.setReaderEndpoint(resolveEndpointHost());
-                    cluster.setPort(MONGO_PORT);
-                    LOG.warnv("DocDB cluster {0} created without a backing MongoDB container: no "
-                            + "Docker daemon is reachable. Metadata operations work; connections to "
-                            + "the cluster do not until a daemon appears.", id);
+                    startBackend(cluster, password, requestedPort, region);
+                }
+                clusters.put(key(region, id), cluster);
+                provisioned = true;
+            } finally {
+                if (!provisioned) {
+                    rollbackBackend(cluster, region);
                 }
             }
-
-            clusters.put(key(region, id), cluster);
             LOG.infov("DocDB cluster {0} created, endpoint={1}:{2}",
                     id, cluster.getEndpoint(), String.valueOf(cluster.getPort()));
             return cluster;
         }
+    }
+
+    /**
+     * Starts the cluster's MongoDB container and the proxy that serves it on the cluster's port.
+     * A cluster record is metadata: its identifier, ARN and tags need no Docker, so the cluster is
+     * created and reaches 'available' even when no daemon is reachable. Only connecting to the
+     * database needs the container.
+     */
+    private void startBackend(DocDbCluster cluster, String password, Integer requestedPort, String region) {
+        String id = cluster.getDbClusterIdentifier();
+        String image = config.services().docdb().defaultImage();
+        boolean tlsRequired = tlsRequired(cluster.getDbClusterParameterGroupName(), region);
+        int port = proxyManager.reserve(cluster.getDbClusterArn(), requestedPort, tlsRequired);
+        cluster.setProxyPort(port);
+        LOG.infov("Creating DocDB cluster {0}, image={1}, port={2}", id, image, String.valueOf(port));
+        DocDbContainerHandle handle = containerManager.tryStart(id, image, cluster.getMasterUsername(), password,
+                cluster.getEndpoint(), port);
+        if (handle == null) {
+            proxyManager.release(cluster.getDbClusterArn());
+            cluster.setProxyPort(0);
+            LOG.warnv("DocDB cluster {0} created without a backing MongoDB container: no "
+                    + "Docker daemon is reachable. Metadata operations work; connections to "
+                    + "the cluster do not until a daemon appears.", id);
+            return;
+        }
+        cluster.setContainerId(handle.getContainerId());
+        cluster.setContainerHost(handle.getHost());
+        cluster.setContainerPort(handle.getPort());
+        proxyManager.attach(cluster.getDbClusterArn(), List.of(cluster.getEndpoint(), cluster.getReaderEndpoint()),
+                handle.getHost(), handle.getPort());
+        cluster.setPort(port);
+    }
+
+    /** Undoes whatever part of a failed create ran, so nothing outlives the refused request. */
+    private void rollbackBackend(DocDbCluster cluster, String region) {
+        try {
+            proxyManager.release(cluster.getDbClusterArn());
+            if (cluster.getContainerId() != null) {
+                containerManager.stop(new DocDbContainerHandle(cluster.getContainerId(),
+                        cluster.getDbClusterIdentifier(), cluster.getContainerHost(), cluster.getContainerPort()));
+            }
+            detachManagedMasterUserSecret(cluster, region);
+        } catch (RuntimeException e) {
+            LOG.warnv(e, "Rolling back DocDB cluster {0} left something behind",
+                    cluster.getDbClusterIdentifier());
+        }
+    }
+
+    /** Whether the cluster's parameter group leaves TLS on, which it is unless {@code tls} is disabled. */
+    private boolean tlsRequired(String parameterGroupName, String region) {
+        if (parameterGroupName == null || rdsService == null) {
+            return true;
+        }
+        try {
+            DbClusterParameterGroup group = rdsService.getDbClusterParameterGroup(parameterGroupName, region);
+            String tls = group == null || group.getParameters() == null ? null : group.getParameters().get("tls");
+            return tls == null || !"disabled".equalsIgnoreCase(tls.trim());
+        } catch (AwsException e) {
+            // The engine's default group is not stored; its tls parameter is enabled.
+            return true;
+        }
+    }
+
+    private static void validateMasterUserPassword(String masterPassword, boolean manageMasterUserPassword,
+                                                   String masterUserSecretKmsKeyId) {
+        boolean passwordGiven = masterPassword != null && !masterPassword.isEmpty();
+        if (manageMasterUserPassword && passwordGiven) {
+            throw new AwsException("InvalidParameterCombination",
+                    "MasterUserPassword can't be specified when ManageMasterUserPassword is turned on.", 400);
+        }
+        if (!manageMasterUserPassword && masterUserSecretKmsKeyId != null && !masterUserSecretKmsKeyId.isBlank()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "MasterUserSecretKmsKeyId can only be specified when ManageMasterUserPassword is turned on.",
+                    400);
+        }
+    }
+
+    /** The KMS key of a managed master user secret, as an ARN; none means the Secrets Manager default. */
+    private String resolveSecretKmsKeyArn(String kmsKeyId, String region) {
+        if (secretsManagerService == null) {
+            throw new AwsException("InvalidParameterCombination",
+                    "ManageMasterUserPassword requires Secrets Manager support.", 400);
+        }
+        return resolveKmsKeyArn(kmsKeyId, region);
+    }
+
+    private void attachManagedMasterUserSecret(DocDbCluster cluster, String password, String kmsKeyArn,
+                                               String region) {
+        // The service owns the secret it manages and rotates it itself, so it carries no rotation
+        // Lambda; AWS marks that with OwningService and these two tags.
+        List<Secret.Tag> tags = List.of(
+                new Secret.Tag("aws:rds:primaryDBClusterArn", cluster.getDbClusterArn()),
+                new Secret.Tag("aws:secretsmanager:owningService", MANAGED_SECRET_OWNING_SERVICE));
+        Secret secret = secretsManagerService.createSecret(
+                "rds!" + cluster.getDbClusterResourceId().toLowerCase(Locale.ROOT),
+                managedMasterSecretString(cluster.getMasterUsername(), password),
+                null,
+                "Managed master user secret for DocumentDB cluster " + cluster.getDbClusterIdentifier(),
+                kmsKeyArn,
+                tags,
+                MANAGED_SECRET_OWNING_SERVICE,
+                region);
+        cluster.setMasterUserSecretArn(secret.getArn());
+        cluster.setMasterUserSecretStatus("active");
+        cluster.setMasterUserSecretKmsKeyId(kmsKeyArn);
+    }
+
+    /** Deletes a cluster's managed master user secret; one already gone is not an error. */
+    private void detachManagedMasterUserSecret(DocDbCluster cluster, String region) {
+        String secretArn = cluster.getMasterUserSecretArn();
+        if (secretArn == null || secretsManagerService == null) {
+            return;
+        }
+        try {
+            secretsManagerService.deleteSecret(secretArn, null, true, region);
+        } catch (AwsException e) {
+            LOG.debugv("Managed master user secret {0} could not be deleted: {1}", secretArn, e.getMessage());
+        }
+        cluster.setMasterUserSecretArn(null);
+        cluster.setMasterUserSecretStatus(null);
+        cluster.setMasterUserSecretKmsKeyId(null);
+    }
+
+    private static String managedMasterSecretString(String username, String password) {
+        Map<String, String> secret = new LinkedHashMap<>();
+        secret.put("username", username == null ? "" : username);
+        secret.put("password", password);
+        try {
+            return JSON.writeValueAsString(secret);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Unable to serialize the DocumentDB master user secret", e);
+        }
+    }
+
+    private static String generatedMasterPassword() {
+        return "floci-" + UUID.randomUUID().toString().replace("-", "");
     }
 
     /**
@@ -641,11 +824,14 @@ public class DocDbService {
             cluster.setStatus("deleting");
             clusters.put(key(region, id), cluster);
 
+            proxyManager.release(cluster.getDbClusterArn());
             if (cluster.getContainerId() != null) {
                 containerManager.stop(new DocDbContainerHandle(
                         cluster.getContainerId(), id,
                         cluster.getContainerHost(), cluster.getContainerPort()));
             }
+            // AWS deletes the master user secret it manages along with the cluster
+            detachManagedMasterUserSecret(cluster, region);
 
             clusters.delete(key(region, id));
             writeLocks.remove("cluster:" + key(region, id));
@@ -684,7 +870,7 @@ public class DocDbService {
                 instance.setDbInstanceClass(dbInstanceClass != null ? dbInstanceClass : "db.r5.large");
                 instance.setEngineVersion(engineVersion != null ? engineVersion : cluster.getEngineVersion());
                 instance.setStatus("available");
-                instance.setEndpoint(cluster.getEndpoint());
+                instance.setEndpoint(DocDbEndpoints.instance(id, regionResolver.getAccountId(), region, dnsSuffix()));
                 instance.setPort(cluster.getPort());
                 instance.setIamDatabaseAuthenticationEnabled(iamEnabled);
                 instance.setDbInstanceArn(regionResolver.buildArn("rds", region, "db:" + id));
@@ -700,6 +886,8 @@ public class DocDbService {
 
                 cluster.getDbClusterMembers().add(id);
                 clusters.put(key(region, dbClusterIdentifier), cluster);
+                // an instance endpoint reaches the cluster's replica set as on AWS
+                proxyManager.addHostname(cluster.getDbClusterArn(), instance.getEndpoint());
 
                 instances.put(key(region, id), instance);
                 LOG.infov("DocDB instance {0} created in cluster {1}", id, dbClusterIdentifier);
@@ -793,6 +981,7 @@ public class DocDbService {
                 if (cluster != null) {
                     cluster.getDbClusterMembers().remove(id);
                     clusters.put(key(region, clusterId), cluster);
+                    proxyManager.removeHostname(cluster.getDbClusterArn(), instance.getEndpoint());
                 }
             }
 
@@ -804,8 +993,9 @@ public class DocDbService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private String resolveEndpointHost() {
-        return config.hostname().orElse("localhost");
+    /** The DNS suffix endpoint hostnames are built under, as ELB and the other data planes do. */
+    private String dnsSuffix() {
+        return config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
     }
 
     // ── Tags ──────────────────────────────────────────────────────────────────

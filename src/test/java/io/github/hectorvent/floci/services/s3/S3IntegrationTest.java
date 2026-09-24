@@ -2168,8 +2168,10 @@ class S3IntegrationTest {
             .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
 
         try {
+            // Skip the s3:TestEvent so the first message received is the object notification.
             given()
                 .contentType("application/xml")
+                .header("x-amz-skip-destination-validation", "true")
                 .queryParam("notification", "")
                 .body("""
                     <NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">

@@ -27,6 +27,18 @@ public class EcsServiceModel {
     private String deploymentId;
     /** The deploymentId last observed to reach steady state; guards against re-emitting COMPLETED. */
     private String lastCompletedDeploymentId;
+    /** The task definition of {@link #lastCompletedDeploymentId}, which a circuit-breaker rollback returns to. */
+    private String lastCompletedTaskDefinition;
+    /** Consecutive (or, with {@code resetOnHealthyTask=false}, cumulative) task failures of the current deployment. */
+    private int deploymentFailedTasks;
+    /** {@code FAILED} once the deployment circuit breaker trips on the current deployment; null while derived. */
+    private String deploymentRolloutState;
+    /** The current deployment's rolloutStateReason when it is not the derived in-progress/completed text. */
+    private String deploymentRolloutStateReason;
+    /** Superseded deployments the circuit breaker failed, still reported as ACTIVE until the PRIMARY completes. */
+    private List<Deployment> failedDeployments = new ArrayList<>();
+    /** Scheduler events recorded for the service, newest first. */
+    private List<ServiceEvent> events = new ArrayList<>();
     private String namespace;
     private String deploymentController;
     private String schedulingStrategy;
@@ -48,7 +60,10 @@ public class EcsServiceModel {
     private String propagateTags;
     private Integer healthCheckGracePeriodSeconds;
     private String roleArn;
-    /** {@code deploymentConfiguration}, kept raw: Floci reports it but runs no rollout against it. */
+    /**
+     * {@code deploymentConfiguration}, kept raw. The reconciler reads its
+     * {@code deploymentCircuitBreaker}; the rolling-update percentages are reported but not enforced.
+     */
     private Map<String, Object> deploymentConfiguration;
     /** {@code serviceRegistries}, kept raw: Cloud Map registration is not emulated. */
     private List<Map<String, Object>> serviceRegistries;
@@ -93,6 +108,34 @@ public class EcsServiceModel {
     public String getLastCompletedDeploymentId() { return lastCompletedDeploymentId; }
     public void setLastCompletedDeploymentId(String lastCompletedDeploymentId) {
         this.lastCompletedDeploymentId = lastCompletedDeploymentId;
+    }
+
+    public String getLastCompletedTaskDefinition() { return lastCompletedTaskDefinition; }
+    public void setLastCompletedTaskDefinition(String lastCompletedTaskDefinition) {
+        this.lastCompletedTaskDefinition = lastCompletedTaskDefinition;
+    }
+
+    public int getDeploymentFailedTasks() { return deploymentFailedTasks; }
+    public void setDeploymentFailedTasks(int deploymentFailedTasks) { this.deploymentFailedTasks = deploymentFailedTasks; }
+
+    public String getDeploymentRolloutState() { return deploymentRolloutState; }
+    public void setDeploymentRolloutState(String deploymentRolloutState) {
+        this.deploymentRolloutState = deploymentRolloutState;
+    }
+
+    public String getDeploymentRolloutStateReason() { return deploymentRolloutStateReason; }
+    public void setDeploymentRolloutStateReason(String deploymentRolloutStateReason) {
+        this.deploymentRolloutStateReason = deploymentRolloutStateReason;
+    }
+
+    public List<Deployment> getFailedDeployments() { return failedDeployments; }
+    public void setFailedDeployments(List<Deployment> failedDeployments) {
+        this.failedDeployments = failedDeployments != null ? failedDeployments : new ArrayList<>();
+    }
+
+    public List<ServiceEvent> getEvents() { return events; }
+    public void setEvents(List<ServiceEvent> events) {
+        this.events = events != null ? events : new ArrayList<>();
     }
 
     public String getNamespace() { return namespace; }

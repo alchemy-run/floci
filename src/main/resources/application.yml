@@ -663,8 +663,10 @@ floci:
         #   - nvidia.com/gpu=GPU-<uuid>
     batch:
       enabled: true
-      runner-mode: immediate
-      # Leave jobs RUNNABLE so CancelJob/TerminateJob can still act after SubmitJob.
+      # Jobs run in real containers once a MANAGED compute environment can place them;
+      # jobs on UNMANAGED-only queues stay RUNNABLE, as on AWS.
+      runner-mode: docker
+      # Only consulted by runner-mode immediate.
       immediate-complete: false
       # docker-network: floci-network
     codedeploy:
@@ -852,6 +854,16 @@ floci:
       # validate-runtime-exists: false        # true = reject unknown runtime ARNs
       # harness-echo-prefix: 'You said: '      # Prefix on the reply InvokeHarness streams back
       # harness-empty-reply: 'No user message was supplied.'
+      # code-interpreter-image: python:3.12-slim          # Container a code interpreter session runs in
+      # code-interpreter-memory-mb: 512
+      # code-interpreter-max-active-sessions: 5
+      # browser-image: chromedp/headless-shell:151.0.7922.109  # Headless Chrome serving DevTools on 9222
+      # browser-memory-mb: 1024
+      # browser-max-active-sessions: 3
+      # tool-execution-timeout-seconds: 300
+      # browser-startup-timeout-seconds: 60
+      # docker-network: ""                                 # Falls back to floci.services.docker-network
+      # prewarm-images: true                               # Pull session images when a tool is created
     bedrock-agent-core-control:
       enabled: true
     servicequotas:

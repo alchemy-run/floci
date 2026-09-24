@@ -27,7 +27,7 @@ public class RdsAuthProxy {
     private final String dbName;
     private final DatabaseEngine engine;
     private final RdsSigV4Validator sigV4;
-    private final RdsMysqlBinding mysqlBinding;
+    private volatile RdsMysqlBinding mysqlBinding;
     private final MySqlProtocolHandler.IamUserChecker iamUserChecker;
     private final RdsProxyTlsCertificates tlsCertificates;
     private final MasterPasswordCheck passwordValidator;
@@ -37,6 +37,7 @@ public class RdsAuthProxy {
 
     private volatile boolean running;
     private ServerSocket serverSocket;
+    private volatile int port;
 
     public RdsAuthProxy(String instanceId, String backendHost, int backendPort,
                         DatabaseEngine engine, boolean iamEnabled,
@@ -93,6 +94,7 @@ public class RdsAuthProxy {
         serverSocket = new ServerSocket();
         serverSocket.setReuseAddress(true);
         serverSocket.bind(new InetSocketAddress(proxyPort));
+        port = serverSocket.getLocalPort();
         running = true;
         Thread.ofVirtual().name("rds-proxy-accept-" + instanceId).start(this::acceptLoop);
         LOG.infov("RDS proxy started for instance {0} on port {1} → {2}:{3}",
@@ -107,6 +109,25 @@ public class RdsAuthProxy {
     /** Apply an IAM-auth setting change to new connections without restarting the listener. */
     public void updateIamEnabled(boolean enabled) {
         this.iamEnabled = enabled;
+    }
+
+    /**
+     * The host and port MySQL IAM tokens must be signed for: the advertised endpoint, which is
+     * not this listener's internal port once the endpoint is served on its configured port.
+     */
+    public void updateMysqlBinding(RdsMysqlBinding binding) {
+        if (this.mysqlBinding != null) {
+            this.mysqlBinding = binding;
+        }
+    }
+
+    /** The port this proxy accepted connections on, or 0 before {@link #start}. */
+    public int getPort() {
+        return port;
+    }
+
+    public DatabaseEngine getEngine() {
+        return engine;
     }
 
     public void stop() {

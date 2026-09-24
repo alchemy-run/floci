@@ -46,7 +46,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -699,6 +701,61 @@ class CodeArtifactServiceTest {
         PackageCoordinate mirror = new PackageCoordinate(REGION, "packages", null, "mirror",
                 "generic", "scope", "artifact");
         assertArrayEquals(content, service.getPackageVersionAsset(mirror, "1", "data", null).content());
+    }
+
+    @Test
+    void packageVersionChangesArePublishedAsStateChangeEvents() throws Exception {
+        CodeArtifactEventPublisher publisher = mock(CodeArtifactEventPublisher.class);
+        List<CodeArtifactEventPublisher.PackageVersionChange> changes = new ArrayList<>();
+        doAnswer(invocation -> changes.add(invocation.getArgument(0))).when(publisher).publish(any());
+        EmulatorConfig config = mock(EmulatorConfig.class);
+        when(config.effectiveBaseUrl()).thenReturn("http://localhost:4566");
+        service = new CodeArtifactService(AccountAwareStorageBackend.inMemory(ACCOUNT_ID),
+                AccountAwareStorageBackend.inMemory(ACCOUNT_ID), AccountAwareStorageBackend.inMemory(ACCOUNT_ID),
+                regionResolver, config, true, null, publisher);
+        PackageCoordinate source = packageFixture();
+        byte[] content = "event payload".getBytes(StandardCharsets.UTF_8);
+
+        service.publishPackageVersion(source, "3.0.0", "data.bin", content, hash(content), false);
+        assertEquals(1, changes.size());
+        CodeArtifactEventPublisher.PackageVersionChange published = changes.getFirst();
+        assertEquals("Created", published.operationType());
+        assertEquals("Published", published.state());
+        assertEquals("source", published.repository());
+        assertEquals(ACCOUNT_ID, published.domainOwner());
+        assertEquals("generic", published.format());
+        assertEquals("scope", published.namespace());
+        assertEquals("artifact", published.packageName());
+        assertEquals("3.0.0", published.version());
+        assertEquals(1, published.assetsAdded());
+        assertTrue(published.statusChanged());
+
+        service.copyPackageVersions(source, "mirror", mutation(List.of("3.0.0"), Map.of(), null, null, false));
+        assertEquals("mirror", changes.get(1).repository());
+        assertEquals("Created", changes.get(1).operationType());
+
+        service.mutatePackageVersions(source, "status", mutation(List.of("3.0.0"), Map.of(), null, "Archived", false));
+        assertEquals("Archived", changes.get(2).state());
+        assertEquals("Updated", changes.get(2).operationType());
+        service.mutatePackageVersions(source, "status", mutation(List.of("3.0.0"), Map.of(), null, "Archived", false));
+        assertEquals(3, changes.size());
+
+        PackageCoordinate mirror = new PackageCoordinate(REGION, "packages", null, "mirror", "generic", "scope", "artifact");
+        service.mutatePackageVersions(mirror, "dispose", mutation(List.of("3.0.0"), Map.of(), null, null, false));
+        assertEquals("Disposed", changes.get(3).state());
+        assertEquals(1, changes.get(3).assetsRemoved());
+        service.mutatePackageVersions(mirror, "delete", mutation(List.of("3.0.0"), Map.of(), null, null, false));
+        assertEquals("Deleted", changes.get(4).state());
+        assertEquals("Deleted", changes.get(4).operationType());
+
+        service.publishPackageVersion(source, "4.0.0", "data.bin", content, hash(content), true);
+        service.publishPackageVersion(source, "4.0.0", "data.bin", content, hash(content), true);
+        assertEquals(6, changes.size());
+        assertEquals("Unfinished", changes.get(5).state());
+        service.publishPackageVersion(source, "4.0.0", "data.bin", content, hash(content), false);
+        assertEquals("Updated", changes.get(6).operationType());
+        assertEquals("Published", changes.get(6).state());
+        assertEquals(0, changes.get(6).assetsAdded());
     }
 
     private PackageCoordinate packageFixture() {

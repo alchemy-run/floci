@@ -299,10 +299,10 @@ public class RedshiftOperationsTest {
         when(containerManager.start(any(), eq("cluster-src"), any(), any()))
                 .thenReturn(new RedshiftContainerHandle("c1", "cluster-src", "localhost", 5439));
         doAnswer(invocation -> {
-            Path p = invocation.getArgument(3);
+            Path p = invocation.getArgument(4);
             Files.writeString(p, "-- dump sql table test_data;");
             return null;
-        }).when(containerManager).takeSnapshot(any(), eq("cluster-src"), eq("admin"), any(Path.class));
+        }).when(containerManager).takeSnapshot(any(), eq("cluster-src"), eq("admin"), eq("dev"), any(Path.class));
         when(containerManager.start(any(), eq("cluster-restored"), any(), any()))
                 .thenReturn(new RedshiftContainerHandle("c2", "cluster-restored", "localhost", 5440));
 

@@ -1147,10 +1147,6 @@ class GlueServiceTest {
 
         AwsException idle = assertThrows(AwsException.class, () -> glueService.stopCrawler("events"));
         assertEquals("CrawlerNotRunningException", idle.getErrorCode());
-
-        glueService.startCrawler("events");
-        assertEquals("RUNNING", glueService.getCrawler("events").getState());
-        glueService.stopCrawler("events");
         assertEquals("READY", glueService.getCrawler("events").getState());
     }
 

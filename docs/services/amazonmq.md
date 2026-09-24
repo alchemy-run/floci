@@ -1,14 +1,15 @@
-# Amazon MQ (RabbitMQ)
+# Amazon MQ (RabbitMQ and ActiveMQ)
 
 **Protocol:** REST-JSON
 **Endpoint:** `http://localhost:4566/`
 
-Floci emulates Amazon MQ by orchestrating **RabbitMQ** containers. Each broker is
-backed by a real `rabbitmq:3-management` container, so AMQP clients and the RabbitMQ
-management console work against the published endpoints.
+Floci emulates Amazon MQ by orchestrating real broker containers. A RabbitMQ broker is
+backed by a `rabbitmq:3-management` container and an ActiveMQ broker by an
+`apache/activemq-classic` container, so wire-protocol clients and the broker consoles
+work against the published endpoints.
 
-Only the **RabbitMQ** engine and the `SINGLE_INSTANCE` deployment mode are supported;
-`CreateBroker` rejects `ACTIVEMQ` and the multi-AZ deployment modes.
+Both engines are supported in the `SINGLE_INSTANCE` deployment mode; `CreateBroker`
+rejects the multi-AZ deployment modes.
 
 ## Supported Actions
 
@@ -20,16 +21,22 @@ Only the **RabbitMQ** engine and the `SINGLE_INSTANCE` deployment mode are suppo
 | `DeleteBroker` | Stops and removes the RabbitMQ container |
 | `RebootBroker` | Reboots the broker and applies pending `UpdateBroker` changes |
 | `UpdateBroker` | Applies `AutoMinorVersionUpgrade`, maintenance window, logs and security groups immediately; engine version, instance type, authentication strategy and configuration stay pending until `RebootBroker` |
-| `Promote` | Rejected with `BadRequestException`: only a replica broker in a cross-Region data replication (CRDR) pair can be promoted, and RabbitMQ brokers never belong to one |
+| `Promote` | Rejected with `BadRequestException`: only a replica broker in a cross-Region data replication (CRDR) pair can be promoted, and no emulated broker belongs to one |
 
 ### User management
 
 Amazon MQ's user API (`CreateUser`, `DescribeUser`, `ListUsers`, `UpdateUser`,
 `DeleteUser`) applies **only to ActiveMQ** brokers. As on real AWS, Floci rejects these
 operations for RabbitMQ brokers with a `BadRequestException`. Manage RabbitMQ users
-through the RabbitMQ management console. The broker's initial administrator is supplied
+through the RabbitMQ management console. A RabbitMQ broker's administrator is supplied
 in the `CreateBroker` `Users` list (exactly one user is required) and seeded into the
 container.
+
+An ActiveMQ broker takes 1 to 250 users at creation. Changes made through the user API
+are staged as a pending `CREATE`, `UPDATE` or `DELETE` (visible in `DescribeUser`,
+`ListUsers` and `DescribeBroker`) and applied by the next `RebootBroker`, which restarts
+the broker container with the new users. Broker user passwords are held in memory only,
+so a broker reloaded from persistent storage cannot be rebooted with its users.
 
 ## Configuration
 
@@ -38,6 +45,7 @@ container.
 | `FLOCI_SERVICES_AMAZONMQ_ENABLED` | `true` | Enable or disable the service |
 | `FLOCI_SERVICES_AMAZONMQ_MOCK` | `false` | `true` = metadata-only CRUD, no Docker containers |
 | `FLOCI_SERVICES_AMAZONMQ_DEFAULT_IMAGE` | `rabbitmq:3-management` | Docker image for RabbitMQ broker containers |
+| `FLOCI_SERVICES_AMAZONMQ_ACTIVEMQ_IMAGE` | (unset) | Docker image for every ActiveMQ broker. When unset, engine version `5.18` runs on `apache/activemq-classic:5.18.7` and the older versions on `apache/activemq-classic:5.17.6` |
 | `FLOCI_SERVICES_AMAZONMQ_AMQP_HOST_PORT_BASE` | `5672` | First host port in the range the AMQP listener (5672) is published on |
 | `FLOCI_SERVICES_AMAZONMQ_AMQP_HOST_PORT_MAX` | `5699` | Last host port in the AMQP range |
 | `FLOCI_SERVICES_AMAZONMQ_CONSOLE_HOST_PORT_BASE` | `15672` | First host port in the range the management console (15672) is published on |
@@ -68,6 +76,24 @@ authentication, and other Docker settings see [Docker Configuration](../configur
   `FLOCI_STORAGE_PRUNE_VOLUMES_ON_DELETE=true`.
 - **Readiness**: The broker state transitions to `RUNNING` once the RabbitMQ management
   API answers on its port.
+
+### ActiveMQ brokers
+
+- **Endpoints**: OpenWire (61616), AMQP (5672), STOMP (61613), MQTT (1883) and WebSocket
+  (61614) are reported in that order as `tcp://`, `amqp://`, `stomp://`, `mqtt://` and
+  `ws://` endpoints, and the web console (8161) as the `ConsoleURL`. Each is published on a
+  free host port. Floci does not terminate TLS, so the endpoints are plain-text.
+- **Users**: Broker users are enforced by a `simpleAuthenticationPlugin`; users with
+  `ConsoleAccess` can sign in to the web console.
+- **Configurations**: The broker's ActiveMQ configuration revision is applied to
+  `activemq.xml`. As on Amazon MQ, a revision contributes destination policies,
+  destinations, destination interceptors, network connectors, permitted broker attributes
+  and non-authentication plugins such as `authorizationPlugin`; transports, persistence,
+  system usage and authentication stay service-managed.
+- **Resources**: Each broker container is limited to 768 MiB with a 384 MiB JVM heap.
+- **Readiness**: The broker becomes `RUNNING` once the web console answers and the
+  OpenWire transport accepts connections. A container that exits first marks the broker
+  `CREATION_FAILED`.
 
 ## Examples
 

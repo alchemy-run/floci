@@ -14,6 +14,7 @@ import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.CurrentContainerNetworkResolver;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
@@ -33,6 +34,7 @@ import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import io.github.hectorvent.floci.services.rds.model.DbCluster;
 import io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
+import io.github.hectorvent.floci.services.rds.model.DbClusterSettings;
 import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
@@ -73,6 +75,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
@@ -122,6 +125,14 @@ public class RdsService implements Resettable, ResourceProvider {
             managedDefault("docdb4.0"),
             managedDefault("docdb5.0"),
             managedDefault("docdb8.0"));
+
+    /**
+     * The {@code default.<family>} DB parameter groups AWS provides for every engine family. AWS
+     * creates one in an account and region the first time it is needed, so Floci does the same:
+     * the first reference by name persists it in the caller's account and region, after which it
+     * is listed like any other group.
+     */
+    private static final Set<String> MANAGED_DB_PARAMETER_GROUP_FAMILIES = managedDbParameterGroupFamilies();
 
     /**
      * Engines AWS accepts for {@code EngineName} on an option group. Floci can only run
@@ -581,6 +592,7 @@ public class RdsService implements Resettable, ResourceProvider {
                                        DbInstanceSettings settings,
                                        Boolean publiclyAccessible) {
         validateInstanceSettings(settings);
+        validateListenerPort(settings.port());
         String provisioningKey = "instance:" + currentAccountId() + ":"
                 + dbResourceKey(effectiveRegion(region), id);
         if (!provisioningIds.add(provisioningKey)) {
@@ -615,6 +627,9 @@ public class RdsService implements Resettable, ResourceProvider {
                                           DbInstanceSettings settings,
                                           Boolean publiclyAccessible) {
         String effectiveRegion = effectiveRegion(region);
+        // A cluster member listens on its cluster's port whatever the request says: the API
+        // reference documents Port as not applicable to Aurora instances.
+        Integer requestedPort = settings.port();
         String dbiResourceId = "db-" + java.util.UUID.randomUUID().toString()
                 .replace("-", "").substring(0, 24).toUpperCase();
         String dbInstanceArn = regionResolver.buildArn("rds", effectiveRegion, "db:" + id);
@@ -664,6 +679,7 @@ public class RdsService implements Resettable, ResourceProvider {
         String instanceDockerVolumeName = null;
         String instanceStorageResourceId = dbiResourceId;
         PlacementResolution placement;
+        int listenerPort = requestedPort != null ? requestedPort : engine.defaultPort();
 
         String engineIdentifier = engineParam != null && !engineParam.isBlank()
                 ? engineParam.toLowerCase() : null;
@@ -693,6 +709,7 @@ public class RdsService implements Resettable, ResourceProvider {
             }
             instanceStorageResourceId = resolvedClusterStorageResourceId(cluster);
             placement = PlacementResolution.fromCluster(cluster);
+            listenerPort = clusterListenerPort(cluster);
         } else {
             placement = resolvePlacement(dbSubnetGroupName, availabilityZone, multiAz, effectiveRegion);
             if (!mock) {
@@ -721,10 +738,11 @@ public class RdsService implements Resettable, ResourceProvider {
             }
         }
 
-        DbEndpoint endpoint = mock ? new DbEndpoint("localhost", proxyPort) : proxyEndpoint(proxyPort);
+        DbEndpoint endpoint = instanceEndpoint(id, accountIdFromArn(dbInstanceArn), effectiveRegion, listenerPort);
         DbInstance instance = new DbInstance(id, engine, engineVersion, masterUsername, masterPassword,
                 dbName, dbInstanceClass, allocatedStorage, DbInstanceStatus.CREATING,
                 endpoint, iamEnabled, paramGroupName, dbClusterIdentifier, Instant.now(), proxyPort);
+        instance.setPort(listenerPort);
         instance.setOptionGroupName(optionGroupName);
         instance.setDbSubnetGroupName(dbSubnetGroupName);
         instance.setContainerId(containerId);
@@ -765,6 +783,7 @@ public class RdsService implements Resettable, ResourceProvider {
                         masterUsername, masterPassword, dbName,
                         (user, pw) -> validateDbPasswordForScope(
                                 accountId, instanceRegion, id, user, pw));
+                advertiseInstance(instance);
             } catch (RuntimeException | Error e) {
                 try {
                     deleteInstanceForScope(accountId, effectiveRegion, id);
@@ -849,7 +868,7 @@ public class RdsService implements Resettable, ResourceProvider {
             case "subgrp" -> findSubnetGroupForScope(currentAccountId(), region, id) != null;
             case "pg" -> findParameterGroupForRegion(id, region) != null;
             case "cluster-pg" -> findClusterParameterGroupForRegion(id, region) != null;
-            case "cluster-endpoint" -> clusterEndpoints.get(id).isPresent();
+            case "cluster-endpoint" -> clusterEndpoints.get(clusterEndpointKey(id)).isPresent();
             case "snapshot" -> findSnapshotForScope(currentAccountId(), region, id) != null;
             case "cluster-snapshot" -> findClusterSnapshotForScope(currentAccountId(), region, id) != null;
             default -> false;
@@ -1239,12 +1258,14 @@ public class RdsService implements Resettable, ResourceProvider {
         boolean autoMinorVersionUpgrade = request.autoMinorVersionUpgrade() != null
                 ? request.autoMinorVersionUpgrade() : source.isAutoMinorVersionUpgrade();
         // Backups stay off on a replica; the source's windows carry over, and encryption follows
-        // the source because AWS never lets a replica be less protected than what it copies.
+        // the source because AWS never lets a replica be less protected than what it copies. The
+        // replica listens on the source's port, the documented default for Port.
         DbInstanceSettings settings = new DbInstanceSettings(
                 source.isStorageEncrypted() ? Boolean.TRUE : null,
                 source.isStorageEncrypted() && sameRegion ? source.getKmsKeyId() : null,
                 0, source.getPreferredBackupWindow(), source.getPreferredMaintenanceWindow(),
-                copyTagsToSnapshot);
+                copyTagsToSnapshot, null, null, null, null, null, null, null, null,
+                instanceListenerPort(source));
         Map<String, String> tags = request.tags() != null ? request.tags() : Map.of();
 
         DbInstance replica = createDbInstance(id, engineParam, source.getEngineVersion(),
@@ -1734,7 +1755,10 @@ public class RdsService implements Resettable, ResourceProvider {
                 parameterGroupName, dbSubnetGroupName, availabilityZone, false, effectiveRegion,
                 null, null, null, false, null,
                 engineMode != null && !engineMode.isBlank() ? engineMode : snapshot.getEngineMode(),
-                snapshot.isStorageEncrypted());
+                snapshot.isStorageEncrypted(),
+                // The restored cluster listens where the source did unless the request names a port.
+                port != null ? port
+                        : snapshot.getPort() >= 1150 && snapshot.getPort() <= 65535 ? snapshot.getPort() : null);
         if (tags != null && !tags.isEmpty()) {
             cluster.getTags().putAll(tags);
             putClusterForScope(accountId, effectiveRegion, clusterId, cluster);
@@ -2014,7 +2038,7 @@ public class RdsService implements Resettable, ResourceProvider {
                 DbClusterEndpoint endpoint = getDbClusterEndpoint(resourceId);
                 yield new TagHandle(endpoint.getTags(), updated -> {
                     endpoint.setTags(updated);
-                    clusterEndpoints.put(resourceId, endpoint);
+                    clusterEndpoints.put(endpoint.getDbClusterEndpointIdentifier(), endpoint);
                 });
             }
             case "cluster-snapshot" -> {
@@ -2838,6 +2862,7 @@ public class RdsService implements Resettable, ResourceProvider {
                     instance.getEndpoint().address(),
                     effectiveMasterUser, instance.getMasterPassword(), instance.getDbName(),
                     (user, pw) -> validateDbPasswordForScope(accountId, instanceRegion, id, user, pw));
+            advertiseInstance(instance);
         }
     }
 
@@ -2926,6 +2951,7 @@ public class RdsService implements Resettable, ResourceProvider {
                         member.getMasterUsername() != null ? member.getMasterUsername() : "root",
                         member.getMasterPassword(), member.getDbName(),
                         (user, pw) -> validateDbPasswordForScope(accountId, memberRegion, memberId, user, pw));
+                advertiseInstance(member);
             }
             member.setStatus(DbInstanceStatus.AVAILABLE);
             putInstanceForScope(accountId, effectiveRegion, memberId, member);
@@ -2968,6 +2994,7 @@ public class RdsService implements Resettable, ResourceProvider {
                         member.getMasterUsername() != null ? member.getMasterUsername() : "root",
                         member.getMasterPassword(), member.getDbName(),
                         (user, pw) -> validateDbPasswordForScope(accountId, memberRegion, memberId, user, pw));
+                advertiseInstance(member);
             }
             member.setStatus(DbInstanceStatus.AVAILABLE);
             putInstanceForScope(accountId, effectiveRegion, memberId, member);
@@ -3031,6 +3058,7 @@ public class RdsService implements Resettable, ResourceProvider {
                     cluster.getMasterUsername() != null ? cluster.getMasterUsername() : "root",
                     cluster.getMasterPassword(), cluster.getDatabaseName(),
                     (user, pw) -> validateDbClusterPasswordForScope(accountId, clusterRegion, id, user, pw));
+            advertiseCluster(cluster);
         }
     }
 
@@ -3095,6 +3123,7 @@ public class RdsService implements Resettable, ResourceProvider {
                         effectiveMasterUser, instance.getMasterPassword(), instance.getDbName(),
                         (user, pw) -> validateDbPasswordForScope(
                                 accountId, instanceRegion, id, user, pw));
+                advertiseInstance(instance);
             } else {
                 // No backing container: created or last rebooted while no daemon was reachable.
                 instance = ensureInstanceBackend(id, effectiveRegion);
@@ -3178,6 +3207,7 @@ public class RdsService implements Resettable, ResourceProvider {
                     effectiveMasterUser, instance.getMasterPassword(), instance.getDbName(),
                     (user, pw) -> validateDbPasswordForScope(
                             accountId, instanceRegion, id, user, pw));
+            advertiseInstance(instance);
         } catch (RuntimeException e) {
             stopStartedBackend(started, e);
             throw e;
@@ -3230,6 +3260,7 @@ public class RdsService implements Resettable, ResourceProvider {
                     effectiveMasterUser, cluster.getMasterPassword(), cluster.getDatabaseName(),
                     (user, pw) -> validateDbClusterPasswordForScope(
                             accountId, clusterRegion, id, user, pw));
+            advertiseCluster(cluster);
         } catch (RuntimeException e) {
             stopStartedBackend(started, e);
             throw e;
@@ -3404,6 +3435,24 @@ public class RdsService implements Resettable, ResourceProvider {
                                      Integer serverlessV2SecondsUntilAutoPause,
                                      boolean manageMasterUserPassword, String masterUserSecretKmsKeyId,
                                      String engineMode, boolean storageEncrypted) {
+        return createDbCluster(id, engineParam, engineVersion, masterUsername, masterPassword,
+                databaseName, iamEnabled, paramGroupName, dbSubnetGroupName, availabilityZone,
+                multiAz, region, serverlessV2MinCapacity, serverlessV2MaxCapacity,
+                serverlessV2SecondsUntilAutoPause, manageMasterUserPassword, masterUserSecretKmsKeyId,
+                engineMode, storageEncrypted, null);
+    }
+
+    /** @param port the listener port CreateDBCluster names, or null for the engine default */
+    public DbCluster createDbCluster(String id, String engineParam, String engineVersion,
+                                     String masterUsername, String masterPassword,
+                                     String databaseName, boolean iamEnabled,
+                                     String paramGroupName, String dbSubnetGroupName,
+                                     String availabilityZone, boolean multiAz, String region,
+                                     Double serverlessV2MinCapacity, Double serverlessV2MaxCapacity,
+                                     Integer serverlessV2SecondsUntilAutoPause,
+                                     boolean manageMasterUserPassword, String masterUserSecretKmsKeyId,
+                                     String engineMode, boolean storageEncrypted, Integer port) {
+        validateListenerPort(port);
         String provisioningKey = "cluster:" + currentAccountId() + ":"
                 + dbResourceKey(effectiveRegion(region), id);
         if (!provisioningIds.add(provisioningKey)) {
@@ -3415,7 +3464,7 @@ public class RdsService implements Resettable, ResourceProvider {
                     databaseName, iamEnabled, paramGroupName, dbSubnetGroupName, availabilityZone,
                     multiAz, region, serverlessV2MinCapacity, serverlessV2MaxCapacity,
                     serverlessV2SecondsUntilAutoPause, manageMasterUserPassword, masterUserSecretKmsKeyId,
-                    engineMode, storageEncrypted);
+                    engineMode, storageEncrypted, port);
         } finally {
             provisioningIds.remove(provisioningKey);
         }
@@ -3429,7 +3478,7 @@ public class RdsService implements Resettable, ResourceProvider {
                                         Double serverlessV2MinCapacity, Double serverlessV2MaxCapacity,
                                         Integer serverlessV2SecondsUntilAutoPause,
                                         boolean manageMasterUserPassword, String masterUserSecretKmsKeyId,
-                                        String engineMode, boolean storageEncrypted) {
+                                        String engineMode, boolean storageEncrypted, Integer requestedPort) {
         String effectiveRegion = effectiveRegion(region);
         String clusterResourceId = "cluster-" + java.util.UUID.randomUUID().toString()
                 .replace("-", "").substring(0, 24).toUpperCase();
@@ -3456,10 +3505,14 @@ public class RdsService implements Resettable, ResourceProvider {
         if (manageMasterUserPassword && (masterPassword == null || masterPassword.isBlank())) {
             masterPassword = generatedMasterPassword();
         }
-        DbEndpoint endpoint = mock ? new DbEndpoint("localhost", proxyPort) : proxyEndpoint(proxyPort);
+        int listenerPort = requestedPort != null ? requestedPort : engine.defaultPort();
+        String clusterAccountId = accountIdFromArn(clusterArn);
+        DbEndpoint endpoint = clusterEndpoint(id, clusterAccountId, effectiveRegion, listenerPort);
         DbCluster cluster = new DbCluster(id, engine, engineVersion, masterUsername, masterPassword,
-                databaseName, DbInstanceStatus.AVAILABLE, endpoint, endpoint,
+                databaseName, DbInstanceStatus.AVAILABLE, endpoint,
+                clusterReaderEndpoint(id, clusterAccountId, effectiveRegion, listenerPort),
                 iamEnabled, new ArrayList<>(), paramGroupName, Instant.now(), proxyPort);
+        cluster.setPort(listenerPort);
         cluster.setEngineIdentifier(effectiveEngineName(engineParam).toLowerCase(Locale.ROOT));
         cluster.setEngineMode(engineMode != null && !engineMode.isBlank() ? engineMode : "provisioned");
         cluster.setStorageEncrypted(storageEncrypted);
@@ -3510,6 +3563,7 @@ public class RdsService implements Resettable, ResourceProvider {
                         effectiveMasterUser, masterPassword, databaseName,
                         (user, pw) -> validateDbClusterPasswordForScope(
                                 accountId, clusterRegion, id, user, pw));
+                advertiseCluster(cluster);
             }
 
             cluster.setServerlessV2MinCapacity(serverlessV2MinCapacity);
@@ -3780,6 +3834,178 @@ public class RdsService implements Resettable, ResourceProvider {
         return cluster;
     }
 
+    /**
+     * The CloudWatch Logs types each engine can export from a DB cluster, as the RDS and Aurora
+     * user guides list them. Aurora clusters export the engine log plus IAM auth errors and the
+     * per-instance log; Multi-AZ DB clusters of the community engines export what their instances
+     * do.
+     */
+    private static final Map<String, Set<String>> CLUSTER_LOG_TYPES = Map.of(
+            "aurora-postgresql", Set.of("postgresql", "iam-db-auth-error", "instance"),
+            "aurora-mysql", Set.of("audit", "error", "general", "slowquery", "iam-db-auth-error", "instance"),
+            "postgres", Set.of("postgresql", "upgrade"),
+            "mysql", Set.of("error", "general", "slowquery"));
+
+    private static final Set<String> CLUSTER_NETWORK_TYPES = Set.of("IPV4", "DUAL");
+
+    /**
+     * Checks the cluster settings a CreateDBCluster or ModifyDBCluster request carries before any
+     * of them, or the rest of the request, takes effect.
+     *
+     * @param engineIdentifier the cluster's engine name as the request or cluster gives it
+     */
+    public static void validateClusterSettings(String engineIdentifier, String engineVersion,
+                                               DbClusterSettings settings) {
+        if (settings == null) {
+            return;
+        }
+        validateListenerPort(settings.port());
+        if (settings.networkType() != null
+                && !CLUSTER_NETWORK_TYPES.contains(settings.networkType().toUpperCase(Locale.ROOT))) {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid network type " + settings.networkType() + ". Valid values are IPV4 and DUAL.", 400);
+        }
+        if (settings.backupRetentionPeriod() != null
+                && (settings.backupRetentionPeriod() < 1 || settings.backupRetentionPeriod() > 35)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid backup retention period " + settings.backupRetentionPeriod()
+                            + ". The backup retention period must be a value from 1 to 35 days.", 400);
+        }
+        Set<String> supported = engineIdentifier == null ? null
+                : CLUSTER_LOG_TYPES.get(engineIdentifier.toLowerCase(Locale.ROOT));
+        if (supported == null) {
+            return;
+        }
+        List<String> requested = new ArrayList<>();
+        if (settings.enabledCloudwatchLogsExports() != null) {
+            requested.addAll(settings.enabledCloudwatchLogsExports());
+        }
+        if (settings.logExportChanges() != null) {
+            if (settings.logExportChanges().enableLogTypes() != null) {
+                requested.addAll(settings.logExportChanges().enableLogTypes());
+            }
+            if (settings.logExportChanges().disableLogTypes() != null) {
+                requested.addAll(settings.logExportChanges().disableLogTypes());
+            }
+        }
+        List<String> unsupported = requested.stream().filter(type -> !supported.contains(type)).distinct().toList();
+        if (!unsupported.isEmpty()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "You cannot use the log types '" + String.join("', '", unsupported) + "' with engine version "
+                            + engineIdentifier.toLowerCase(Locale.ROOT)
+                            + (engineVersion != null ? " " + engineVersion : "")
+                            + ". For supported log types, see the documentation.", 400);
+        }
+    }
+
+    public void validateDbClusterSettings(String id, String region, DbClusterSettings settings) {
+        DbCluster cluster = getDbCluster(id, effectiveRegion(region));
+        validateClusterSettings(clusterEngineIdentifier(cluster), cluster.getEngineVersion(), settings);
+    }
+
+    private static String clusterEngineIdentifier(DbCluster cluster) {
+        if (cluster.getEngineIdentifier() != null) {
+            return cluster.getEngineIdentifier();
+        }
+        return cluster.getEngine() != null ? cluster.getEngine().name().toLowerCase(Locale.ROOT) : null;
+    }
+
+    /**
+     * Applies the listener, network, protection, backup and log-export settings of a
+     * CreateDBCluster or ModifyDBCluster request, and on create its tags. A new port moves the
+     * cluster's writer and reader endpoints and every member's endpoint at once: RDS restarts the
+     * cluster on the new port whatever ApplyImmediately says.
+     */
+    public synchronized DbCluster applyDbClusterSettings(String id, String region, DbClusterSettings settings,
+                                                         Map<String, String> tags) {
+        String effectiveRegion = effectiveRegion(region);
+        String accountId = currentAccountId();
+        DbCluster cluster = getDbCluster(id, effectiveRegion);
+        validateClusterSettings(clusterEngineIdentifier(cluster), cluster.getEngineVersion(), settings);
+        if (settings.vpcSecurityGroupIds() != null && !settings.vpcSecurityGroupIds().isEmpty()) {
+            cluster.setVpcSecurityGroupIds(settings.vpcSecurityGroupIds().stream().distinct().toList());
+        }
+        if (settings.enabledCloudwatchLogsExports() != null) {
+            cluster.setEnabledCloudwatchLogsExports(
+                    settings.enabledCloudwatchLogsExports().stream().distinct().toList());
+        }
+        if (settings.logExportChanges() != null) {
+            cluster.setEnabledCloudwatchLogsExports(
+                    settings.logExportChanges().applyTo(cluster.getEnabledCloudwatchLogsExports()));
+        }
+        if (settings.deletionProtection() != null) {
+            cluster.setDeletionProtection(settings.deletionProtection());
+        }
+        if (settings.networkType() != null) {
+            cluster.setNetworkType(settings.networkType().toUpperCase(Locale.ROOT));
+        }
+        if (settings.backupRetentionPeriod() != null) {
+            cluster.setBackupRetentionPeriod(settings.backupRetentionPeriod());
+        }
+        if (tags != null && !tags.isEmpty()) {
+            cluster.getTags().putAll(tags);
+        }
+        boolean portChanged = settings.port() != null && settings.port() != clusterListenerPort(cluster);
+        if (portChanged) {
+            cluster.setPort(settings.port());
+            assignClusterEndpoints(cluster);
+        }
+        putClusterForScope(accountId, effectiveRegion, id, cluster);
+        if (portChanged) {
+            boolean running = !config.services().rds().mock()
+                    && hasBackend(cluster.getContainerHost(), cluster.getContainerPort());
+            if (running) {
+                advertiseCluster(cluster);
+            }
+            for (String memberId : cluster.getDbClusterMembers()) {
+                DbInstance member = findInstanceForScope(accountId, effectiveRegion, memberId);
+                if (member == null) {
+                    continue;
+                }
+                assignInstanceEndpoint(member);
+                putInstanceForScope(accountId, effectiveRegion, memberId, member);
+                if (running) {
+                    advertiseInstance(member);
+                }
+            }
+        }
+        return cluster;
+    }
+
+    /**
+     * ModifyDBInstance DBPortNumber. RDS restarts the instance on the new port whatever
+     * ApplyImmediately says, so the endpoint moves at once. Called after the rest of the
+     * modification, once {@link #validateDbInstancePortChange} has accepted the port.
+     */
+    public synchronized DbInstance modifyDbInstancePort(String id, int port, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        validateDbInstancePortChange(id, port, effectiveRegion);
+        DbInstance instance = getDbInstance(id, effectiveRegion);
+        if (instanceListenerPort(instance) == port) {
+            return instance;
+        }
+        instance.setPort(port);
+        assignInstanceEndpoint(instance);
+        putInstanceForScope(currentAccountId(), effectiveRegion, id, instance);
+        if (!config.services().rds().mock()
+                && hasBackend(instance.getContainerHost(), instance.getContainerPort())) {
+            advertiseInstance(instance);
+        }
+        LOG.infov("DB instance {0} now listens on port {1}", id, String.valueOf(port));
+        return instance;
+    }
+
+    /** A cluster member's listener belongs to its cluster, which ModifyDBCluster Port changes. */
+    public void validateDbInstancePortChange(String id, int port, String region) {
+        validateListenerPort(port);
+        DbInstance instance = getDbInstance(id, effectiveRegion(region));
+        if (instance.getDbClusterIdentifier() != null && !instance.getDbClusterIdentifier().isBlank()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "The port of DB instance " + id + " is managed by DB cluster "
+                            + instance.getDbClusterIdentifier() + ". Modify the DB cluster's port instead.", 400);
+        }
+    }
+
     public synchronized void deleteDbCluster(String id) {
         deleteDbCluster(id, regionResolver.getDefaultRegion());
     }
@@ -3792,6 +4018,10 @@ public class RdsService implements Resettable, ResourceProvider {
                 new AwsException("DBClusterNotFoundFault",
                         "DB cluster " + id + " not found.", 404));
 
+        if (cluster.isDeletionProtection()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "Cannot delete protected Cluster, please disable deletion protection and try again.", 400);
+        }
         if (!cluster.getDbClusterMembers().isEmpty()) {
             throw new AwsException("InvalidDBClusterStateFault",
                     "DB cluster " + id + " still has DB instances.", 400);
@@ -4431,7 +4661,9 @@ public class RdsService implements Resettable, ResourceProvider {
         boolean mock = config.services().rds().mock();
         // RDS Proxy exposes a bare hostname on the engine's default port. Floci currently models
         // that contract directly; a separate endpoint-routing design is required before multiple
-        // same-engine proxies can be made externally reachable through one Docker host.
+        // same-engine proxies can be made externally reachable through one Docker host. When DB
+        // instance or cluster endpoints are already served on that port, the proxy takes a pool
+        // port rather than colliding with their listener.
         int proxyPort = reserveOrAllocateProxyPort(defaultPortForEngineFamily(engineFamily));
         DbProxy proxy = new DbProxy();
         proxy.setDbProxyName(dbProxyName);
@@ -5449,7 +5681,8 @@ public class RdsService implements Resettable, ResourceProvider {
     public DbParameterGroup createDbParameterGroup(
             String name, String family, String description, String region) {
         String effectiveRegion = effectiveRegion(region);
-        if (findParameterGroupForRegion(name, effectiveRegion) != null
+        if (isManagedDbParameterGroup(name)
+                || findParameterGroupForRegion(name, effectiveRegion) != null
                 || scopedKeyExists(parameterGroups, currentAccountId(),
                 dbResourceKey(effectiveRegion, name))) {
             throw new AwsException("DBParameterGroupAlreadyExists",
@@ -5467,7 +5700,11 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     public DbParameterGroup getDbParameterGroup(String name, String region) {
-        DbParameterGroup group = findParameterGroupForRegion(name, effectiveRegion(region));
+        String effectiveRegion = effectiveRegion(region);
+        DbParameterGroup group = findParameterGroupForRegion(name, effectiveRegion);
+        if (group == null) {
+            group = materializeManagedDbParameterGroup(name, effectiveRegion);
+        }
         if (group == null) {
             throw new AwsException("DBParameterGroupNotFound",
                     "DBParameterGroupName doesn't refer to an existing DB parameter group.", 404);
@@ -5514,6 +5751,10 @@ public class RdsService implements Resettable, ResourceProvider {
 
     public void deleteDbParameterGroup(String name, String region) {
         String effectiveRegion = effectiveRegion(region);
+        if (isManagedDbParameterGroup(name)) {
+            throw new AwsException("InvalidDBParameterGroupState",
+                    "Default DBParameterGroup cannot be deleted: " + name, 400);
+        }
         if (findParameterGroupForRegion(name, effectiveRegion) == null) {
             throw new AwsException("DBParameterGroupNotFound",
                     "DBParameterGroupName doesn't refer to an existing DB parameter group.", 404);
@@ -5535,6 +5776,7 @@ public class RdsService implements Resettable, ResourceProvider {
     public DbParameterGroup modifyDbParameterGroup(
             String name, Map<String, String> parameters, Map<String, String> applyMethods, String region) {
         String effectiveRegion = effectiveRegion(region);
+        rejectManagedDbParameterGroupChange(name);
         DbParameterGroup group = getDbParameterGroup(name, effectiveRegion);
         Map<String, String> methods = new LinkedHashMap<>();
         if (parameters != null) {
@@ -5600,11 +5842,59 @@ public class RdsService implements Resettable, ResourceProvider {
     public DbParameterGroup resetDbParameterGroup(
             String name, boolean resetAllParameters, List<String> parameterNames, String region) {
         String effectiveRegion = effectiveRegion(region);
+        rejectManagedDbParameterGroupChange(name);
         DbParameterGroup group = getDbParameterGroup(name, effectiveRegion);
         resetParameters(group.getParameters(), resetAllParameters, parameterNames);
         resetParameters(group.getParameterApplyMethods(), resetAllParameters, parameterNames);
         putParameterGroupForRegion(name, effectiveRegion, group);
         return group;
+    }
+
+    private static Set<String> managedDbParameterGroupFamilies() {
+        Set<String> families = new TreeSet<>(RdsEngineCatalog.families());
+        for (ManagedClusterParameterGroup group : MANAGED_CLUSTER_PARAMETER_GROUPS) {
+            // DocumentDB has cluster parameter groups only.
+            if (!group.family().startsWith("docdb")) {
+                families.add(group.family());
+            }
+        }
+        return Set.copyOf(families);
+    }
+
+    /** Whether a name is one of the default DB parameter groups the service itself provides. */
+    public boolean isManagedDbParameterGroup(String name) {
+        return managedDbParameterGroupFamily(name) != null;
+    }
+
+    private static String managedDbParameterGroupFamily(String name) {
+        if (name == null || !name.startsWith("default.")) {
+            return null;
+        }
+        String family = name.substring("default.".length());
+        return MANAGED_DB_PARAMETER_GROUP_FAMILIES.contains(family) ? family : null;
+    }
+
+    private synchronized DbParameterGroup materializeManagedDbParameterGroup(String name, String region) {
+        String family = managedDbParameterGroupFamily(name);
+        if (family == null) {
+            return null;
+        }
+        DbParameterGroup existing = findParameterGroupForRegion(name, region);
+        if (existing != null) {
+            return existing;
+        }
+        DbParameterGroup group = new DbParameterGroup(name, family, "Default parameter group for " + family);
+        group.setRegion(region);
+        group.setDbParameterGroupArn(regionResolver.buildArn("rds", region, "pg:" + name));
+        putParameterGroupForRegion(name, region, group);
+        return group;
+    }
+
+    private void rejectManagedDbParameterGroupChange(String name) {
+        if (isManagedDbParameterGroup(name)) {
+            throw new AwsException("InvalidDBParameterGroupState",
+                    "Default parameter groups cannot be modified: " + name, 400);
+        }
     }
 
     /**
@@ -5901,39 +6191,40 @@ public class RdsService implements Resettable, ResourceProvider {
         if (identifier == null || identifier.isBlank()) {
             throw new AwsException("InvalidParameterValue", "DBClusterEndpointIdentifier is required.", 400);
         }
+        String id = clusterEndpointKey(identifier);
         getDbCluster(clusterId, regionResolver.getRegion());
-        if (clusterEndpoints.get(identifier).isPresent()) {
+        if (clusterEndpoints.get(id).isPresent()) {
             throw new AwsException("DBClusterEndpointAlreadyExistsFault",
-                    "DB cluster endpoint " + identifier + " already exists.", 400);
+                    "DB cluster endpoint " + id + " already exists.", 400);
         }
         String region = regionResolver.getRegion();
         DbClusterEndpoint endpoint = new DbClusterEndpoint();
-        endpoint.setDbClusterEndpointIdentifier(identifier);
+        endpoint.setDbClusterEndpointIdentifier(id);
         endpoint.setDbClusterIdentifier(clusterId);
         endpoint.setCustomEndpointType(endpointType != null ? endpointType : "ANY");
         endpoint.setStaticMembers(staticMembers);
         endpoint.setExcludedMembers(excludedMembers);
-        endpoint.setEndpoint(identifier + ".cluster-custom." + region + ".rds.amazonaws.com");
+        endpoint.setEndpoint(id + ".cluster-custom." + region + ".rds.amazonaws.com");
         endpoint.setDbClusterEndpointArn(
-                regionResolver.buildArn("rds", region, "cluster-endpoint:" + identifier));
+                regionResolver.buildArn("rds", region, "cluster-endpoint:" + id));
         if (tags != null) {
             endpoint.setTags(tags);
         }
-        clusterEndpoints.put(identifier, endpoint);
+        clusterEndpoints.put(id, endpoint);
         return endpoint;
     }
 
     public DbClusterEndpoint getDbClusterEndpoint(String identifier) {
-        return clusterEndpoints.get(identifier).orElseThrow(() ->
+        return clusterEndpoints.get(clusterEndpointKey(identifier)).orElseThrow(() ->
                 new AwsException("DBClusterEndpointNotFoundFault",
                         "DBClusterEndpoint " + identifier + " not found.", 400));
     }
 
     public Collection<DbClusterEndpoint> listDbClusterEndpoints(String clusterId, String identifier) {
+        String id = identifier == null || identifier.isBlank() ? null : clusterEndpointKey(identifier);
         return clusterEndpoints.scan(k -> true).stream()
                 .filter(e -> clusterId == null || clusterId.isBlank() || clusterId.equals(e.getDbClusterIdentifier()))
-                .filter(e -> identifier == null || identifier.isBlank()
-                        || identifier.equals(e.getDbClusterEndpointIdentifier()))
+                .filter(e -> id == null || id.equals(e.getDbClusterEndpointIdentifier()))
                 .toList();
     }
 
@@ -5949,13 +6240,18 @@ public class RdsService implements Resettable, ResourceProvider {
         if (excludedMembers != null) {
             endpoint.setExcludedMembers(excludedMembers);
         }
-        clusterEndpoints.put(identifier, endpoint);
+        clusterEndpoints.put(endpoint.getDbClusterEndpointIdentifier(), endpoint);
         return endpoint;
     }
 
     public void deleteDbClusterEndpoint(String identifier) {
-        getDbClusterEndpoint(identifier);
-        clusterEndpoints.delete(identifier);
+        DbClusterEndpoint endpoint = getDbClusterEndpoint(identifier);
+        clusterEndpoints.delete(endpoint.getDbClusterEndpointIdentifier());
+    }
+
+    /** AWS stores DBClusterEndpointIdentifier as a lowercase string and matches it case-insensitively. */
+    static String clusterEndpointKey(String identifier) {
+        return identifier == null ? null : identifier.toLowerCase(Locale.ROOT);
     }
 
     // ── Snapshots ─────────────────────────────────────────────────────────────
@@ -6499,7 +6795,7 @@ public class RdsService implements Resettable, ResourceProvider {
         int base = config.services().rds().proxyBasePort();
         int max = config.services().rds().proxyMaxPort();
         for (int port = base; port <= max; port++) {
-            if (usedPorts.add(port)) {
+            if (!isAdvertisedEndpointPort(port) && usedPorts.add(port)) {
                 return port;
             }
         }
@@ -6511,17 +6807,146 @@ public class RdsService implements Resettable, ResourceProvider {
         usedPorts.remove(port);
     }
 
-    private DbEndpoint proxyEndpoint(int proxyPort) {
-        Optional<String> endpointHost = config.services().rds().endpointHost()
-                .filter(host -> !host.isBlank());
-        if (endpointHost.isEmpty()) {
-            return new DbEndpoint(proxyEndpointHost(), proxyPort);
+    /**
+     * Whether an instance or cluster endpoint is served on {@code port}. The endpoint router
+     * listens there, so no proxy (an internal pool port, or an RDS Proxy on its engine's default
+     * port) may take it.
+     */
+    private boolean isAdvertisedEndpointPort(int port) {
+        if (config.services().rds().mock()) {
+            return false;   // nothing listens in mock mode
         }
+        for (DbInstance instance : allInstances()) {
+            if (instance.getEndpoint() != null && instance.getEndpoint().port() == port
+                    && instance.getProxyPort() != port) {
+                return true;
+            }
+        }
+        for (DbCluster cluster : allClusters()) {
+            if (cluster.getEndpoint() != null && cluster.getEndpoint().port() == port
+                    && cluster.getProxyPort() != port) {
+                return true;
+            }
+        }
+        return false;
+    }
 
-        int endpointPort = currentContainerNetworkResolver == null
-                ? proxyPort
-                : currentContainerNetworkResolver.resolvePublishedPort(proxyPort).orElse(proxyPort);
-        return new DbEndpoint(endpointHost.get(), endpointPort);
+    /** Local stand-in for {@code rds.amazonaws.com}; the wildcard resolves to 127.0.0.1 on the host. */
+    static final String ENDPOINT_DOMAIN = "rds." + EmbeddedDnsServer.DEFAULT_SUFFIX;
+
+    /**
+     * AWS names each endpoint after the resource and an identifier for the account and Region,
+     * {@code mydb.c0a1b2c3d4e5.us-east-1.rds.amazonaws.com}, so every instance can listen on the
+     * same port. Floci keeps that shape under {@link #ENDPOINT_DOMAIN}: the public wildcard record
+     * sends it to the host's loopback and Floci's embedded DNS sends it to Floci inside the
+     * containers it launches, and the proxy manager serves each name on its configured port. An
+     * operator-set {@code floci.services.rds.endpoint-host} replaces the name for every endpoint.
+     */
+    private DbEndpoint instanceEndpoint(String id, String accountId, String region, int port) {
+        return new DbEndpoint(endpointHost(id, "", accountId, region), port);
+    }
+
+    private DbEndpoint clusterEndpoint(String id, String accountId, String region, int port) {
+        return new DbEndpoint(endpointHost(id, "cluster-", accountId, region), port);
+    }
+
+    private DbEndpoint clusterReaderEndpoint(String id, String accountId, String region, int port) {
+        return new DbEndpoint(endpointHost(id, "cluster-ro-", accountId, region), port);
+    }
+
+    private String endpointHost(String id, String kind, String accountId, String region) {
+        Optional<String> override = config.services().rds().endpointHost()
+                .filter(host -> !host.isBlank());
+        if (override.isPresent()) {
+            return override.get();
+        }
+        return id.toLowerCase(Locale.ROOT) + "." + kind + endpointToken(accountId, region)
+                + "." + region + "." + ENDPOINT_DOMAIN;
+    }
+
+    /** The per-account, per-Region label AWS puts in every RDS endpoint: "c" and 11 characters. */
+    static String endpointToken(String accountId, String region) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest((accountId + ":" + region).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return "c" + java.util.HexFormat.of().formatHex(digest).substring(0, 11);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private int clusterListenerPort(DbCluster cluster) {
+        if (cluster.getPort() > 0) {
+            return cluster.getPort();
+        }
+        return cluster.getEngine() != null ? cluster.getEngine().defaultPort() : DatabaseEngine.POSTGRES.defaultPort();
+    }
+
+    /** A member listens on its cluster's port; a standalone instance on its own. */
+    private int instanceListenerPort(DbInstance instance) {
+        String clusterId = instance.getDbClusterIdentifier();
+        if (clusterId != null && !clusterId.isBlank() && instance.getDbInstanceArn() != null) {
+            DbCluster cluster = findClusterForScope(accountIdFromArn(instance.getDbInstanceArn()),
+                    regionFromArn(instance.getDbInstanceArn()), clusterId);
+            if (cluster != null) {
+                return clusterListenerPort(cluster);
+            }
+        }
+        if (instance.getPort() > 0) {
+            return instance.getPort();
+        }
+        return instance.getEngine() != null ? instance.getEngine().defaultPort() : DatabaseEngine.POSTGRES.defaultPort();
+    }
+
+    private void assignInstanceEndpoint(DbInstance instance) {
+        int port = instanceListenerPort(instance);
+        instance.setPort(port);
+        instance.setEndpoint(instanceEndpoint(instance.getDbInstanceIdentifier(),
+                accountIdFromArn(instance.getDbInstanceArn()), regionFromArn(instance.getDbInstanceArn()), port));
+    }
+
+    private void assignClusterEndpoints(DbCluster cluster) {
+        int port = clusterListenerPort(cluster);
+        String accountId = accountIdFromArn(cluster.getDbClusterArn());
+        String region = regionFromArn(cluster.getDbClusterArn());
+        cluster.setPort(port);
+        cluster.setEndpoint(clusterEndpoint(cluster.getDbClusterIdentifier(), accountId, region, port));
+        cluster.setReaderEndpoint(clusterReaderEndpoint(cluster.getDbClusterIdentifier(), accountId, region, port));
+    }
+
+    /** Serves a started instance proxy on the instance's endpoint and configured port. */
+    private void advertiseInstance(DbInstance instance) {
+        DbEndpoint endpoint = instance.getEndpoint();
+        if (endpoint == null || config.services().rds().mock()) {
+            return;
+        }
+        proxyManager.advertise(
+                rdsResourceRelayKey(instance.getDbInstanceArn(), instance.getDbInstanceIdentifier()),
+                List.of(endpoint.address()), endpoint.port());
+    }
+
+    /** Serves a started cluster proxy on its writer and reader endpoints. */
+    private void advertiseCluster(DbCluster cluster) {
+        DbEndpoint endpoint = cluster.getEndpoint();
+        if (endpoint == null || config.services().rds().mock()) {
+            return;
+        }
+        List<String> hostnames = new ArrayList<>(List.of(endpoint.address()));
+        DbEndpoint reader = cluster.getReaderEndpoint();
+        if (reader != null && !hostnames.contains(reader.address())) {
+            hostnames.add(reader.address());
+        }
+        proxyManager.advertise(
+                rdsResourceRelayKey(cluster.getDbClusterArn(), cluster.getDbClusterIdentifier()),
+                hostnames, endpoint.port());
+    }
+
+    /** CreateDBInstance Port, ModifyDBInstance DBPortNumber and CreateDBCluster Port share this range. */
+    static void validateListenerPort(Integer port) {
+        if (port != null && (port < 1150 || port > 65535)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid port " + port + ". The port must be a value from 1150 to 65535.", 400);
+        }
     }
 
     private String proxyEndpointHost() {
@@ -7191,14 +7616,10 @@ public class RdsService implements Resettable, ResourceProvider {
                 // A stopped cluster stays stopped across an emulator restart; StartDBCluster
                 // brings its container back. Its endpoint keeps its port when that port is free.
                 int port = reserveOrAllocateProxyPort(cluster.getProxyPort());
-                if (port != cluster.getProxyPort()) {
-                    cluster.setProxyPort(port);
-                    DbEndpoint endpoint = proxyEndpoint(port);
-                    cluster.setEndpoint(endpoint);
-                    cluster.setReaderEndpoint(endpoint);
-                    putClusterForScope(accountIdFromArn(cluster.getDbClusterArn()),
-                            regionFromArn(cluster.getDbClusterArn()), cluster.getDbClusterIdentifier(), cluster);
-                }
+                cluster.setProxyPort(port);
+                assignClusterEndpoints(cluster);
+                putClusterForScope(accountIdFromArn(cluster.getDbClusterArn()),
+                        regionFromArn(cluster.getDbClusterArn()), cluster.getDbClusterIdentifier(), cluster);
                 continue;
             }
             String accountId = accountIdFromArn(cluster.getDbClusterArn());
@@ -7215,17 +7636,13 @@ public class RdsService implements Resettable, ResourceProvider {
                 proxyPort = reserveOrAllocateProxyPort(cluster.getProxyPort());
                 portReserved = true;
                 cluster.setProxyPort(proxyPort);
+                assignClusterEndpoints(cluster);
                 if (config.services().rds().mock()) {
-                    cluster.setEndpoint(new DbEndpoint("localhost", proxyPort));
-                    cluster.setReaderEndpoint(new DbEndpoint("localhost", proxyPort));
                     cluster.setStatus(DbInstanceStatus.AVAILABLE);
                     putClusterForScope(accountId, clusterRegion,
                             cluster.getDbClusterIdentifier(), cluster);
                     continue;
                 }
-                DbEndpoint endpoint = proxyEndpoint(proxyPort);
-                cluster.setEndpoint(endpoint);
-                cluster.setReaderEndpoint(endpoint);
                 String image = imageForEngine(cluster.getEngine(), cluster.getEngineVersion());
                 restoredHandle = containerManager.tryStart(
                         cluster.getDbClusterArn(), cluster.getDbClusterIdentifier(),
@@ -7249,6 +7666,7 @@ public class RdsService implements Resettable, ResourceProvider {
                             (user, pw) -> validateDbClusterPasswordForScope(
                                     accountId, clusterRegion,
                                     cluster.getDbClusterIdentifier(), user, pw));
+                    advertiseCluster(cluster);
                 }
                 cluster.setStatus(DbInstanceStatus.AVAILABLE);
                 putClusterForScope(accountId, clusterRegion,
@@ -7299,12 +7717,10 @@ public class RdsService implements Resettable, ResourceProvider {
             if (instance.getStatus() == DbInstanceStatus.STOPPED) {
                 // Stays stopped across a restart; StartDBInstance brings the container back.
                 int port = reserveOrAllocateProxyPort(instance.getProxyPort());
-                if (port != instance.getProxyPort()) {
-                    instance.setProxyPort(port);
-                    instance.setEndpoint(proxyEndpoint(port));
-                    putInstanceForScope(accountIdFromArn(instance.getDbInstanceArn()),
-                            regionFromArn(instance.getDbInstanceArn()), instance.getDbInstanceIdentifier(), instance);
-                }
+                instance.setProxyPort(port);
+                assignInstanceEndpoint(instance);
+                putInstanceForScope(accountIdFromArn(instance.getDbInstanceArn()),
+                        regionFromArn(instance.getDbInstanceArn()), instance.getDbInstanceIdentifier(), instance);
                 continue;
             }
             String accountId = accountIdFromArn(instance.getDbInstanceArn());
@@ -7330,14 +7746,13 @@ public class RdsService implements Resettable, ResourceProvider {
                 proxyPort = reserveOrAllocateProxyPort(instance.getProxyPort());
                 portReserved = true;
                 instance.setProxyPort(proxyPort);
+                assignInstanceEndpoint(instance);
                 if (config.services().rds().mock()) {
-                    instance.setEndpoint(new DbEndpoint("localhost", proxyPort));
                     instance.setStatus(DbInstanceStatus.AVAILABLE);
                     putInstanceForScope(accountId, instanceRegion,
                             instance.getDbInstanceIdentifier(), instance);
                     continue;
                 }
-                instance.setEndpoint(proxyEndpoint(proxyPort));
                 String backendHost;
                 int backendPort;
                 if (clusterId != null && !clusterId.isBlank()) {
@@ -7386,6 +7801,7 @@ public class RdsService implements Resettable, ResourceProvider {
                             (user, pw) -> validateDbPasswordForScope(
                                     accountId, instanceRegion,
                                     instance.getDbInstanceIdentifier(), user, pw));
+                    advertiseInstance(instance);
                 }
                 instance.setStatus(DbInstanceStatus.AVAILABLE);
                 putInstanceForScope(accountId, instanceRegion,
@@ -8373,7 +8789,7 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     private int reserveOrAllocateProxyPort(int persistedPort) {
-        if (persistedPort > 0 && usedPorts.add(persistedPort)) {
+        if (persistedPort > 0 && !isAdvertisedEndpointPort(persistedPort) && usedPorts.add(persistedPort)) {
             return persistedPort;
         }
         return allocateProxyPort();

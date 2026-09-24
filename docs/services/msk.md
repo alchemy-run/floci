@@ -76,8 +76,32 @@ Two details worth knowing:
 `CreateClusterV2` accepts a `serverless` member as well as `provisioned` — exactly one of the
 two, as on AWS. A serverless cluster stores its `vpcConfigs` and `clientAuthentication`, reports
 `clusterType: SERVERLESS`, and comes back from `DescribeClusterV2` under a `serverless` envelope
-rather than a `provisioned` one. It is backed by the same emulated Kafka endpoint, so
-`GetBootstrapBrokers` works normally.
+rather than a `provisioned` one. It is backed by the same emulated Kafka broker. As on AWS, its
+only endpoint is SASL/IAM, so `GetBootstrapBrokers` returns just `BootstrapBrokerStringSaslIam`.
+
+### SASL/IAM
+
+A serverless cluster, and a provisioned cluster created with `clientAuthentication.sasl.iam.enabled`,
+gets a SASL/IAM endpoint on port 9098, reported as `BootstrapBrokerStringSaslIam`:
+`boot-<id>.kafka-serverless.<region>.<domain>:9098` for serverless and
+`b-1.<id>.kafka.<region>.<domain>:9098` for provisioned, where `<domain>` is `localhost.floci.io`
+unless `FLOCI_HOSTNAME` sets another name. A provisioned cluster keeps its plaintext
+`BootstrapBrokerString` too.
+
+Floci serves the endpoint itself, on port 9098, the way MSK does:
+
+- **TLS** with a certificate for the broker hostname the client asked for (TLS server name),
+  issued by Floci's local CA. Trust the CA once (`GET /_floci/ca.pem`); containers Floci
+  launches already do.
+- **SASL** with the `AWS_MSK_IAM` (aws-msk-iam-auth) or `OAUTHBEARER` (aws-msk-iam-sasl-signer)
+  mechanism. The SigV4 signature of the `kafka-cluster:Connect` presign is verified against the
+  caller's secret key, so only a holder of a Floci IAM credential gets through; an unknown key, a
+  wrong signature or an expired token fails with `SASL_AUTHENTICATION_FAILED`.
+- The authenticated connection is relayed to the cluster's Redpanda broker, whose SASL/IAM
+  listener advertises the same hostname, so every broker connection goes through the endpoint.
+
+IAM policies are not evaluated for the `kafka-cluster:*` data-plane actions: an authenticated
+client may use the cluster. In mock mode the endpoint is reported but no broker runs behind it.
 
 The v1 API predates serverless and its `ClusterInfo` cannot represent one, so — as on AWS —
 `DescribeCluster` on a serverless cluster returns `BadRequestException` pointing you at

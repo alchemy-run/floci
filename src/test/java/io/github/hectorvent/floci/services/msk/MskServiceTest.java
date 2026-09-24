@@ -23,6 +23,7 @@ import io.github.hectorvent.floci.services.msk.model.CreateClusterV2Request;
 import io.github.hectorvent.floci.services.msk.model.EncryptionInTransit;
 import io.github.hectorvent.floci.services.msk.model.EbsStorageInfo;
 import io.github.hectorvent.floci.services.msk.model.EncryptionInfo;
+import io.github.hectorvent.floci.services.msk.model.Iam;
 import io.github.hectorvent.floci.services.msk.model.JmxExporter;
 import io.github.hectorvent.floci.services.msk.model.LoggingInfo;
 import io.github.hectorvent.floci.services.msk.model.OpenMonitoring;
@@ -1013,6 +1014,63 @@ class MskServiceTest {
         assertEquals(2, mskService.listClusters().size());
         assertEquals(1, mskService.listProvisionedClusters().size());
         assertEquals("provisioned-cluster", mskService.listProvisionedClusters().get(0).getClusterName());
+    }
+
+    @Test
+    void serverlessBootstrapBrokersExposeOnlyTheSaslIamEndpoint() {
+        CreateClusterV2Request request = new CreateClusterV2Request();
+        request.setClusterName("iam-serverless");
+        request.setServerless(new Serverless());
+        MskCluster cluster = mskService.createCluster(request);
+
+        MskService.BootstrapBrokers brokers = mskService.bootstrapBrokersFor(cluster.getClusterArn());
+
+        assertNull(brokers.bootstrapBrokerString());
+        assertNotNull(brokers.bootstrapBrokerStringSaslIam());
+        assertTrue(brokers.bootstrapBrokerStringSaslIam().endsWith(":9098"),
+                brokers.bootstrapBrokerStringSaslIam());
+        assertTrue(brokers.bootstrapBrokerStringSaslIam()
+                .matches("boot-[0-9a-f]{8}\\.kafka-serverless\\.us-east-1\\.localhost\\.floci\\.io:9098"),
+                brokers.bootstrapBrokerStringSaslIam());
+        // Floci's own consumers keep the broker's internal plaintext address.
+        assertEquals("localhost:9092", mskService.getBootstrapBrokers(cluster.getClusterArn()));
+    }
+
+    @Test
+    void provisionedBootstrapBrokersAddSaslIamOnlyWhenIamIsEnabled() {
+        MskCluster plain = mskService.createCluster("plain-cluster");
+        MskService.BootstrapBrokers plainBrokers = mskService.bootstrapBrokersFor(plain.getClusterArn());
+        assertEquals("localhost:9092", plainBrokers.bootstrapBrokerString());
+        assertNull(plainBrokers.bootstrapBrokerStringSaslIam());
+
+        CreateClusterRequest request = new CreateClusterRequest();
+        request.setClusterName("iam-cluster");
+        Sasl sasl = new Sasl();
+        Iam iam = new Iam();
+        iam.setEnabled(true);
+        sasl.setIam(iam);
+        ClientAuthentication clientAuthentication = new ClientAuthentication();
+        clientAuthentication.setSasl(sasl);
+        request.setClientAuthentication(clientAuthentication);
+        MskCluster withIam = mskService.createCluster(request);
+
+        MskService.BootstrapBrokers iamBrokers = mskService.bootstrapBrokersFor(withIam.getClusterArn());
+        assertEquals("localhost:9092", iamBrokers.bootstrapBrokerString());
+        assertTrue(iamBrokers.bootstrapBrokerStringSaslIam()
+                .matches("b-1\\.[0-9a-f]{8}\\.kafka\\.us-east-1\\.localhost\\.floci\\.io:9098"),
+                iamBrokers.bootstrapBrokerStringSaslIam());
+    }
+
+    @Test
+    void iamBackendIsResolvedOnlyForAClusterWithABrokerListener() {
+        CreateClusterV2Request request = new CreateClusterV2Request();
+        request.setClusterName("iam-backend");
+        request.setServerless(new Serverless());
+        MskCluster cluster = mskService.createCluster(request);
+
+        // Mock mode starts no broker, so there is nothing behind the hostname to relay to.
+        assertTrue(mskService.iamBackendFor(cluster.getIamBrokerHost()).isEmpty());
+        assertTrue(mskService.iamBackendFor("boot-unknown.kafka-serverless.us-east-1.localhost.floci.io").isEmpty());
     }
 
     @Test

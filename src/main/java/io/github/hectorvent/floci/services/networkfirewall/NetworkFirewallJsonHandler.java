@@ -54,6 +54,14 @@ public class NetworkFirewallJsonHandler {
             case "DescribeLoggingConfiguration" -> ok(service.describeLoggingConfiguration(
                     textOrNull(request, "FirewallArn"), textOrNull(request, "FirewallName")));
             case "AssociateFirewallPolicy" -> ok(service.associateFirewallPolicy(request, region, accountId));
+            case "StartFlowCapture" -> ok(service.startFlowCapture(request, region));
+            case "StartFlowFlush" -> ok(service.startFlowFlush(request, region));
+            case "DescribeFlowOperation" -> ok(service.describeFlowOperation(request));
+            case "ListFlowOperations" -> ok(service.listFlowOperations(request));
+            case "ListFlowOperationResults" -> ok(service.listFlowOperationResults(request));
+            case "StartAnalysisReport" -> ok(service.startAnalysisReport(request));
+            case "ListAnalysisReports" -> ok(service.listAnalysisReports(request));
+            case "GetAnalysisReportResults" -> ok(service.getAnalysisReportResults(request));
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: NetworkFirewall_20201112." + action))

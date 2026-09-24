@@ -322,6 +322,83 @@ class LambdaMicrovmsIntegrationTest {
     }
 
     @Test
+    @Order(11)
+    void connectorUpdatePersistsNetworkProtocolAndConfiguration() {
+        String id = given()
+                .contentType("application/json")
+                .body("""
+                        {
+                          "Name": "microvm-it-connector-update",
+                          "ClientToken": "microvm-it-token-update",
+                          "OperatorRole": "arn:aws:iam::000000000000:role/microvm-connector-operator",
+                          "Configuration": { "VpcEgressConfiguration": {
+                            "AssociatedComputeResourceTypes": ["MicroVm"],
+                            "NetworkProtocol": "IPv4",
+                            "SubnetIds": ["subnet-0000000000000up01"],
+                            "SecurityGroupIds": ["sg-0000000000000up01"]
+                          } }
+                        }
+                        """)
+                .when()
+                .post(CORE + "/network-connectors")
+                .then()
+                .statusCode(202)
+                .body("Configuration.VpcEgressConfiguration.NetworkProtocol", equalTo("IPv4"))
+                .extract().path("Id");
+
+        given()
+                .contentType("application/json")
+                .body("""
+                        {
+                          "OperatorRole": "arn:aws:iam::000000000000:role/microvm-connector-operator-2",
+                          "Configuration": { "VpcEgressConfiguration": {
+                            "AssociatedComputeResourceTypes": ["MicroVm"],
+                            "NetworkProtocol": "DualStack",
+                            "SubnetIds": ["subnet-0000000000000up02"],
+                            "SecurityGroupIds": ["sg-0000000000000up02"]
+                          } }
+                        }
+                        """)
+                .when()
+                .put(CORE + "/network-connectors/" + id)
+                .then()
+                .statusCode(202)
+                .body("LastUpdateStatus", equalTo("Successful"))
+                .body("Configuration.VpcEgressConfiguration.NetworkProtocol", equalTo("DualStack"));
+
+        given()
+                .when()
+                .get(CORE + "/network-connectors/" + id)
+                .then()
+                .statusCode(200)
+                .body("OperatorRole", equalTo("arn:aws:iam::000000000000:role/microvm-connector-operator-2"))
+                .body("Configuration.VpcEgressConfiguration.NetworkProtocol", equalTo("DualStack"))
+                .body("Configuration.VpcEgressConfiguration.SubnetIds[0]", equalTo("subnet-0000000000000up02"))
+                .body("Configuration.VpcEgressConfiguration.SecurityGroupIds[0]", equalTo("sg-0000000000000up02"))
+                .body("Configuration.VpcEgressConfiguration.AssociatedComputeResourceTypes[0]", equalTo("MicroVm"));
+
+        given()
+                .when()
+                .get(CORE + "/network-connectors")
+                .then()
+                .statusCode(200)
+                .body("NetworkConnectors.Id", hasItem(id));
+
+        given()
+                .when()
+                .delete(CORE + "/network-connectors/" + id)
+                .then()
+                .statusCode(202)
+                .body("State", equalTo("DELETING"));
+
+        given()
+                .when()
+                .get(CORE + "/network-connectors/" + id)
+                .then()
+                .statusCode(404);
+    }
+
+    @Test
     @Order(12)
     void connectorSubnetLimit() {
         StringBuilder subnets = new StringBuilder();

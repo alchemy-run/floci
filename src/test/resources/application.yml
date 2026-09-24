@@ -507,6 +507,8 @@ floci:
       default-image: "mongo:7.0"
     bedrock-agent-core:
       enabled: true
+      # Creating a code interpreter or browser must not pull session images during tests.
+      prewarm-images: false
     bedrock-agent-core-control:
       enabled: true
     servicequotas:

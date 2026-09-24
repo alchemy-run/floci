@@ -7,6 +7,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -21,6 +22,7 @@ public class RdsProxyManager {
     private final RdsProxyTlsCertificates tlsCertificates;
     private final EmulatorConfig config;
     private final ConcurrentHashMap<String, RdsAuthProxy> proxies = new ConcurrentHashMap<>();
+    private final RdsEndpointRouter router;
 
     @Inject
     public RdsProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
@@ -28,6 +30,30 @@ public class RdsProxyManager {
         this.sigV4Validator = sigV4Validator;
         this.tlsCertificates = tlsCertificates;
         this.config = config;
+        EmulatorConfig.RdsServiceConfig rdsConfig = config.services().rds();
+        this.router = new RdsEndpointRouter(rdsConfig.proxyHandshakeTimeoutMillis(),
+                rdsConfig.proxyBackendConnectTimeoutMillis(), rdsConfig.proxyMaxConnections());
+    }
+
+    /**
+     * Serves a started proxy on its advertised endpoint: {@code hostnames} (the endpoint address
+     * and any alias, such as a cluster's reader endpoint) on the endpoint's configured
+     * {@code port}, which many resources can share. The TLS certificate covers every name, and
+     * MySQL IAM tokens are checked against the advertised host and port rather than the internal
+     * one. A no-op when no proxy runs under {@code relayKey}.
+     *
+     * @return false when the port could not be bound on this host
+     */
+    public synchronized boolean advertise(String relayKey, List<String> hostnames, int port) {
+        RdsAuthProxy proxy = proxies.get(relayKey);
+        if (proxy == null || hostnames == null || hostnames.isEmpty()) {
+            return true;
+        }
+        for (String hostname : hostnames) {
+            tlsCertificates.ensureHost(hostname);
+        }
+        proxy.updateMysqlBinding(new RdsMysqlBinding(hostnames.get(0), port, regionFromRelayKey(relayKey)));
+        return router.register(relayKey, port, hostnames, proxy.getPort(), proxy.getEngine());
     }
 
     public synchronized void startProxy(String instanceId, DatabaseEngine engine, boolean iamEnabled,
@@ -119,6 +145,7 @@ public class RdsProxyManager {
     }
 
     public synchronized void stopProxy(String instanceId) {
+        router.unregister(instanceId);
         RdsAuthProxy proxy = proxies.get(instanceId);
         if (proxy != null) {
             proxy.stop();
@@ -128,6 +155,7 @@ public class RdsProxyManager {
     }
 
     public synchronized void stopAll() {
+        router.closeAll();
         proxies.forEach((instanceId, proxy) -> {
             try {
                 proxy.stop();

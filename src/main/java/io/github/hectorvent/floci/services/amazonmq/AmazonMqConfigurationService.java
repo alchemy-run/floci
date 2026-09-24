@@ -37,9 +37,9 @@ import java.util.regex.Pattern;
 
 /**
  * Amazon MQ broker configurations (CreateConfiguration, DescribeConfiguration,
- * UpdateConfiguration, ...). Configurations are pure control-plane documents, so
- * both ActiveMQ and RabbitMQ configurations are stored even though only RabbitMQ
- * brokers are provisioned. Scoped per account (storage) and per region (key prefix).
+ * UpdateConfiguration, ...). ActiveMQ revisions are applied to the broker's
+ * {@code activemq.xml} when the broker starts or reboots. Scoped per account (storage)
+ * and per region (key prefix).
  */
 @ApplicationScoped
 public class AmazonMqConfigurationService {
@@ -207,6 +207,40 @@ public class AmazonMqConfigurationService {
         if (revision != null && configuration.revision(revision) == null) {
             throw new AwsException("NotFoundException", "Can't find requested revision [" + revision
                     + "] of configuration [" + configurationId + "].", 404);
+        }
+    }
+
+    /** The revision a broker applies when its configuration reference omits one: the latest. */
+    public int resolveRevision(String configurationId, Integer revision) {
+        if (revision != null) {
+            return revision;
+        }
+        MqConfiguration.Revision latest = describeConfiguration(configurationId).latestRevision();
+        return latest == null ? 1 : latest.getRevision();
+    }
+
+    /**
+     * The decoded ActiveMQ {@code <broker>} document of a configuration revision, or
+     * {@code null} when the configuration no longer exists, is not an ActiveMQ configuration,
+     * or the revision is missing.
+     */
+    public String activeMqDocument(String configurationId, Integer revision) {
+        Optional<MqConfiguration> configuration = find(configurationId);
+        if (configuration.isEmpty() || !ENGINE_ACTIVEMQ.equals(configuration.get().getEngineType())) {
+            return null;
+        }
+        MqConfiguration.Revision found = revision == null
+                ? configuration.get().latestRevision()
+                : configuration.get().revision(revision);
+        if (found == null || found.getData() == null) {
+            return null;
+        }
+        try {
+            return new String(Base64.getDecoder().decode(found.getData().trim()), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            LOG.warnv("Configuration {0} revision {1} is not valid base64; ignoring it", configurationId,
+                    String.valueOf(found.getRevision()));
+            return null;
         }
     }
 

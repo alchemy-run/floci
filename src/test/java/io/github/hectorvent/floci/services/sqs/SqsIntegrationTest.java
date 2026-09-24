@@ -832,6 +832,51 @@ class SqsIntegrationTest {
         }
     }
 
+    @Test
+    void redrivePolicyWithMissingDeadLetterTargetIsRejected() {
+        String redrivePolicy = "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:query-missing-dead-letter\","
+                + "\"maxReceiveCount\":3}";
+        String sourceUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "query-missing-dlq-source")
+        .when().post("/").then().statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+
+        try {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "SetQueueAttributes")
+                .formParam("QueueUrl", sourceUrl)
+                .formParam("Attribute.1.Name", "RedrivePolicy")
+                .formParam("Attribute.1.Value", redrivePolicy)
+            .when().post("/").then()
+                .statusCode(400)
+                .body(containsString("<Code>InvalidParameterValue</Code>"))
+                .body(containsString("Reason: Dead letter target does not exist."));
+
+            assertFalse(allQueueAttributes(sourceUrl).containsKey("RedrivePolicy"),
+                    "A rejected SetQueueAttributes must not store the RedrivePolicy");
+
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateQueue")
+                .formParam("QueueName", "query-missing-dlq-create")
+                .formParam("Attribute.1.Name", "RedrivePolicy")
+                .formParam("Attribute.1.Value", redrivePolicy)
+            .when().post("/").then()
+                .statusCode(400)
+                .body(containsString("<Code>InvalidParameterValue</Code>"))
+                .body(containsString("Dead letter target does not exist"));
+        } finally {
+            given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteQueue")
+                .formParam("QueueUrl", sourceUrl)
+            .when().post("/");
+        }
+    }
+
     private static Map<String, String> allQueueAttributes(String url) {
         XmlPath xml = given()
             .contentType("application/x-www-form-urlencoded")

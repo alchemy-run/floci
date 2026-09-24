@@ -3,9 +3,11 @@ package io.github.hectorvent.floci.services.bedrockagentcorecontrol;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreSandboxRuntime;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -30,14 +32,20 @@ public class BedrockAgentCoreToolsController {
     private static final Logger LOG = Logger.getLogger(BedrockAgentCoreToolsController.class);
 
     private final BedrockAgentCoreToolsService service;
+    private final BedrockAgentCoreSandboxRuntime sandboxRuntime;
+    private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
     public BedrockAgentCoreToolsController(BedrockAgentCoreToolsService service,
+                                           BedrockAgentCoreSandboxRuntime sandboxRuntime,
+                                           EmulatorConfig config,
                                            RegionResolver regionResolver,
                                            ObjectMapper objectMapper) {
         this.service = service;
+        this.sandboxRuntime = sandboxRuntime;
+        this.config = config;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -49,6 +57,8 @@ public class BedrockAgentCoreToolsController {
         try {
             ObjectNode request = object(body);
             ObjectNode browser = service.createBrowser(request, region);
+            // Sessions run in containers; pulling the image now keeps it off the first session's latency.
+            sandboxRuntime.prewarm(config.services().bedrockAgentCore().browserImage());
             ObjectNode response = objectMapper.createObjectNode();
             response.put("browserArn", browser.path("browserArn").asText());
             response.put("browserId", browser.path("browserId").asText());
@@ -130,6 +140,7 @@ public class BedrockAgentCoreToolsController {
         String region = regionResolver.resolveRegion(headers);
         try {
             ObjectNode interpreter = service.createCodeInterpreter(object(body), region);
+            sandboxRuntime.prewarm(config.services().bedrockAgentCore().codeInterpreterImage());
             ObjectNode response = objectMapper.createObjectNode();
             copyText(interpreter, response, "codeInterpreterArn");
             copyText(interpreter, response, "codeInterpreterId");

@@ -644,7 +644,7 @@ public class OpenSearchController {
         node.put("Created", !domain.isProcessing());
         node.put("Processing", domain.isProcessing());
         node.put("Deleted", domain.isDeleted());
-        node.put("Endpoint", domain.getEndpoint() != null ? domain.getEndpoint() : "");
+        node.put("Endpoint", service.publicEndpoint(domain));
         if (domain.getAccessPolicies() != null) {
             node.put("AccessPolicies", domain.getAccessPolicies());
         }

@@ -329,8 +329,8 @@ public class CloudHsmV2Service {
     public Hsm createHsm(String clusterId, String availabilityZone, String ipAddress, String region) {
         Cluster cluster = getCluster(clusterId, region);
 
-        if (cluster.getState() != ClusterState.INITIALIZED
-                && cluster.getState() != ClusterState.ACTIVE) {
+        // The first HSM is added to an UNINITIALIZED cluster; InitializeCluster comes after it.
+        if (!acceptsNewHsm(cluster.getState())) {
             throw new AwsException("CloudHsmInvalidRequestException",
                     "Cannot create HSM in cluster " + clusterId + " with state " + cluster.getState().wireValue(), 400);
         }
@@ -510,6 +510,13 @@ public class CloudHsmV2Service {
         return clusters.get(regionKey(region, clusterId)).orElseThrow(() ->
                 new AwsException("CloudHsmResourceNotFoundException",
                         "Cluster " + clusterId + " not found.", 400));
+    }
+
+    static boolean acceptsNewHsm(ClusterState state) {
+        return state == ClusterState.UNINITIALIZED
+                || state == ClusterState.INITIALIZED
+                || state == ClusterState.ACTIVE
+                || state == ClusterState.DEGRADED;
     }
 
     private String regionKey(String region, String clusterId) {

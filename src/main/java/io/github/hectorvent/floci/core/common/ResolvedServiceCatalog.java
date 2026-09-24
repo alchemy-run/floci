@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.iot.IotController;
 import io.github.hectorvent.floci.services.iot.IotDomainConfigurationController;
 import io.github.hectorvent.floci.services.iot.IotDataController;
 import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreController;
+import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreToolSessionController;
 import io.github.hectorvent.floci.services.bedrockagentcorecontrol.BedrockAgentCoreControlController;
 import io.github.hectorvent.floci.services.bedrockagentcorecontrol.BedrockAgentCoreGatewayController;
 import io.github.hectorvent.floci.services.bedrockagentcorecontrol.BedrockAgentCoreGatewayRuleController;
@@ -402,7 +403,7 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of(), Set.of(),
-                        Set.of(BedrockAgentCoreController.class)),
+                        Set.of(BedrockAgentCoreController.class, BedrockAgentCoreToolSessionController.class)),
                 descriptor("elasticloadbalancing", "elbv2", config.services().elbv2().enabled(), true,
                         "elbv2", config.storage().mode(), 5000L, AwsNamespaces.ELB_V2, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),

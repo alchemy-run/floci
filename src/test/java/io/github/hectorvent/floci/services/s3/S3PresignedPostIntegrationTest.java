@@ -81,8 +81,10 @@ class S3PresignedPostIntegrationTest {
         String wildcardQueueUrl = createQueue(wildcardQueueName);
 
         try {
+            // Skip the s3:TestEvent so each queue holds only object notifications.
             given()
                 .contentType("application/xml")
+                .header("x-amz-skip-destination-validation", "true")
                 .queryParam("notification", "")
                 .body("""
                     <NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">

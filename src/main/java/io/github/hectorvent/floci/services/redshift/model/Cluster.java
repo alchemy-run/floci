@@ -21,6 +21,22 @@ public class Cluster {
     private List<String> vpcSecurityGroupIds = new ArrayList<>();
     private List<String> iamRoleArns = new ArrayList<>();
 
+    // CreateCluster DBName. Null on clusters persisted before it was recorded; those were
+    // always created with the default "dev" database.
+    private String dbName;
+    private int numberOfNodes = 1;
+    private boolean publiclyAccessible;
+    private boolean encrypted;
+
+    public String getDbName() { return dbName; }
+    public void setDbName(String dbName) { this.dbName = dbName; }
+    public int getNumberOfNodes() { return numberOfNodes; }
+    public void setNumberOfNodes(int numberOfNodes) { this.numberOfNodes = numberOfNodes; }
+    public boolean isPubliclyAccessible() { return publiclyAccessible; }
+    public void setPubliclyAccessible(boolean publiclyAccessible) { this.publiclyAccessible = publiclyAccessible; }
+    public boolean isEncrypted() { return encrypted; }
+    public void setEncrypted(boolean encrypted) { this.encrypted = encrypted; }
+
     public String getClusterIdentifier() { return clusterIdentifier; }
     public void setClusterIdentifier(String clusterIdentifier) { this.clusterIdentifier = clusterIdentifier; }
     public String getNodeType() { return nodeType; }

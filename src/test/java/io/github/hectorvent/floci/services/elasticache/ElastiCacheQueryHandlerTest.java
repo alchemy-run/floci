@@ -642,4 +642,35 @@ class ElastiCacheQueryHandlerTest {
         assertEquals(200, handler.handle("ModifyReplicationGroup", p, "us-east-1").getStatus());
         verify(service).modifyReplicationGroup("g1", null, null, new ReplicationGroupSettings(null, null, 3, "01:00-02:00"));
     }
+
+    @Test
+    void modifyReplicationGroupShardConfiguration_passesTheShardsToRemoveAndRetain() {
+        when(service.modifyShardConfiguration(eq("g1"), eq(2), any(), any())).thenReturn(group("g1"));
+        MultivaluedMap<String, String> p = params();
+        p.add("ReplicationGroupId", "g1");
+        p.add("NodeGroupCount", "2");
+        p.add("ApplyImmediately", "true");
+        p.add("NodeGroupsToRemove.NodeGroupToRemove.1", "0003");
+        p.add("NodeGroupsToRemove.NodeGroupToRemove.2", "0004");
+
+        Response response = handler.handle("ModifyReplicationGroupShardConfiguration", p, "us-east-1");
+
+        assertEquals(200, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<ModifyReplicationGroupShardConfigurationResult>"));
+        verify(service).modifyShardConfiguration("g1", 2, List.of("0003", "0004"), List.of());
+    }
+
+    @Test
+    void modifyReplicationGroupShardConfiguration_surfacesTheServiceFault() {
+        when(service.modifyShardConfiguration(eq("g1"), eq(1), any(), any())).thenThrow(
+                new AwsException("InvalidParameterValue", "Either NodeGroupsToRemove or NodeGroupsToRetain is required", 400));
+        MultivaluedMap<String, String> p = params();
+        p.add("ReplicationGroupId", "g1");
+        p.add("NodeGroupCount", "1");
+
+        Response response = handler.handle("ModifyReplicationGroupShardConfiguration", p, "us-east-1");
+
+        assertEquals(400, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("InvalidParameterValue"));
+    }
 }

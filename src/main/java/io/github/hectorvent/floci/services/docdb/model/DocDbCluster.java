@@ -34,11 +34,15 @@ public class DocDbCluster {
     private String preferredMaintenanceWindow;
     private boolean deletionProtection;
     private Instant createdAt;
+    private String masterUserSecretArn;
+    private String masterUserSecretStatus;
+    private String masterUserSecretKmsKeyId;
 
     // Docker / proxy runtime fields — persisted so cleanup works across restarts
     private String containerId;
     private String containerHost;
     private int containerPort;
+    private int proxyPort;
 
     public DocDbCluster (){}
 
@@ -109,6 +113,20 @@ public class DocDbCluster {
 
     public int getContainerPort() { return containerPort; }
     public void setContainerPort(int containerPort) { this.containerPort = containerPort; }
+
+    public int getProxyPort() { return proxyPort; }
+    public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
+
+    public String getMasterUserSecretArn() { return masterUserSecretArn; }
+    public void setMasterUserSecretArn(String masterUserSecretArn) { this.masterUserSecretArn = masterUserSecretArn; }
+
+    public String getMasterUserSecretStatus() { return masterUserSecretStatus; }
+    public void setMasterUserSecretStatus(String masterUserSecretStatus) { this.masterUserSecretStatus = masterUserSecretStatus; }
+
+    public String getMasterUserSecretKmsKeyId() { return masterUserSecretKmsKeyId; }
+    public void setMasterUserSecretKmsKeyId(String masterUserSecretKmsKeyId) {
+        this.masterUserSecretKmsKeyId = masterUserSecretKmsKeyId;
+    }
 
     public Map<String, String> getTags() { return tags; }
 

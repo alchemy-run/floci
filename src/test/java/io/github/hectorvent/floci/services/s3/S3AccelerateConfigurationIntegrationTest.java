@@ -15,7 +15,7 @@ import static org.hamcrest.Matchers.nullValue;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class S3AccelerateConfigurationIntegrationTest {
 
-    private static final String BUCKET = "accelerate-int-test";
+    private static final String BUCKET = "accelerate-config-int-test";
     private static final String ENABLED_XML = """
             <AccelerateConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
                 <Status>Enabled</Status>

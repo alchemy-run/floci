@@ -21,6 +21,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Running MicroVMs, each backed by a local Docker container built by
@@ -48,6 +50,8 @@ public class MicrovmRuntimeService {
     private final LaunchedContainerAwsEnv awsEnv;
     private final EmulatorConfig config;
     private final SecureRandom random = new SecureRandom();
+    /** Containers whose in-VM server has answered at least one proxied request. */
+    private final Set<String> servedContainers = ConcurrentHashMap.newKeySet();
 
     @Inject
     public MicrovmRuntimeService(MicrovmStore microvmStore, MicrovmImageService imageService,
@@ -253,6 +257,7 @@ public class MicrovmRuntimeService {
                 }
             }
             lifecycleManager.stopAndRemove(vm.getContainerId(), null);
+            servedContainers.remove(vm.getContainerId());
         }
         vm.setContainerId(null);
         vm.setState("TERMINATED");
@@ -265,6 +270,17 @@ public class MicrovmRuntimeService {
 
     public Optional<MicrovmRecord> findById(String microvmId) {
         return microvmStore.findById(microvmId);
+    }
+
+    /** Whether the VM's current container has answered a proxied request since it started. */
+    public boolean hasServed(MicrovmRecord vm) {
+        return vm.getContainerId() != null && servedContainers.contains(vm.getContainerId());
+    }
+
+    public void markServed(MicrovmRecord vm) {
+        if (vm.getContainerId() != null) {
+            servedContainers.add(vm.getContainerId());
+        }
     }
 
     /** Records data-plane activity — the idle policy's input. */

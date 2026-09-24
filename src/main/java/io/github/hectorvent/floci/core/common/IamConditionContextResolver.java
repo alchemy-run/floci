@@ -131,14 +131,13 @@ public class IamConditionContextResolver {
             // given the tags of the REQUEST only, never those of an object it is about to
             // overwrite. See S3ObjectTagConditionEnforcementIntegrationTest.
             //
-            // s3:GetObjectVersion is deliberately absent. IamActionRegistry authorizes a GET
-            // carrying ?versionId= as s3:GetObject, and IamEnforcementFilter is the only caller
-            // of resolve, so an arm for it would never be reached. The versionId is read from the
-            // request instead, below.
-            case "s3:GetObject", "s3:GetObjectTagging", "s3:GetObjectAcl",
-                 "s3:PutObjectAcl", "s3:DeleteObjectTagging" -> s3ExistingObjectTagConditionContext(ctx);
+            // A request naming a versionId is authorized as the *Version* variant of its action
+            // (IamActionRegistry); those arms read the tags of the version the request selects.
+            case "s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectTagging", "s3:GetObjectVersionTagging",
+                 "s3:GetObjectAcl", "s3:GetObjectVersionAcl", "s3:PutObjectAcl", "s3:PutObjectVersionAcl",
+                 "s3:DeleteObjectTagging", "s3:DeleteObjectVersionTagging" -> s3ExistingObjectTagConditionContext(ctx);
             case "s3:PutObject" -> s3RequestObjectTagConditionContext(ctx);
-            case "s3:PutObjectTagging" -> merge(s3ExistingObjectTagConditionContext(ctx),
+            case "s3:PutObjectTagging", "s3:PutObjectVersionTagging" -> merge(s3ExistingObjectTagConditionContext(ctx),
                     s3PutObjectTaggingBodyConditionContext(ctx));
             default -> null;
         };

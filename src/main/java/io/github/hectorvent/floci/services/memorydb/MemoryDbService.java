@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -32,14 +33,18 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -75,6 +80,7 @@ public class MemoryDbService {
     // letters, digits and hyphens.
     private static final Pattern USER_NAME_PATTERN =
             Pattern.compile("[a-zA-Z][a-zA-Z0-9\\-]*");
+    private static final Pattern IP_LITERAL = Pattern.compile("^[0-9.]+$|.*:.*");
 
     private final StorageBackend<String, Cluster> clusters;
     private final StorageBackend<String, User> users;
@@ -169,13 +175,15 @@ public class MemoryDbService {
             cluster.setParameterGroupName(spec.getParameterGroupName());
             cluster.setSubnetGroupName(spec.getSubnetGroupName());
             cluster.setTlsEnabled(spec.isTlsEnabled());
+            cluster.setSecurityGroupIds(spec.getSecurityGroupIds());
             cluster.setArn(buildArn(region, "cluster", name));
             cluster.setCreatedAt(Instant.now());
             cluster.setTags(spec.getTags());
 
             if (config.services().memorydb().mock()) {
                 LOG.infov("Creating MemoryDB cluster {0} in mock mode (no container)", name);
-                cluster.setClusterEndpoint(new Endpoint(resolveEndpointHost(), REDIS_PORT));
+                cluster.setClusterEndpoint(new Endpoint(
+                        resolveEndpointHost(name, cluster.getAccountId(), region), REDIS_PORT));
             } else {
                 startBackend(cluster, authRequired);
             }
@@ -220,9 +228,16 @@ public class MemoryDbService {
     }
 
     public Cluster updateCluster(String name, String description, String region) {
+        return updateCluster(name, description, null, region);
+    }
+
+    public Cluster updateCluster(String name, String description, List<String> securityGroupIds, String region) {
         Cluster cluster = getCluster(name, region);
         if (description != null) {
             cluster.setDescription(description);
+        }
+        if (securityGroupIds != null) {
+            cluster.setSecurityGroupIds(securityGroupIds);
         }
         clusters.put(key(region, name), cluster);
         recordEvent(name, "cluster", "Cluster updated", region);
@@ -386,20 +401,9 @@ public class MemoryDbService {
             throw new AwsException("ACLAlreadyExistsFault",
                     "ACL with specified name already exists.", 400);
         }
-        if (!spec.getUserNames().contains(DEFAULT_USER)) {
-            throw new AwsException("DefaultUserRequired",
-                    "A default user is required and must be specified.", 400);
-        }
-        Set<String> seen = new HashSet<>();
-        for (String userName : spec.getUserNames()) {
-            if (!seen.add(userName)) {
-                throw new AwsException("DuplicateUserNameFault",
-                        "Duplicate user name " + userName + " in ACL.", 400);
-            }
-            if (!userExists(userName, region)) {
-                throw new AwsException("UserNotFoundFault", "User " + userName + " not found.", 404);
-            }
-        }
+        // A custom ACL holds only custom users and may be empty: the built-in default user
+        // belongs to the open-access ACL alone.
+        validateAclMembers(spec.getUserNames(), region);
 
         Acl acl = new Acl();
         acl.setName(name);
@@ -416,6 +420,60 @@ public class MemoryDbService {
         recordEvent(name, "acl", "ACL created", region);
         LOG.infov("MemoryDB ACL {0} created with users={1}", name, acl.getUserNames());
         return acl;
+    }
+
+    public synchronized Acl updateAcl(String name, List<String> userNamesToAdd, List<String> userNamesToRemove,
+                                      String region) {
+        requireText(name, "ACLName");
+        if (DEFAULT_ACL.equals(name)) {
+            throw invalid("The open-access ACL cannot be modified.");
+        }
+        Acl acl = resourceGet(acls, name, region).orElseThrow(() ->
+                new AwsException("ACLNotFoundFault", "ACL not found.", 404));
+        if (userNamesToAdd.isEmpty() && userNamesToRemove.isEmpty()) {
+            throw fault("InvalidParameterCombinationException",
+                    "At least one of UserNamesToAdd or UserNamesToRemove must be specified.");
+        }
+        for (String userName : userNamesToAdd) {
+            if (userNamesToRemove.contains(userName)) {
+                throw fault("InvalidParameterCombinationException",
+                        "User " + userName + " cannot be both added to and removed from the ACL.");
+            }
+        }
+        validateAclMembers(userNamesToAdd, region);
+        List<String> members = new ArrayList<>(acl.getUserNames());
+        for (String userName : userNamesToAdd) {
+            if (members.contains(userName)) {
+                throw fault("DuplicateUserNameFault", "User " + userName + " is already a member of the ACL.");
+            }
+        }
+        for (String userName : userNamesToRemove) {
+            if (!members.contains(userName)) {
+                throw invalid("User " + userName + " is not a member of the ACL.");
+            }
+        }
+        members.removeAll(userNamesToRemove);
+        members.addAll(userNamesToAdd);
+        acl.setUserNames(members);
+        acls.put(key(region, name), acl);
+        recordEvent(name, "acl", "ACL updated", region);
+        return acl;
+    }
+
+    private void validateAclMembers(List<String> userNames, String region) {
+        Set<String> seen = new HashSet<>();
+        for (String userName : userNames) {
+            if (DEFAULT_USER.equals(userName)) {
+                throw invalid("The default user can only be a member of the open-access ACL.");
+            }
+            if (!seen.add(userName)) {
+                throw new AwsException("DuplicateUserNameFault",
+                        "Duplicate user name " + userName + " in ACL.", 400);
+            }
+            if (!userExists(userName, region)) {
+                throw new AwsException("UserNotFoundFault", "User " + userName + " not found.", 404);
+            }
+        }
     }
 
     public Collection<Acl> describeAcls(String filterName, String region) {
@@ -975,7 +1033,11 @@ public class MemoryDbService {
         };
     }
 
-    /** True if the ACL has at least one user that requires a credential (password or IAM). */
+    /**
+     * True unless every connection may skip AUTH: only the open-access ACL (or a legacy ACL
+     * whose members all use no-password) allows that. An empty ACL grants no access at all,
+     * so it always demands a credential no user can present.
+     */
     private boolean isAuthRequired(String aclName, String region) {
         if (DEFAULT_ACL.equals(aclName)) {
             return false;
@@ -983,6 +1045,9 @@ public class MemoryDbService {
         Acl acl = resourceGet(acls, aclName, region).orElse(null);
         if (acl == null) {
             return false;
+        }
+        if (acl.getUserNames().isEmpty()) {
+            return true;
         }
         return acl.getUserNames().stream()
                 .map(name -> resolveUser(name, region))
@@ -1112,7 +1177,8 @@ public class MemoryDbService {
             // 'available' even when no daemon is reachable. Only connecting to the cache needs
             // the container.
             handle = containerManager.tryStart(identity, image);
-            cluster.setClusterEndpoint(new Endpoint(resolveEndpointHost(), proxyPort));
+            cluster.setClusterEndpoint(new Endpoint(
+                    resolveEndpointHost(name, cluster.getAccountId(), cluster.getRegion()), proxyPort));
             cluster.setProxyPort(proxyPort);
 
             if (handle != null) {
@@ -1299,8 +1365,33 @@ public class MemoryDbService {
         return regionResolver.buildArn("memorydb", region, resourceType + "/" + name);
     }
 
-    private String resolveEndpointHost() {
-        return config.hostname().orElse("localhost");
+    /**
+     * Cluster endpoint hostname in the AWS shape
+     * {@code clustercfg.<cluster>.<id>.memorydb.<region>.amazonaws.com}, with the Floci wildcard
+     * domain (or the configured Floci hostname) in place of {@code amazonaws.com}. The embedded
+     * DNS resolves it to Floci for containers and public DNS resolves the default domain to
+     * loopback on the host. A configured IP address cannot carry a prefix and is used as is.
+     */
+    String resolveEndpointHost(String clusterName, String accountId, String region) {
+        String suffix = config.hostname()
+                .filter(h -> !h.isBlank() && !"localhost".equalsIgnoreCase(h))
+                .orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
+        if (IP_LITERAL.matcher(suffix).matches()) {
+            return suffix;
+        }
+        return "clustercfg." + clusterName.toLowerCase(Locale.ROOT) + "." + endpointId(accountId, region)
+                + ".memorydb." + region + "." + suffix;
+    }
+
+    // AWS gives every account and region a stable six-character endpoint label.
+    private static String endpointId(String accountId, String region) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(("memorydb:" + accountId + ":" + region).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, 6);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     private int allocateProxyPort() {

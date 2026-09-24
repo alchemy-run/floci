@@ -52,6 +52,7 @@ class MemoryDbServiceTest {
     private MemoryDbProxyManager proxyManager;
     private SigV4Validator sigV4Validator;
     private EmulatorConfig.MemoryDbServiceConfig mdbConfig;
+    private EmulatorConfig config;
     private Ec2Service ec2Service;
 
     @BeforeEach
@@ -60,7 +61,7 @@ class MemoryDbServiceTest {
         proxyManager = mock(MemoryDbProxyManager.class);
         sigV4Validator = mock(SigV4Validator.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
-        EmulatorConfig config = mock(EmulatorConfig.class);
+        config = mock(EmulatorConfig.class);
         RegionResolver regionResolver = mock(RegionResolver.class);
 
         EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
@@ -97,7 +98,7 @@ class MemoryDbServiceTest {
         assertEquals("my-cluster", created.getName());
         assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
         assertEquals("arn:aws:memorydb:us-east-1:000000000000:cluster/my-cluster", created.getArn());
-        assertEquals("localhost", created.getClusterEndpoint().address());
+        assertAwsShapedEndpoint("my-cluster", created);
 
         assertEquals(1, service.describeClusters("my-cluster").size());
         assertEquals(1, service.describeClusters(null).size());
@@ -165,7 +166,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("app-acl");
-        aclSpec.setUserNames(List.of("default", "app-user"));
+        aclSpec.setUserNames(List.of("app-user"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -190,7 +191,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("iam-acl");
-        aclSpec.setUserNames(List.of("default", "iam-user"));
+        aclSpec.setUserNames(List.of("iam-user"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -259,19 +260,123 @@ class MemoryDbServiceTest {
     }
 
     @Test
-    void createAclRequiresDefaultUser() {
-        User userSpec = new User();
-        userSpec.setName("solo");
-        userSpec.setAuthMode(AuthMode.PASSWORD);
-        userSpec.setPasswords(List.of("p"));
-        userSpec.setAccessString("on ~* +@all");
-        service.createUser(userSpec, "us-east-1");
+    void createAclAcceptsCustomUsersWithoutTheDefaultUser() {
+        service.createUser(passwordUser("solo", "p"), "us-east-1");
 
         Acl aclSpec = new Acl();
-        aclSpec.setName("no-default-acl");
-        aclSpec.setUserNames(List.of("solo")); // missing the required "default" user
+        aclSpec.setName("custom-acl");
+        aclSpec.setUserNames(List.of("solo"));
+        Acl created = service.createAcl(aclSpec, "us-east-1");
+
+        assertEquals(List.of("solo"), created.getUserNames());
+        assertEquals("active", created.getStatus());
+        assertEquals(List.of("custom-acl"), service.aclNamesForUser("solo", "us-east-1"));
+        assertEquals(List.of("open-access"), service.aclNamesForUser("default", "us-east-1"));
+    }
+
+    @Test
+    void createAclAllowsAnEmptyUserList() {
+        Acl aclSpec = new Acl();
+        aclSpec.setName("empty-acl");
+        aclSpec.setUserNames(List.of());
+
+        assertTrue(service.createAcl(aclSpec, "us-east-1").getUserNames().isEmpty());
+    }
+
+    @Test
+    void createAclRejectsTheBuiltinDefaultUser() {
+        service.createUser(passwordUser("member", "p"), "us-east-1");
+
+        Acl aclSpec = new Acl();
+        aclSpec.setName("with-default");
+        aclSpec.setUserNames(List.of("default", "member"));
         AwsException ex = assertThrows(AwsException.class, () -> service.createAcl(aclSpec, "us-east-1"));
-        assertEquals("DefaultUserRequired", ex.jsonType());
+
+        assertEquals("InvalidParameterValueException", ex.jsonType());
+        assertTrue(service.describeAcls(null, "us-east-1").stream()
+                .noneMatch(acl -> "with-default".equals(acl.getName())));
+    }
+
+    @Test
+    void emptyAclClusterRejectsEveryConnection() {
+        Acl aclSpec = new Acl();
+        aclSpec.setName("locked");
+        aclSpec.setUserNames(List.of());
+        service.createAcl(aclSpec, "us-east-1");
+        service.createCluster(cluster("locked-cluster", "locked"), "us-east-1");
+
+        verify(proxyManager).startProxy(anyString(), eq(true), anyInt(), anyString(), anyInt(), any());
+        assertFalse(service.authenticate("locked-cluster", null, "anything", "us-east-1"));
+        assertFalse(service.authenticate("locked-cluster", "default", "", "us-east-1"));
+    }
+
+    @Test
+    void updateAclAddsAndRemovesMembers() {
+        service.createUser(passwordUser("first", "p1"), "us-east-1");
+        service.createUser(passwordUser("second", "p2"), "us-east-1");
+        service.createAcl(acl("rotating", "first"), "us-east-1");
+
+        Acl updated = service.updateAcl("rotating", List.of("second"), List.of("first"), "us-east-1");
+
+        assertEquals(List.of("second"), updated.getUserNames());
+        assertEquals(List.of("second"),
+                service.describeAcls("rotating", "us-east-1").iterator().next().getUserNames());
+    }
+
+    @Test
+    void updateAclValidatesTheRequestedMembership() {
+        service.createUser(passwordUser("member", "p"), "us-east-1");
+        service.createAcl(acl("guarded", "member"), "us-east-1");
+
+        assertEquals("InvalidParameterValueException", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of("default"), List.of(), "us-east-1")).jsonType());
+        assertEquals("DuplicateUserNameFault", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of("member"), List.of(), "us-east-1")).jsonType());
+        assertEquals("UserNotFoundFault", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of("ghost"), List.of(), "us-east-1")).jsonType());
+        assertEquals("InvalidParameterCombinationException", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of(), List.of(), "us-east-1")).jsonType());
+        assertEquals("ACLNotFoundFault", assertThrows(AwsException.class, () ->
+                service.updateAcl("missing", List.of("member"), List.of(), "us-east-1")).jsonType());
+        assertEquals("InvalidParameterValueException", assertThrows(AwsException.class, () ->
+                service.updateAcl("open-access", List.of("member"), List.of(), "us-east-1")).jsonType());
+        assertEquals(List.of("member"),
+                service.describeAcls("guarded", "us-east-1").iterator().next().getUserNames());
+    }
+
+    @Test
+    void securityGroupsAreRecordedOnCreateAndReplacedOnUpdate() {
+        Cluster spec = cluster("sg-cluster", "open-access");
+        spec.setSecurityGroupIds(List.of("sg-1"));
+        assertEquals(List.of("sg-1"), service.createCluster(spec, "us-east-1").getSecurityGroupIds());
+
+        service.updateCluster("sg-cluster", null, List.of("sg-2", "sg-3"), "us-east-1");
+        assertEquals(List.of("sg-2", "sg-3"), service.getCluster("sg-cluster", "us-east-1").getSecurityGroupIds());
+
+        service.updateCluster("sg-cluster", "described", null, "us-east-1");
+        assertEquals(List.of("sg-2", "sg-3"), service.getCluster("sg-cluster", "us-east-1").getSecurityGroupIds());
+    }
+
+    @Test
+    void endpointHostUsesTheConfiguredFlociHostnameAsTheDomain() {
+        when(config.hostname()).thenReturn(Optional.of("floci"));
+
+        String host = service.resolveEndpointHost("Cache", "000000000000", "eu-west-1");
+
+        assertTrue(host.matches("clustercfg\\.cache\\.[0-9a-f]{6}\\.memorydb\\.eu-west-1\\.floci"), host);
+    }
+
+    @Test
+    void endpointHostKeepsAConfiguredIpAddress() {
+        when(config.hostname()).thenReturn(Optional.of("192.168.1.20"));
+
+        assertEquals("192.168.1.20", service.resolveEndpointHost("cache", "000000000000", "us-east-1"));
+    }
+
+    private static void assertAwsShapedEndpoint(String clusterName, Cluster cluster) {
+        String address = cluster.getClusterEndpoint().address();
+        assertTrue(address.matches("clustercfg\\." + clusterName
+                + "\\.[0-9a-f]{6}\\.memorydb\\.us-east-1\\.localhost\\.floci\\.io"), address);
     }
 
     @Test
@@ -285,7 +390,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("dup-acl");
-        aclSpec.setUserNames(List.of("default", "dup", "dup"));
+        aclSpec.setUserNames(List.of("dup", "dup"));
         AwsException ex = assertThrows(AwsException.class, () -> service.createAcl(aclSpec, "us-east-1"));
         assertEquals("DuplicateUserNameFault", ex.jsonType());
     }
@@ -315,7 +420,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("in-use");
-        aclSpec.setUserNames(List.of("default", "u1"));
+        aclSpec.setUserNames(List.of("u1"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -433,7 +538,7 @@ class MemoryDbServiceTest {
         Cluster created = service.createCluster(spec, "us-east-1");
 
         assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
-        assertEquals("localhost", created.getClusterEndpoint().address());
+        assertAwsShapedEndpoint("mock-cluster", created);
         assertEquals(6379, created.getClusterEndpoint().port());
         verifyNoInteractions(containerManager);
     }
@@ -593,7 +698,7 @@ class MemoryDbServiceTest {
     private Acl acl(String name, String userName) {
         Acl acl = new Acl();
         acl.setName(name);
-        acl.setUserNames(List.of("default", userName));
+        acl.setUserNames(List.of(userName));
         return acl;
     }
 
@@ -617,7 +722,7 @@ class MemoryDbServiceTest {
         Cluster created = service.createCluster(spec, "us-east-1");
 
         assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
-        assertEquals("localhost", created.getClusterEndpoint().address());
+        assertAwsShapedEndpoint("no-docker-cluster", created);
         assertEquals(16400, created.getProxyPort());
         verify(proxyManager, never()).startProxy(anyString(), anyBoolean(), anyInt(), anyString(), anyInt(), any());
 

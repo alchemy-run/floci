@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.opensearch;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.TlsCertificateManager;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -52,24 +53,62 @@ public class OpenSearchService implements ResourceProvider {
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final OpenSearchDomainManager domainManager;
+    private final TlsCertificateManager certificateManager;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
 
     @Inject
     public OpenSearchService(StorageFactory storageFactory, EmulatorConfig config,
-                             RegionResolver regionResolver, OpenSearchDomainManager domainManager) {
+                             RegionResolver regionResolver, OpenSearchDomainManager domainManager,
+                             TlsCertificateManager certificateManager) {
         this.domainStore = storageFactory.create("opensearch", "opensearch-domains.json",
                 new TypeReference<Map<String, Domain>>() {});
         this.config = config;
         this.regionResolver = regionResolver;
         this.domainManager = domainManager;
+        this.certificateManager = certificateManager;
     }
 
     OpenSearchService(StorageBackend<String, Domain> domainStore, EmulatorConfig config,
                       RegionResolver regionResolver, OpenSearchDomainManager domainManager) {
+        this(domainStore, config, regionResolver, domainManager, null);
+    }
+
+    OpenSearchService(StorageBackend<String, Domain> domainStore, EmulatorConfig config,
+                      RegionResolver regionResolver, OpenSearchDomainManager domainManager,
+                      TlsCertificateManager certificateManager) {
         this.domainStore = domainStore;
         this.config = config;
         this.regionResolver = regionResolver;
         this.domainManager = domainManager;
+        this.certificateManager = certificateManager;
+    }
+
+    /**
+     * The endpoint DescribeDomain reports: the gateway host that serves the domain's REST API
+     * (see {@link OpenSearchDataPlaneEndpoint}), or empty while no search engine backs the domain.
+     */
+    public String publicEndpoint(Domain domain) {
+        if (domain.getEndpoint() == null || domain.getEndpoint().isBlank()) {
+            return "";
+        }
+        return OpenSearchDataPlaneEndpoint.publicEndpoint(domain.getDomainName(), regionOf(domain), baseUrl());
+    }
+
+    private String regionOf(Domain domain) {
+        return domain.getArn() != null
+                ? AwsArnUtils.parse(domain.getArn()).region()
+                : regionResolver.getDefaultRegion();
+    }
+
+    private String baseUrl() {
+        return config.effectiveBaseUrl();
+    }
+
+    /** Makes the HTTPS listener's certificate cover every domain endpoint host in the region. */
+    private void ensureEndpointCertificate(String region) {
+        if (certificateManager != null) {
+            certificateManager.ensureHost(OpenSearchDataPlaneEndpoint.certificateWildcard(region, baseUrl()));
+        }
     }
 
     @PostConstruct
@@ -158,6 +197,7 @@ public class OpenSearchService implements ResourceProvider {
         }
 
         domainStore.put(domainName, domain);
+        ensureEndpointCertificate(region);
         LOG.infov("Created OpenSearch domain: {0}", domainName);
         return domain;
     }

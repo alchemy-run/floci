@@ -52,6 +52,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -60,6 +61,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Supplier;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
@@ -268,7 +271,8 @@ public class S3Controller {
             }
             if (hasQueryParam(uriInfo, "notification")) {
                 s3Service.authorizeBucketWrite(bucket, "s3:PutBucketNotification", authorization);
-                return handlePutBucketNotification(bucket, body);
+                return handlePutBucketNotification(bucket, body,
+                        "true".equalsIgnoreCase(httpHeaders.getHeaderString("x-amz-skip-destination-validation")));
             }
             if (hasQueryParam(uriInfo, "versioning")) {
                 s3Service.authorizeBucketWrite(bucket, "s3:PutBucketVersioning", authorization);
@@ -778,25 +782,31 @@ public class S3Controller {
             key = extractObjectKey(uriInfo, bucket, key);
             S3Service.RequestAuthorization authorization = bucketAuthorization(bucket, httpHeaders, uriInfo);
 
+            String objectKey = key;
+            String subresourceVersionId = uriInfo.getQueryParameters().getFirst("versionId");
             if (hasQueryParam(uriInfo, "tagging")) {
-                s3Service.authorizeObjectWrite(bucket, key, "s3:PutObjectTagging", authorization);
-                return handlePutObjectTagging(bucket, key, body);
+                s3Service.authorizeObjectWrite(bucket, key,
+                        subresourceVersionId != null ? "s3:PutObjectVersionTagging" : "s3:PutObjectTagging",
+                        authorization);
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> handlePutObjectTagging(bucket, objectKey, subresourceVersionId, body));
             }
             if (hasQueryParam(uriInfo, "retention")) {
                 s3Service.authorizeObjectWrite(bucket, key, "s3:PutObjectRetention", authorization);
                 if ("true".equalsIgnoreCase(httpHeaders.getHeaderString("x-amz-bypass-governance-retention"))) {
                     s3Service.authorizeObjectWrite(bucket, key, "s3:BypassGovernanceRetention", authorization);
                 }
-                return handlePutObjectRetention(bucket, key,
-                        uriInfo.getQueryParameters().getFirst("versionId"), httpHeaders, body);
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> handlePutObjectRetention(bucket, objectKey, subresourceVersionId, httpHeaders, body));
             }
             if (hasQueryParam(uriInfo, "legal-hold")) {
                 s3Service.authorizeObjectWrite(bucket, key, "s3:PutObjectLegalHold", authorization);
-                return handlePutObjectLegalHold(bucket, key,
-                        uriInfo.getQueryParameters().getFirst("versionId"), body);
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> handlePutObjectLegalHold(bucket, objectKey, subresourceVersionId, body));
             }
             if (hasQueryParam(uriInfo, "acl")) {
-                s3Service.authorizeObjectWrite(bucket, key, "s3:PutObjectAcl", authorization);
+                s3Service.authorizeObjectWrite(bucket, key,
+                        subresourceVersionId != null ? "s3:PutObjectVersionAcl" : "s3:PutObjectAcl", authorization);
                 s3Service.putObjectAcl(bucket, key, uriInfo.getQueryParameters().getFirst("versionId"),
                         new String(body, StandardCharsets.UTF_8),
                         httpHeaders.getHeaderString("x-amz-acl"),
@@ -943,8 +953,9 @@ public class S3Controller {
             }
 
             if (hasQueryParam(uriInfo, "tagging")) {
-                s3Service.authorizeObjectRead(bucket, key, versionId, "s3:GetObjectTagging", authorization);
-                return handleGetObjectTagging(bucket, key);
+                s3Service.authorizeObjectRead(bucket, key, versionId,
+                        versionId != null ? "s3:GetObjectVersionTagging" : "s3:GetObjectTagging", authorization);
+                return handleGetObjectTagging(bucket, key, versionId);
             }
             if (hasQueryParam(uriInfo, "annotation")) {
                 String annotationNameParam = uriInfo.getQueryParameters().getFirst("annotationName");
@@ -966,7 +977,8 @@ public class S3Controller {
                 return handleGetObjectLegalHold(bucket, key, versionId);
             }
             if (hasQueryParam(uriInfo, "acl")) {
-                s3Service.authorizeObjectRead(bucket, key, versionId, "s3:GetObjectAcl", authorization);
+                s3Service.authorizeObjectRead(bucket, key, versionId,
+                        versionId != null ? "s3:GetObjectVersionAcl" : "s3:GetObjectAcl", authorization);
                 try {
                     String aclXml = s3Service.getObjectAcl(bucket, key, versionId);
                     emitCloudTrailEvent("GetObjectAcl", bucket, key, 0L,
@@ -978,7 +990,8 @@ public class S3Controller {
                 }
             }
             if (hasQueryParam(uriInfo, "attributes")) {
-                s3Service.authorizeObjectRead(bucket, key, versionId, "s3:GetObjectAttributes", authorization);
+                s3Service.authorizeObjectRead(bucket, key, versionId,
+                        versionId != null ? "s3:GetObjectVersionAttributes" : "s3:GetObjectAttributes", authorization);
                 // Merge all x-amz-object-attributes header values (SDK may send multiple lines)
                 List<String> attrHeaders = httpHeaders.getRequestHeader("x-amz-object-attributes");
                 String mergedAttributes = attrHeaders != null ? String.join(",", attrHeaders) : objectAttributesHeader;
@@ -1020,14 +1033,15 @@ public class S3Controller {
             emitCloudTrailEvent("GetObject", bucket, key, 0L, obj.getSize(), null, null);
             return fullObjectResponse(obj, overrides, includeChecksum);
         } catch (AwsException e) {
-            emitCloudTrailEvent("GetObject", bucket, key, 0L, 0L, e.getErrorCode(), e.getMessage());
-            if (S3Service.isWebsiteErrorDocumentTrigger(e) && isWebsiteRequest(httpHeaders, uriInfo)) {
-                Response websiteError = serveWebsiteErrorResponse(bucket, authorization, e);
+            AwsException visible = concealUnlistableMiss(e, bucket, httpHeaders, authorization, true);
+            emitCloudTrailEvent("GetObject", bucket, key, 0L, 0L, visible.getErrorCode(), visible.getMessage());
+            if (S3Service.isWebsiteErrorDocumentTrigger(visible) && isWebsiteRequest(httpHeaders, uriInfo)) {
+                Response websiteError = serveWebsiteErrorResponse(bucket, authorization, visible);
                 if (websiteError != null) {
                     return websiteError;
                 }
             }
-            return xmlErrorResponse(e);
+            return xmlErrorResponse(visible);
         }
     }
 
@@ -1223,14 +1237,15 @@ public class S3Controller {
             emitCloudTrailEvent("HeadObject", bucket, key, 0L, obj.getSize(), null, null);
             return resp.build();
         } catch (AwsException e) {
-            emitCloudTrailEvent("HeadObject", bucket, key, 0L, 0L, e.getErrorCode(), e.getMessage());
-            if (S3Service.isWebsiteErrorDocumentTrigger(e) && isWebsiteRequest(httpHeaders, uriInfo)) {
-                Response websiteError = serveWebsiteErrorResponse(bucket, authorization, e);
+            AwsException visible = concealUnlistableMiss(e, bucket, httpHeaders, authorization, true);
+            emitCloudTrailEvent("HeadObject", bucket, key, 0L, 0L, visible.getErrorCode(), visible.getMessage());
+            if (S3Service.isWebsiteErrorDocumentTrigger(visible) && isWebsiteRequest(httpHeaders, uriInfo)) {
+                Response websiteError = serveWebsiteErrorResponse(bucket, authorization, visible);
                 if (websiteError != null) {
                     return headOnlyResponse(websiteError);
                 }
             }
-            return xmlErrorResponse(e);
+            return xmlErrorResponse(visible);
         }
     }
 
@@ -1319,9 +1334,12 @@ public class S3Controller {
             S3Service.RequestAuthorization authorization = bucketAuthorization(bucket, httpHeaders, uriInfo);
 
             if (hasQueryParam(uriInfo, "tagging")) {
-                s3Service.authorizeObjectWrite(bucket, key, "s3:DeleteObjectTagging", authorization);
-                s3Service.deleteObjectTagging(bucket, key);
-                return Response.noContent().build();
+                s3Service.authorizeObjectWrite(bucket, key,
+                        versionId != null ? "s3:DeleteObjectVersionTagging" : "s3:DeleteObjectTagging",
+                        authorization);
+                String objectKey = key;
+                return concealingMisses(bucket, httpHeaders, authorization, true,
+                        () -> handleDeleteObjectTagging(bucket, objectKey, versionId));
             }
             if (hasQueryParam(uriInfo, "annotation")) {
                 boolean bypass = "true".equalsIgnoreCase(
@@ -1450,8 +1468,14 @@ public class S3Controller {
 
             if (hasQueryParam(uriInfo, "restore")) {
                 s3Service.authorizeObjectWrite(bucket, key, "s3:RestoreObject", authorization);
-                s3Service.restoreObject(bucket, key, versionId, new String(body, StandardCharsets.UTF_8));
-                return Response.accepted().build();
+                String objectKey = key;
+                // RestoreObject reports a selected delete marker as 405 even to a caller that
+                // cannot list the bucket; only a missing key or version is concealed.
+                return concealingMisses(bucket, httpHeaders, authorization, false, () -> {
+                    boolean alreadyRestored = s3Service.restoreObject(bucket, objectKey, versionId,
+                            new String(body, StandardCharsets.UTF_8));
+                    return (alreadyRestored ? Response.ok() : Response.accepted()).build();
+                });
             }
 
             if (hasQueryParam(uriInfo, "select")) {
@@ -1764,7 +1788,7 @@ public class S3Controller {
             if (obj.isDeleteMarker()) {
                 xml.start("DeleteMarker")
                    .elem("Key", maybeEncode(obj.getKey(), encodingType))
-                   .elem("VersionId", obj.getVersionId())
+                   .elem("VersionId", obj.getVersionId() != null ? obj.getVersionId() : "null")
                    .elem("IsLatest", obj.isLatest())
                    .elem("LastModified", ISO_FORMAT.format(obj.getLastModified()))
                    .end("DeleteMarker");
@@ -1840,35 +1864,45 @@ public class S3Controller {
         }
     }
 
-    private Response handlePutBucketNotification(String bucket, byte[] body) {
+    private Response handlePutBucketNotification(String bucket, byte[] body, boolean skipDestinationValidation) {
         try {
             String xml = new String(body, StandardCharsets.UTF_8);
             NotificationConfiguration config = new NotificationConfiguration();
 
-            for (var parsed : parseNotificationGroups(xml, "QueueConfiguration", "Queue")) {
-                config.getQueueConfigurations().add(
-                        new QueueNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+            for (ParsedNotificationGroup parsed : parseNotificationGroups(xml, "QueueConfiguration", "Queue")) {
+                config.getQueueConfigurations().add(new QueueNotification(
+                        notificationId(parsed.id()), parsed.arn(), parsed.events(), parsed.filterRules()));
             }
-            for (var parsed : parseNotificationGroups(xml, "TopicConfiguration", "Topic")) {
-                config.getTopicConfigurations().add(
-                        new TopicNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+            for (ParsedNotificationGroup parsed : parseNotificationGroups(xml, "TopicConfiguration", "Topic")) {
+                config.getTopicConfigurations().add(new TopicNotification(
+                        notificationId(parsed.id()), parsed.arn(), parsed.events(), parsed.filterRules()));
             }
-            for (var parsed : parseNotificationGroups(xml, "LambdaFunctionConfiguration", "LambdaFunctionArn")) {
-                config.getLambdaFunctionConfigurations().add(
-                        new LambdaNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+            for (ParsedNotificationGroup parsed : parseNotificationGroups(
+                    xml, "LambdaFunctionConfiguration", "LambdaFunctionArn")) {
+                config.getLambdaFunctionConfigurations().add(new LambdaNotification(
+                        notificationId(parsed.id()), parsed.arn(), parsed.events(), parsed.filterRules()));
             }
-            for (var parsed : parseNotificationGroups(xml, "CloudFunctionConfiguration", "CloudFunction")) {
-                config.getLambdaFunctionConfigurations().add(
-                        new LambdaNotification(parsed.id, parsed.arn, parsed.events, parsed.filterRules));
+            for (ParsedNotificationGroup parsed : parseNotificationGroups(xml, "CloudFunctionConfiguration", "CloudFunction")) {
+                config.getLambdaFunctionConfigurations().add(new LambdaNotification(
+                        notificationId(parsed.id()), parsed.arn(), parsed.events(), parsed.filterRules()));
             }
 
             config.setEventBridgeEnabled(parseEventBridgeConfiguration(xml));
 
-            s3Service.putBucketNotificationConfiguration(bucket, config);
+            s3Service.putBucketNotificationConfiguration(bucket, config, skipDestinationValidation);
             return Response.ok().build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
         }
+    }
+
+    /** S3 assigns an Id to every notification configuration submitted without one. */
+    private static String notificationId(String id) {
+        if (id != null && !id.isBlank()) {
+            return id;
+        }
+        return Base64.getEncoder().withoutPadding().encodeToString(
+                UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private static boolean parseEventBridgeConfiguration(String xml) {
@@ -2207,16 +2241,74 @@ public class S3Controller {
 
     // --- Object Tagging ---
 
-    private Response handlePutObjectTagging(String bucket, String key, byte[] body) {
+    private Response handlePutObjectTagging(String bucket, String key, String versionId, byte[] body) {
         String xml = new String(body, StandardCharsets.UTF_8);
         Map<String, String> tags = XmlParser.extractPairs(xml, "Tag", "Key", "Value");
-        s3Service.putObjectTagging(bucket, key, tags);
-        return Response.ok().build();
+        S3Object tagged = s3Service.putObjectTagging(bucket, key, versionId, tags);
+        return withVersionHeader(Response.ok(), tagged).build();
     }
 
-    private Response handleGetObjectTagging(String bucket, String key) {
-        Map<String, String> tags = s3Service.getObjectTagging(bucket, key);
-        return Response.ok(buildTaggingXml(tags)).type(MediaType.APPLICATION_XML).build();
+    private Response handleGetObjectTagging(String bucket, String key, String versionId) {
+        S3Object object = s3Service.getObjectMetadata(bucket, key, versionId);
+        Map<String, String> tags = object.getTags() != null ? object.getTags() : Map.of();
+        return withVersionHeader(Response.ok(buildTaggingXml(tags)).type(MediaType.APPLICATION_XML), object)
+                .build();
+    }
+
+    private Response handleDeleteObjectTagging(String bucket, String key, String versionId) {
+        S3Object untagged = s3Service.deleteObjectTagging(bucket, key, versionId);
+        return withVersionHeader(Response.noContent(), untagged).build();
+    }
+
+    /** Reports the version an object subresource request acted on, as S3 does in {@code x-amz-version-id}. */
+    private static Response.ResponseBuilder withVersionHeader(Response.ResponseBuilder response, S3Object object) {
+        if (object.getVersionId() != null) {
+            response.header("x-amz-version-id", object.getVersionId());
+        }
+        return response;
+    }
+
+    /**
+     * S3 does not reveal whether an object or version exists to a caller that may not list the
+     * bucket: a missing key or version (and, for most object operations, a delete-marker version)
+     * is answered with 403 AccessDenied unless the caller holds {@code s3:ListBucket} on the
+     * bucket. Returns the error to send, which is either {@code e} or that AccessDenied.
+     */
+    private AwsException concealUnlistableMiss(AwsException e, String bucket, HttpHeaders httpHeaders,
+                                               S3Service.RequestAuthorization authorization,
+                                               boolean concealDeleteMarkerVersion) {
+        boolean missing = "NoSuchKey".equals(e.getErrorCode()) || "NoSuchVersion".equals(e.getErrorCode());
+        boolean deleteMarkerVersion = concealDeleteMarkerVersion && e instanceof S3DeleteMarkerException;
+        if (!missing && !deleteMarkerVersion) {
+            return e;
+        }
+        String authorizationHeader = httpHeaders != null ? httpHeaders.getHeaderString("Authorization") : null;
+        if (authorizationHeader == null) {
+            return e;
+        }
+        String bucketArn = S3PublicAccessEvaluator.bucketArn(bucket);
+        try {
+            S3Service.SignedPrincipalResourcePolicyEvaluation evaluation =
+                    s3Service.signedPrincipalResourcePolicyDecision(bucket, "s3:ListBucket", bucketArn,
+                            authorization != null ? authorization : S3Service.RequestAuthorization.unsigned());
+            iamEnforcementFilter.authorizeAdditionalResourceForSession(authorizationHeader, "s3:ListBucket",
+                    bucketArn, evaluation.decision(), evaluation.resourceOwnerAccountId());
+            return e;
+        } catch (AwsException denied) {
+            return denied;
+        }
+    }
+
+    /** Runs an object operation whose not-found answers are subject to {@link #concealUnlistableMiss}. */
+    private Response concealingMisses(String bucket, HttpHeaders httpHeaders,
+                                      S3Service.RequestAuthorization authorization,
+                                      boolean concealDeleteMarkerVersion, Supplier<Response> operation) {
+        try {
+            return operation.get();
+        } catch (AwsException e) {
+            return xmlErrorResponse(concealUnlistableMiss(e, bucket, httpHeaders, authorization,
+                    concealDeleteMarkerVersion));
+        }
     }
 
     private String buildTaggingXml(Map<String, String> tags) {
@@ -2601,6 +2693,10 @@ public class S3Controller {
             appendChecksumHeaders(resp, obj.getChecksum());
         }
         appendLockHeaders(resp, obj);
+        if (obj.getRestoreExpiryDate() != null && Instant.now().isBefore(obj.getRestoreExpiryDate())) {
+            resp.header("x-amz-restore", "ongoing-request=\"false\", expiry-date=\""
+                    + RFC_822.format(obj.getRestoreExpiryDate()) + "\"");
+        }
     }
 
     private void appendSseCustomerHeaders(Response.ResponseBuilder resp, S3Object obj) {
@@ -2669,8 +2765,8 @@ public class S3Controller {
             throw new AwsException("InvalidRequest",
                     "x-amz-annotation-directive must be COPY or EXCLUDE.", 400);
         }
-        S3Object copy = s3Service.copyObject(sourceBucket, sourceObject.objectKey(), destBucket, destKey,
-                sourceObject.versionId(),
+        S3Service.CopyObjectResult copied = s3Service.copyObjectVersion(sourceBucket, sourceObject.objectKey(),
+                destBucket, destKey, sourceObject.versionId(),
                 new CopyObjectOptions()
                         .withMetadataDirective(httpHeaders.getHeaderString("x-amz-metadata-directive"))
                         .withReplacementMetadata(extractUserMetadata(httpHeaders))
@@ -2697,6 +2793,7 @@ public class S3Controller {
                         .withGrantFullControl(httpHeaders.getHeaderString("x-amz-grant-full-control"))
                         .withGrantReadAcp(httpHeaders.getHeaderString("x-amz-grant-read-acp"))
                         .withGrantWriteAcp(httpHeaders.getHeaderString("x-amz-grant-write-acp")));
+        S3Object copy = copied.object();
         XmlBuilder xmlBuilder = new XmlBuilder()
                 .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
                 .start("CopyObjectResult", AwsNamespaces.S3)
@@ -2713,6 +2810,9 @@ public class S3Controller {
         }
         if (copy.getVersionId() != null) {
             response.header("x-amz-version-id", copy.getVersionId());
+        }
+        if (copied.sourceVersionId() != null) {
+            response.header("x-amz-copy-source-version-id", copied.sourceVersionId());
         }
         appendSseCustomerHeaders(response, copy);
         return response.build();
@@ -2732,10 +2832,11 @@ public class S3Controller {
                 httpHeaders.getHeaderString("x-amz-source-expected-bucket-owner"));
         authorizeCopySourceRead(httpHeaders, sourceObject, authorization);
         String copySourceRange = httpHeaders.getHeaderString("x-amz-copy-source-range");
-        String eTag = s3Service.uploadPartCopy(destBucket, destKey, uploadId, partNumber,
-                sourceBucket, sourceObject.objectKey(), sourceObject.versionId(), copySourceRange,
+        S3Service.UploadPartCopyResult copiedPart = s3Service.uploadPartCopyVersion(destBucket, destKey, uploadId,
+                partNumber, sourceBucket, sourceObject.objectKey(), sourceObject.versionId(), copySourceRange,
                 copySourceSseCustomerHeaders(httpHeaders),
                 sseCustomerHeaders(httpHeaders));
+        String eTag = copiedPart.eTag();
         // The destination multipart upload's own SSE settings (captured at
         // CreateMultipartUpload), not anything from this request's headers.
         // UploadPartCopy doesn't take server-side-encryption headers itself,
@@ -2749,6 +2850,9 @@ public class S3Controller {
                 .end("CopyPartResult")
                 .build();
         Response.ResponseBuilder response = Response.ok(xml).type(MediaType.APPLICATION_XML);
+        if (copiedPart.sourceVersionId() != null) {
+            response.header("x-amz-copy-source-version-id", copiedPart.sourceVersionId());
+        }
         if (destinationUpload.getServerSideEncryption() != null) {
             response.header("x-amz-server-side-encryption", destinationUpload.getServerSideEncryption());
         }
@@ -3124,7 +3228,20 @@ public class S3Controller {
                 .elem("RequestId", java.util.UUID.randomUUID().toString())
                 .end("Error")
                 .build();
-        return Response.status(e.getHttpStatus()).entity(xml).type(MediaType.APPLICATION_XML).build();
+        Response.ResponseBuilder response = Response.status(e.getHttpStatus())
+                .entity(xml)
+                .type(MediaType.APPLICATION_XML);
+        if (e instanceof S3DeleteMarkerException marker) {
+            response.header("x-amz-delete-marker", "true")
+                    .header("x-amz-version-id", marker.versionId());
+            if (marker.selectedByVersionId()) {
+                response.header("Allow", "DELETE");
+                if (marker.lastModified() != null) {
+                    response.header("Last-Modified", RFC_822.format(marker.lastModified()));
+                }
+            }
+        }
+        return response.build();
     }
 
     private Response checkPreconditions(S3Object obj, String ifMatch, String ifNoneMatch,
@@ -3892,7 +4009,9 @@ public class S3Controller {
      * in the {@code x-amz-copy-source} header and is otherwise invisible to the request-level IAM filter
      * that authorizes the destination from the URL path. Real S3 requires both permissions: a caller
      * allowed to write to the destination bucket must not be able to exfiltrate an object it cannot read.
-     * A no-op when IAM enforcement is disabled, matching {@link IamEnforcementFilter}'s own bypass rules.
+     * Evaluated under global IAM enforcement and, as on AWS, for assumed-role sessions (Lambda execution
+     * roles) even when global enforcement is off; otherwise a no-op, matching {@link IamEnforcementFilter}'s
+     * bypass rules.
      */
     private void authorizeCopySourceRead(HttpHeaders httpHeaders, CopySourceRef source,
                                          S3Service.RequestAuthorization authorization) {
@@ -3901,7 +4020,7 @@ public class S3Controller {
         S3Service.SignedPrincipalResourcePolicyEvaluation resourcePolicyEvaluation =
                 s3Service.signedPrincipalResourcePolicyDecision(
                         source.bucket(), action, resource, authorization);
-        iamEnforcementFilter.authorizeAdditionalResource(
+        iamEnforcementFilter.authorizeAdditionalResourceForSession(
                 httpHeaders.getHeaderString("Authorization"), action, resource,
                 resourcePolicyEvaluation.decision(), resourcePolicyEvaluation.resourceOwnerAccountId());
         s3Service.authorizeGetObject(

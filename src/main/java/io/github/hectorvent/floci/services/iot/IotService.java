@@ -54,6 +54,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -88,6 +89,8 @@ public class IotService {
     /** An AWS policy variable such as {@code ${iot:ClientId}}. */
     private static final Pattern POLICY_VARIABLE = Pattern.compile("\\$\\{[^}]*\\}");
     public static final int MAX_POLICY_VERSIONS = 5;
+    /** How long a thing type must stay deprecated before DeleteThingType accepts it. */
+    static final Duration THING_TYPE_DELETION_DELAY = Duration.ofMinutes(5);
 
     /** One lock for every policy version write and the policy delete, so a cap check, an append and a delete cannot interleave. */
     private final Object policyWriteLock = new Object();
@@ -124,6 +127,7 @@ public class IotService {
     private final FlociCertificateAuthority certificateAuthority;
     private final IamPolicyEvaluator policyEvaluator;
     private final RuleSqlEvaluator ruleSqlEvaluator;
+    private final Clock clock;
 
     @Inject
     public IotService(StorageFactory storageFactory,
@@ -188,6 +192,43 @@ public class IotService {
                   CloudWatchLogsService cloudWatchLogsService,
                   FlociCertificateAuthority certificateAuthority,
                   IamPolicyEvaluator policyEvaluator) {
+        this(thingStore, certificateStore, policyStore, policyAttachmentStore, thingPrincipalStore, shadowStore,
+                topicRuleStore, retainedMessageStore, jobStore, jobExecutionStore, thingTypeStore, thingGroupStore,
+                thingGroupMembershipStore, config, regionResolver, objectMapper, publishEventRecorder, mqttBrokerService,
+                sqsService, snsService, s3Service, kinesisService, dynamoDbService, lambdaService, firehoseService,
+                cloudWatchLogsService, certificateAuthority, policyEvaluator, Clock.systemUTC());
+    }
+
+    IotService(StorageBackend<String, Thing> thingStore,
+               StorageBackend<String, IotCertificate> certificateStore,
+               StorageBackend<String, IotPolicy> policyStore,
+               StorageBackend<String, Set<String>> policyAttachmentStore,
+               StorageBackend<String, Set<String>> thingPrincipalStore,
+               StorageBackend<String, IotShadow> shadowStore,
+               StorageBackend<String, IotTopicRule> topicRuleStore,
+               StorageBackend<String, IotRetainedMessage> retainedMessageStore,
+               StorageBackend<String, IotJob> jobStore,
+               StorageBackend<String, IotJobExecution> jobExecutionStore,
+               StorageBackend<String, IotThingType> thingTypeStore,
+               StorageBackend<String, IotThingGroup> thingGroupStore,
+               StorageBackend<String, Set<String>> thingGroupMembershipStore,
+               EmulatorConfig config,
+               RegionResolver regionResolver,
+               ObjectMapper objectMapper,
+               IotPublishEventRecorder publishEventRecorder,
+               IotMqttBrokerService mqttBrokerService,
+               SqsService sqsService,
+               SnsService snsService,
+               S3Service s3Service,
+               KinesisService kinesisService,
+               DynamoDbService dynamoDbService,
+               LambdaService lambdaService,
+               FirehoseService firehoseService,
+               CloudWatchLogsService cloudWatchLogsService,
+               FlociCertificateAuthority certificateAuthority,
+               IamPolicyEvaluator policyEvaluator,
+               Clock clock) {
+        this.clock = clock;
         this.thingStore = thingStore;
         this.certificateStore = certificateStore;
         this.policyStore = policyStore;
@@ -235,8 +276,10 @@ public class IotService {
     public Thing createThing(String thingName, Map<String, String> attributes, String thingTypeName, String region) {
         startMqttIfEnabled();
         validateThingName(thingName);
-        if (thingTypeName != null && !thingTypeName.isBlank()) {
-            describeThingType(thingTypeName, region);
+        if (thingTypeName != null && !thingTypeName.isBlank()
+                && describeThingType(thingTypeName, region).isDeprecated()) {
+            throw new AwsException("InvalidRequestException",
+                    "Can not create a new thing with deprecated thing type " + thingTypeName + ".", 400);
         }
         String key = thingKey(region, thingName);
         Thing existing = thingStore.get(key).orElse(null);
@@ -977,14 +1020,41 @@ public class IotService {
     }
 
     public void deprecateThingType(String thingTypeName, String region) {
+        deprecateThingType(thingTypeName, false, region);
+    }
+
+    /**
+     * Deprecates a thing type, or with {@code undoDeprecate} reverts it to active. Deprecating an
+     * already deprecated type keeps its original deprecation date, which the deletion window
+     * counts from.
+     */
+    public void deprecateThingType(String thingTypeName, boolean undoDeprecate, String region) {
         IotThingType type = describeThingType(thingTypeName, region);
-        type.setDeprecated(true);
-        type.setDeprecatedDate(Instant.now());
+        if (undoDeprecate) {
+            type.setDeprecated(false);
+            type.setDeprecatedDate(null);
+        } else if (!type.isDeprecated()) {
+            type.setDeprecated(true);
+            type.setDeprecatedDate(clock.instant());
+        }
         thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
     }
 
+    /**
+     * Deletes a thing type. AWS only deletes a type that has been deprecated for at least
+     * {@link #THING_TYPE_DELETION_DELAY} and that no thing is associated with.
+     */
     public void deleteThingType(String thingTypeName, String region) {
-        describeThingType(thingTypeName, region);
+        IotThingType type = describeThingType(thingTypeName, region);
+        if (!type.isDeprecated()) {
+            throw new AwsException("InvalidRequestException",
+                    "Thing type " + thingTypeName + " must be deprecated before it can be deleted.", 400);
+        }
+        Instant deprecatedAt = type.getDeprecatedDate() != null ? type.getDeprecatedDate() : type.getCreationDate();
+        if (deprecatedAt != null && clock.instant().isBefore(deprecatedAt.plus(THING_TYPE_DELETION_DELAY))) {
+            throw new AwsException("InvalidRequestException",
+                    "Thing type " + thingTypeName + " cannot be deleted until 5 minutes after it was deprecated.", 400);
+        }
         boolean inUse = listThings(region).stream().anyMatch(thing -> thingTypeName.equals(thing.getThingTypeName()));
         if (inUse) {
             throw new AwsException("InvalidRequestException", "Cannot delete thing type with associated things", 400);
@@ -1899,6 +1969,24 @@ public class IotService {
             return new TaggableResource(rule.getTags(), tags -> {
                 rule.setTags(tags);
                 topicRuleStore.put(topicRuleKey(region, ruleName), rule);
+            });
+        }
+        if (resource.startsWith("thingtype/")) {
+            String thingTypeName = resource.substring("thingtype/".length());
+            IotThingType type = thingTypeStore.get(thingTypeKey(region, thingTypeName))
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
+            return new TaggableResource(type.getTags(), tags -> {
+                type.setTags(tags);
+                thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
+            });
+        }
+        if (resource.startsWith("thinggroup/")) {
+            String thingGroupName = resource.substring("thinggroup/".length());
+            IotThingGroup group = thingGroupStore.get(thingGroupKey(region, thingGroupName))
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404));
+            return new TaggableResource(group.getTags(), tags -> {
+                group.setTags(tags);
+                thingGroupStore.put(thingGroupKey(region, thingGroupName), group);
             });
         }
         throw new AwsException("InvalidRequestException", "Invalid resource ARN: " + resourceArn, 400);

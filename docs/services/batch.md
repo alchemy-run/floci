@@ -36,8 +36,8 @@ Batch uses `floci.services.batch.runner-mode`.
 
 | Value | Behavior |
 |---|---|
-| `immediate` | Default. `SubmitJob` persists the job and records lifecycle timestamps. When `immediate-complete` is `true` (Floci's own tests), it creates one successful attempt and returns after the job is `SUCCEEDED`. When `false` (Alchemy Docker image), the job is left `RUNNABLE` so `CancelJob` / `TerminateJob` can still fail it after submit returns. |
-| `docker` | Starts one Docker container per attempt from the job-definition image, passes resolved command and environment values, applies `MEMORY` resource requirements as Docker memory limits, captures a CloudWatch Logs stream name, and sets `SUCCEEDED` or `FAILED` from the container exit code. Timed-out jobs fail without retry, matching AWS Batch timeout behavior. |
+| `immediate` | Configuration default and the mode of Floci's own tests. `SubmitJob` persists the job and records lifecycle timestamps without running anything. When `immediate-complete` is `true`, it creates one successful attempt and returns after the job is `SUCCEEDED`. When `false`, the job is left `RUNNABLE`. |
+| `docker` | The shipped `application.yml` value. A `RUNNABLE` job is placed once its queue is `ENABLED` and one of its compute environments is `MANAGED`, `ENABLED`, and `VALID`; jobs whose queues only reference `UNMANAGED` environments stay `RUNNABLE`, because Floci registers no container instances for them. At most 16 job containers run at once; further jobs wait in `RUNNABLE`. Each attempt starts one Docker container from the job-definition image (ECR image URIs are resolved to Floci's registry), passes resolved command and environment values, applies `MEMORY` and `VCPU` resource requirements as Docker limits, streams output to the `/aws/batch/job` log group under `{jobDefinitionName}/default/{jobId}`, and sets `SUCCEEDED` or `FAILED` from the container exit code. Timed-out jobs fail without retry, matching AWS Batch timeout behavior. |
 
 `process` mode is not implemented.
 
@@ -134,14 +134,14 @@ Floci provisions these resource types:
 - `AWS::Batch::JobQueue`
 - `AWS::Batch::JobDefinition`
 
-IAM roles, VPC fields, Fargate declarations, log configuration, storage, and resource requirements are accepted as metadata. Docker mode applies `MEMORY` requirements as container memory limits; local scheduling does not simulate AWS capacity, VCPU allocation, or VPC networking.
+IAM roles, VPC fields, Fargate declarations, log configuration, and storage are accepted as metadata. Docker mode applies `MEMORY` and `VCPU` requirements as container limits; local scheduling does not simulate per-environment `maxvCpus` capacity or VPC networking.
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_BATCH_ENABLED` | `true` | Enable or disable Batch |
-| `FLOCI_SERVICES_BATCH_RUNNER_MODE` | `immediate` | `immediate` or `docker` |
+| `FLOCI_SERVICES_BATCH_RUNNER_MODE` | `docker` (`immediate` in tests) | `immediate` or `docker` |
 | `FLOCI_SERVICES_BATCH_IMMEDIATE_COMPLETE` | `true` (tests) / `false` (image) | When `immediate`, finish jobs to `SUCCEEDED` before `SubmitJob` returns |
 | `FLOCI_SERVICES_BATCH_DOCKER_NETWORK` | *(unset)* | Docker network for Batch containers |
 | `FLOCI_STORAGE_SERVICES_BATCH_MODE` | *(inherits global)* | Optional storage mode override |

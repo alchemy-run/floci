@@ -157,30 +157,65 @@ public class PreSignedUrlFilter implements ContainerRequestFilter {
             }
         }
 
+        if (verifySigV4) {
+            return;
+        }
         // Always enforce signed Content-Type on AWS SDK / distilled presigned
         // PUTs. validate-signatures defaults false (Floci HMAC vs real SigV4),
         // but a URL that lists content-type in X-Amz-SignedHeaders must reject
         // a mismatched Content-Type the same way real S3 does (403).
         String signedHeaders = maybeUrlDecode(queryParams.getFirst("X-Amz-SignedHeaders"));
-        if (!verifySigV4
-                && S3PresignedSignature.signedHeadersInclude(signedHeaders, "content-type")
-                && !signedContentTypeMatches(requestContext, queryParams, signedHeaders, amzDate, signature)) {
+        String presignedAccessKeyId = presignedAccessKeyId(queryParams);
+        if (S3PresignedSignature.signedHeadersInclude(signedHeaders, "content-type")
+                && !presignedSignatureMatches(requestContext, queryParams, signedHeaders, amzDate, signature,
+                        presignedAccessKeyId == null ? List.of() : secretsFor(presignedAccessKeyId))) {
+            requestContext.abortWith(errorResponse(403, "SignatureDoesNotMatch",
+                    "The request signature we calculated does not match the signature you provided."));
+            return;
+        }
+        // A URL presigned by a workload holding an assumed-role session Floci minted (such as a
+        // Lambda execution role) was signed with the real session secret, so it can be checked
+        // exactly. Otherwise a holder of the URL could rewrite a signed query parameter - swap
+        // versionId to read another version, or drop it - and still be served, where real S3
+        // answers SignatureDoesNotMatch. Hand-built URLs for IAM user keys stay unverified while
+        // validate-signatures is off.
+        List<String> issuedSecret = roleSessionSecretFor(queryParams);
+        if (!issuedSecret.isEmpty()
+                && !presignedSignatureMatches(requestContext, queryParams, signedHeaders, amzDate, signature,
+                        issuedSecret)) {
             requestContext.abortWith(errorResponse(403, "SignatureDoesNotMatch",
                     "The request signature we calculated does not match the signature you provided."));
         }
     }
 
-    private boolean signedContentTypeMatches(ContainerRequestContext requestContext,
-                                             MultivaluedMap<String, String> queryParams,
-                                             String signedHeaders, String amzDate, String signature) {
+    private static String presignedAccessKeyId(MultivaluedMap<String, String> queryParams) {
+        return S3PresignedSignature.accessKeyId(maybeUrlDecode(queryParams.getFirst("X-Amz-Credential")));
+    }
+
+    /** The secret of a live assumed-role session Floci minted, matched with its session token; empty otherwise. */
+    private List<String> roleSessionSecretFor(MultivaluedMap<String, String> queryParams) {
+        String accessKeyId = presignedAccessKeyId(queryParams);
+        if (iamService == null || accessKeyId == null || LEGACY_ACCESS_KEY_ID.equals(accessKeyId)
+                || !iamService.isAssumedRoleSession(accessKeyId)) {
+            return List.of();
+        }
+        return iamService.findSecretKey(accessKeyId, queryParams.getFirst("X-Amz-Security-Token"))
+                .map(List::of)
+                .orElse(List.of());
+    }
+
+    private boolean presignedSignatureMatches(ContainerRequestContext requestContext,
+                                              MultivaluedMap<String, String> queryParams,
+                                              String signedHeaders, String amzDate, String signature,
+                                              List<String> secrets) {
         String credential = maybeUrlDecode(queryParams.getFirst("X-Amz-Credential"));
         String accessKeyId = S3PresignedSignature.accessKeyId(credential);
         String credentialScope = S3PresignedSignature.credentialScope(credential);
-        if (accessKeyId == null || credentialScope == null || amzDate == null || signature == null) {
+        if (accessKeyId == null || credentialScope == null || amzDate == null || signature == null
+                || signedHeaders == null) {
             return false;
         }
 
-        List<String> secrets = secretsFor(accessKeyId);
         if (secrets.isEmpty()) {
             return false;
         }

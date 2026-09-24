@@ -104,6 +104,9 @@ public class MemoryDbHandler {
                 case "DeleteUser" -> handleDeleteUser(request, region);
                 case "CreateACL" -> handleCreateAcl(request, region);
                 case "DescribeACLs" -> handleDescribeAcls(request, region);
+                case "UpdateACL" -> single("ACL", aclNode(service.updateAcl(text(request, "ACLName"),
+                        parseStringList(request.path("UserNamesToAdd")),
+                        parseStringList(request.path("UserNamesToRemove")), region)));
                 case "DeleteACL" -> handleDeleteAcl(request, region);
                 case "ListTags" -> handleListTags(request, region);
                 case "TagResource" -> handleTagResource(request, region);
@@ -141,7 +144,9 @@ public class MemoryDbHandler {
         spec.setAclName(text(request, "ACLName"));
         spec.setParameterGroupName(text(request, "ParameterGroupName"));
         spec.setSubnetGroupName(text(request, "SubnetGroupName"));
-        spec.setTlsEnabled(request.path("TLSEnabled").asBoolean(false));
+        spec.setSecurityGroupIds(parseStringList(request.path("SecurityGroupIds")));
+        // MemoryDB enables in-transit encryption unless the request turns it off.
+        spec.setTlsEnabled(request.path("TLSEnabled").asBoolean(true));
         spec.setTags(parseTags(request.path("Tags")));
         Cluster created = service.createCluster(spec, region);
         ObjectNode response = objectMapper.createObjectNode();
@@ -159,7 +164,10 @@ public class MemoryDbHandler {
     }
 
     private Response handleUpdateCluster(JsonNode request, String region) {
-        Cluster updated = service.updateCluster(text(request, "ClusterName"), text(request, "Description"), region);
+        List<String> securityGroupIds = request.has("SecurityGroupIds")
+                ? parseStringList(request.path("SecurityGroupIds")) : null;
+        Cluster updated = service.updateCluster(text(request, "ClusterName"), text(request, "Description"),
+                securityGroupIds, region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("Cluster", clusterNode(updated));
         return Response.ok(response).build();
@@ -435,6 +443,14 @@ public class MemoryDbHandler {
             node.put("SubnetGroupName", cluster.getSubnetGroupName());
         }
         node.put("TLSEnabled", cluster.isTlsEnabled());
+        if (!cluster.getSecurityGroupIds().isEmpty()) {
+            ArrayNode securityGroups = node.putArray("SecurityGroups");
+            for (String securityGroupId : cluster.getSecurityGroupIds()) {
+                securityGroups.addObject()
+                        .put("SecurityGroupId", securityGroupId)
+                        .put("Status", "active");
+            }
+        }
         node.put("ARN", cluster.getArn());
         if (cluster.getClusterEndpoint() != null) {
             ObjectNode endpoint = node.putObject("ClusterEndpoint");

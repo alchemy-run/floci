@@ -22,6 +22,7 @@ import io.github.hectorvent.floci.services.rds.container.RdsContainerHandle;
 import io.github.hectorvent.floci.services.rds.container.RdsContainerManager;
 import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import io.github.hectorvent.floci.services.rds.model.DbCluster;
+import io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
 import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
@@ -38,6 +39,8 @@ import io.github.hectorvent.floci.services.rds.model.DbSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbSubnetGroup;
 import io.github.hectorvent.floci.services.rds.model.GlobalCluster;
 import io.github.hectorvent.floci.services.rds.model.GlobalClusterMember;
+import io.github.hectorvent.floci.services.rds.model.DbClusterSettings;
+import io.github.hectorvent.floci.services.rds.model.LogExportChanges;
 import io.github.hectorvent.floci.services.rds.model.OptionGroup;
 import io.github.hectorvent.floci.services.rds.model.OptionGroupOption;
 import io.github.hectorvent.floci.services.rds.model.RdsEvent;
@@ -364,6 +367,31 @@ class RdsServiceTest {
     }
 
     @Test
+    void clusterEndpointIdentifierIsStoredLowercaseAndMatchedCaseInsensitively() {
+        rdsService.createDbCluster("endpoint-cluster", "aurora-postgresql", "16.3",
+                "admin", "password", "dbname", false, null);
+
+        rdsService.createDbClusterEndpoint("My-Custom-Endpoint", "endpoint-cluster", "READER",
+                List.of(), List.of(), Map.of());
+
+        Collection<DbClusterEndpoint> found =
+                rdsService.listDbClusterEndpoints(null, "MY-CUSTOM-ENDPOINT");
+        assertEquals(1, found.size());
+        assertEquals("my-custom-endpoint", found.iterator().next().getDbClusterEndpointIdentifier());
+        assertTrue(found.iterator().next().getDbClusterEndpointArn().endsWith(":cluster-endpoint:my-custom-endpoint"));
+        assertEquals("my-custom-endpoint",
+                rdsService.getDbClusterEndpoint("My-Custom-Endpoint").getDbClusterEndpointIdentifier());
+
+        AwsException duplicate = assertThrows(AwsException.class, () ->
+                rdsService.createDbClusterEndpoint("my-custom-endpoint", "endpoint-cluster", "READER",
+                        List.of(), List.of(), Map.of()));
+        assertEquals("DBClusterEndpointAlreadyExistsFault", duplicate.getErrorCode());
+
+        rdsService.deleteDbClusterEndpoint("MY-custom-ENDPOINT");
+        assertTrue(rdsService.listDbClusterEndpoints(null, "my-custom-endpoint").isEmpty());
+    }
+
+    @Test
     void createDbClusterRejectsADuplicateIdentifier() {
         rdsService.createDbCluster("dup-cluster", "postgres", "17.5",
                 "admin", "password", "dbname", false, null, null, null, false);
@@ -629,23 +657,31 @@ class RdsServiceTest {
                 rdsService.listTagsForResource(instance.getDbInstanceArn()));
     }
 
+    // AWS reports Endpoint.Port as the instance's listener port and names the endpoint after the
+    // instance, so every instance can listen on 5432. Floci used to report its internal proxy port
+    // on a shared host name.
     @Test
-    void dbInstanceEndpointUsesResolvedProxyHost() {
+    void dbInstanceEndpointIsAPerInstanceHostOnTheEngineDefaultPort() {
         DockerHostResolver dockerHostResolver = mock(DockerHostResolver.class);
         when(dockerHostResolver.resolve()).thenReturn("floci.local");
         RdsService service = new RdsService(containerManager, proxyManager, ec2Service, regionResolver, config,
                 new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
                 new InMemoryStorage<>(), new InMemoryStorage<>(), null, dockerHostResolver, null);
 
-        DbInstance instance = service.createDbInstance("mydb", "postgres", "13",
+        DbInstance instance = service.createDbInstance("MyDb", "postgres", "13",
                 "admin", "password", "dbname", "db.t3.micro",
                 20, false, null, null, null);
 
-        assertEquals("floci.local", instance.getEndpoint().address());
+        String token = RdsService.endpointToken("123456789012", "us-east-1");
+        assertEquals("mydb." + token + ".us-east-1.rds.localhost.floci.io", instance.getEndpoint().address());
+        assertEquals(5432, instance.getEndpoint().port());
+        assertEquals(7000, instance.getProxyPort());
+        verify(proxyManager).advertise("rds-resource:arn:aws:rds:us-east-1:123456789012:db:MyDb",
+                List.of(instance.getEndpoint().address()), 5432);
     }
 
     @Test
-    void dbInstanceEndpointUsesPublishedProxyPort() {
+    void dbInstanceEndpointReportsTheRequestedPortUnderAConfiguredEndpointHost() {
         CurrentContainerNetworkResolver currentContainerNetworkResolver = mock(CurrentContainerNetworkResolver.class);
         when(config.services().rds().endpointHost()).thenReturn(Optional.of("localhost"));
         when(currentContainerNetworkResolver.resolvePublishedPort(7000)).thenReturn(OptionalInt.of(49173));
@@ -655,11 +691,145 @@ class RdsServiceTest {
 
         DbInstance instance = service.createDbInstance("mydb", "postgres", "13",
                 "admin", "password", "dbname", "db.t3.micro",
-                20, false, null, null, null);
+                20, false, null, null, null, null, false, false, null, Map.of(), List.of(), null,
+                "us-east-1", true,
+                new DbInstanceSettings(null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, 5434),
+                null);
 
         assertEquals("localhost", instance.getEndpoint().address());
-        assertEquals(49173, instance.getEndpoint().port());
+        assertEquals(5434, instance.getEndpoint().port());
+        assertEquals(5434, instance.getPort());
         assertEquals(7000, instance.getProxyPort());
+    }
+
+    @Test
+    void createDbInstanceRejectsAPortOutsideTheRdsRange() {
+        AwsException error = assertThrows(AwsException.class, () -> rdsService.createDbInstance(
+                "mydb", "postgres", "13", "admin", "password", "dbname", "db.t3.micro",
+                20, false, null, null, null, null, false, false, null, Map.of(), List.of(), null,
+                "us-east-1", true,
+                new DbInstanceSettings(null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, 80),
+                null));
+
+        assertEquals("InvalidParameterValue", error.getErrorCode());
+        verifyNoInteractions(containerManager);
+    }
+
+    // The Alchemy DBInstance list test: an Aurora member reports its cluster's port (5434), not the
+    // 5435 its CreateDBInstance named, and the cluster's reader endpoint is served on it too.
+    @Test
+    void auroraMemberListensOnItsClustersConfiguredPort() {
+        DbCluster cluster = rdsService.createDbCluster("list-cluster", "aurora-postgresql", "16.4",
+                "alchemy", "Password123", null, false, null, null, null, false, "us-east-1",
+                0.5, 1.0, null, false, null, "provisioned", false, 5434);
+        DbInstance member = rdsService.createDbInstance("list-instance", "aurora-postgresql", "16.4",
+                null, null, null, "db.serverless", 20, false, null, null, "list-cluster", null, false,
+                false, null, Map.of(), List.of(), null, "us-east-1", true,
+                new DbInstanceSettings(null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, 5435),
+                null);
+
+        String token = RdsService.endpointToken("123456789012", "us-east-1");
+        assertEquals(5434, cluster.getEndpoint().port());
+        assertEquals("list-cluster.cluster-" + token + ".us-east-1.rds.localhost.floci.io",
+                cluster.getEndpoint().address());
+        assertEquals("list-cluster.cluster-ro-" + token + ".us-east-1.rds.localhost.floci.io",
+                cluster.getReaderEndpoint().address());
+        assertEquals(5434, member.getEndpoint().port());
+        assertEquals("list-instance." + token + ".us-east-1.rds.localhost.floci.io",
+                member.getEndpoint().address());
+        verify(proxyManager).advertise("rds-resource:arn:aws:rds:us-east-1:123456789012:cluster:list-cluster",
+                List.of(cluster.getEndpoint().address(), cluster.getReaderEndpoint().address()), 5434);
+    }
+
+    @Test
+    void modifyDbClusterPortMovesTheClusterAndMemberEndpoints() {
+        rdsService.createDbCluster("port-cluster", "aurora-postgresql", "16.4",
+                "alchemy", "Password123", null, false, null, null, null, false, "us-east-1",
+                null, null, null, false, null, "provisioned", false, null);
+        rdsService.createDbInstance("port-member", "aurora-postgresql", "16.4",
+                null, null, null, "db.serverless", 20, false, null, null, "port-cluster");
+
+        DbCluster modified = rdsService.applyDbClusterSettings("port-cluster", "us-east-1",
+                new DbClusterSettings(6543, null, null, null, null, null, null), null);
+
+        assertEquals(6543, modified.getEndpoint().port());
+        assertEquals(6543, modified.getReaderEndpoint().port());
+        assertEquals(6543, rdsService.getDbInstance("port-member").getEndpoint().port());
+        verify(proxyManager).advertise(eq("rds-resource:arn:aws:rds:us-east-1:123456789012:db:port-member"),
+                any(), eq(6543));
+    }
+
+    @Test
+    void modifyDbInstancePortMovesTheEndpointAndRefusesClusterMembers() {
+        rdsService.createDbInstance("standalone", "postgres", "16.4",
+                "admin", "password", null, "db.t3.micro", 20, false, null, null, null);
+        rdsService.createDbCluster("member-cluster", "aurora-postgresql", "16.4",
+                "alchemy", "Password123", null, false, null, null, null, false, "us-east-1",
+                null, null, null, false, null, "provisioned", false, null);
+        rdsService.createDbInstance("member", "aurora-postgresql", "16.4",
+                null, null, null, "db.serverless", 20, false, null, null, "member-cluster");
+
+        DbInstance moved = rdsService.modifyDbInstancePort("standalone", 6432, "us-east-1");
+
+        assertEquals(6432, moved.getEndpoint().port());
+        assertEquals(6432, rdsService.getDbInstance("standalone").getEndpoint().port());
+        AwsException memberError = assertThrows(AwsException.class,
+                () -> rdsService.validateDbInstancePortChange("member", 6432, "us-east-1"));
+        assertEquals("InvalidParameterCombination", memberError.getErrorCode());
+        assertEquals(5432, rdsService.getDbInstance("member").getEndpoint().port());
+    }
+
+    // The Alchemy Aurora security test: the cluster must keep and report the log exports,
+    // deletion protection and network type CreateDBCluster named.
+    @Test
+    void dbClusterSettingsPersistAndApplyLogExportDeltas() {
+        rdsService.createDbCluster("settings-cluster", "aurora-postgresql", "16.4",
+                "alchemy", "Password123", null, true, null, null, null, false, "us-east-1",
+                null, null, null, false, null, "provisioned", false, null);
+
+        DbCluster created = rdsService.applyDbClusterSettings("settings-cluster", "us-east-1",
+                new DbClusterSettings(null, List.of("sg-1", "sg-2", "sg-1"), List.of("postgresql"), null,
+                        false, "ipv4", 7),
+                Map.of("owner", "alchemy"));
+
+        assertEquals(List.of("postgresql"), created.getEnabledCloudwatchLogsExports());
+        assertEquals(List.of("sg-1", "sg-2"), created.getVpcSecurityGroupIds());
+        assertFalse(created.isDeletionProtection());
+        assertEquals("IPV4", created.getNetworkType());
+        assertEquals(7, created.getBackupRetentionPeriod());
+        assertEquals("alchemy", created.getTags().get("owner"));
+
+        DbCluster modified = rdsService.applyDbClusterSettings("settings-cluster", "us-east-1",
+                new DbClusterSettings(null, null, null,
+                        new LogExportChanges(List.of("iam-db-auth-error"), List.of("postgresql")),
+                        true, null, null),
+                null);
+
+        assertEquals(List.of("iam-db-auth-error"), modified.getEnabledCloudwatchLogsExports());
+        assertTrue(modified.isDeletionProtection());
+        AwsException protectedDelete = assertThrows(AwsException.class,
+                () -> rdsService.deleteDbCluster("settings-cluster", "us-east-1"));
+        assertEquals("InvalidParameterCombination", protectedDelete.getErrorCode());
+    }
+
+    @Test
+    void dbClusterLogExportsAreValidatedPerEngine() {
+        AwsException instanceLog = assertThrows(AwsException.class, () -> RdsService.validateClusterSettings(
+                "aurora-postgresql", "16.4",
+                new DbClusterSettings(null, null, List.of("postgresql", "audit"), null, null, null, null)));
+        assertEquals("InvalidParameterCombination", instanceLog.getErrorCode());
+        assertTrue(instanceLog.getMessage().contains("'audit'"));
+
+        assertDoesNotThrow(() -> RdsService.validateClusterSettings("aurora-mysql", "8.0.mysql_aurora.3.08.0",
+                new DbClusterSettings(null, null, List.of("audit", "error", "slowquery"), null, null, null, null)));
+
+        AwsException network = assertThrows(AwsException.class, () -> RdsService.validateClusterSettings(
+                "aurora-postgresql", "16.4",
+                new DbClusterSettings(null, null, null, null, null, "IPV6", null)));
+        assertEquals("InvalidParameterValue", network.getErrorCode());
     }
 
     @Test
@@ -1468,8 +1638,9 @@ class RdsServiceTest {
                 "admin", "password", "dbname", false, null);
 
         assertEquals(DbInstanceStatus.AVAILABLE, cluster.getStatus());
-        assertEquals("localhost", cluster.getEndpoint().address());
-        assertTrue(cluster.getEndpoint().port() > 0);
+        assertEquals("cluster1.cluster-" + RdsService.endpointToken("123456789012", "us-east-1")
+                + ".us-east-1.rds.localhost.floci.io", cluster.getEndpoint().address());
+        assertEquals(5432, cluster.getEndpoint().port());
         assertNull(cluster.getContainerId());
         verify(containerManager, never()).tryStart(any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(proxyManager, never()).startProxy(any(), any(), anyBoolean(), anyInt(), any(), anyInt(),
@@ -1700,7 +1871,8 @@ class RdsServiceTest {
                 0, false, null, null, "cluster1");
 
         assertEquals(DbInstanceStatus.AVAILABLE, instance.getStatus());
-        assertEquals("localhost", instance.getEndpoint().address());
+        assertEquals("inst1." + RdsService.endpointToken("123456789012", "us-east-1")
+                + ".us-east-1.rds.localhost.floci.io", instance.getEndpoint().address());
         // No Docker volume name may be persisted: the mock cluster has a null volume id, so the
         // fallback would fabricate a name that a later non-mock restore could try to reference.
         assertNull(instance.getDockerVolumeName());
@@ -1951,7 +2123,7 @@ class RdsServiceTest {
         DbInstance restored = restoredService.getDbInstance("mydb");
         assertEquals(DbInstanceStatus.AVAILABLE, restored.getStatus());
         assertEquals(created.getProxyPort(), restored.getProxyPort());
-        assertEquals(created.getProxyPort(), restored.getEndpoint().port());
+        assertEquals(created.getEndpoint(), restored.getEndpoint());
         assertNull(restored.getContainerId());
         verify(daemonlessProxyManager, never()).startProxy(any(), any(), anyBoolean(), anyInt(),
                 any(), anyInt(), any(), any(), any(), any(), any());
@@ -2025,8 +2197,10 @@ class RdsServiceTest {
         verify(containerManager, never()).removeVolume(any(), any(), any());
     }
 
+    // Like AWS, both clusters listen on the engine's port under their own names; only the
+    // internal proxy ports behind those names differ.
     @Test
-    void mockModeAssignsDistinctEndpointPorts() {
+    void mockModeAssignsDistinctEndpointNamesOnTheSamePort() {
         when(config.services().rds().mock()).thenReturn(true);
 
         DbCluster a = rdsService.createDbCluster("cluster-a", "aurora-postgresql", "16.3",
@@ -2034,7 +2208,10 @@ class RdsServiceTest {
         DbCluster b = rdsService.createDbCluster("cluster-b", "aurora-postgresql", "16.3",
                 "admin", "password", "dbname", false, null);
 
-        assertNotEquals(a.getEndpoint().port(), b.getEndpoint().port());
+        assertNotEquals(a.getEndpoint().address(), b.getEndpoint().address());
+        assertEquals(5432, a.getEndpoint().port());
+        assertEquals(5432, b.getEndpoint().port());
+        assertNotEquals(a.getProxyPort(), b.getProxyPort());
     }
 
     @Test
@@ -2044,6 +2221,8 @@ class RdsServiceTest {
                 20, false, null, null, null);
         String volume = created.getDockerVolumeName();
         int port = created.getEndpoint().port();
+        int proxyPort = created.getProxyPort();
+        String address = created.getEndpoint().address();
 
         DbInstance stopping = rdsService.stopDbInstance("standalone", null);
         assertEquals(DbInstanceStatus.STOPPING, stopping.getStatus());
@@ -2066,9 +2245,14 @@ class RdsServiceTest {
         assertEquals(DbInstanceStatus.AVAILABLE, started.getStatus());
         assertEquals("cont-id", started.getContainerId());
         assertEquals(port, started.getEndpoint().port());
+        assertEquals(proxyPort, started.getProxyPort());
+        assertEquals(address, started.getEndpoint().address());
         verify(containerManager, times(2)).tryStart(any(), any(), any(), eq(volume), any(), any(), any(), any(), any());
-        verify(proxyManager, times(2)).startProxy(any(), any(), anyBoolean(), eq(port), any(), anyInt(),
-                any(), any(), any(), any(), any());
+        // The restarted proxy reuses the stored internal port and is advertised on the same
+        // endpoint address and listener port as before the stop.
+        verify(proxyManager, times(2)).startProxy(any(), any(), anyBoolean(), eq(proxyPort), any(), anyInt(),
+                eq(address), any(), any(), any(), any());
+        verify(proxyManager, times(2)).advertise(any(), eq(List.of(address)), eq(port));
         assertEquals("InvalidDBInstanceState", assertThrows(AwsException.class,
                 () -> rdsService.startDbInstance("standalone")).getErrorCode());
     }
@@ -2444,6 +2628,51 @@ class RdsServiceTest {
                 "regional-pg", "us-west-2").getDescription());
         assertEquals("west", rdsService.getDbClusterParameterGroup(
                 "regional-cpg", "us-west-2").getDescription());
+    }
+
+    @Test
+    void awsDefaultDbParameterGroupResolvesLazilyPerRegionForAuroraInstance() {
+        assertTrue(rdsService.listDbParameterGroups(null, "us-east-1").isEmpty());
+        rdsService.createDbCluster("default-pg-cluster", "aurora-postgresql", "16.3",
+                "admin", "password", "dbname", false, null);
+
+        DbInstance member = rdsService.createDbInstance("default-pg-member", "aurora-postgresql", "16.3",
+                "admin", "password", "dbname", "db.serverless",
+                20, false, "default.aurora-postgresql16", null, "default-pg-cluster");
+
+        assertEquals("default.aurora-postgresql16", member.getParameterGroupName());
+        DbParameterGroup group = rdsService.getDbParameterGroup("default.aurora-postgresql16", "us-east-1");
+        assertEquals("aurora-postgresql16", group.getDbParameterGroupFamily());
+        assertEquals("Default parameter group for aurora-postgresql16", group.getDescription());
+        assertEquals("arn:aws:rds:us-east-1:123456789012:pg:default.aurora-postgresql16",
+                group.getDbParameterGroupArn());
+        assertEquals(List.of("default.aurora-postgresql16"),
+                rdsService.listDbParameterGroups(null, "us-east-1").stream()
+                        .map(DbParameterGroup::getDbParameterGroupName).toList());
+        assertTrue(rdsService.listDbParameterGroups(null, "us-west-2").isEmpty());
+        assertEquals("postgres16",
+                rdsService.getDbParameterGroup("default.postgres16", "us-west-2").getDbParameterGroupFamily());
+    }
+
+    @Test
+    void awsDefaultDbParameterGroupsAreImmutableAndUnknownFamiliesAreNotFabricated() {
+        String name = "default.postgres16";
+
+        assertEquals("InvalidDBParameterGroupState", assertThrows(AwsException.class, () ->
+                rdsService.modifyDbParameterGroup(name, Map.of("log_statement", "all"), "us-east-1"))
+                .getErrorCode());
+        assertEquals("InvalidDBParameterGroupState", assertThrows(AwsException.class, () ->
+                rdsService.resetDbParameterGroup(name, true, List.of(), "us-east-1")).getErrorCode());
+        assertEquals("InvalidDBParameterGroupState", assertThrows(AwsException.class, () ->
+                rdsService.deleteDbParameterGroup(name, "us-east-1")).getErrorCode());
+        assertEquals("DBParameterGroupAlreadyExists", assertThrows(AwsException.class, () ->
+                rdsService.createDbParameterGroup(name, "postgres16", "shadow", "us-east-1")).getErrorCode());
+        assertTrue(rdsService.getDbParameterGroup(name, "us-east-1").getParameters().isEmpty());
+
+        for (String unknown : List.of("default.", "default.postgres999", "default.docdb5.0")) {
+            assertEquals("DBParameterGroupNotFound", assertThrows(AwsException.class, () ->
+                    rdsService.getDbParameterGroup(unknown, "us-east-1")).getErrorCode());
+        }
     }
 
     @Test
@@ -2960,7 +3189,8 @@ class RdsServiceTest {
         assertEquals("mydb", restored.getContainerStorageResourceId());
         assertEquals("floci-rds-" + persistedVolumeId, restored.getDockerVolumeName());
         assertEquals(persistedProxyPort, restored.getProxyPort());
-        assertEquals(persistedProxyPort, restored.getEndpoint().port());
+        // The endpoint reports the listener port, not the internal proxy port behind it.
+        assertEquals(5432, restored.getEndpoint().port());
         assertEquals("restored-container", restored.getContainerId());
         assertEquals("127.0.0.1", restored.getContainerHost());
         assertEquals(15432, restored.getContainerPort());
@@ -3659,7 +3889,7 @@ class RdsServiceTest {
         DbInstance replacement = restoredService.createDbInstance(
                 "replacement", "postgres", "16.3", "admin", "secret", "app",
                 "db.t3.micro", 20, false, null, null, null);
-        assertEquals(7000, replacement.getEndpoint().port());
+        assertEquals(7000, replacement.getProxyPort());
     }
 
     @Test
@@ -3781,7 +4011,7 @@ class RdsServiceTest {
         DbCluster replacement = restoredService.createDbCluster(
                 "replacement", "aurora-postgresql", "16.3", "admin", "secret",
                 "app", false, null);
-        assertEquals(7000, replacement.getEndpoint().port());
+        assertEquals(7000, replacement.getProxyPort());
     }
 
     @Test
@@ -6110,9 +6340,12 @@ class RdsServiceTest {
 
         ArgumentCaptor<RdsAuthProxy.MasterPasswordCheck> validator =
                 ArgumentCaptor.forClass(RdsAuthProxy.MasterPasswordCheck.class);
+        // The restored clusters' endpoints are served on 5432, so the proxy's own listener moves
+        // to a pool port instead of colliding with them.
         verify(restoredProxyManager).startProxy(eq("db-proxy:" + proxy.getDbProxyArn()),
                 eq(DatabaseEngine.POSTGRES),
-                eq(false), eq(5432), eq("127.0.0.1"), eq(15432), any(), eq("admin"),
+                eq(false), org.mockito.ArgumentMatchers.intThat(port -> port != 5432),
+                eq("127.0.0.1"), eq(15432), any(), eq("admin"),
                 eq("target-secret"), eq("app"), validator.capture());
         assertTrue(validator.getValue().validate("admin", "target-secret"));
         assertFalse(validator.getValue().validate("admin", "default-secret"));
@@ -7250,8 +7483,8 @@ class RdsServiceTest {
         assertEquals(50, replica.getAllocatedStorage());
         assertEquals(0, replica.getBackupRetentionPeriod(), "a replica starts with backups off");
         assertEquals(DbInstanceStatus.AVAILABLE, replica.getStatus());
-        assertNotEquals(rdsService.getDbInstance("primary").getEndpoint().port(),
-                replica.getEndpoint().port(), "a replica has its own endpoint");
+        assertNotEquals(rdsService.getDbInstance("primary").getEndpoint().address(),
+                replica.getEndpoint().address(), "a replica has its own endpoint");
         assertEquals(List.of("primary-replica"),
                 rdsService.getDbInstance("primary").getReadReplicaDbInstanceIdentifiers());
         // The backing copy is a dump of the source restored into the replica's own container.

@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.core.common.ServiceConfigAccess;
 import io.github.hectorvent.floci.core.common.auth.SigV4RequestValidator;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.codeartifact.CodeArtifactEventPublisher.PackageVersionChange;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactDomain;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactPackage.Version;
 import io.github.hectorvent.floci.services.codeartifact.model.CodeArtifactPackage;
@@ -110,6 +111,7 @@ public class CodeArtifactService implements Resettable {
     private final AccountAwareStorageBackend<CodeArtifactPackageVersion> packageVersions;
     private final RegionResolver regionResolver;
     private final EmulatorConfig config;
+    private final CodeArtifactEventPublisher eventPublisher;
     // Asset bytes never go through the JSON/WAL-backed `packageVersions` store (see PackageAsset's
     // @JsonIgnore content field): they're kept here instead, on disk in persistent/hybrid/wal mode
     // or in this map in memory mode, so a publish only ever rewrites metadata.
@@ -121,7 +123,7 @@ public class CodeArtifactService implements Resettable {
 
     @Inject
     public CodeArtifactService(StorageFactory storageFactory, RegionResolver regionResolver, EmulatorConfig config,
-                                ServiceConfigAccess serviceConfigAccess) {
+                                ServiceConfigAccess serviceConfigAccess, CodeArtifactEventPublisher eventPublisher) {
         this(
                 storageFactory.create("codeartifact", "codeartifact-domains.json",
                         new TypeReference<Map<String, CodeArtifactDomain>>() {}),
@@ -131,7 +133,7 @@ public class CodeArtifactService implements Resettable {
                         new TypeReference<Map<String, CodeArtifactPackageVersion>>() {}),
                 regionResolver, config,
                 "memory".equals(serviceConfigAccess.storageMode("codeartifact")),
-                Path.of(config.storage().persistentPath()).resolve(ASSET_STORAGE_DIR));
+                Path.of(config.storage().persistentPath()).resolve(ASSET_STORAGE_DIR), eventPublisher);
     }
 
     /** Package-private constructor for testing. */
@@ -140,11 +142,21 @@ public class CodeArtifactService implements Resettable {
                          AccountAwareStorageBackend<CodeArtifactPackageVersion> packageVersions,
                          RegionResolver regionResolver, EmulatorConfig config,
                          boolean inMemory, Path assetRoot) {
+        this(domains, repositories, packageVersions, regionResolver, config, inMemory, assetRoot, null);
+    }
+
+    /** Package-private constructor for testing; a null publisher emits no events. */
+    CodeArtifactService(AccountAwareStorageBackend<CodeArtifactDomain> domains,
+                         AccountAwareStorageBackend<CodeArtifactRepository> repositories,
+                         AccountAwareStorageBackend<CodeArtifactPackageVersion> packageVersions,
+                         RegionResolver regionResolver, EmulatorConfig config,
+                         boolean inMemory, Path assetRoot, CodeArtifactEventPublisher eventPublisher) {
         this.domains = domains;
         this.repositories = repositories;
         this.packageVersions = packageVersions;
         this.regionResolver = regionResolver;
         this.config = config;
+        this.eventPublisher = eventPublisher;
         this.inMemory = inMemory;
         this.assetRoot = assetRoot;
         if (!inMemory) {
@@ -554,6 +566,10 @@ public class CodeArtifactService implements Resettable {
         Map<String, CodeArtifactPackage> packages = new LinkedHashMap<>(readPackages(repository));
         packages.remove(packageKey(coordinate));
         savePackages(coordinate, repository, packages);
+        for (Version version : pkg.versions().values()) {
+            publishVersionChange(coordinate, pkg, version, "Deleted", "Deleted",
+                    0, version.assets().size(), false, true);
+        }
         return Map.of("deletedPackage", packageDescription(pkg, true));
     }
 
@@ -721,6 +737,22 @@ public class CodeArtifactService implements Resettable {
             return Map.of("successfulVersions", Map.of(), "failedVersions", failed);
         }
         savePackage(coordinate, repository, withVersions(pkg, versions));
+        for (String version : successful.keySet()) {
+            Version before = pkg.versions().get(version);
+            String status = switch (operation) {
+                case "delete" -> "Deleted";
+                case "dispose" -> "Disposed";
+                default -> request.targetStatus();
+            };
+            boolean statusChanged = !status.equals(before.status());
+            if ("status".equals(operation) && !statusChanged) {
+                continue;
+            }
+            int removed = "status".equals(operation) ? 0 : before.assets().size();
+            publishVersionChange(coordinate, pkg, before, status,
+                    "delete".equals(operation) ? "Deleted" : "Updated",
+                    0, removed, false, statusChanged);
+        }
         return Map.of("successfulVersions", successful, "failedVersions", failed);
     }
 
@@ -772,6 +804,14 @@ public class CodeArtifactService implements Resettable {
         }
         if (!successful.isEmpty()) {
             savePackage(target, repository, withVersions(pkg, versions));
+            for (String version : successful.keySet()) {
+                Version copied = versions.get(version);
+                Version previous = pkg.versions().get(version);
+                publishVersionChange(target, pkg, copied, copied.status(),
+                        previous == null ? "Created" : "Updated",
+                        copied.assets().size(), previous == null ? 0 : previous.assets().size(), true,
+                        previous == null || !copied.status().equals(previous.status()));
+            }
         }
         return Map.of("successfulVersions", successful, "failedVersions", failed);
     }
@@ -837,6 +877,21 @@ public class CodeArtifactService implements Resettable {
 
     private static Map<String, String> versionError(String code) {
         return Map.of("errorCode", code, "errorMessage", "Package version operation failed: " + code);
+    }
+
+    private void publishVersionChange(PackageCoordinate coordinate, CodeArtifactPackage pkg, Version version,
+                                      String state, String operationType, int assetsAdded, int assetsRemoved,
+                                      boolean metadataUpdated, boolean statusChanged) {
+        publishVersionChange(new PackageVersionChange(coordinate.region(), coordinate.domain(),
+                effectiveOwner(coordinate.owner()), coordinate.repository(), pkg.format(), pkg.namespace(),
+                pkg.name(), version.version(), state, version.revision(), operationType,
+                assetsAdded, assetsRemoved, 0, metadataUpdated, statusChanged));
+    }
+
+    private void publishVersionChange(PackageVersionChange change) {
+        if (eventPublisher != null) {
+            eventPublisher.publish(change);
+        }
     }
 
     private CodeArtifactRepository packageRepository(PackageCoordinate coordinate) {
@@ -1103,6 +1158,8 @@ public class CodeArtifactService implements Resettable {
         String key = packageVersionKey(region, domain, repository, format, namespace, packageName, version);
 
         CodeArtifactPackageVersion pv = packageVersions.getForAccount(owner, key).orElse(null);
+        boolean created = pv == null;
+        String statusBefore = pv == null ? null : pv.getStatus();
         if (pv != null && !"Unfinished".equals(pv.getStatus())) {
             throw conflict("Package version '" + version + "' of package '" + packageName + "' is already "
                     + "Published; no additional assets can be uploaded to it.", version, "package-version");
@@ -1149,6 +1206,12 @@ public class CodeArtifactService implements Resettable {
         }
 
         packageVersions.putForAccount(owner, key, pv);
+        boolean statusChanged = !pv.getStatus().equals(statusBefore);
+        if (previous == null || statusChanged) {
+            publishVersionChange(new PackageVersionChange(region, domain, owner, repository, format, namespace,
+                    packageName, version, pv.getStatus(), pv.getRevision(), created ? "Created" : "Updated",
+                    previous == null ? 1 : 0, 0, 0, created, statusChanged));
+        }
         return new PublishPackageVersionResult(pv, asset);
     }
 

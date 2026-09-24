@@ -11,7 +11,10 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 
 /**
@@ -34,6 +37,10 @@ public class ValkeyClusterFormation {
     private static final int READ_TIMEOUT_MS = 10_000;
     private static final long FORMATION_DEADLINE_MS = 60_000;
     private static final long RETRY_SLEEP_MS = 200;
+    private static final long RESHARD_DEADLINE_MS = 120_000;
+    private static final int SLOT_BATCH = 512;
+    private static final int MIGRATE_KEY_BATCH = 100;
+    private static final int MIGRATE_TIMEOUT_MS = 5_000;
 
     /**
      * One node to join into the cluster.
@@ -109,6 +116,302 @@ public class ValkeyClusterFormation {
         int end = (nodeGroup + 1) * TOTAL_SLOTS / numNodeGroups - 1;
         return new int[] {start, end};
     }
+
+    /**
+     * One node of a running cluster taking part in a reshard.
+     *
+     * @param endpointHost host Floci uses to reach the node
+     * @param endpointPort port Floci uses to reach the node
+     * @param networkIp    the node's Docker-network IP, dialled by its peers and by MIGRATE
+     * @param nodeGroupId  the shard the node belongs to
+     * @param primary      whether this node holds the shard's slots
+     * @param joining      a freshly started node that is not yet part of the cluster
+     * @param leaving      a node whose shard is being removed; it ends up owning no slots and is
+     *                     forgotten by every node that stays
+     */
+    public record ShardMember(String endpointHost, int endpointPort, String networkIp,
+                              String nodeGroupId, boolean primary, boolean joining, boolean leaving) {}
+
+    /**
+     * Reshards a running cluster online, the way {@code valkey-cli --cluster add-node},
+     * {@code reshard} and {@code del-node} do: joining nodes are introduced with MEET and their
+     * replicas attached, every slot whose owner changes is moved with the IMPORTING/MIGRATING
+     * handshake so its keys travel with it, and leaving nodes are forgotten once they own nothing.
+     *
+     * @param currentSlots the slot ranges each shard owns now, keyed by node group id
+     * @param desiredSlots the slot ranges each remaining shard must own afterwards
+     */
+    public void reshard(String groupId, List<ShardMember> members,
+                        Map<String, String> currentSlots, Map<String, String> desiredSlots) {
+        long deadline = System.currentTimeMillis() + RESHARD_DEADLINE_MS;
+        List<RespClient> clients = new ArrayList<>(members.size());
+        try {
+            for (ShardMember member : members) {
+                clients.add(new RespClient(member.endpointHost(), member.endpointPort()));
+            }
+            List<String> nodeIds = new ArrayList<>(members.size());
+            for (RespClient client : clients) {
+                nodeIds.add(client.callString("CLUSTER", "MYID"));
+            }
+
+            int seed = -1;
+            for (int i = 0; i < members.size(); i++) {
+                if (!members.get(i).joining()) {
+                    seed = i;
+                    break;
+                }
+            }
+            if (seed < 0) {
+                throw new IllegalArgumentException("Reshard of group " + groupId + " has no existing node");
+            }
+            for (int i = 0; i < members.size(); i++) {
+                if (members.get(i).joining()) {
+                    clients.get(seed).callString("CLUSTER", "MEET",
+                            members.get(i).networkIp(), String.valueOf(BACKEND_PORT));
+                }
+            }
+            awaitKnownNodes(groupId, clients, members.size(), deadline);
+
+            Map<String, Integer> primaryByShard = new LinkedHashMap<>();
+            for (int i = 0; i < members.size(); i++) {
+                if (members.get(i).primary()) {
+                    primaryByShard.put(members.get(i).nodeGroupId(), i);
+                }
+            }
+            for (int i = 0; i < members.size(); i++) {
+                ShardMember member = members.get(i);
+                if (member.joining() && !member.primary()) {
+                    Integer primary = primaryByShard.get(member.nodeGroupId());
+                    if (primary == null) {
+                        throw new IllegalArgumentException("No primary for node group " + member.nodeGroupId());
+                    }
+                    replicateWithRetry(groupId, clients.get(i), nodeIds.get(primary), deadline);
+                }
+            }
+
+            String[] from = slotOwners(currentSlots);
+            String[] to = slotOwners(desiredSlots);
+            Map<SlotMove, List<Integer>> moves = new LinkedHashMap<>();
+            for (int slot = 0; slot < TOTAL_SLOTS; slot++) {
+                if (to[slot] == null) {
+                    throw new IllegalArgumentException("Slot " + slot + " has no owner in the target layout");
+                }
+                if (!to[slot].equals(from[slot])) {
+                    moves.computeIfAbsent(new SlotMove(from[slot], to[slot]), key -> new ArrayList<>()).add(slot);
+                }
+            }
+
+            List<Integer> primaries = new ArrayList<>(primaryByShard.values());
+            for (Map.Entry<SlotMove, List<Integer>> move : moves.entrySet()) {
+                Integer target = primaryByShard.get(move.getKey().to());
+                if (target == null) {
+                    throw new IllegalArgumentException("No primary for node group " + move.getKey().to());
+                }
+                Integer source = move.getKey().from() == null ? null : primaryByShard.get(move.getKey().from());
+                migrateSlots(groupId, clients, nodeIds, primaries, source, target,
+                        members.get(target).networkIp(), move.getValue());
+            }
+
+            List<RespClient> remaining = new ArrayList<>();
+            for (int i = 0; i < members.size(); i++) {
+                if (!members.get(i).leaving()) {
+                    remaining.add(clients.get(i));
+                }
+            }
+            for (int i = 0; i < members.size(); i++) {
+                if (!members.get(i).leaving()) {
+                    continue;
+                }
+                for (RespClient client : remaining) {
+                    try {
+                        client.callString("CLUSTER", "FORGET", nodeIds.get(i));
+                    } catch (RespError e) {
+                        LOG.debugv("FORGET {0} in group {1}: {2}", nodeIds.get(i), groupId, e.getMessage());
+                    }
+                }
+            }
+
+            String[] desiredOwnerIds = new String[TOTAL_SLOTS];
+            for (int slot = 0; slot < TOTAL_SLOTS; slot++) {
+                desiredOwnerIds[slot] = nodeIds.get(primaryByShard.get(to[slot]));
+            }
+            awaitClusterOk(groupId, remaining, deadline);
+            awaitSlotOwnership(groupId, remaining, desiredOwnerIds, deadline);
+            LOG.infov("Valkey cluster for group {0} resharded: {1} slot move(s) across {2} shard(s)",
+                    groupId, String.valueOf(moves.values().stream().mapToInt(List::size).sum()),
+                    String.valueOf(desiredSlots.size()));
+        } catch (IOException e) {
+            throw new RuntimeException("Reshard of group " + groupId + " failed: " + e.getMessage(), e);
+        } finally {
+            clients.forEach(RespClient::closeQuietly);
+        }
+    }
+
+    /**
+     * Moves {@code slots} to {@code target}, a batch at a time with pipelined SETSLOT calls. A slot
+     * that holds keys has them carried across with MIGRATE while it is in the migrating state, so
+     * no key is lost and clients are redirected with ASK for the duration.
+     */
+    private static void migrateSlots(String groupId, List<RespClient> clients, List<String> nodeIds,
+                                     List<Integer> primaries, Integer source, int target,
+                                     String targetIp, List<Integer> slots) throws IOException {
+        RespClient targetClient = clients.get(target);
+        String targetId = nodeIds.get(target);
+        for (int start = 0; start < slots.size(); start += SLOT_BATCH) {
+            List<Integer> batch = slots.subList(start, Math.min(slots.size(), start + SLOT_BATCH));
+            if (source == null) {
+                expectOk(targetClient.pipeline(slotCommands(batch, "ADDSLOTS")));
+                continue;
+            }
+            RespClient sourceClient = clients.get(source);
+            String sourceId = nodeIds.get(source);
+            expectOk(targetClient.pipeline(slotCommands(batch, "SETSLOT", "IMPORTING", sourceId)));
+            expectOk(sourceClient.pipeline(slotCommands(batch, "SETSLOT", "MIGRATING", targetId)));
+            List<Object> counts = sourceClient.pipeline(slotCommands(batch, "COUNTKEYSINSLOT"));
+            expectOk(counts);
+            for (int i = 0; i < batch.size(); i++) {
+                if (counts.get(i) instanceof Long count && count > 0) {
+                    moveKeys(groupId, sourceClient, targetIp, batch.get(i));
+                }
+            }
+            expectOk(targetClient.pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId)));
+            for (Object reply : sourceClient.pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId))) {
+                // A primary that gossip has already stripped of its last slot demotes itself to a
+                // replica of the new owner and refuses SETSLOT; the slot has moved regardless.
+                if (reply instanceof RespError e && !e.getMessage().contains("SETSLOT only with")) {
+                    throw e;
+                }
+            }
+            for (int primary : primaries) {
+                if (primary == target || primary == source) {
+                    continue;
+                }
+                // Only speeds up convergence: a node that has not learned the target yet refuses,
+                // and gossip of the target's bumped epoch settles it regardless.
+                for (Object reply : clients.get(primary).pipeline(slotCommands(batch, "SETSLOT", "NODE", targetId))) {
+                    if (reply instanceof RespError e) {
+                        LOG.debugv("SETSLOT NODE broadcast in group {0}: {1}", groupId, e.getMessage());
+                    }
+                }
+            }
+        }
+    }
+
+    private static void moveKeys(String groupId, RespClient source, String targetIp, int slot) throws IOException {
+        while (true) {
+            Object reply = source.callBinary(List.of(bytes("CLUSTER"), bytes("GETKEYSINSLOT"),
+                    bytes(String.valueOf(slot)), bytes(String.valueOf(MIGRATE_KEY_BATCH))));
+            if (!(reply instanceof List<?> keys) || keys.isEmpty()) {
+                return;
+            }
+            List<byte[]> command = new ArrayList<>();
+            command.add(bytes("MIGRATE"));
+            command.add(bytes(targetIp));
+            command.add(bytes(String.valueOf(BACKEND_PORT)));
+            command.add(new byte[0]);
+            command.add(bytes("0"));
+            command.add(bytes(String.valueOf(MIGRATE_TIMEOUT_MS)));
+            command.add(bytes("KEYS"));
+            for (Object key : keys) {
+                command.add((byte[]) key);
+            }
+            source.callBinary(command);
+            LOG.debugv("Migrated {0} key(s) of slot {1} in group {2}",
+                    String.valueOf(keys.size()), String.valueOf(slot), groupId);
+        }
+    }
+
+    private static List<String[]> slotCommands(List<Integer> slots, String subcommand, String... suffix) {
+        List<String[]> commands = new ArrayList<>(slots.size());
+        for (int slot : slots) {
+            String[] command = new String[3 + suffix.length];
+            command[0] = "CLUSTER";
+            command[1] = subcommand;
+            command[2] = String.valueOf(slot);
+            System.arraycopy(suffix, 0, command, 3, suffix.length);
+            commands.add(command);
+        }
+        return commands;
+    }
+
+    private static void expectOk(List<Object> replies) throws RespError {
+        for (Object reply : replies) {
+            if (reply instanceof RespError e) {
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Expands a node-group-to-ranges map (each value like {@code 0-5460} or {@code 0-99,200-299})
+     * into the owning node group of every slot.
+     */
+    static String[] slotOwners(Map<String, String> slotsByNodeGroup) {
+        String[] owners = new String[TOTAL_SLOTS];
+        for (Map.Entry<String, String> entry : slotsByNodeGroup.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().isBlank()) {
+                continue;
+            }
+            for (String range : entry.getValue().split(",")) {
+                String trimmed = range.trim();
+                int dash = trimmed.indexOf('-');
+                int start = Integer.parseInt(dash < 0 ? trimmed : trimmed.substring(0, dash));
+                int end = dash < 0 ? start : Integer.parseInt(trimmed.substring(dash + 1));
+                for (int slot = start; slot <= end; slot++) {
+                    owners[slot] = entry.getKey();
+                }
+            }
+        }
+        return owners;
+    }
+
+    private static void awaitSlotOwnership(String groupId, List<RespClient> clients,
+                                           String[] desiredOwnerIds, long deadline) throws IOException {
+        while (true) {
+            boolean agreed = true;
+            for (RespClient client : clients) {
+                if (!Arrays.equals(slotOwnerIds(client.call("CLUSTER", "SLOTS")), desiredOwnerIds)) {
+                    agreed = false;
+                    break;
+                }
+            }
+            if (agreed) {
+                return;
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                throw new RuntimeException("Reshard of group " + groupId
+                        + " timed out waiting for every node to agree on slot ownership");
+            }
+            sleep(groupId);
+        }
+    }
+
+    /** The primary node id owning each slot, read from a CLUSTER SLOTS reply. */
+    static String[] slotOwnerIds(Object clusterSlotsReply) {
+        String[] owners = new String[TOTAL_SLOTS];
+        if (!(clusterSlotsReply instanceof List<?> ranges)) {
+            return owners;
+        }
+        for (Object range : ranges) {
+            if (!(range instanceof List<?> entry) || entry.size() < 3
+                    || !(entry.get(0) instanceof Long start) || !(entry.get(1) instanceof Long end)
+                    || !(entry.get(2) instanceof List<?> primary) || primary.size() < 3) {
+                continue;
+            }
+            String id = String.valueOf(primary.get(2));
+            for (long slot = start; slot <= end && slot < TOTAL_SLOTS; slot++) {
+                owners[(int) slot] = id;
+            }
+        }
+        return owners;
+    }
+
+    private static byte[] bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** Slots moving from one node group to another; {@code from} is null for an unassigned slot. */
+    private record SlotMove(String from, String to) {}
 
     private static int primaryIndex(List<Node> nodes, int nodeGroup) {
         for (int i = 0; i < nodes.size(); i++) {
@@ -219,21 +522,57 @@ public class ValkeyClusterFormation {
         }
 
         Object call(String... args) throws IOException {
-            StringBuilder header = new StringBuilder();
-            header.append('*').append(args.length).append("\r\n");
-            out.write(header.toString().getBytes(StandardCharsets.UTF_8));
+            writeCommand(toBytes(args));
+            out.flush();
+            return readReply(false);
+        }
+
+        /** As {@link #call}, with byte-exact arguments and bulk replies returned as {@code byte[]}. */
+        Object callBinary(List<byte[]> args) throws IOException {
+            writeCommand(args);
+            out.flush();
+            return readReply(true);
+        }
+
+        /**
+         * Sends every command before reading any reply. An error reply is returned in place as a
+         * {@link RespError} rather than thrown, so the remaining replies are still consumed.
+         */
+        List<Object> pipeline(List<String[]> commands) throws IOException {
+            for (String[] command : commands) {
+                writeCommand(toBytes(command));
+            }
+            out.flush();
+            List<Object> replies = new ArrayList<>(commands.size());
+            for (int i = 0; i < commands.size(); i++) {
+                try {
+                    replies.add(readReply(false));
+                } catch (RespError e) {
+                    replies.add(e);
+                }
+            }
+            return replies;
+        }
+
+        private static List<byte[]> toBytes(String[] args) {
+            List<byte[]> encoded = new ArrayList<>(args.length);
             for (String arg : args) {
-                byte[] bytes = arg.getBytes(StandardCharsets.UTF_8);
-                out.write(("$" + bytes.length + "\r\n").getBytes(StandardCharsets.UTF_8));
-                out.write(bytes);
+                encoded.add(arg.getBytes(StandardCharsets.UTF_8));
+            }
+            return encoded;
+        }
+
+        private void writeCommand(List<byte[]> args) throws IOException {
+            out.write(("*" + args.size() + "\r\n").getBytes(StandardCharsets.UTF_8));
+            for (byte[] arg : args) {
+                out.write(("$" + arg.length + "\r\n").getBytes(StandardCharsets.UTF_8));
+                out.write(arg);
                 out.write('\r');
                 out.write('\n');
             }
-            out.flush();
-            return readReply();
         }
 
-        private Object readReply() throws IOException {
+        private Object readReply(boolean binary) throws IOException {
             int type = in.read();
             if (type == -1) {
                 throw new IOException("Connection closed while awaiting reply");
@@ -243,13 +582,13 @@ public class ValkeyClusterFormation {
                 case '+' -> line;
                 case '-' -> throw new RespError(line);
                 case ':' -> Long.parseLong(line);
-                case '$' -> readBulk(Integer.parseInt(line));
-                case '*' -> readArray(Integer.parseInt(line));
+                case '$' -> readBulk(Integer.parseInt(line), binary);
+                case '*' -> readArray(Integer.parseInt(line), binary);
                 default -> throw new IOException("Unexpected RESP type: " + (char) type);
             };
         }
 
-        private String readBulk(int length) throws IOException {
+        private Object readBulk(int length, boolean binary) throws IOException {
             if (length < 0) {
                 return null;
             }
@@ -258,16 +597,16 @@ public class ValkeyClusterFormation {
                 throw new IOException("Truncated bulk reply");
             }
             expectCrLf();
-            return new String(data, StandardCharsets.UTF_8);
+            return binary ? data : new String(data, StandardCharsets.UTF_8);
         }
 
-        private List<Object> readArray(int count) throws IOException {
+        private List<Object> readArray(int count, boolean binary) throws IOException {
             if (count < 0) {
                 return null;
             }
             List<Object> items = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
-                items.add(readReply());
+                items.add(readReply(binary));
             }
             return items;
         }

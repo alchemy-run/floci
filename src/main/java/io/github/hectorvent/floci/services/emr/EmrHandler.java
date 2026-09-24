@@ -7,9 +7,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsJson11Controller;
+import io.github.hectorvent.floci.services.emr.model.EmrBootstrapAction;
 import io.github.hectorvent.floci.services.emr.model.EmrCluster;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceFleet;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceGroup;
+import io.github.hectorvent.floci.services.emr.model.EmrManagedScalingPolicy;
 import io.github.hectorvent.floci.services.emr.model.EmrStep;
 import io.github.hectorvent.floci.services.emr.model.SecurityConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -68,6 +70,21 @@ public class EmrHandler {
                 case "AddInstanceFleet" -> handleAddInstanceFleet(request);
                 case "ListInstanceFleets" -> handleListInstanceFleets(request);
                 case "ListInstances" -> handleListInstances(request);
+                case "ModifyInstanceGroups" -> handleModifyInstanceGroups(request);
+                case "ModifyInstanceFleet" -> handleModifyInstanceFleet(request);
+                case "ListBootstrapActions" -> handleListBootstrapActions(request);
+                case "PutAutoTerminationPolicy" -> handlePutAutoTerminationPolicy(request);
+                case "GetAutoTerminationPolicy" -> handleGetAutoTerminationPolicy(request);
+                case "RemoveAutoTerminationPolicy" -> {
+                    service.removeAutoTerminationPolicy(text(request, "ClusterId"));
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "PutManagedScalingPolicy" -> handlePutManagedScalingPolicy(request);
+                case "GetManagedScalingPolicy" -> handleGetManagedScalingPolicy(request);
+                case "RemoveManagedScalingPolicy" -> {
+                    service.removeManagedScalingPolicy(text(request, "ClusterId"));
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
                 case "CreateSecurityConfiguration" -> handleCreateSecurityConfiguration(request);
                 case "DescribeSecurityConfiguration" -> handleDescribeSecurityConfiguration(request);
                 case "DeleteSecurityConfiguration" -> handleDeleteSecurityConfiguration(request);
@@ -134,6 +151,17 @@ public class EmrHandler {
         cluster.setInstanceGroups(parseInstanceGroups(instances.path("InstanceGroups")));
         cluster.setInstanceFleets(parseInstanceFleets(instances.path("InstanceFleets")));
         cluster.setSteps(parseSteps(request.path("Steps")));
+        cluster.setBootstrapActions(parseBootstrapActions(request.path("BootstrapActions")));
+        JsonNode autoTermination = request.path("AutoTerminationPolicy");
+        if (autoTermination.isObject()) {
+            Long idleTimeout = idleTimeout(autoTermination);
+            cluster.setAutoTerminationIdleTimeout(idleTimeout != null
+                    ? idleTimeout : EmrService.DEFAULT_IDLE_TIMEOUT_SECONDS);
+        }
+        JsonNode managedScaling = request.path("ManagedScalingPolicy");
+        if (managedScaling.isObject()) {
+            cluster.setManagedScalingPolicy(parseManagedScalingPolicy(managedScaling));
+        }
 
         EmrCluster created = service.runJobFlow(cluster, region);
         ObjectNode response = objectMapper.createObjectNode();
@@ -288,6 +316,100 @@ public class EmrHandler {
         for (EmrInstanceGroup group : cluster.getInstanceGroups()) {
             for (int i = 0; i < Math.max(1, group.getRunningInstanceCount()); i++) {
                 arr.add(syntheticInstanceNode(cluster, group, n++));
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleModifyInstanceGroups(JsonNode request) {
+        List<EmrService.InstanceGroupModification> modifications = new ArrayList<>();
+        JsonNode groups = request.path("InstanceGroups");
+        if (groups.isArray()) {
+            for (JsonNode g : groups) {
+                JsonNode count = g.path("InstanceCount");
+                modifications.add(new EmrService.InstanceGroupModification(
+                        g.path("InstanceGroupId").asText(null),
+                        count.isNumber() ? Integer.valueOf(count.asInt()) : null));
+            }
+        }
+        service.modifyInstanceGroups(text(request, "ClusterId"), modifications);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleModifyInstanceFleet(JsonNode request) {
+        JsonNode fleet = request.path("InstanceFleet");
+        JsonNode onDemand = fleet.path("TargetOnDemandCapacity");
+        JsonNode spot = fleet.path("TargetSpotCapacity");
+        service.modifyInstanceFleet(text(request, "ClusterId"), fleet.path("InstanceFleetId").asText(null),
+                onDemand.isNumber() ? Integer.valueOf(onDemand.asInt()) : null,
+                spot.isNumber() ? Integer.valueOf(spot.asInt()) : null);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleListBootstrapActions(JsonNode request) {
+        List<EmrBootstrapAction> actions = service.listBootstrapActions(text(request, "ClusterId"));
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode arr = response.putArray("BootstrapActions");
+        for (EmrBootstrapAction action : actions) {
+            ObjectNode node = objectMapper.createObjectNode();
+            if (action.getName() != null) {
+                node.put("Name", action.getName());
+            }
+            if (action.getScriptPath() != null) {
+                node.put("ScriptPath", action.getScriptPath());
+            }
+            ArrayNode args = node.putArray("Args");
+            action.getArgs().forEach(args::add);
+            arr.add(node);
+        }
+        return Response.ok(response).build();
+    }
+
+    // ──────────────────────────── Auto-termination / managed scaling ────────────────────────────
+
+    private Response handlePutAutoTerminationPolicy(JsonNode request) {
+        JsonNode policy = request.path("AutoTerminationPolicy");
+        service.putAutoTerminationPolicy(text(request, "ClusterId"),
+                policy.isObject() ? idleTimeout(policy) : null);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetAutoTerminationPolicy(JsonNode request) {
+        Long idleTimeout = service.getAutoTerminationIdleTimeout(text(request, "ClusterId"));
+        ObjectNode response = objectMapper.createObjectNode();
+        if (idleTimeout != null) {
+            response.putObject("AutoTerminationPolicy").put("IdleTimeout", idleTimeout.longValue());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handlePutManagedScalingPolicy(JsonNode request) {
+        JsonNode policy = request.path("ManagedScalingPolicy");
+        service.putManagedScalingPolicy(text(request, "ClusterId"),
+                policy.isObject() ? parseManagedScalingPolicy(policy) : null);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetManagedScalingPolicy(JsonNode request) {
+        EmrManagedScalingPolicy policy = service.getManagedScalingPolicy(text(request, "ClusterId"));
+        ObjectNode response = objectMapper.createObjectNode();
+        if (policy != null) {
+            ObjectNode node = response.putObject("ManagedScalingPolicy");
+            ObjectNode limits = node.putObject("ComputeLimits");
+            limits.put("UnitType", policy.getUnitType());
+            limits.put("MinimumCapacityUnits", policy.getMinimumCapacityUnits());
+            limits.put("MaximumCapacityUnits", policy.getMaximumCapacityUnits());
+            if (policy.getMaximumOnDemandCapacityUnits() != null) {
+                limits.put("MaximumOnDemandCapacityUnits", policy.getMaximumOnDemandCapacityUnits());
+            }
+            if (policy.getMaximumCoreCapacityUnits() != null) {
+                limits.put("MaximumCoreCapacityUnits", policy.getMaximumCoreCapacityUnits());
+            }
+            if (policy.getUtilizationPerformanceIndex() != null) {
+                node.put("UtilizationPerformanceIndex", policy.getUtilizationPerformanceIndex());
+            }
+            if (policy.getScalingStrategy() != null) {
+                node.put("ScalingStrategy", policy.getScalingStrategy());
             }
         }
         return Response.ok(response).build();
@@ -540,6 +662,45 @@ public class EmrHandler {
             steps.add(step);
         }
         return steps;
+    }
+
+    private List<EmrBootstrapAction> parseBootstrapActions(JsonNode actionsNode) {
+        List<EmrBootstrapAction> actions = new ArrayList<>();
+        if (!actionsNode.isArray()) {
+            return actions;
+        }
+        for (JsonNode a : actionsNode) {
+            EmrBootstrapAction action = new EmrBootstrapAction();
+            action.setName(a.path("Name").asText(null));
+            JsonNode script = a.path("ScriptBootstrapAction");
+            action.setScriptPath(script.path("Path").asText(null));
+            action.setArgs(stringList(script.path("Args")));
+            actions.add(action);
+        }
+        return actions;
+    }
+
+    private Long idleTimeout(JsonNode policy) {
+        JsonNode value = policy.path("IdleTimeout");
+        return value.isNumber() ? Long.valueOf(value.asLong()) : null;
+    }
+
+    private EmrManagedScalingPolicy parseManagedScalingPolicy(JsonNode node) {
+        EmrManagedScalingPolicy policy = new EmrManagedScalingPolicy();
+        JsonNode limits = node.path("ComputeLimits");
+        policy.setUnitType(limits.path("UnitType").asText(null));
+        policy.setMinimumCapacityUnits(optionalInt(limits, "MinimumCapacityUnits"));
+        policy.setMaximumCapacityUnits(optionalInt(limits, "MaximumCapacityUnits"));
+        policy.setMaximumOnDemandCapacityUnits(optionalInt(limits, "MaximumOnDemandCapacityUnits"));
+        policy.setMaximumCoreCapacityUnits(optionalInt(limits, "MaximumCoreCapacityUnits"));
+        policy.setUtilizationPerformanceIndex(optionalInt(node, "UtilizationPerformanceIndex"));
+        policy.setScalingStrategy(node.path("ScalingStrategy").asText(null));
+        return policy;
+    }
+
+    private Integer optionalInt(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        return value.isNumber() ? Integer.valueOf(value.asInt()) : null;
     }
 
     private List<EmrInstanceGroup> parseInstanceGroups(JsonNode groupsNode) {

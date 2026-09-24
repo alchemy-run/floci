@@ -252,6 +252,18 @@ public class BedrockAgentCoreToolsService {
                         "Browser profile not found: " + profileId, 404));
     }
 
+    /** Records that a browser session's state was saved into the profile (SaveBrowserSessionProfile). */
+    public ObjectNode recordBrowserProfileSave(String profileId, String browserId, String sessionId,
+                                               Instant savedAt, String region) {
+        ObjectNode profile = getBrowserProfile(profileId, region);
+        profile.put("lastSavedAt", savedAt.toString());
+        profile.put("lastSavedBrowserId", browserId);
+        profile.put("lastSavedBrowserSessionId", sessionId);
+        profile.put("lastUpdatedAt", savedAt.toString());
+        storage.put(key("browser-profile", region, profileId), profile);
+        return profile.deepCopy();
+    }
+
     public PaginatedResult<ObjectNode> listBrowserProfiles(Integer maxResults, String nextToken,
                                                             String name, String region) {
         if (name != null && !name.isBlank() && !TOOL_NAME.matcher(name).matches()) {

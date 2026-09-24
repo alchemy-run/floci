@@ -468,7 +468,12 @@ def test_thing_types_groups_and_jobs(iot_client, iot_jobs_data_client, unique_na
     iot_client.delete_thing_group(thingGroupName=group_name)
     iot_client.delete_thing(thingName=thing_name)
     iot_client.deprecate_thing_type(thingTypeName=thing_type)
-    iot_client.delete_thing_type(thingTypeName=thing_type)
+    # A deprecated thing type can only be deleted five minutes after its deprecation.
+    try:
+        iot_client.delete_thing_type(thingTypeName=thing_type)
+        raise AssertionError("expected DeleteThingType inside the deprecation window to fail")
+    except ClientError as exc:
+        assert exc.response["Error"]["Code"] == "InvalidRequestException"
 
 
 def test_mqtt_connect_publish_subscribe(unique_name):

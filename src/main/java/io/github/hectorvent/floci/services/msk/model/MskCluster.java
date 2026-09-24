@@ -105,6 +105,15 @@ public class MskCluster {
     @JsonProperty("volumeId")
     private String volumeId;
 
+    // The broker hostname clients reach the SASL/IAM listener (port 9098) under, for a cluster
+    // with IAM client authentication; the gateway routes a TLS connection to the cluster by it.
+    @JsonProperty("iamBrokerHost")
+    private String iamBrokerHost;
+
+    // host:port of the broker's own listener behind the SASL/IAM gateway.
+    @JsonProperty("iamBackendAddress")
+    private String iamBackendAddress;
+
     public MskCluster() {}
 
     public MskCluster(String clusterArn, String clusterName, String kafkaVersion) {
@@ -189,4 +198,10 @@ public class MskCluster {
 
     public String getVolumeId() { return volumeId; }
     public void setVolumeId(String volumeId) { this.volumeId = volumeId; }
+
+    public String getIamBrokerHost() { return iamBrokerHost; }
+    public void setIamBrokerHost(String iamBrokerHost) { this.iamBrokerHost = iamBrokerHost; }
+
+    public String getIamBackendAddress() { return iamBackendAddress; }
+    public void setIamBackendAddress(String iamBackendAddress) { this.iamBackendAddress = iamBackendAddress; }
 }

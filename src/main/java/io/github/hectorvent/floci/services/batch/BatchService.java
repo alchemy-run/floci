@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -46,10 +47,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class BatchService {
+
+    private enum Placement { READY, WAIT, STOP }
 
     private static final Logger LOG = Logger.getLogger(BatchService.class);
     private static final int DESCRIBE_JOBS_LIMIT = 100;
@@ -67,6 +71,12 @@ public class BatchService {
             "JOB_NAME", "JOB_DEFINITION", "BEFORE_CREATED_AT", "AFTER_CREATED_AT", "SHARE_IDENTIFIER");
     private static final Set<String> TERMINAL_JOB_STATUSES = Set.of(
             BatchStatus.SUCCEEDED.name(), BatchStatus.FAILED.name());
+    // Bounds how many job containers run at once; further jobs wait in RUNNABLE like jobs
+    // waiting for compute capacity on AWS.
+    private static final int MAX_CONCURRENT_CONTAINERS = 16;
+    private static final long PLACEMENT_POLL_MILLIS = 1000;
+
+    private final Semaphore containerSlots = new Semaphore(MAX_CONCURRENT_CONTAINERS);
 
     private final StorageBackend<String, BatchJobDefinition> jobDefinitionStore;
     private final StorageBackend<String, BatchJobQueue> jobQueueStore;
@@ -981,23 +991,31 @@ public class BatchService {
                 if (!transition(accountId, jobId, BatchStatus.RUNNABLE, null, false)) {
                     return;
                 }
-                sleepQuietly();
-                if (!transition(accountId, jobId, BatchStatus.STARTING, null, false)) {
+                int slots = awaitPlacement(accountId, jobId, 1);
+                if (slots < 0) {
                     return;
                 }
-                sleepQuietly();
-                if (!transition(accountId, jobId, BatchStatus.RUNNING, null, true)) {
-                    return;
-                }
-                BatchJob attemptJob = getJobForAccount(accountId, jobId).orElse(null);
-                if (attemptJob == null || isTerminal(attemptJob)) {
-                    return;
-                }
-                BatchRunResult result = shouldRunDocker()
-                        ? dockerRunner.run(attemptJob, attemptNumber)
-                        : immediateSuccess(attemptJob);
-                if (finishAttempt(accountId, jobId, result, attemptNumber >= maxAttempts)) {
-                    return;
+                try {
+                    sleepQuietly();
+                    if (!transition(accountId, jobId, BatchStatus.STARTING, null, false)) {
+                        return;
+                    }
+                    sleepQuietly();
+                    if (!transition(accountId, jobId, BatchStatus.RUNNING, null, true)) {
+                        return;
+                    }
+                    BatchJob attemptJob = getJobForAccount(accountId, jobId).orElse(null);
+                    if (attemptJob == null || isTerminal(attemptJob)) {
+                        return;
+                    }
+                    BatchRunResult result = shouldRunDocker()
+                            ? dockerRunner.run(attemptJob, attemptNumber)
+                            : immediateSuccess(attemptJob);
+                    if (finishAttempt(accountId, jobId, result, attemptNumber >= maxAttempts)) {
+                        return;
+                    }
+                } finally {
+                    containerSlots.release(slots);
                 }
             }
         } catch (Exception e) {
@@ -1098,21 +1116,29 @@ public class BatchService {
                 if (!transition(accountId, jobId, BatchStatus.RUNNABLE, null, false)) {
                     return;
                 }
-                sleepQuietly();
-                if (!transition(accountId, jobId, BatchStatus.STARTING, null, false)) {
+                int slots = awaitPlacement(accountId, jobId, job.getNodeExecutions().size());
+                if (slots < 0) {
                     return;
                 }
-                sleepQuietly();
-                if (!transition(accountId, jobId, BatchStatus.RUNNING, null, true)) {
-                    return;
-                }
-                BatchJob attemptJob = getJobForAccount(accountId, jobId).orElse(null);
-                if (attemptJob == null || isTerminal(attemptJob)) {
-                    return;
-                }
-                List<BatchRunResult> nodeResults = runNodes(attemptJob, attemptNumber);
-                if (finishMultiNodeAttempt(accountId, jobId, nodeResults, attemptNumber >= maxAttempts)) {
-                    return;
+                try {
+                    sleepQuietly();
+                    if (!transition(accountId, jobId, BatchStatus.STARTING, null, false)) {
+                        return;
+                    }
+                    sleepQuietly();
+                    if (!transition(accountId, jobId, BatchStatus.RUNNING, null, true)) {
+                        return;
+                    }
+                    BatchJob attemptJob = getJobForAccount(accountId, jobId).orElse(null);
+                    if (attemptJob == null || isTerminal(attemptJob)) {
+                        return;
+                    }
+                    List<BatchRunResult> nodeResults = runNodes(attemptJob, attemptNumber);
+                    if (finishMultiNodeAttempt(accountId, jobId, nodeResults, attemptNumber >= maxAttempts)) {
+                        return;
+                    }
+                } finally {
+                    containerSlots.release(slots);
                 }
             }
         } catch (Exception e) {
@@ -1253,6 +1279,64 @@ public class BatchService {
 
     private boolean isTerminalStatus(String status) {
         return TERMINAL_JOB_STATUSES.contains(status);
+    }
+
+    /**
+     * Holds a RUNNABLE job until its queue can place it: the queue is ENABLED and one of its
+     * compute environments is a MANAGED, ENABLED, VALID environment, and a container slot is free.
+     * An UNMANAGED environment has no container instances in Floci, so its jobs stay RUNNABLE as
+     * they do on AWS until capacity is registered. Returns the container slots acquired, or -1
+     * when the job no longer needs to run.
+     */
+    private int awaitPlacement(String accountId, String jobId, int requestedSlots) {
+        if (!shouldRunDocker()) {
+            return 0;
+        }
+        int slots = Math.min(Math.max(1, requestedSlots), MAX_CONCURRENT_CONTAINERS);
+        while (!Thread.currentThread().isInterrupted()) {
+            Placement placement = placement(accountId, jobId);
+            if (placement == Placement.STOP) {
+                return -1;
+            }
+            if (placement == Placement.READY && containerSlots.tryAcquire(slots)) {
+                return slots;
+            }
+            try {
+                Thread.sleep(PLACEMENT_POLL_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        return -1;
+    }
+
+    private Placement placement(String accountId, String jobId) {
+        return RequestScopes.callAs(accountId, () -> {
+            synchronized (this) {
+                BatchJob job = getJobForAccount(accountId, jobId).orElse(null);
+                if (job == null || isTerminal(job)) {
+                    return Placement.STOP;
+                }
+                Optional<BatchJobQueue> queue = resolveJobQueueOptional(job.getJobQueue());
+                if (queue.isEmpty()) {
+                    failJob(accountId, jobId, "Job queue " + job.getJobQueueName() + " was deleted");
+                    return Placement.STOP;
+                }
+                if (!"ENABLED".equals(queue.get().getState())) {
+                    return Placement.WAIT;
+                }
+                for (BatchComputeEnvironmentOrder order : queue.get().getComputeEnvironmentOrder()) {
+                    Optional<BatchComputeEnvironment> env =
+                            resolveComputeEnvironmentOptional(order.getComputeEnvironment());
+                    if (env.isPresent() && "MANAGED".equals(env.get().getType())
+                            && "ENABLED".equals(env.get().getState())
+                            && "VALID".equals(env.get().getStatus())) {
+                        return Placement.READY;
+                    }
+                }
+                return Placement.WAIT;
+            }
+        });
     }
 
     private void sleepQuietly() {

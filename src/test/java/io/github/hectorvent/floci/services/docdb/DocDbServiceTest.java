@@ -7,7 +7,11 @@ import io.github.hectorvent.floci.core.common.BackupWindows;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.docdb.container.DocDbContainerHandle;
 import io.github.hectorvent.floci.services.docdb.container.DocDbContainerManager;
+import io.github.hectorvent.floci.services.docdb.proxy.DocDbProxyManager;
+import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
+import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.docdb.model.DocDbCluster;
 import io.github.hectorvent.floci.services.docdb.model.DocDbInstance;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,18 +25,23 @@ import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.rds.RdsService;
 import io.github.hectorvent.floci.services.rds.model.DbSubnetGroup;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -40,6 +49,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DocDbServiceTest {
+
+    private static final String HASH = DocDbEndpoints.hash("000000000000", "us-east-1");
 
     private DocDbService docDbService;
     private DocDbContainerManager containerManager;
@@ -80,11 +91,14 @@ class DocDbServiceTest {
         assertNotNull(cluster);
         assertEquals("mock-cluster", cluster.getDbClusterIdentifier());
         assertEquals("available", cluster.getStatus());
-        assertEquals("localhost", cluster.getEndpoint());
+        assertEquals("mock-cluster.cluster-" + HASH + ".us-east-1.docdb.localhost.floci.io", cluster.getEndpoint());
+        assertEquals("mock-cluster.cluster-ro-" + HASH + ".us-east-1.docdb.localhost.floci.io",
+                cluster.getReaderEndpoint());
         assertEquals(27017, cluster.getPort());
         assertTrue(cluster.getDbClusterArn().contains("mock-cluster"));
 
-        verify(containerManager, never()).start(anyString(), anyString(), anyString(), anyString());
+        verify(containerManager, never()).start(anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyInt());
     }
 
     @Test
@@ -107,7 +121,7 @@ class DocDbServiceTest {
         assertEquals("mock-instance", instance.getDbInstanceIdentifier());
         assertEquals("mock-cluster", instance.getDbClusterIdentifier());
         assertEquals("available", instance.getStatus());
-        assertEquals("localhost", instance.getEndpoint());
+        assertEquals("mock-instance." + HASH + ".us-east-1.docdb.localhost.floci.io", instance.getEndpoint());
         assertEquals(27017, instance.getPort());
     }
 
@@ -166,7 +180,8 @@ class DocDbServiceTest {
         when(config.hostname()).thenReturn(java.util.Optional.of("localhost"));
 
         DocDbContainerManager noDaemonContainerManager = Mockito.mock(DocDbContainerManager.class);
-        when(noDaemonContainerManager.tryStart(anyString(), anyString(), anyString(), anyString()))
+        when(noDaemonContainerManager.tryStart(anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyInt()))
                 .thenReturn(null);
         RegionResolver regionResolver = new RegionResolver("us-east-1", "000000000000");
         DocDbService noDaemonService = new DocDbService(config, regionResolver, noDaemonContainerManager, storageFactory,
@@ -176,7 +191,7 @@ class DocDbServiceTest {
                 "no-docker-cluster", null, "admin", "secret", false);
 
         assertEquals("available", created.getStatus());
-        assertEquals("localhost", created.getEndpoint());
+        assertEquals("no-docker-cluster.cluster-" + HASH + ".us-east-1.docdb.localhost", created.getEndpoint());
         assertEquals(27017, created.getPort());
 
         assertEquals("no-docker-cluster",
@@ -520,7 +535,7 @@ class DocDbServiceTest {
         e = refused(new DocDbClusterSettings(null, null, null, null, null, null, "02:00-02:30", "tue:02:15-tue:02:45", null));
         assertEquals("The backup window and maintenance window must not overlap.", e.getMessage());
         assertThrows(AwsException.class, () -> docDbService.getDbCluster("c1"));
-        verify(containerManager, never()).tryStart(any(), any(), any(), any());
+        verify(containerManager, never()).tryStart(any(), any(), any(), any(), any(), anyInt());
 
         // a window given alone is paired with a default clear of it
         docDbService.createDbCluster("alone", "5.0.0", "u", "pw", false,
@@ -582,5 +597,177 @@ class DocDbServiceTest {
         assertFalse(docDbService.getDbInstance("i2").isAutoMinorVersionUpgrade());
         assertTrue(docDbService.getDbInstance("i2").isCopyTagsToSnapshot());
         assertEquals("thu:10:00-thu:10:30", docDbService.getDbInstance("i2").getPreferredMaintenanceWindow());
+    }
+
+    private DocDbProxyManager proxyManager;
+    private SecretsManagerService secretsManagerService;
+
+    /** A service in container mode whose Docker, listeners and Secrets Manager are mocks. */
+    private DocDbService containerModeService(DocDbContainerManager manager) {
+        StorageFactory storageFactory = Mockito.mock(StorageFactory.class);
+        when(storageFactory.create(anyString(), anyString(), any()))
+                .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
+        EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
+        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        var docdbConfig = Mockito.mock(EmulatorConfig.DocDbServiceConfig.class);
+        when(config.services()).thenReturn(servicesConfig);
+        when(servicesConfig.docdb()).thenReturn(docdbConfig);
+        when(docdbConfig.mock()).thenReturn(false);
+        when(docdbConfig.defaultImage()).thenReturn("mongo:7.0");
+        proxyManager = Mockito.mock(DocDbProxyManager.class);
+        when(proxyManager.reserve(anyString(), any(), anyBoolean()))
+                .thenAnswer(inv -> inv.getArgument(1) != null ? inv.<Integer>getArgument(1) : 27017);
+        secretsManagerService = Mockito.mock(SecretsManagerService.class);
+        when(secretsManagerService.createSecret(anyString(), anyString(), any(), anyString(), any(), anyList(),
+                anyString(), anyString())).thenAnswer(inv -> {
+                    Secret secret = new Secret();
+                    secret.setArn("arn:aws:secretsmanager:us-east-1:000000000000:secret:"
+                            + inv.getArgument(0) + "-AbCdEf");
+                    return secret;
+                });
+        return new DocDbService(config, new RegionResolver("us-east-1", "000000000000"), manager, proxyManager,
+                storageFactory, rdsService, ec2Service, kmsService, secretsManagerService);
+    }
+
+    /** Containers that start, each reachable on its own loopback port from 40000. */
+    private static DocDbContainerManager runningContainers() {
+        DocDbContainerManager manager = Mockito.mock(DocDbContainerManager.class);
+        AtomicInteger nextPort = new AtomicInteger(40000);
+        when(manager.tryStart(anyString(), anyString(), any(), any(), anyString(), anyInt()))
+                .thenAnswer(inv -> new DocDbContainerHandle("cid-" + inv.getArgument(0), inv.getArgument(0),
+                        "127.0.0.1", nextPort.getAndIncrement()));
+        return manager;
+    }
+
+    @Test
+    void containerModeServesEveryClusterOnTheDocumentDbDefaultPortUnderItsOwnHostname() {
+        DocDbContainerManager manager = runningContainers();
+        DocDbService service = containerModeService(manager);
+
+        DocDbCluster first = service.createDbCluster("docs", null, "alchemy", "pw", false);
+        DocDbCluster second = service.createDbCluster("more-docs", null, "alchemy", "pw", false);
+
+        String endpoint = "docs.cluster-" + HASH + ".us-east-1.docdb.localhost.floci.io";
+        String reader = "docs.cluster-ro-" + HASH + ".us-east-1.docdb.localhost.floci.io";
+        assertEquals(endpoint, first.getEndpoint());
+        assertEquals(27017, first.getPort());
+        assertEquals(27017, second.getPort());
+        verify(proxyManager).reserve(first.getDbClusterArn(), null, true);
+        // the replica set advertises the endpoint clients are given, on the port they are given
+        verify(manager).tryStart("docs", "mongo:7.0", "alchemy", "pw", endpoint, 27017);
+        verify(proxyManager).attach(first.getDbClusterArn(), List.of(endpoint, reader), "127.0.0.1", 40000);
+        verify(proxyManager).attach(eq(second.getDbClusterArn()), anyList(), eq("127.0.0.1"), eq(40001));
+
+        DocDbInstance instance = service.createDbInstance("writer", "docs", "db.t3.medium", null, false);
+        String instanceEndpoint = "writer." + HASH + ".us-east-1.docdb.localhost.floci.io";
+        assertEquals(instanceEndpoint, instance.getEndpoint());
+        assertEquals(27017, instance.getPort());
+        verify(proxyManager).addHostname(first.getDbClusterArn(), instanceEndpoint);
+
+        service.deleteDbInstance("writer");
+        verify(proxyManager).removeHostname(first.getDbClusterArn(), instanceEndpoint);
+        service.deleteDbCluster("docs");
+        verify(proxyManager).release(first.getDbClusterArn());
+        verify(manager).stop(any());
+    }
+
+    @Test
+    void containerModePassesTheRequestedPortOnAndRefusesOneAwsWouldRefuse() {
+        DocDbContainerManager manager = runningContainers();
+        DocDbService service = containerModeService(manager);
+
+        DocDbCluster chosen = service.createDbCluster("chosen", null, "u", "pw", false,
+                DocDbClusterSettings.defaults(), Map.of(), 28000, false, null);
+        assertEquals(28000, chosen.getPort());
+        verify(manager).tryStart(eq("chosen"), anyString(), any(), any(), anyString(), eq(28000));
+
+        AwsException invalid = assertThrows(AwsException.class, () -> service.createDbCluster("low", null, "u",
+                "pw", false, DocDbClusterSettings.defaults(), Map.of(), 80, false, null));
+        assertEquals("InvalidParameterValue", invalid.getErrorCode());
+        verify(proxyManager, never()).reserve(anyString(), eq(80), anyBoolean());
+    }
+
+    @Test
+    void clusterWithTlsDisabledInItsParameterGroupIsServedWithoutTls() {
+        DocDbContainerManager manager = runningContainers();
+        DocDbService service = containerModeService(manager);
+        DbClusterParameterGroup group = new DbClusterParameterGroup("no-tls", "docdb5.0", "d");
+        group.getParameters().put("tls", "disabled");
+        when(rdsService.getDbClusterParameterGroup(eq("no-tls"), any())).thenReturn(group);
+
+        DocDbCluster cluster = service.createDbCluster("plain", "5.0.0", "u", "pw", false,
+                new DocDbClusterSettings(null, "no-tls", null, null, null, null, null, null, null), Map.of());
+
+        verify(proxyManager).reserve(cluster.getDbClusterArn(), null, false);
+    }
+
+    @Test
+    void manageMasterUserPasswordKeepsAGeneratedPasswordInAManagedSecret() {
+        DocDbContainerManager manager = runningContainers();
+        DocDbService service = containerModeService(manager);
+
+        DocDbCluster cluster = service.createDbCluster("docs", null, "alchemy", null, false,
+                DocDbClusterSettings.defaults(), Map.of(), null, true, null);
+
+        String secretName = "rds!" + cluster.getDbClusterResourceId().toLowerCase(Locale.ROOT);
+        String secretArn = "arn:aws:secretsmanager:us-east-1:000000000000:secret:" + secretName + "-AbCdEf";
+        assertEquals(secretArn, cluster.getMasterUserSecretArn());
+        assertEquals("active", cluster.getMasterUserSecretStatus());
+        assertNull(cluster.getMasterUserSecretKmsKeyId());
+
+        ArgumentCaptor<String> secretString = ArgumentCaptor.forClass(String.class);
+        verify(secretsManagerService).createSecret(eq(secretName), secretString.capture(), any(), anyString(),
+                any(), anyList(), eq("rds"), eq("us-east-1"));
+        ArgumentCaptor<String> password = ArgumentCaptor.forClass(String.class);
+        verify(manager).tryStart(eq("docs"), anyString(), eq("alchemy"), password.capture(), anyString(), anyInt());
+        assertTrue(password.getValue() != null && !password.getValue().isBlank());
+        assertEquals("{\"username\":\"alchemy\",\"password\":\"" + password.getValue() + "\"}",
+                secretString.getValue(), "the database's master user must be able to sign in with the secret");
+
+        service.deleteDbCluster("docs");
+        verify(secretsManagerService).deleteSecret(secretArn, null, true, "us-east-1");
+    }
+
+    @Test
+    void manageMasterUserPasswordRefusesAPasswordAndAKeyWithoutIt() {
+        DocDbService service = containerModeService(runningContainers());
+
+        AwsException both = assertThrows(AwsException.class, () -> service.createDbCluster("docs", null, "u",
+                "pw", false, DocDbClusterSettings.defaults(), Map.of(), null, true, null));
+        assertEquals("InvalidParameterCombination", both.getErrorCode());
+        AwsException keyOnly = assertThrows(AwsException.class, () -> service.createDbCluster("docs", null, "u",
+                "pw", false, DocDbClusterSettings.defaults(), Map.of(), null, false, "alias/k"));
+        assertEquals("InvalidParameterCombination", keyOnly.getErrorCode());
+        assertFalse(service.hasCluster("docs"));
+        verify(secretsManagerService, never()).createSecret(anyString(), anyString(), any(), anyString(), any(),
+                anyList(), anyString(), anyString());
+    }
+
+    @Test
+    void aFailedBackendStartLeavesNoSecretContainerOrPortBehind() {
+        DocDbContainerManager manager = runningContainers();
+        DocDbService service = containerModeService(manager);
+        Mockito.doThrow(new IllegalStateException("listener gone")).when(proxyManager)
+                .attach(anyString(), anyList(), anyString(), anyInt());
+
+        assertThrows(IllegalStateException.class, () -> service.createDbCluster("docs", null, "u", null, false,
+                DocDbClusterSettings.defaults(), Map.of(), null, true, null));
+
+        assertFalse(service.hasCluster("docs"));
+        verify(manager).stop(any());
+        verify(proxyManager).release(anyString());
+        verify(secretsManagerService).deleteSecret(anyString(), any(), eq(true), eq("us-east-1"));
+    }
+
+    @Test
+    void noDockerDaemonReleasesTheReservedPort() {
+        DocDbContainerManager manager = Mockito.mock(DocDbContainerManager.class);
+        DocDbService service = containerModeService(manager);
+
+        DocDbCluster cluster = service.createDbCluster("docs", null, "u", "pw", false);
+
+        assertEquals(27017, cluster.getPort());
+        verify(proxyManager).release(cluster.getDbClusterArn());
+        verify(proxyManager, never()).attach(anyString(), anyList(), anyString(), anyInt());
     }
 }

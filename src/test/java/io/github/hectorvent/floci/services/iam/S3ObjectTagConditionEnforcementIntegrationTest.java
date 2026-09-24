@@ -118,10 +118,15 @@ class S3ObjectTagConditionEnforcementIntegrationTest {
         // Two versions of one key with different tags. The current version carries the tag the
         // policy allows; the one under it does not.
         String denied = f.seedVersion("a/rolled", "env=b");
-        f.seedVersion("a/rolled", "env=a");
+        String allowed = f.seedVersion("a/rolled", "env=a");
 
+        // A read naming a versionId is s3:GetObjectVersion, so a GetObject grant alone does not reach it.
         f.policy(allow("s3:GetObject", f.objects(), EXISTING_A));
         assertEquals(200, f.get("a/rolled"), "the current version carries the allowed tag");
+        assertEquals(403, f.getVersion("a/rolled", allowed), "a GetObject grant does not cover GetObjectVersion");
+
+        f.policy(allow("\"s3:GetObject\",\"s3:GetObjectVersion\"", f.objects(), EXISTING_A));
+        assertEquals(200, f.getVersion("a/rolled", allowed), "the selected version carries the allowed tag");
         assertEquals(403, f.getVersion("a/rolled", denied),
                 "the older version carries a foreign tag, so its own tags decide");
     }

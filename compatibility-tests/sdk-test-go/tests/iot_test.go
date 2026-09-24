@@ -522,6 +522,15 @@ func TestIoT(t *testing.T) {
 		_, _ = svc.DeleteThingGroup(ctx, &iot.DeleteThingGroupInput{ThingGroupName: aws.String(groupName)})
 		_, _ = svc.DeprecateThingType(ctx, &iot.DeprecateThingTypeInput{ThingTypeName: aws.String(thingType)})
 		_, _ = svc.DeleteThingType(ctx, &iot.DeleteThingTypeInput{ThingTypeName: aws.String(thingType)})
+		_, _ = svc.DeprecateThingType(ctx, &iot.DeprecateThingTypeInput{ThingTypeName: aws.String(thingType), UndoDeprecate: true})
+		// A type left by an earlier run inside its deletion window is reactivated and reset instead.
+		_, _ = svc.UpdateThingType(ctx, &iot.UpdateThingTypeInput{
+			ThingTypeName: aws.String(thingType),
+			ThingTypeProperties: &iottypes.ThingTypeProperties{
+				ThingTypeDescription: aws.String("go type"),
+				SearchableAttributes:  []string{"model"},
+			},
+		})
 
 		jobsEndpoint, err := svc.DescribeEndpoint(ctx, &iot.DescribeEndpointInput{EndpointType: aws.String("iot:Jobs")})
 		require.NoError(t, err)
@@ -607,8 +616,10 @@ func TestIoT(t *testing.T) {
 		require.NoError(t, err)
 		_, err = svc.DeprecateThingType(ctx, &iot.DeprecateThingTypeInput{ThingTypeName: aws.String(thingType)})
 		require.NoError(t, err)
+		// A deprecated thing type can only be deleted five minutes after its deprecation.
 		_, err = svc.DeleteThingType(ctx, &iot.DeleteThingTypeInput{ThingTypeName: aws.String(thingType)})
-		require.NoError(t, err)
+		var deleteTooSoon *iottypes.InvalidRequestException
+		require.ErrorAs(t, err, &deleteTooSoon)
 	})
 
 	t.Run("MqttConnectPublishSubscribe", func(t *testing.T) {

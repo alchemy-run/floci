@@ -93,7 +93,7 @@ class RedshiftQueryHandlerTest {
         Cluster cluster = new Cluster();
         cluster.setClusterIdentifier("test-cluster");
         cluster.setClusterStatus("available");
-        when(service.createCluster(any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
 
         Response response = handler.handle("CreateCluster", params);
 
@@ -119,8 +119,8 @@ class RedshiftQueryHandlerTest {
         cluster.setClusterStatus("available");
         cluster.setMasterPasswordSecretArn("arn:aws:secretsmanager:us-east-1:acc:secret:redshift-managed");
         cluster.setMasterPasswordSecretKmsKeyId("arn:aws:kms:us-east-1:acc:key/key-1");
-        when(service.createClusterWithManagedMasterPassword(any(), any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(cluster);
+        when(service.createClusterWithManagedMasterPassword(any(), any(), any(), any(), any(), any(), any(), any(),
+                any())).thenReturn(cluster);
 
         Response response = handler.handle("CreateCluster", params,
                 "AWS4-HMAC-SHA256 Credential=test/20260918/us-east-1/redshift/aws4_request");
@@ -132,7 +132,7 @@ class RedshiftQueryHandlerTest {
         assertFalse(xml.contains("<MasterUserSecret>"));
         verify(service).createClusterWithManagedMasterPassword(eq("managed-cluster"), eq("dc2.large"),
                 eq("admin"), isNull(), eq(List.of()), eq(List.of()),
-                eq("arn:aws:kms:us-east-1:acc:key/key-1"), eq("us-east-1"));
+                eq("arn:aws:kms:us-east-1:acc:key/key-1"), eq("us-east-1"), any());
     }
 
     @Test
@@ -148,13 +148,83 @@ class RedshiftQueryHandlerTest {
         Cluster cluster = new Cluster();
         cluster.setClusterIdentifier("test-cluster");
         cluster.setClusterStatus("available");
-        when(service.createCluster(any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
 
         handler.handle("CreateCluster", params);
 
         verify(service).createCluster(eq("test-cluster"), eq("dc2.large"), eq("admin"), eq("password123"),
                 isNull(), eq(List.of()), eq(List.of("arn:aws:iam::000000000000:role/first",
-                        "arn:aws:iam::000000000000:role/second")));
+                        "arn:aws:iam::000000000000:role/second")), any());
+    }
+
+    @Test
+    void createClusterPassesDatabaseNetworkAndEncryptionSettingsAndReportsThem() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "warehouse");
+        params.putSingle("NodeType", "ra3.large");
+        params.putSingle("ClusterType", "single-node");
+        params.putSingle("MasterUsername", "admin");
+        params.putSingle("MasterUserPassword", "Password123");
+        params.putSingle("DBName", "analytics");
+        params.putSingle("PubliclyAccessible", "false");
+        params.putSingle("Encrypted", "true");
+
+        Cluster cluster = availableCluster("warehouse");
+        cluster.setDbName("analytics");
+        cluster.setEncrypted(true);
+        cluster.setEndpoint(new Endpoint("warehouse.0123456789ab.us-east-1.redshift.localhost.floci.io", 5439));
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+
+        String xml = (String) handler.handle("CreateCluster", params).getEntity();
+
+        ArgumentCaptor<RedshiftService.ClusterOptions> options =
+                ArgumentCaptor.forClass(RedshiftService.ClusterOptions.class);
+        verify(service).createCluster(eq("warehouse"), eq("ra3.large"), eq("admin"), eq("Password123"),
+                isNull(), eq(List.of()), eq(List.of()), options.capture());
+        assertEquals(new RedshiftService.ClusterOptions("analytics", 1, false, true, null), options.getValue());
+        assertTrue(xml.contains("<DBName>analytics</DBName>"));
+        assertTrue(xml.contains("<NumberOfNodes>1</NumberOfNodes>"));
+        assertTrue(xml.contains("<PubliclyAccessible>false</PubliclyAccessible>"));
+        assertTrue(xml.contains("<Encrypted>true</Encrypted>"));
+        assertTrue(xml.contains("<Port>5439</Port>"));
+    }
+
+    @Test
+    void createClusterDefaultsToEncryptedPrivateSingleNode() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "defaults");
+        params.putSingle("MasterUsername", "admin");
+        params.putSingle("MasterUserPassword", "Password123");
+        params.putSingle("Port", "5440");
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(availableCluster("defaults"));
+
+        handler.handle("CreateCluster", params);
+
+        verify(service).createCluster(eq("defaults"), any(), eq("admin"), eq("Password123"), isNull(),
+                eq(List.of()), eq(List.of()), eq(new RedshiftService.ClusterOptions(null, 1, false, true, 5440)));
+    }
+
+    @Test
+    void createClusterRejectsMultiNodeWithFewerThanTwoNodes() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "multi");
+        params.putSingle("ClusterType", "multi-node");
+        params.putSingle("NumberOfNodes", "1");
+
+        AwsException error = assertThrows(AwsException.class, () -> handler.handle("CreateCluster", params));
+
+        assertEquals("InvalidParameterValue", error.getErrorCode());
+        verify(service, never()).createCluster(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void describeClustersReportsTheDefaultDatabaseForLegacyClusters() {
+        when(service.describeClusters(any())).thenReturn(List.of(availableCluster("legacy")));
+
+        String xml = (String) handler.handle("DescribeClusters", new MultivaluedHashMap<>()).getEntity();
+
+        assertTrue(xml.contains("<DBName>dev</DBName>"));
     }
     
     @Test
@@ -197,7 +267,7 @@ class RedshiftQueryHandlerTest {
         Cluster cluster = new Cluster();
         cluster.setClusterIdentifier("test-cluster");
         cluster.setClusterStatus("creating");
-        when(service.createCluster(any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
 
         Response response = handler.handle("CreateCluster", params);
         String xml = (String) response.getEntity();

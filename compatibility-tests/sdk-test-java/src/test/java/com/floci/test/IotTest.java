@@ -628,18 +628,33 @@ class IotTest {
             iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build());
         } catch (Exception ignored) {
         }
+        try {
+            // A type left by an earlier run inside its five-minute deletion window is reactivated instead.
+            iot.deprecateThingType(DeprecateThingTypeRequest.builder().thingTypeName(thingType).undoDeprecate(true).build());
+        } catch (Exception ignored) {
+        }
 
         var jobsEndpoint = iot.describeEndpoint(DescribeEndpointRequest.builder().endpointType("iot:Jobs").build());
         assertThat(jobsEndpoint.endpointAddress()).isNotBlank();
 
-        var createdType = iot.createThingType(CreateThingTypeRequest.builder()
-                .thingTypeName(thingType)
-                .thingTypeProperties(ThingTypeProperties.builder()
-                        .thingTypeDescription("java type")
-                        .searchableAttributes("model")
-                        .build())
-                .build());
-        assertThat(createdType.thingTypeName()).isEqualTo(thingType);
+        ThingTypeProperties initialTypeProperties = ThingTypeProperties.builder()
+                .thingTypeDescription("java type")
+                .searchableAttributes("model")
+                .build();
+        String createdTypeName;
+        try {
+            createdTypeName = iot.createThingType(CreateThingTypeRequest.builder()
+                    .thingTypeName(thingType)
+                    .thingTypeProperties(initialTypeProperties)
+                    .build()).thingTypeName();
+        } catch (ResourceAlreadyExistsException e) {
+            iot.updateThingType(UpdateThingTypeRequest.builder()
+                    .thingTypeName(thingType)
+                    .thingTypeProperties(initialTypeProperties)
+                    .build());
+            createdTypeName = thingType;
+        }
+        assertThat(createdTypeName).isEqualTo(thingType);
         var describedType = iot.describeThingType(DescribeThingTypeRequest.builder().thingTypeName(thingType).build());
         assertThat(describedType.thingTypeProperties().thingTypeDescription()).isEqualTo("java type");
         assertThat(iot.listThingTypes(ListThingTypesRequest.builder().build()).thingTypes())
@@ -707,7 +722,9 @@ class IotTest {
         iot.deleteThingGroup(DeleteThingGroupRequest.builder().thingGroupName(groupName).build());
         iot.deleteThing(DeleteThingRequest.builder().thingName(thingName).build());
         iot.deprecateThingType(DeprecateThingTypeRequest.builder().thingTypeName(thingType).build());
-        iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build());
+        // A deprecated thing type can only be deleted five minutes after its deprecation.
+        assertThatThrownBy(() -> iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build()))
+                .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test

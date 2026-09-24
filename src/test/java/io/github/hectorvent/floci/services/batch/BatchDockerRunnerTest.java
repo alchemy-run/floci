@@ -10,9 +10,11 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.services.batch.model.BatchJob;
 import io.github.hectorvent.floci.services.batch.model.BatchNodeExecution;
+import io.github.hectorvent.floci.services.batch.model.BatchResourceRequirement;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
@@ -251,6 +254,53 @@ class BatchDockerRunnerTest {
         assertEquals(137, secondResult.get().exitCode());
         verify(lifecycleManager).stopAndRemove("container-0", null);
         verify(lifecycleManager).stopAndRemove("container-1", null);
+    }
+
+    @Test
+    void runResolvesEcrImageAppliesLimitsAndUsesAwsLogStreamName() {
+        EmulatorConfig config = config(Optional.empty());
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.BatchServiceConfig batch = mock(EmulatorConfig.BatchServiceConfig.class);
+        when(config.services()).thenReturn(services);
+        when(services.batch()).thenReturn(batch);
+        when(batch.dockerNetwork()).thenReturn(Optional.empty());
+        when(config.port()).thenReturn(4566);
+
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        when(lifecycleManager.createAndStart(any())).thenReturn(
+                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of()));
+        DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning()).thenReturn(false);
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getExitCodeLong()).thenReturn(0L);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        ContainerLogStreamer logStreamer = mock(ContainerLogStreamer.class);
+        String ecrImage = "123456789012.dkr.ecr.us-east-1.amazonaws.com/jobs:abc";
+        String localImage = "123456789012.dkr.ecr.us-east-1.localhost:4566/jobs:abc";
+        BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager, logStreamer,
+                config, mock(ContainerDetector.class), image -> image.equals(ecrImage) ? localImage : image);
+
+        BatchJob job = job();
+        job.setAccountId("123456789012");
+        job.setContainerImage(ecrImage);
+        job.setResourceRequirements(List.of(
+                new BatchResourceRequirement("VCPU", "0.25"),
+                new BatchResourceRequirement("MEMORY", "512")));
+
+        BatchRunResult result = runner.run(job, 1);
+
+        assertEquals(0, result.exitCode());
+        assertEquals("my-def/default/job-1", result.logStreamName());
+        verify(containerBuilder).newContainer(localImage);
+        verify(builder).withCpuUnits(256);
+        verify(builder).withMemoryMb(512);
+        verify(builder).withEnv(argThat((List<String> env) -> env.contains("AWS_ACCESS_KEY_ID=123456789012")
+                && env.contains("AWS_SECRET_ACCESS_KEY=test")));
+        verify(logStreamer).attachForAccount(eq("123456789012"), eq("container-id"), eq("/aws/batch/job"),
+                eq("my-def/default/job-1"), eq("us-east-1"), anyString());
     }
 
     private BatchJob job() {

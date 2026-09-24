@@ -12,7 +12,7 @@ Supported MVP 1 behavior:
 - Certificate basics: `CreateKeysAndCertificate`, `CreateCertificateFromCsr`, `DescribeCertificate`, `ListCertificates`, `UpdateCertificate`, and `DeleteCertificate` with active/attached delete constraints. `CreateKeysAndCertificate` returns a real X.509 client certificate issued by Floci's local CA (`GET /_floci/ca.pem`) with a fresh RSA 2048 key pair, valid until 2049-12-31T23:59:59Z as on AWS, and `certificateId` is the SHA-256 of the certificate's DER encoding as on AWS. `DescribeCertificate` reports `validity` and `certificateMode`. `CreateCertificateFromCsr` signs the request's public key (RSA of at least 2048 bits, or EC on P-256, P-384 or P-521) with the same CA and, as on AWS, returns no private key.
 - Policy basics: `CreatePolicy`, `GetPolicy`, `ListPolicies`, `DeletePolicy`, policy version lifecycle, `AttachPolicy`, `DetachPolicy`, `ListAttachedPolicies`, and `ListTargetsForPolicy`.
 - Thing principal basics: `AttachThingPrincipal`, `DetachThingPrincipal`, `ListThingPrincipals`, and `ListPrincipalThings`.
-- Tags for things, certificates, policies, and topic rules.
+- Tags for things, certificates, policies, topic rules, thing types, and thing groups.
 - IoT Data retained messages: retained `Publish`, `GetRetainedMessage`, and paginated `ListRetainedMessages`.
 - Shadow null-delete and version-conflict behavior for HTTP and shared service paths.
 - Topic rule duplicate/delete/replace semantics, plus `republish`, `sqs`, `sns`, `s3`, `dynamoDBv2`, `kinesis`, `lambda`, `firehose`, and `cloudwatchLogs` action dispatch.
@@ -28,7 +28,7 @@ Status: implemented for the current SDK compatibility slice.
 
 Supported MVP 2 behavior:
 
-- Thing types: `CreateThingType`, `DescribeThingType`, `ListThingTypes`, `UpdateThingType`, `DeprecateThingType`, and `DeleteThingType` with typed `CreateThing` association and in-use delete protection.
+- Thing types: `CreateThingType`, `DescribeThingType`, `ListThingTypes`, `UpdateThingType`, `DeprecateThingType`, and `DeleteThingType` with typed `CreateThing` association and in-use delete protection. As on AWS, `DeleteThingType` accepts only a type that has been deprecated for at least five minutes, `DeprecateThingType` with `undoDeprecate` reactivates a deprecated type, and `CreateThing` rejects a deprecated type.
 - Static thing groups: `CreateThingGroup`, `DescribeThingGroup`, `ListThingGroups`, `UpdateThingGroup`, `DeleteThingGroup`, `AddThingToThingGroup`, `RemoveThingFromThingGroup`, `ListThingsInThingGroup`, and `ListThingGroupsForThing`.
 - Jobs control plane: `CreateJob`, `DescribeJob`, and `ListJobs`, including thing ARN targets and static thing group targets.
 - Jobs data plane: pending-job listing, `StartNextPendingJobExecution`, `DescribeJobExecution`, and `UpdateJobExecution` with version conflicts and terminal-state checks.

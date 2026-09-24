@@ -30,10 +30,12 @@ Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and G
 | CreateCrawler | Stores a crawler in `READY` state. |
 | GetCrawler | Returns a stored crawler. |
 | GetCrawlers | Lists stored crawlers. |
-| UpdateCrawler | Updates a crawler that is not `RUNNING`. Create/Update accept `Schedule` as a cron string; GetCrawler returns `{ScheduleExpression, State}`. |
-| DeleteCrawler | Deletes a crawler that is not `RUNNING`. |
-| StartCrawler | Sets crawler state to `RUNNING`. |
-| StopCrawler | Sets crawler state to `READY`. Idle crawlers raise `CrawlerNotRunningException` (400). |
+| UpdateCrawler | Updates a crawler that is not `RUNNING` or `STOPPING`. Create/Update accept `Schedule` as a cron string; GetCrawler returns `{ScheduleExpression, State}`. |
+| DeleteCrawler | Deletes a crawler that is not `RUNNING` or `STOPPING`. |
+| StartCrawler | Sets the crawler `RUNNING` and crawls its S3 targets in the background, then returns it to `READY` with `LastCrawl.Status` `SUCCEEDED`, `FAILED` (with `ErrorMessage`), or `CANCELLED`. |
+| StopCrawler | Moves a `RUNNING` crawler to `STOPPING`; the crawl stops and the crawler returns to `READY` with a `CANCELLED` last crawl. Idle crawlers raise `CrawlerNotRunningException` and stopping crawlers `CrawlerStoppingException` (400). |
+
+A crawl lists every object under each S3 target path (honoring `Exclusions` globs and `SampleSize`, and skipping `_` and `.` prefixed files), samples the first 1 MiB of each object with the built-in CSV (comma, tab, pipe, semicolon, Ctrl-A), JSON (JSON Lines or one document) and Parquet (schema read through floci-duck) classifiers, and groups objects the way Glue does: a single child folder becomes its own table, compatible sibling folders (70% column overlap) become partitions of one table (`key=value` folders name the partition keys, others become `partition_N`), and incompatible siblings become separate tables. Tables are created in, or with `UpdateBehavior` other than `LOG` updated in, the crawler's database with `classification`, `UPDATED_BY_CRAWLER`, record and size statistics, and the Hive SerDe for the format. JDBC, DynamoDB, catalog, MongoDB, Delta, Hudi, and Iceberg targets are not crawled: such crawls fail with an explicit error. `DeleteBehavior`, custom classifiers, compressed objects, and crawl logs in CloudWatch Logs are not implemented.
 
 `TagResource` / `UntagResource` / `GetTags` apply to job, crawler, connection, database, and table ARNs as well as Schema Registry resources.
 

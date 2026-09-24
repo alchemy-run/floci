@@ -197,10 +197,14 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         Optional<SessionCreds> roleCredentials = Optional.empty();
         try {
 
-        // Resolve image
-        String image = "Image".equals(fn.getPackageType()) && fn.getImageUri() != null
-                ? fn.getImageUri()
-                : imageResolver.resolve(fn.getRuntime());
+        // Resolve image. A container-image function runs the digest pinned at deploy time, so a
+        // tag moved afterwards (or a stale local copy of that tag) cannot change its code.
+        String image;
+        if ("Image".equals(fn.getPackageType()) && fn.getImageUri() != null) {
+            image = fn.getResolvedImageUri() != null ? fn.getResolvedImageUri() : fn.getImageUri();
+        } else {
+            image = imageResolver.resolve(fn.getRuntime());
+        }
 
         // If this is an AWS-shaped ECR URI, rewrite it to Floci's loopback registry
         image = ecrRegistryManager.rewriteImageUri(image);

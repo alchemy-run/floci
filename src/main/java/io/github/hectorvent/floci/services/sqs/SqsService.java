@@ -466,6 +466,7 @@ public class SqsService implements Resettable, ResourceProvider {
         }
 
         validateMaximumMessageSize(attributes);
+        attributes = withNormalizedPolicy(attributes);
 
         String accountId = regionResolver.getAccountId();
         String queueUrl = baseUrl + "/" + accountId + "/" + queueName;
@@ -491,6 +492,8 @@ public class SqsService implements Resettable, ResourceProvider {
             }
             return existing;
         }
+
+        validateRedrivePolicy(attributes, accountId, region);
 
         Queue queue = new Queue(queueName, queueUrl);
         queue.setAccountId(regionResolver.getAccountId());
@@ -532,6 +535,7 @@ public class SqsService implements Resettable, ResourceProvider {
             removed.close();
         }
         deduplicationCache.remove(storageKey);
+        redrivePolicyCache.remove(storageKey);
         if (messageStore != null) {
             messageStore.delete(storageKey);
         }
@@ -803,6 +807,52 @@ public class SqsService implements Resettable, ResourceProvider {
         if (parsed < MIN_MAXIMUM_MESSAGE_SIZE || parsed > maxAllowedMessageSize) {
             throw invalidMaximumMessageSize();
         }
+    }
+
+    /**
+     * AWS rejects a RedrivePolicy whose {@code deadLetterTargetArn} does not name an existing
+     * queue in the source queue's own account and region. Only the policy being written is
+     * checked: deleting the dead-letter queue afterwards leaves the source queue usable.
+     */
+    private void validateRedrivePolicy(Map<String, String> attributes, String sourceAccountId, String region) {
+        if (attributes == null) {
+            return;
+        }
+        String raw = attributes.get("RedrivePolicy");
+        if (raw == null || raw.isEmpty()) {
+            return;
+        }
+        JsonNode policy;
+        try {
+            policy = POLICY_MAPPER.readTree(raw);
+        } catch (Exception e) {
+            LOG.debugv("RedrivePolicy is not JSON, skipping dead-letter target check: {0}", raw);
+            return;
+        }
+        JsonNode target = policy == null ? null : policy.get("deadLetterTargetArn");
+        if (target == null || !target.isTextual()) {
+            return;
+        }
+        if (!deadLetterTargetExists(target.asText(), sourceAccountId, region)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Value " + raw + " for parameter RedrivePolicy is invalid. "
+                            + "Reason: Dead letter target does not exist.", 400);
+        }
+    }
+
+    private boolean deadLetterTargetExists(String targetArn, String sourceAccountId, String region) {
+        if (!AwsArnUtils.isArnFor(targetArn, "sqs")) {
+            return false;
+        }
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(targetArn);
+        if (!arn.region().isEmpty() && !arn.region().equals(region)) {
+            return false;
+        }
+        if (!arn.accountId().equals(sourceAccountId)) {
+            return false;
+        }
+        String dlqUrl = queueUrlFromArn(targetArn, region);
+        return dlqUrl != null && getQueueByUrl(regionKey(region, dlqUrl), dlqUrl).isPresent();
     }
 
     private AwsException invalidMaximumMessageSize() {
@@ -1102,6 +1152,10 @@ public class SqsService implements Resettable, ResourceProvider {
                 .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
                         "The specified queue does not exist.", 400));
         validateMaximumMessageSize(attributes);
+        attributes = withNormalizedPolicy(attributes);
+        String sourceAccountId = accountFromQueueUrl(queue.getQueueUrl());
+        validateRedrivePolicy(attributes,
+                sourceAccountId != null ? sourceAccountId : regionResolver.getAccountId(), region);
         if (attributes != null) {
             for (Map.Entry<String, String> entry : attributes.entrySet()) {
                 if (entry.getValue() == null || entry.getValue().isEmpty()) {
@@ -1109,6 +1163,9 @@ public class SqsService implements Resettable, ResourceProvider {
                 } else {
                     queue.getAttributes().put(entry.getKey(), entry.getValue());
                 }
+            }
+            if (attributes.containsKey("RedrivePolicy")) {
+                redrivePolicyCache.remove(storageKey);
             }
         }
         queue.setLastModifiedTimestamp(Instant.now());
@@ -1435,6 +1492,73 @@ public class SqsService implements Resettable, ResourceProvider {
     }
 
     private static final ObjectMapper POLICY_MAPPER = new ObjectMapper();
+
+    /** Policy statement elements SQS stores a one-element list of as the bare value. */
+    private static final List<String> COLLAPSIBLE_STATEMENT_ELEMENTS =
+            List.of("Action", "NotAction", "Resource", "NotResource");
+
+    /** Copy of {@code attributes} whose Policy is stored the way SQS stores it. */
+    private static Map<String, String> withNormalizedPolicy(Map<String, String> attributes) {
+        if (attributes == null) {
+            return null;
+        }
+        String policy = attributes.get("Policy");
+        if (policy == null || policy.isEmpty()) {
+            return attributes;
+        }
+        Map<String, String> normalized = new HashMap<>(attributes);
+        normalized.put("Policy", normalizePolicyDocument(policy));
+        return normalized;
+    }
+
+    /**
+     * SQS re-serializes a queue policy when it stores it: whitespace is dropped and a one-element
+     * Action, NotAction, Resource, NotResource or principal list comes back as the bare value, so
+     * {@code "Action":["sqs:SendMessage"]} is returned as {@code "Action":"sqs:SendMessage"}. A
+     * document that is not a JSON object is kept verbatim.
+     */
+    static String normalizePolicyDocument(String raw) {
+        JsonNode parsed;
+        try {
+            parsed = POLICY_MAPPER.readTree(raw);
+        } catch (Exception e) {
+            return raw;
+        }
+        if (!(parsed instanceof ObjectNode document)) {
+            return raw;
+        }
+        JsonNode statements = document.get("Statement");
+        if (statements instanceof ArrayNode array) {
+            array.forEach(SqsService::collapseStatement);
+        } else if (statements instanceof ObjectNode statement) {
+            collapseStatement(statement);
+        }
+        return document.toString();
+    }
+
+    private static void collapseStatement(JsonNode node) {
+        if (!(node instanceof ObjectNode statement)) {
+            return;
+        }
+        for (String element : COLLAPSIBLE_STATEMENT_ELEMENTS) {
+            collapseSingleton(statement, element);
+        }
+        for (String element : List.of("Principal", "NotPrincipal")) {
+            if (statement.get(element) instanceof ObjectNode principal) {
+                List<String> types = new ArrayList<>();
+                principal.fieldNames().forEachRemaining(types::add);
+                for (String type : types) {
+                    collapseSingleton(principal, type);
+                }
+            }
+        }
+    }
+
+    private static void collapseSingleton(ObjectNode owner, String field) {
+        if (owner.get(field) instanceof ArrayNode values && values.size() == 1 && values.get(0).isValueNode()) {
+            owner.set(field, values.get(0));
+        }
+    }
 
     public void addPermission(String queueUrl, String label, List<String> awsAccountIds,
                               List<String> actionNames, String region) {

@@ -19,6 +19,7 @@ public class ClusterNode {
     private transient String containerId;
     private transient String containerHost;
     private transient int containerPort;
+    private transient String networkIp;
 
     public ClusterNode() {}
 
@@ -54,4 +55,8 @@ public class ClusterNode {
 
     public int getContainerPort() { return containerPort; }
     public void setContainerPort(int containerPort) { this.containerPort = containerPort; }
+
+    /** The node's Docker-network IP, the address its peers and slot migrations dial. */
+    public String getNetworkIp() { return networkIp; }
+    public void setNetworkIp(String networkIp) { this.networkIp = networkIp; }
 }

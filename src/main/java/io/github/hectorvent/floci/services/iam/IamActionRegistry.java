@@ -379,19 +379,56 @@ public class IamActionRegistry {
         return null;
     }
 
+    /**
+     * Object-level S3 actions. A request naming a {@code versionId} is authorized as the
+     * {@code *Version*} variant of its action, as on AWS (s3:GetObjectVersion,
+     * s3:GetObjectVersionTagging, ...); retention and legal hold have no such variant.
+     */
     private static String objectSubResourceAction(String method, MultivaluedMap<String, String> params) {
+        boolean versioned = params.containsKey("versionId");
         if (params.containsKey("acl")) {
             return switch (method) {
-                case "GET" -> "s3:GetObjectAcl";
-                case "PUT" -> "s3:PutObjectAcl";
+                case "GET" -> versioned ? "s3:GetObjectVersionAcl" : "s3:GetObjectAcl";
+                case "PUT" -> versioned ? "s3:PutObjectVersionAcl" : "s3:PutObjectAcl";
                 default -> null;
             };
         }
         if (params.containsKey("tagging")) {
             return switch (method) {
-                case "GET" -> "s3:GetObjectTagging";
-                case "PUT" -> "s3:PutObjectTagging";
-                case "DELETE" -> "s3:DeleteObjectTagging";
+                case "GET" -> versioned ? "s3:GetObjectVersionTagging" : "s3:GetObjectTagging";
+                case "PUT" -> versioned ? "s3:PutObjectVersionTagging" : "s3:PutObjectTagging";
+                case "DELETE" -> versioned ? "s3:DeleteObjectVersionTagging" : "s3:DeleteObjectTagging";
+                default -> null;
+            };
+        }
+        if (params.containsKey("retention")) {
+            return switch (method) {
+                case "GET" -> "s3:GetObjectRetention";
+                case "PUT" -> "s3:PutObjectRetention";
+                default -> null;
+            };
+        }
+        if (params.containsKey("legal-hold")) {
+            return switch (method) {
+                case "GET" -> "s3:GetObjectLegalHold";
+                case "PUT" -> "s3:PutObjectLegalHold";
+                default -> null;
+            };
+        }
+        if (params.containsKey("attributes") && "GET".equals(method)) {
+            return versioned ? "s3:GetObjectVersionAttributes" : "s3:GetObjectAttributes";
+        }
+        if (params.containsKey("uploadId")) {
+            return switch (method) {
+                case "GET" -> "s3:ListMultipartUploadParts";
+                case "DELETE" -> "s3:AbortMultipartUpload";
+                default -> null;
+            };
+        }
+        if (versioned) {
+            return switch (method) {
+                case "GET", "HEAD" -> "s3:GetObjectVersion";
+                case "DELETE" -> "s3:DeleteObjectVersion";
                 default -> null;
             };
         }

@@ -105,8 +105,11 @@ public class MskController {
     @GET
     @Path("/v1/clusters/{clusterArn}/bootstrap-brokers")
     public Response getBootstrapBrokers(@PathParam("clusterArn") String clusterArn) {
-        String bootstrapBrokers = mskService.getBootstrapBrokers(clusterArn);
-        return Response.ok(Map.of("bootstrapBrokerString", bootstrapBrokers)).build();
+        MskService.BootstrapBrokers brokers = mskService.bootstrapBrokersFor(clusterArn);
+        Map<String, Object> response = new HashMap<>();
+        putIfPresent(response, "bootstrapBrokerString", brokers.bootstrapBrokerString());
+        putIfPresent(response, "bootstrapBrokerStringSaslIam", brokers.bootstrapBrokerStringSaslIam());
+        return Response.ok(response).build();
     }
 
     @GET

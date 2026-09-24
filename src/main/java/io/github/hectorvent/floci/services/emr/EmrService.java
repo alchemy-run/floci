@@ -6,9 +6,11 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.emr.model.EmrBootstrapAction;
 import io.github.hectorvent.floci.services.emr.model.EmrCluster;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceFleet;
 import io.github.hectorvent.floci.services.emr.model.EmrInstanceGroup;
+import io.github.hectorvent.floci.services.emr.model.EmrManagedScalingPolicy;
 import io.github.hectorvent.floci.services.emr.model.EmrStep;
 import io.github.hectorvent.floci.services.emr.model.SecurityConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -31,6 +33,10 @@ public class EmrService {
 
     private static final String UPPER_ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final long MIN_IDLE_TIMEOUT_SECONDS = 60L;
+    private static final long MAX_IDLE_TIMEOUT_SECONDS = 604_800L;
+    // AWS applies a one-hour idle timeout when a policy is attached without IdleTimeout.
+    static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 3_600L;
 
     private final StorageBackend<String, EmrCluster> clusterStore;
     private final StorageBackend<String, SecurityConfiguration> secConfigStore;
@@ -66,6 +72,12 @@ public class EmrService {
         }
         cluster.setInstanceCollectionType(cluster.getInstanceFleets().isEmpty()
                 ? "INSTANCE_GROUP" : "INSTANCE_FLEET");
+        if (cluster.getAutoTerminationIdleTimeout() != null) {
+            validateIdleTimeout(cluster.getAutoTerminationIdleTimeout());
+        }
+        if (cluster.getManagedScalingPolicy() != null) {
+            validateManagedScalingPolicy(cluster, cluster.getManagedScalingPolicy());
+        }
         cluster.setAutoTerminate(!cluster.isKeepJobFlowAliveWhenNoSteps());
         cluster.setMasterPublicDnsName("ip-10-0-0-1." + region + ".compute.internal");
         cluster.setCreationDateTime(Instant.now());
@@ -270,6 +282,130 @@ public class EmrService {
         return requireCluster(clusterId);
     }
 
+    public record InstanceGroupModification(String instanceGroupId, Integer instanceCount) {}
+
+    public void modifyInstanceGroups(String clusterId, List<InstanceGroupModification> modifications) {
+        // ClusterId is optional on the wire; instance group ids are globally unique.
+        List<EmrCluster> candidates = clusterId != null
+                ? List.of(requireCluster(clusterId))
+                : new ArrayList<>(clusterStore.scan(k -> true));
+        List<EmrCluster> touched = new ArrayList<>();
+        List<Runnable> updates = new ArrayList<>();
+        // Validate every modification before applying any: the call succeeds or fails atomically.
+        for (InstanceGroupModification mod : modifications) {
+            if (mod.instanceCount() != null && mod.instanceCount() < 0) {
+                throw new AwsException("ValidationException",
+                        "Instance count for instance group " + mod.instanceGroupId() + " must not be negative.", 400);
+            }
+            EmrCluster owner = null;
+            EmrInstanceGroup target = null;
+            for (EmrCluster c : candidates) {
+                for (EmrInstanceGroup g : c.getInstanceGroups()) {
+                    if (g.getId().equals(mod.instanceGroupId())) {
+                        owner = c;
+                        target = g;
+                    }
+                }
+            }
+            if (target == null) {
+                throw new AwsException("InvalidRequestException",
+                        "Instance group id '" + mod.instanceGroupId() + "' is not valid.", 400);
+            }
+            if (mod.instanceCount() != null) {
+                if ("MASTER".equals(target.getInstanceGroupType())
+                        && mod.instanceCount() != target.getRequestedInstanceCount()) {
+                    throw new AwsException("ValidationException",
+                            "The instance count of the master instance group cannot be modified.", 400);
+                }
+                EmrInstanceGroup group = target;
+                int count = mod.instanceCount();
+                updates.add(() -> {
+                    group.setRequestedInstanceCount(count);
+                    group.setRunningInstanceCount(count);
+                });
+            }
+            if (!touched.contains(owner)) {
+                touched.add(owner);
+            }
+        }
+        updates.forEach(Runnable::run);
+        for (EmrCluster c : touched) {
+            clusterStore.put(c.getId(), c);
+        }
+    }
+
+    public void modifyInstanceFleet(String clusterId, String instanceFleetId,
+                                    Integer targetOnDemandCapacity, Integer targetSpotCapacity) {
+        EmrCluster cluster = requireCluster(clusterId);
+        EmrInstanceFleet fleet = cluster.getInstanceFleets().stream()
+                .filter(f -> f.getId().equals(instanceFleetId))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("InvalidRequestException",
+                        "Instance fleet id '" + instanceFleetId + "' is not valid.", 400));
+        if ((targetOnDemandCapacity != null && targetOnDemandCapacity < 0)
+                || (targetSpotCapacity != null && targetSpotCapacity < 0)) {
+            throw new AwsException("ValidationException",
+                    "Target capacity for instance fleet " + instanceFleetId + " must not be negative.", 400);
+        }
+        if (targetOnDemandCapacity != null) {
+            fleet.setTargetOnDemandCapacity(targetOnDemandCapacity);
+            fleet.setProvisionedOnDemandCapacity(targetOnDemandCapacity);
+        }
+        if (targetSpotCapacity != null) {
+            fleet.setTargetSpotCapacity(targetSpotCapacity);
+            fleet.setProvisionedSpotCapacity(targetSpotCapacity);
+        }
+        clusterStore.put(cluster.getId(), cluster);
+    }
+
+    public List<EmrBootstrapAction> listBootstrapActions(String clusterId) {
+        return requireCluster(clusterId).getBootstrapActions();
+    }
+
+    // ──────────────────────────── Auto-termination policy ────────────────────────────
+
+    public void putAutoTerminationPolicy(String clusterId, Long idleTimeout) {
+        EmrCluster cluster = requireCluster(clusterId);
+        long timeout = idleTimeout == null ? DEFAULT_IDLE_TIMEOUT_SECONDS : idleTimeout;
+        validateIdleTimeout(timeout);
+        cluster.setAutoTerminationIdleTimeout(timeout);
+        clusterStore.put(cluster.getId(), cluster);
+    }
+
+    public Long getAutoTerminationIdleTimeout(String clusterId) {
+        return requireCluster(clusterId).getAutoTerminationIdleTimeout();
+    }
+
+    public void removeAutoTerminationPolicy(String clusterId) {
+        EmrCluster cluster = requireCluster(clusterId);
+        cluster.setAutoTerminationIdleTimeout(null);
+        clusterStore.put(cluster.getId(), cluster);
+    }
+
+    // ──────────────────────────── Managed scaling policy ────────────────────────────
+
+    public void putManagedScalingPolicy(String clusterId, EmrManagedScalingPolicy policy) {
+        EmrCluster cluster = requireCluster(clusterId);
+        if (policy == null) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value null at 'managedScalingPolicy' failed to satisfy "
+                            + "constraint: Member must not be null", 400);
+        }
+        validateManagedScalingPolicy(cluster, policy);
+        cluster.setManagedScalingPolicy(policy);
+        clusterStore.put(cluster.getId(), cluster);
+    }
+
+    public EmrManagedScalingPolicy getManagedScalingPolicy(String clusterId) {
+        return requireCluster(clusterId).getManagedScalingPolicy();
+    }
+
+    public void removeManagedScalingPolicy(String clusterId) {
+        EmrCluster cluster = requireCluster(clusterId);
+        cluster.setManagedScalingPolicy(null);
+        clusterStore.put(cluster.getId(), cluster);
+    }
+
     // ──────────────────────────── Security configurations ────────────────────────────
 
     public SecurityConfiguration createSecurityConfiguration(String name, String json) {
@@ -335,6 +471,71 @@ public class EmrService {
                 mutation.accept(c);
                 clusterStore.put(id, c);
             });
+        }
+    }
+
+    private void validateIdleTimeout(long idleTimeout) {
+        if (idleTimeout < MIN_IDLE_TIMEOUT_SECONDS || idleTimeout > MAX_IDLE_TIMEOUT_SECONDS) {
+            throw new AwsException("ValidationException",
+                    "The idle timeout must be between " + MIN_IDLE_TIMEOUT_SECONDS + " and "
+                            + MAX_IDLE_TIMEOUT_SECONDS + " seconds.", 400);
+        }
+    }
+
+    private void validateManagedScalingPolicy(EmrCluster cluster, EmrManagedScalingPolicy policy) {
+        requireComputeLimit(policy.getUnitType(), "unitType");
+        requireComputeLimit(policy.getMinimumCapacityUnits(), "minimumCapacityUnits");
+        requireComputeLimit(policy.getMaximumCapacityUnits(), "maximumCapacityUnits");
+        String unitType = policy.getUnitType();
+        if (!List.of("InstanceFleetUnits", "Instances", "VCPU").contains(unitType)) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value '" + unitType + "' at "
+                            + "'managedScalingPolicy.computeLimits.unitType' failed to satisfy constraint: "
+                            + "Member must satisfy enum value set: [InstanceFleetUnits, Instances, VCPU]", 400);
+        }
+        boolean fleets = "INSTANCE_FLEET".equals(cluster.getInstanceCollectionType());
+        if (fleets && "Instances".equals(unitType)) {
+            throw new AwsException("ValidationException",
+                    "The unit type Instances is not supported for clusters with instance fleets.", 400);
+        }
+        if (!fleets && "InstanceFleetUnits".equals(unitType)) {
+            throw new AwsException("ValidationException",
+                    "The unit type InstanceFleetUnits is not supported for clusters with instance groups.", 400);
+        }
+        int min = policy.getMinimumCapacityUnits();
+        int max = policy.getMaximumCapacityUnits();
+        if (min < 0) {
+            throw new AwsException("ValidationException",
+                    "MinimumCapacityUnits must not be negative.", 400);
+        }
+        if (min > max) {
+            throw new AwsException("ValidationException",
+                    "MinimumCapacityUnits must be less than or equal to MaximumCapacityUnits.", 400);
+        }
+        Integer onDemand = policy.getMaximumOnDemandCapacityUnits();
+        if (onDemand != null && (onDemand < 0 || onDemand > max)) {
+            throw new AwsException("ValidationException",
+                    "MaximumOnDemandCapacityUnits must be between 0 and MaximumCapacityUnits.", 400);
+        }
+        Integer core = policy.getMaximumCoreCapacityUnits();
+        if (core != null && (core < 0 || core > max)) {
+            throw new AwsException("ValidationException",
+                    "MaximumCoreCapacityUnits must be between 0 and MaximumCapacityUnits.", 400);
+        }
+        String strategy = policy.getScalingStrategy();
+        if (strategy != null && !List.of("DEFAULT", "ADVANCED").contains(strategy)) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value '" + strategy + "' at "
+                            + "'managedScalingPolicy.scalingStrategy' failed to satisfy constraint: "
+                            + "Member must satisfy enum value set: [DEFAULT, ADVANCED]", 400);
+        }
+    }
+
+    private void requireComputeLimit(Object value, String member) {
+        if (value == null) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value null at 'managedScalingPolicy.computeLimits."
+                            + member + "' failed to satisfy constraint: Member must not be null", 400);
         }
     }
 

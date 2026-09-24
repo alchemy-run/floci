@@ -6,7 +6,9 @@
 
 Floci emulates Amazon Redshift by managing a real [PostgreSQL](https://www.postgresql.org/) Docker container per cluster behind a Redshift-shaped control plane. Each cluster sits behind a lightweight auth proxy on the Floci host, so the endpoint is reachable from outside Docker and the master password is validated at the proxy, a `ModifyCluster` password change takes effect for new connections immediately. Redshift speaks the PostgreSQL wire protocol, so the cluster endpoint returned by `DescribeClusters` works with any standard PostgreSQL driver (`psql`, JDBC, `psycopg`, …).
 
-> **Always read the host and port from `DescribeClusters`** rather than assuming a fixed port. PostgreSQL listens on `5432` *inside* the container; the port you connect to is dynamically assigned on the host and returned as `Clusters[0].Endpoint.Port`. Redshift's conventional port is `5439`, but the emulator does not bind it: use whatever `DescribeClusters` reports.
+> **Always read the host and port from `DescribeClusters`** rather than assuming a fixed port. The endpoint host keeps the AWS shape `<cluster>.<id>.<region>.redshift.localhost.floci.io` (the embedded DNS resolves it to Floci inside containers, public DNS resolves it to loopback on the host). The proxy listens on the cluster's `Port` (`5439` unless `CreateCluster` sets one); all clusters share Floci's address, so when another cluster already holds that port the proxy falls back to the proxy port range and `Clusters[0].Endpoint.Port` reports the port actually listening.
+>
+> `CreateCluster` `DBName` (default `dev`) is created in the backing PostgreSQL server and is the database a connection uses when it names none.
 
 The container has **no persistent volume**: if the physical container survives a Floci restart it is adopted and its data is kept, but if the container itself is gone (host reboot, `docker rm`, a pruned dev box) the cluster comes back empty. Use `CreateClusterSnapshot` / `RestoreFromClusterSnapshot` to preserve data explicitly.
 
@@ -139,10 +141,10 @@ For `AWS::Redshift::ClusterParameterGroup`, `Parameters` is applied via `ModifyC
 |----------|---------|-------------|
 | `FLOCI_SERVICES_REDSHIFT_ENABLED` | `true` | Enable or disable Redshift |
 | `FLOCI_SERVICES_REDSHIFT_IMAGE_VERSION` | `postgres:15-alpine` | PostgreSQL Docker image backing each cluster |
-| `FLOCI_SERVICES_REDSHIFT_DEFAULT_PORT` | `5439` | Reported Redshift port hint (the real host port is dynamic and comes from `DescribeClusters`) |
+| `FLOCI_SERVICES_REDSHIFT_DEFAULT_PORT` | `5439` | Port a cluster listens on when `CreateCluster` omits `Port` (falls back to the proxy range when taken) |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_BASE_PORT` | `7100` | Lowest host port the per-cluster auth proxies bind |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_MAX_PORT` | `7199` | Highest host port the per-cluster auth proxies bind |
-| `FLOCI_SERVICES_REDSHIFT_ENDPOINT_HOST` | _(unset)_ | Hostname advertised in `DescribeClusters`; unset resolves from the Docker host |
+| `FLOCI_SERVICES_REDSHIFT_ENDPOINT_HOST` | _(unset)_ | Hostname advertised in `DescribeClusters`; unset uses `<cluster>.<id>.<region>.redshift.<domain>` where `<domain>` is `localhost.floci.io` unless `FLOCI_HOSTNAME` sets another name |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_HANDSHAKE_TIMEOUT_MILLIS` | `10000` | Max time a client has to complete the startup/auth handshake before the proxy drops it |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_BACKEND_CONNECT_TIMEOUT_MILLIS` | `5000` | Max time the proxy waits for the backend TCP connect |
 | `FLOCI_SERVICES_REDSHIFT_PROXY_MAX_CONNECTIONS` | `100` | Max concurrent connections per proxy before new ones are refused |

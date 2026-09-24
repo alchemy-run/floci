@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.amazonmq.container.ActiveMqManager;
 import io.github.hectorvent.floci.services.amazonmq.container.RabbitMqManager;
 import io.github.hectorvent.floci.services.amazonmq.model.Broker;
 import io.github.hectorvent.floci.services.amazonmq.model.MqUser;
@@ -18,7 +19,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 /**
@@ -47,7 +47,8 @@ class AmazonMqEngineTypeCaseTest {
 
         service = new AmazonMqService(storageFactory, config,
                 new RegionResolver("us-east-1", "000000000000"),
-                Mockito.mock(RabbitMqManager.class));
+                Mockito.mock(RabbitMqManager.class), Mockito.mock(ActiveMqManager.class),
+                Mockito.mock(AmazonMqConfigurationService.class));
     }
 
     private CreateBrokerParams params(String name, String engineType) {
@@ -71,16 +72,11 @@ class AmazonMqEngineTypeCaseTest {
         assertEquals("RABBITMQ", broker.getEngineType());
     }
 
-    @Test
-    void activeMqIsRejectedWithAMessageNamingTheEngine() {
-        // ActiveMQ is a genuine capability gap rather than a malformed request. The
-        // message has to say which engine was refused, otherwise it is indistinguishable
-        // from the casing rejection this test class exists to prevent.
-        AwsException e = assertThrows(AwsException.class,
-                () -> service.createBroker(params("activemq-broker", "ActiveMQ")));
-        assertEquals(400, e.getHttpStatus());
-        assertTrue(e.getMessage().contains("ActiveMQ"),
-                "expected the refused engine to be named, got: " + e.getMessage());
+    @ParameterizedTest(name = "engineType \"{0}\" provisions an ActiveMQ broker")
+    @ValueSource(strings = {"ACTIVEMQ", "ActiveMQ", "activemq"})
+    void activeMqIsAcceptedWithoutRegardToCase(String engineType) {
+        Broker broker = service.createBroker(params("amq-" + engineType.toLowerCase(), engineType));
+        assertEquals("ACTIVEMQ", broker.getEngineType());
     }
 
     @Test

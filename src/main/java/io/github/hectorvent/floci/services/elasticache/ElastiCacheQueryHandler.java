@@ -754,7 +754,9 @@ public class ElastiCacheQueryHandler {
             return AwsQueryResponse.error("InvalidParameterValue", "ReplicationGroupId and NodeGroupCount are required.", AwsNamespaces.EC, 400);
         }
         try {
-            ReplicationGroup group = service.setNodeGroupCount(groupId, nodeGroupCount);
+            ReplicationGroup group = service.modifyShardConfiguration(groupId, nodeGroupCount,
+                    extractMemberList(params, "NodeGroupsToRemove.NodeGroupToRemove."),
+                    extractMemberList(params, "NodeGroupsToRetain.NodeGroupToRetain."));
             return Response.ok(AwsQueryResponse.envelope("ModifyReplicationGroupShardConfiguration", AwsNamespaces.EC, replicationGroupXml(group))).build();
         } catch (AwsException e) {
             return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());

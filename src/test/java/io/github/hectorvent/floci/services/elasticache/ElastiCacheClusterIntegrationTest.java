@@ -194,6 +194,73 @@ class ElastiCacheClusterIntegrationTest {
 
     @Test
     @Order(7)
+    void addingAShardRebalancesSlotsAndCarriesKeysAcross() throws Exception {
+        XmlPath xml = given()
+                .formParam("Action", "ModifyReplicationGroupShardConfiguration")
+                .formParam("ReplicationGroupId", GROUP_ID)
+                .formParam("NodeGroupCount", "3")
+                .formParam("ApplyImmediately", "true")
+                .header("Authorization", AUTH_HEADER)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+            .extract()
+                .xmlPath();
+
+        String prefix = "ModifyReplicationGroupShardConfigurationResponse"
+                + ".ModifyReplicationGroupShardConfigurationResult.ReplicationGroup.";
+        assertEquals("available", xml.getString(prefix + "Status"));
+        assertEquals(List.of("0001", "0002", "0003"), xml.getList(prefix + "NodeGroups.NodeGroup.NodeGroupId"));
+        assertEquals(List.of("0-5460", "5461-10921", "10922-16383"),
+                xml.getList(prefix + "NodeGroups.NodeGroup.Slots"));
+        assertEquals(6, xml.getList(prefix + "MemberClusters.ClusterId").size());
+
+        try (Socket socket = openSocket(configurationEndpointPort)) {
+            write(socket, respArray("CLUSTER", "INFO"));
+            String info = readBulk(socket);
+            assertTrue(info.contains("cluster_state:ok"), "Expected cluster_state:ok but got: " + info);
+            assertTrue(info.contains("cluster_known_nodes:6"), "Expected 6 known nodes but got: " + info);
+        }
+        // foo's slot 12182 now belongs to the added third shard: its key must have moved with it.
+        assertEquals("second-shard-value", getFollowingRedirect(configurationEndpointPort, "foo"));
+        assertEquals("first-shard-value", getFollowingRedirect(configurationEndpointPort, "bar"));
+    }
+
+    @Test
+    @Order(8)
+    void removingAShardHandsItsSlotsAndKeysToTheRemainingShards() throws Exception {
+        XmlPath xml = given()
+                .formParam("Action", "ModifyReplicationGroupShardConfiguration")
+                .formParam("ReplicationGroupId", GROUP_ID)
+                .formParam("NodeGroupCount", "2")
+                .formParam("NodeGroupsToRemove.NodeGroupToRemove.1", "0003")
+                .formParam("ApplyImmediately", "true")
+                .header("Authorization", AUTH_HEADER)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+            .extract()
+                .xmlPath();
+
+        String prefix = "ModifyReplicationGroupShardConfigurationResponse"
+                + ".ModifyReplicationGroupShardConfigurationResult.ReplicationGroup.";
+        assertEquals(List.of("0001", "0002"), xml.getList(prefix + "NodeGroups.NodeGroup.NodeGroupId"));
+        assertEquals(List.of("0-8191", "8192-16383"), xml.getList(prefix + "NodeGroups.NodeGroup.Slots"));
+
+        try (Socket socket = openSocket(configurationEndpointPort)) {
+            write(socket, respArray("CLUSTER", "INFO"));
+            String info = readBulk(socket);
+            assertTrue(info.contains("cluster_state:ok"), "Expected cluster_state:ok but got: " + info);
+            assertTrue(info.contains("cluster_known_nodes:4"), "Expected 4 known nodes but got: " + info);
+        }
+        assertEquals("second-shard-value", getFollowingRedirect(configurationEndpointPort, "foo"));
+        assertEquals("first-shard-value", getFollowingRedirect(configurationEndpointPort, "bar"));
+    }
+
+    @Test
+    @Order(9)
     void deleteClusterModeReplicationGroup() {
         given()
             .formParam("Action", "DeleteReplicationGroup")
@@ -220,6 +287,31 @@ class ElastiCacheClusterIntegrationTest {
             return process.waitFor() == 0;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /** GET through one proxy, following a single MOVED redirect to the owning shard's proxy port. */
+    private static String getFollowingRedirect(int port, String key) throws IOException {
+        try (Socket socket = openSocket(port)) {
+            write(socket, respArray("GET", key));
+            String header = readLine(socket);
+            if (header.startsWith("-MOVED ")) {
+                String target = header.trim().split(" ")[2];
+                int targetPort = Integer.parseInt(target.substring(target.lastIndexOf(':') + 1));
+                try (Socket redirected = openSocket(targetPort)) {
+                    write(redirected, respArray("GET", key));
+                    return readBulk(redirected);
+                }
+            }
+            if (!header.startsWith("$")) {
+                throw new IOException("Expected bulk reply but got: " + header);
+            }
+            int length = Integer.parseInt(header.substring(1).trim());
+            if (length < 0) {
+                return null;
+            }
+            byte[] data = socket.getInputStream().readNBytes(length + 2);
+            return new String(data, 0, length, StandardCharsets.UTF_8);
         }
     }
 

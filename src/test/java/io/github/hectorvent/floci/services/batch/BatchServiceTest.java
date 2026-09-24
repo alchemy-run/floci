@@ -1044,6 +1044,70 @@ class BatchServiceTest {
         verify(runner).stopJob("array-parent:1");
     }
 
+    @Test
+    void dockerJobOnUnmanagedOnlyQueueStaysRunnableUntilCancelled() throws Exception {
+        BatchDockerRunner runner = mock(BatchDockerRunner.class);
+        BatchService service = dockerService(runner);
+        String queueArn = createQueue(service, "unmanaged-docker-ce", "unmanaged-docker-queue");
+        String definitionArn = registerDefinition(service, "unmanaged-docker-job");
+
+        String jobId = service.submitJob(json("""
+                {"jobName":"unmanaged-docker","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+
+        assertNotNull(waitForJobStatus(service, jobId, "RUNNABLE"));
+        Thread.sleep(1500);
+        assertEquals("RUNNABLE", service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
+                .path("jobs").get(0).path("status").asText());
+        verify(runner, never()).run(any(BatchJob.class), anyInt());
+
+        service.cancelJob(json("""
+                {"jobId":"%s","reason":"No capacity"}
+                """.formatted(jobId)));
+        JsonNode cancelled = service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId)))
+                .path("jobs").get(0);
+        assertEquals("FAILED", cancelled.path("status").asText());
+        assertEquals("No capacity", cancelled.path("statusReason").asText());
+    }
+
+    @Test
+    void dockerJobWaitsForDisabledManagedEnvironmentAndRunsOnceEnabled() throws Exception {
+        BatchDockerRunner runner = mock(BatchDockerRunner.class);
+        when(runner.run(any(BatchJob.class), anyInt()))
+                .thenReturn(new BatchRunResult(0, null, "placed-job/default/id", 1L, 2L, false));
+        BatchService service = dockerService(runner);
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"disabled-managed-ce","type":"MANAGED","state":"DISABLED",
+                 "computeResources":{"type":"FARGATE","maxvCpus":4}}
+                """), REGION).path("computeEnvironmentArn").asText();
+        String queueArn = service.createJobQueue(json("""
+                {
+                  "jobQueueName":"disabled-managed-queue",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(computeArn)), REGION).path("jobQueueArn").asText();
+        String definitionArn = registerDefinition(service, "placed-job");
+
+        String jobId = service.submitJob(json("""
+                {"jobName":"placed","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+        assertNotNull(waitForJobStatus(service, jobId, "RUNNABLE"));
+        verify(runner, never()).run(any(BatchJob.class), anyInt());
+
+        service.updateComputeEnvironment(json("""
+                {"computeEnvironment":"%s","state":"ENABLED"}
+                """.formatted(computeArn)));
+
+        JsonNode succeeded = null;
+        for (int i = 0; i < 50 && succeeded == null; i++) {
+            succeeded = waitForJobStatus(service, jobId, "SUCCEEDED");
+        }
+        assertNotNull(succeeded);
+        assertEquals("placed-job/default/id", succeeded.path("container").path("logStreamName").asText());
+        verify(runner, times(1)).run(any(BatchJob.class), anyInt());
+    }
+
     private String arrayReadyQueue(BatchService service) throws Exception {
         String suffix = UUID.randomUUID().toString();
         String computeArn = service.createComputeEnvironment(json("""

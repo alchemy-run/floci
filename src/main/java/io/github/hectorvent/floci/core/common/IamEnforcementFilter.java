@@ -410,11 +410,42 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
             String resource,
             ResourcePolicyDecision resourcePolicyDecision,
             String resourceOwnerAccountId) {
-        if (!config.services().iam().enforcementEnabled()) {
-            return;
-        }
+        authorizeAdditionalResource(authorizationHeader, action, resource, resourcePolicyDecision,
+                resourceOwnerAccountId, false);
+    }
+
+    /**
+     * Like {@link #authorizeAdditionalResource(String, String, String, ResourcePolicyDecision, String)},
+     * but also evaluates assumed-role sessions (Lambda execution roles) while global enforcement is
+     * off - the caller class {@link #filter} evaluates for role-enforced actions. Used for the
+     * secondary S3 permissions a request needs besides its own action: reading a copy source, and
+     * the {@code s3:ListBucket} that decides whether a missing object may be reported as missing.
+     */
+    public void authorizeAdditionalResourceForSession(
+            String authorizationHeader,
+            String action,
+            String resource,
+            ResourcePolicyDecision resourcePolicyDecision,
+            String resourceOwnerAccountId) {
+        authorizeAdditionalResource(authorizationHeader, action, resource, resourcePolicyDecision,
+                resourceOwnerAccountId, true);
+    }
+
+    private void authorizeAdditionalResource(
+            String authorizationHeader,
+            String action,
+            String resource,
+            ResourcePolicyDecision resourcePolicyDecision,
+            String resourceOwnerAccountId,
+            boolean includeRoleSessions) {
         if (authorizationHeader == null) {
             return;
+        }
+        if (!config.services().iam().enforcementEnabled()) {
+            String sessionKey = includeRoleSessions ? accountResolver.extractAccessKeyId(authorizationHeader) : null;
+            if (sessionKey == null || "test".equals(sessionKey) || !iamService.isAssumedRoleSession(sessionKey)) {
+                return;
+            }
         }
         String akid = accountResolver.extractAccessKeyId(authorizationHeader);
         if (akid == null || "test".equals(akid)) {
@@ -563,16 +594,17 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
         // additions. HEAD on an object is bucketed under s3:GetObject by the
         // registry, so we distinguish via httpMethod.
         return switch (action) {
-            case "s3:GetObject" -> "HEAD".equalsIgnoreCase(httpMethod) ? "HeadObject" : "GetObject";
+            case "s3:GetObject", "s3:GetObjectVersion" ->
+                    "HEAD".equalsIgnoreCase(httpMethod) ? "HeadObject" : "GetObject";
             case "s3:PutObject" -> "PutObject";
-            case "s3:DeleteObject" -> "DeleteObject";
+            case "s3:DeleteObject", "s3:DeleteObjectVersion" -> "DeleteObject";
             case "s3:ListBucket" -> "ListObjects";
             case "s3:ListAllMyBuckets" -> "ListBuckets";
-            case "s3:GetObjectAcl" -> "GetObjectAcl";
-            case "s3:PutObjectAcl" -> "PutObjectAcl";
-            case "s3:GetObjectTagging" -> "GetObjectTagging";
-            case "s3:PutObjectTagging" -> "PutObjectTagging";
-            case "s3:DeleteObjectTagging" -> "DeleteObjectTagging";
+            case "s3:GetObjectAcl", "s3:GetObjectVersionAcl" -> "GetObjectAcl";
+            case "s3:PutObjectAcl", "s3:PutObjectVersionAcl" -> "PutObjectAcl";
+            case "s3:GetObjectTagging", "s3:GetObjectVersionTagging" -> "GetObjectTagging";
+            case "s3:PutObjectTagging", "s3:PutObjectVersionTagging" -> "PutObjectTagging";
+            case "s3:DeleteObjectTagging", "s3:DeleteObjectVersionTagging" -> "DeleteObjectTagging";
             default -> null;
         };
     }

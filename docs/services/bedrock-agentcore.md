@@ -59,6 +59,17 @@ runtimes reach `READY` immediately and hold metadata only. See
 | `ListEvents` | Lists a session's events, newest first. `POST` to the session path, not `GET` |
 | `GetEvent` | Returns one event |
 | `DeleteEvent` | Deletes one event and echoes its id |
+| `ListActors` | Lists the actors that have recorded events in a memory |
+| `ListSessions` | Lists an actor's sessions, newest first |
+| `BatchCreateMemoryRecords` | Writes long-term memory records, reporting per-record outcomes |
+| `BatchUpdateMemoryRecords` | Updates long-term memory records, reporting per-record outcomes |
+| `BatchDeleteMemoryRecords` | Deletes long-term memory records, reporting per-record outcomes |
+| `ListMemoryRecords` | Lists records in a namespace, newest first |
+| `GetMemoryRecord` | Returns one memory record |
+| `DeleteMemoryRecord` | Deletes one memory record and echoes its id |
+| `RetrieveMemoryRecords` | Ranks records in a namespace by lexical similarity to a query |
+| `ListMemoryExtractionJobs` | Lists failed extraction jobs; always empty, as Floci runs no extraction |
+| `StartMemoryExtractionJob` | Restarts a failed extraction job; no job ever exists to restart |
 | `CreateBrowser` | Creates a custom browser |
 | `GetCodeInterpreter` | Returns a custom or system code interpreter |
 | `DeleteCodeInterpreter` | Deletes a custom code interpreter |
@@ -101,8 +112,50 @@ than a fixed answer. Behaviour measured against real AgentCore:
 - `CreateEvent` answers `201`, not `200`
 - `ListEvents` pages with `nextToken` and defaults to 20 events when a caller names no `maxResults`
 
-Memory *records* (extraction and retrieval) are not emulated: they depend on an extraction engine
-rather than on stored events.
+`ListActors` and `ListSessions` are derived from the stored events: an actor exists once it has
+recorded an event, and a session's `createdAt` is the timestamp of its first event. Sessions come
+back newest first.
+
+## Memory records
+
+`BatchCreateMemoryRecords`, `BatchUpdateMemoryRecords`, `BatchDeleteMemoryRecords`,
+`GetMemoryRecord`, `DeleteMemoryRecord`, `ListMemoryRecords` and `RetrieveMemoryRecords` are backed
+by real storage:
+
+- batch operations report per-record outcomes in `successfulRecords` / `failedRecords` (with an
+  HTTP-style `errorCode`); only request-level problems fail the call. `BatchCreateMemoryRecords`
+  answers `201`
+- `ListMemoryRecords` and `RetrieveMemoryRecords` require `namespace` (a prefix match) or
+  `namespacePath` (a hierarchy match), and honour `memoryStrategyId` and `metadataFilters`
+- `RetrieveMemoryRecords` ranks by **lexical** similarity, not embeddings: the cosine of the query's
+  and each record's term-frequency vectors, with a short stop-word list removed. Records sharing no
+  term with the query are not returned, and `score` is that cosine
+
+Floci runs no long-term extraction, so events never turn into records on their own, and no
+extraction job ever fails. `ListMemoryExtractionJobs` (the failed jobs eligible to be restarted)
+is therefore always empty and `StartMemoryExtractionJob` answers `ResourceNotFoundException`.
+
+## Code interpreter and browser sessions
+
+Sessions run in real containers, one per session, with a memory limit and one vCPU. A session is
+`READY` while its container runs and `TERMINATED` once it is stopped, reaches
+`sessionTimeoutSeconds`, or loses its container (an emulator restart or state reset). Stopping a
+session that is already terminated is a `ConflictException`. Starting more concurrent sessions
+than the configured maximum is a `ServiceQuotaExceededException`.
+
+- **Code interpreter** sessions run `python:3.12-slim` by default. `InvokeCodeInterpreter` streams
+  one `result` event per call. `executeCode` and `executeCommand` run the program in the session
+  container; `writeFiles`, `readFiles`, `listFiles` and `removeFiles` work on its filesystem
+  (relative paths resolve under `/workspace`). A code interpreter in `SANDBOX` network mode, like
+  the built-in `aws.codeinterpreter.v1`, has no network. Each `executeCode` call starts a fresh
+  interpreter process, so variables do not carry over between calls; files do. The asynchronous
+  task tools (`startCommandExecution`, `getTask`, `stopTask`) are not emulated.
+- **Browser** sessions run headless Chrome (`chromedp/headless-shell`). The automation stream
+  endpoint is the browser's own DevTools WebSocket, reachable from wherever Floci can reach the
+  container; there is no signed stream proxy and no live view, and `UpdateBrowserStream` records
+  the status without enforcing it on that endpoint. `InvokeBrowser` actions are delivered as
+  DevTools input events and `screenshot` returns a real PNG. `SaveBrowserSessionProfile` captures
+  the browser's cookies, and a session started with that profile gets them back.
 
 ## Data plane — `InvokeAgentRuntime`
 
@@ -149,6 +202,16 @@ block is ever produced even when a request supplies `tools`.
 | `FLOCI_SERVICES_BEDROCK_AGENT_CORE_VALIDATE_RUNTIME_EXISTS` | `false` | When `true`, `InvokeAgentRuntime` returns `ResourceNotFoundException` for an unknown runtime ARN instead of the canned response |
 | `FLOCI_SERVICES_BEDROCK_AGENT_CORE_HARNESS_ECHO_PREFIX` | `You said: ` | Prefix on the reply `InvokeHarness` streams back |
 | `FLOCI_SERVICES_BEDROCK_AGENT_CORE_HARNESS_EMPTY_REPLY` | `No user message was supplied.` | Reply used when a request carries no user message |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_CODE_INTERPRETER_IMAGE` | `python:3.12-slim` | Image a code interpreter session runs in |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_CODE_INTERPRETER_MEMORY_MB` | `512` | Memory limit of one code interpreter session |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_CODE_INTERPRETER_MAX_ACTIVE_SESSIONS` | `5` | Concurrent code interpreter sessions |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_BROWSER_IMAGE` | `chromedp/headless-shell:151.0.7922.109` | Headless Chrome image serving DevTools on port 9222 |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_BROWSER_MEMORY_MB` | `1024` | Memory limit of one browser session |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_BROWSER_MAX_ACTIVE_SESSIONS` | `3` | Concurrent browser sessions |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_TOOL_EXECUTION_TIMEOUT_SECONDS` | `300` | Upper bound on one `InvokeCodeInterpreter` call |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_BROWSER_STARTUP_TIMEOUT_SECONDS` | `60` | Wait for a new browser's DevTools endpoint |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_DOCKER_NETWORK` | (global) | Docker network for session containers |
+| `FLOCI_SERVICES_BEDROCK_AGENT_CORE_PREWARM_IMAGES` | `true` | Pull session images when a code interpreter or browser is created |
 
 > **Note on YAML config keys.** The status endpoint reports these services as
 > `bedrock-agentcore-control` and `bedrock-agentcore`, but the YAML property paths

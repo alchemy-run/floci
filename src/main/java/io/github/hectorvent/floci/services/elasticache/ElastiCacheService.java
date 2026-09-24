@@ -60,6 +60,9 @@ public class ElastiCacheService implements ResourceProvider {
 
     private static final Logger LOG = Logger.getLogger(ElastiCacheService.class);
 
+    /** AWS's default Port for Redis OSS and Valkey replication groups. */
+    static final int DEFAULT_ENGINE_PORT = 6379;
+
     private final StorageBackend<String, ReplicationGroup> groups;
     private final StorageBackend<String, ElastiCacheUser> users;
     private final StorageBackend<String, CacheSubnetGroup> subnetGroups;
@@ -244,11 +247,26 @@ public class ElastiCacheService implements ResourceProvider {
                                                       ReplicationGroupSettings resolvedSettings) {
         String groupId = request.replicationGroupId();
         AuthMode authMode = request.authMode();
-        int proxyPort = allocateProxyPort(request.port());
+        int enginePort;
+        int proxyPort;
+        if (containerDetector.isRunningInContainer()) {
+            // Every group is its own container with its own address, as every AWS group has its
+            // own hostname, so the group's Port is never contended: the engine listens on it and
+            // the endpoint names it. The host-facing proxy is a separate listener on Floci's
+            // single address and takes whichever port of the range is free.
+            enginePort = request.port() != null
+                    ? validateRange("Port", request.port(), 1, 65535) : DEFAULT_ENGINE_PORT;
+            proxyPort = allocateProxyPortPreferring(enginePort);
+        } else {
+            // With Floci on the host the endpoint is the proxy on the host's single address, so
+            // the proxy port is the group's Port and two groups cannot both hold one.
+            proxyPort = allocateProxyPort(request.port());
+            enginePort = proxyPort;
+        }
         String image = config.services().elasticache().defaultImage();
 
-        LOG.infov("Creating replication group {0} with authMode={1} on proxy port {2}",
-                groupId, authMode, String.valueOf(proxyPort));
+        LOG.infov("Creating replication group {0} with authMode={1} on port {2}, proxy port {3}",
+                groupId, authMode, String.valueOf(enginePort), String.valueOf(proxyPort));
 
         ElastiCacheContainerHandle handle = null;
         try {
@@ -256,15 +274,13 @@ public class ElastiCacheService implements ResourceProvider {
             // derived from configuration and need no Docker, so the group is created and reaches
             // 'available' even when no daemon is reachable. Only connecting to the cache needs
             // the container.
-            // Valkey listens on the group's port, so the endpoint reports the same Port whether
-            // it names the proxy or (with Floci in Docker) the cache container itself.
-            handle = containerManager.tryStart(groupId, image, proxyPort);
+            handle = containerManager.tryStart(groupId, image, enginePort);
 
-            String endpointHost = resolveEndpointHost();
-            Endpoint endpoint = endpointFor(handle, proxyPort);
+            Endpoint endpoint = endpointFor(handle, enginePort, proxyPort);
             ReplicationGroup group = new ReplicationGroup(
                     groupId, request.description(), ReplicationGroupStatus.AVAILABLE,
                     authMode, endpoint, Instant.now(), proxyPort);
+            group.setEnginePort(enginePort);
             group.setAuthToken(request.authToken());
             group.setArn(regionResolver.buildArn("elasticache", request.region(),
                     "replicationgroup:" + groupId));
@@ -296,7 +312,8 @@ public class ElastiCacheService implements ResourceProvider {
                 }
             }
 
-            LOG.infov("Replication group {0} created, endpoint={1}:{2}", groupId, endpointHost, String.valueOf(proxyPort));
+            LOG.infov("Replication group {0} created, endpoint={1}:{2}", groupId, endpoint.address(),
+                    String.valueOf(endpoint.port()));
             return group;
         } catch (RuntimeException e) {
             LOG.warnv("Replication group {0} provisioning failed, rolling back: {1}", groupId, e.getMessage());
@@ -348,12 +365,9 @@ public class ElastiCacheService implements ResourceProvider {
                         clusterNodeFlags(endpointHost, announceIp, node.getProxyPort()));
                 inFlightMemberId = null;
                 handles.add(handle);
-                node.setContainerId(handle.getContainerId());
-                node.setContainerHost(handle.getHost());
-                node.setContainerPort(handle.getPort());
-                String networkIp = handle.getNetworkIp() != null ? handle.getNetworkIp() : handle.getHost();
+                attachContainer(node, handle);
                 formationNodes.add(new ValkeyClusterFormation.Node(
-                        handle.getHost(), handle.getPort(), networkIp,
+                        handle.getHost(), handle.getPort(), node.getNetworkIp(),
                         Integer.parseInt(node.getNodeGroupId()) - 1, node.isPrimary()));
             }
 
@@ -632,7 +646,7 @@ public class ElastiCacheService implements ResourceProvider {
         String groupId = group.getReplicationGroupId();
         String image = config.services().elasticache().defaultImage();
         try {
-            ElastiCacheContainerHandle handle = containerManager.tryStart(groupId, image, group.getProxyPort());
+            ElastiCacheContainerHandle handle = containerManager.tryStart(groupId, image, enginePortOf(group));
             synchronized (lockFor("rg:" + groupId)) {
                 if (restoreTargetLost(groupId)) {
                     abandonRestoredContainer(groupId, handle);
@@ -655,7 +669,7 @@ public class ElastiCacheService implements ResourceProvider {
                             + "Docker daemon is reachable. Metadata operations work; connections to "
                             + "the cache do not until a daemon appears.", groupId);
                 }
-                group.setConfigurationEndpoint(endpointFor(handle, group.getProxyPort()));
+                group.setConfigurationEndpoint(endpointFor(handle, enginePortOf(group), group.getProxyPort()));
                 group.setStatus(ReplicationGroupStatus.AVAILABLE);
                 groups.put(groupId, group);
                 LOG.infov("Restored replication group {0}, endpoint={1}:{2}", groupId,
@@ -760,6 +774,8 @@ public class ElastiCacheService implements ResourceProvider {
         List<Integer> reservedPorts = nodes.stream().map(ClusterNode::getProxyPort).toList();
         String inFlightMemberId = null;
         try {
+            // Shards are laid out by position, not by id: a removed shard leaves a gap in the ids.
+            List<String> nodeGroupIds = nodeGroupIds(group);
             List<ValkeyClusterFormation.Node> formationNodes = new ArrayList<>(nodes.size());
             for (ClusterNode node : nodes) {
                 inFlightMemberId = node.getMemberClusterId();
@@ -768,13 +784,10 @@ public class ElastiCacheService implements ResourceProvider {
                         clusterNodeFlags(endpointHost, announceIp, node.getProxyPort()));
                 inFlightMemberId = null;
                 handles.add(handle);
-                node.setContainerId(handle.getContainerId());
-                node.setContainerHost(handle.getHost());
-                node.setContainerPort(handle.getPort());
-                String networkIp = handle.getNetworkIp() != null ? handle.getNetworkIp() : handle.getHost();
+                attachContainer(node, handle);
                 formationNodes.add(new ValkeyClusterFormation.Node(
-                        handle.getHost(), handle.getPort(), networkIp,
-                        Integer.parseInt(node.getNodeGroupId()) - 1, node.isPrimary()));
+                        handle.getHost(), handle.getPort(), node.getNetworkIp(),
+                        nodeGroupIds.indexOf(node.getNodeGroupId()), node.isPrimary()));
             }
 
             clusterFormation.form(groupId, formationNodes, group.getNumNodeGroups());
@@ -868,11 +881,21 @@ public class ElastiCacheService implements ResourceProvider {
         }
     }
 
-    private Endpoint endpointFor(ElastiCacheContainerHandle handle, int proxyPort) {
+    /**
+     * With Floci in Docker the endpoint is the group's own cache container on the shared network,
+     * on the group's Port, which is what VPC workloads (Lambda, ECS) dial. On the host it is the
+     * proxy, whose port is the group's Port there.
+     */
+    private Endpoint endpointFor(ElastiCacheContainerHandle handle, int enginePort, int proxyPort) {
         if (handle != null && containerDetector.isRunningInContainer()) {
-            return new Endpoint(handle.getHost(), handle.getPort());
+            return new Endpoint(handle.getHost(), enginePort);
         }
         return new Endpoint(resolveEndpointHost(), proxyPort);
+    }
+
+    /** The port the group's engine listens on; records predating it used the proxy port. */
+    private static int enginePortOf(ReplicationGroup group) {
+        return group.getEnginePort() > 0 ? group.getEnginePort() : group.getProxyPort();
     }
 
     public ReplicationGroup getReplicationGroup(String groupId) {
@@ -911,17 +934,7 @@ public class ElastiCacheService implements ResourceProvider {
 
             if (group.isClusterEnabled() && !group.getClusterNodes().isEmpty()) {
                 for (ClusterNode node : group.getClusterNodes()) {
-                    proxyManager.stopProxy(node.getMemberClusterId());
-                    if (node.getContainerId() != null) {
-                        containerManager.stop(new ElastiCacheContainerHandle(
-                                node.getContainerId(), node.getMemberClusterId(),
-                                node.getContainerHost(), node.getContainerPort()));
-                    } else {
-                        // Transient container fields are lost across a Floci restart; the
-                        // deterministic container name still finds the node.
-                        containerManager.stopByGroupId(node.getMemberClusterId());
-                    }
-                    releaseProxyPort(node.getProxyPort());
+                    stopClusterNode(node);
                 }
             } else {
                 proxyManager.stopProxy(groupId);
@@ -936,6 +949,221 @@ public class ElastiCacheService implements ResourceProvider {
             groups.delete(groupId);
             LOG.infov("Replication group {0} deleted", groupId);
         }
+    }
+
+    private void stopClusterNode(ClusterNode node) {
+        proxyManager.stopProxy(node.getMemberClusterId());
+        if (node.getContainerId() != null) {
+            containerManager.stop(new ElastiCacheContainerHandle(
+                    node.getContainerId(), node.getMemberClusterId(),
+                    node.getContainerHost(), node.getContainerPort()));
+        } else {
+            // Transient container fields are lost across a Floci restart; the
+            // deterministic container name still finds the node.
+            containerManager.stopByGroupId(node.getMemberClusterId());
+        }
+        releaseProxyPort(node.getProxyPort());
+    }
+
+    private static void attachContainer(ClusterNode node, ElastiCacheContainerHandle handle) {
+        node.setContainerId(handle.getContainerId());
+        node.setContainerHost(handle.getHost());
+        node.setContainerPort(handle.getPort());
+        node.setNetworkIp(handle.getNetworkIp() != null ? handle.getNetworkIp() : handle.getHost());
+    }
+
+    /** The group's node group ids in the order its shards are laid out. */
+    private static List<String> nodeGroupIds(ReplicationGroup group) {
+        List<String> ids = new ArrayList<>();
+        for (ClusterNode node : group.getClusterNodes()) {
+            if (!ids.contains(node.getNodeGroupId())) {
+                ids.add(node.getNodeGroupId());
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * ModifyReplicationGroupShardConfiguration. A cluster-mode-enabled group is resharded online
+     * for real: added shards get their own nodes and proxies and join the running cluster, every
+     * shard ends up owning an equal contiguous slot range, and removed shards hand their slots
+     * and keys to the shards that remain before their nodes are forgotten and stopped. A
+     * cluster-mode-disabled group has no data-plane shards, so only its recorded count changes.
+     */
+    public ReplicationGroup modifyShardConfiguration(String groupId, int nodeGroupCount,
+                                                     List<String> nodeGroupsToRemove,
+                                                     List<String> nodeGroupsToRetain) {
+        if (nodeGroupCount > MAX_NODE_GROUPS) {
+            validateNumNodeGroups(nodeGroupCount);
+        }
+        validateRange("NodeGroupCount", nodeGroupCount, 1, MAX_NODE_GROUPS);
+        synchronized (lockFor("rg:" + groupId)) {
+            ReplicationGroup group = getReplicationGroup(groupId);
+            if (!group.isClusterEnabled() || group.getClusterNodes().isEmpty()) {
+                group.setNodeGroupCount(nodeGroupCount);
+                groups.put(groupId, group);
+                return group;
+            }
+            if (group.getStatus() != ReplicationGroupStatus.AVAILABLE) {
+                throw new AwsException("InvalidReplicationGroupState",
+                        "Replication group " + groupId + " is not in available state.", 400);
+            }
+            List<String> current = nodeGroupIds(group);
+            List<String> removed = resolveRemovedNodeGroups(groupId, current, nodeGroupCount,
+                    nodeGroupsToRemove, nodeGroupsToRetain);
+            int added = nodeGroupCount - (current.size() - removed.size());
+            if (added == 0 && removed.isEmpty()) {
+                return group;
+            }
+            reshardClusterModeGroup(group, removed, added);
+            groups.put(groupId, group);
+            return group;
+        }
+    }
+
+    private static List<String> resolveRemovedNodeGroups(String groupId, List<String> current,
+                                                         int nodeGroupCount, List<String> toRemove,
+                                                         List<String> toRetain) {
+        boolean removeGiven = toRemove != null && !toRemove.isEmpty();
+        boolean retainGiven = toRetain != null && !toRetain.isEmpty();
+        if (nodeGroupCount >= current.size()) {
+            if (removeGiven || retainGiven) {
+                throw new AwsException("InvalidParameterCombination",
+                        "NodeGroupsToRemove and NodeGroupsToRetain apply only when NodeGroupCount is "
+                                + "less than the current number of node groups.", 400);
+            }
+            return List.of();
+        }
+        if (removeGiven && retainGiven) {
+            throw new AwsException("InvalidParameterCombination",
+                    "Only one of NodeGroupsToRemove or NodeGroupsToRetain can be specified.", 400);
+        }
+        if (!removeGiven && !retainGiven) {
+            throw new AwsException("InvalidParameterValue",
+                    "Either NodeGroupsToRemove or NodeGroupsToRetain is required when NodeGroupCount "
+                            + "is less than the current number of node groups.", 400);
+        }
+        List<String> named = removeGiven ? toRemove : toRetain;
+        for (String id : named) {
+            if (!current.contains(id)) {
+                throw new AwsException("InvalidParameterValue",
+                        "Node group " + id + " does not exist in replication group " + groupId + ".", 400);
+            }
+        }
+        List<String> removed = removeGiven
+                ? current.stream().filter(toRemove::contains).toList()
+                : current.stream().filter(id -> !toRetain.contains(id)).toList();
+        if (current.size() - removed.size() != nodeGroupCount) {
+            throw new AwsException("InvalidParameterValue",
+                    "NodeGroupCount " + nodeGroupCount + " does not match the " + current.size()
+                            + " current node groups less the " + removed.size() + " being removed.", 400);
+        }
+        return removed;
+    }
+
+    private void reshardClusterModeGroup(ReplicationGroup group, List<String> removedIds, int addedShards) {
+        String groupId = group.getReplicationGroupId();
+        String image = config.services().elasticache().defaultImage();
+        String endpointHost = resolveClusterAnnounceHost();
+        String announceIp = resolveAnnounceIp(endpointHost);
+        List<ClusterNode> existing = group.getClusterNodes();
+        for (ClusterNode node : existing) {
+            if (node.getContainerHost() == null) {
+                throw new AwsException("InvalidReplicationGroupState",
+                        "Replication group " + groupId + " has no running node " + node.getMemberClusterId()
+                                + " to reshard.", 400);
+            }
+        }
+        List<String> currentIds = nodeGroupIds(group);
+        int nextId = currentIds.stream().mapToInt(Integer::parseInt).max().orElse(0) + 1;
+
+        List<ClusterNode> added = new ArrayList<>();
+        List<ElastiCacheContainerHandle> addedHandles = new ArrayList<>();
+        List<String> startedProxyKeys = new ArrayList<>();
+        String inFlightMemberId = null;
+        Map<String, String> desiredSlots = new LinkedHashMap<>();
+        try {
+            for (int shard = 0; shard < addedShards; shard++) {
+                String nodeGroupId = String.format("%04d", nextId + shard);
+                for (int member = 0; member <= group.getReplicasPerNodeGroup(); member++) {
+                    String memberId = groupId + "-" + nodeGroupId + "-" + String.format("%03d", member + 1);
+                    added.add(new ClusterNode(memberId, nodeGroupId, member == 0, allocateProxyPort(), null));
+                }
+            }
+            for (ClusterNode node : added) {
+                inFlightMemberId = node.getMemberClusterId();
+                ElastiCacheContainerHandle handle = containerManager.start(node.getMemberClusterId(), image,
+                        clusterNodeFlags(endpointHost, announceIp, node.getProxyPort()));
+                inFlightMemberId = null;
+                addedHandles.add(handle);
+                attachContainer(node, handle);
+            }
+            // Proxies first, so the reshard is the last step that can fail: once slots have moved
+            // to the added nodes, rolling those nodes back would take the slots with them.
+            for (ClusterNode node : added) {
+                proxyManager.startProxy(node.getMemberClusterId(), group.getAuthMode(), node.getProxyPort(),
+                        node.getContainerHost(), node.getContainerPort(),
+                        (username, password) -> validatePassword(groupId, username, password));
+                startedProxyKeys.add(node.getMemberClusterId());
+            }
+
+            List<String> finalIds = new ArrayList<>(currentIds);
+            finalIds.removeAll(removedIds);
+            added.stream().map(ClusterNode::getNodeGroupId).distinct().forEach(finalIds::add);
+            for (int i = 0; i < finalIds.size(); i++) {
+                int[] range = ValkeyClusterFormation.slotRange(i, finalIds.size());
+                desiredSlots.put(finalIds.get(i), range[0] + "-" + range[1]);
+            }
+            Map<String, String> currentSlots = new LinkedHashMap<>();
+            List<ValkeyClusterFormation.ShardMember> members = new ArrayList<>();
+            for (ClusterNode node : existing) {
+                if (node.isPrimary()) {
+                    currentSlots.put(node.getNodeGroupId(), node.getSlots());
+                }
+                members.add(new ValkeyClusterFormation.ShardMember(node.getContainerHost(),
+                        node.getContainerPort(), networkIpOf(node), node.getNodeGroupId(),
+                        node.isPrimary(), false, removedIds.contains(node.getNodeGroupId())));
+            }
+            for (ClusterNode node : added) {
+                members.add(new ValkeyClusterFormation.ShardMember(node.getContainerHost(),
+                        node.getContainerPort(), node.getNetworkIp(), node.getNodeGroupId(),
+                        node.isPrimary(), true, false));
+            }
+            clusterFormation.reshard(groupId, members, currentSlots, desiredSlots);
+        } catch (RuntimeException e) {
+            LOG.warnv("Resharding replication group {0} failed, rolling back the added nodes: {1}",
+                    groupId, e.getMessage());
+            rollbackClusterModeGroup(groupId, startedProxyKeys, addedHandles, inFlightMemberId,
+                    added.stream().map(ClusterNode::getProxyPort).toList());
+            throw e;
+        }
+
+        List<ClusterNode> remaining = new ArrayList<>();
+        for (ClusterNode node : existing) {
+            if (removedIds.contains(node.getNodeGroupId())) {
+                stopClusterNode(node);
+            } else {
+                remaining.add(node);
+            }
+        }
+        remaining.addAll(added);
+        for (ClusterNode node : remaining) {
+            node.setSlots(desiredSlots.get(node.getNodeGroupId()));
+        }
+        group.setClusterNodes(remaining);
+        group.setNumNodeGroups(desiredSlots.size());
+        group.setNumCacheClusters(remaining.size());
+        group.setProxyPort(remaining.getFirst().getProxyPort());
+        String address = group.getConfigurationEndpoint() != null
+                ? group.getConfigurationEndpoint().address() : endpointHost;
+        group.setConfigurationEndpoint(new Endpoint(address, remaining.getFirst().getProxyPort()));
+        LOG.infov("Resharded replication group {0}: {1} node group(s), {2} added, {3} removed",
+                groupId, String.valueOf(desiredSlots.size()), String.valueOf(addedShards),
+                String.valueOf(removedIds.size()));
+    }
+
+    private static String networkIpOf(ClusterNode node) {
+        return node.getNetworkIp() != null ? node.getNetworkIp() : node.getContainerHost();
     }
 
     /**
@@ -1255,12 +1483,14 @@ public class ElastiCacheService implements ResourceProvider {
      * of the replication group accepts connections"), so a caller that pins one and reads back a
      * different value sees permanent drift: Terraform treats the port as replacement-forcing.
      *
-     * <p>An explicit port is therefore either honored or refused, never quietly changed.
-     * Substituting one reproduces the very drift honoring it was meant to remove, and the
-     * substitution could only ever hit a caller who did ask for a port: one who does not care
-     * passes null and never reaches that branch. Floci multiplexes every group's proxy onto one
-     * host, so two groups genuinely cannot share a port, and a caller who pinned an unavailable
-     * one needs to know rather than discover it as drift later.
+     * <p>This path serves groups whose endpoint is the proxy itself: Floci on the host, and
+     * cluster-mode groups, which announce proxy ports. An explicit port is therefore either
+     * honored or refused, never quietly changed. Substituting one reproduces the very drift
+     * honoring it was meant to remove, and the substitution could only ever hit a caller who did
+     * ask for a port: one who does not care passes null and never reaches that branch. Those
+     * proxies share one host, so two of them genuinely cannot share a port, and a caller who
+     * pinned an unavailable one needs to know rather than discover it as drift later. Groups
+     * served by their own container use {@link #allocateProxyPortPreferring} instead.
      *
      * <p>Only an unpinned create falls back through the range below.
      * {@code NeptuneService.allocateProxyPort} still substitutes on this path and carries the
@@ -1298,6 +1528,20 @@ public class ElastiCacheService implements ResourceProvider {
         LOG.warnv("ElastiCache proxy port range {0}-{1} exhausted; returning InsufficientCacheClusterCapacity", base, max);
         throw new AwsException("InsufficientCacheClusterCapacity",
                 "The requested cache node type is not available in the specified Availability Zone.", 400);
+    }
+
+    /**
+     * A host-proxy port for a group whose endpoint is its own container: the group's Port when
+     * that is free and in the proxy range, so host access keeps the familiar port, otherwise any
+     * free port. The group's Port does not depend on which one the proxy gets.
+     */
+    private int allocateProxyPortPreferring(int preferred) {
+        int base = config.services().elasticache().proxyBasePort();
+        int max = config.services().elasticache().proxyMaxPort();
+        if (preferred >= base && preferred <= max && usedPorts.add(preferred)) {
+            return preferred;
+        }
+        return allocateProxyPort(null);
     }
 
     public void releaseProxyPort(int port) {

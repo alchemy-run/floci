@@ -28,11 +28,7 @@ public class AmazonMqController {
     /** {@link AmazonMqRouteFilter} rewrites mq-signed {@code /v1/configurations} requests here. */
     private static final String CONFIGURATIONS = AmazonMqRouteFilter.INTERNAL_PREFIX + "/v1/configurations";
 
-    /**
-     * Engine versions DescribeBrokerEngineTypes reports, mirroring the AWS catalog. Only
-     * RabbitMQ brokers are provisioned; ActiveMQ is listed because configurations for it
-     * are real control-plane documents here.
-     */
+    /** Engine versions DescribeBrokerEngineTypes reports, mirroring the AWS catalog. */
     private static final Map<String, List<String>> ENGINE_VERSIONS = engineVersions();
 
     private final AmazonMqService service;
@@ -47,10 +43,12 @@ public class AmazonMqController {
     @POST
     @Path("/v1/brokers")
     public Response createBroker(Map<String, Object> request) {
+        String configurationId = null;
+        Integer configurationRevision = null;
         if (request.get("configuration") instanceof Map<?, ?> reference) {
-            configurations.validateBrokerReference(
-                    reference.get("id") == null ? null : String.valueOf(reference.get("id")),
-                    integer(reference.get("revision")),
+            configurationId = reference.get("id") == null ? null : String.valueOf(reference.get("id"));
+            configurationRevision = integer(reference.get("revision"));
+            configurations.validateBrokerReference(configurationId, configurationRevision,
                     str(request, "engineType"));
         }
         CreateBrokerParams params = new CreateBrokerParams(
@@ -62,7 +60,13 @@ public class AmazonMqController {
                 bool(request, "publiclyAccessible"),
                 bool(request, "autoMinorVersionUpgrade"),
                 parseUsers(request.get("users")),
-                tags(request.get("tags")));
+                tags(request.get("tags")),
+                configurationId,
+                configurationRevision,
+                str(request, "authenticationStrategy"),
+                objectMap(request.get("maintenanceWindowStartTime")),
+                objectMap(request.get("logs")),
+                strList(request.get("securityGroups")));
         Broker broker = service.createBroker(params);
         return Response.ok(Map.of(
                 "brokerArn", broker.getBrokerArn(),
@@ -121,6 +125,11 @@ public class AmazonMqController {
         putIfPresent(body, "maintenanceWindowStartTime", b.getMaintenanceWindowStartTime());
         putIfPresent(body, "logs", b.getLogs());
         putIfPresent(body, "securityGroups", b.getSecurityGroups());
+        // ActiveMQ brokers list their users (with any staged change); AWS omits them for
+        // RabbitMQ, whose users are managed in the RabbitMQ console.
+        if (AmazonMqService.ENGINE_ACTIVEMQ.equals(b.getEngineType())) {
+            body.put("users", b.getUsers().stream().map(AmazonMqController::userSummary).toList());
+        }
         if (b.getConfigurationId() != null || b.getPendingConfigurationId() != null) {
             Map<String, Object> configurations = new LinkedHashMap<>();
             if (b.getConfigurationId() != null) {
@@ -217,11 +226,12 @@ public class AmazonMqController {
     public Response createUser(@PathParam("broker-id") String brokerId,
                                @PathParam("username") String username,
                                Map<String, Object> request) {
+        Map<String, Object> safeRequest = request != null ? request : Map.of();
         MqUser user = new MqUser(
                 username,
-                str(request, "password"),
-                bool(request, "consoleAccess"),
-                strList(request.get("groups")));
+                str(safeRequest, "password"),
+                bool(safeRequest, "consoleAccess"),
+                strList(safeRequest.get("groups")));
         service.createUser(brokerId, user);
         return Response.ok(Map.of()).build();
     }
@@ -234,30 +244,59 @@ public class AmazonMqController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("brokerId", brokerId);
         body.put("username", user.getUsername());
-        body.put("consoleAccess", user.isConsoleAccess());
-        body.put("groups", user.getGroups());
+        // A user only staged for creation has no applied settings yet; they live under pending.
+        if (!MqUser.CHANGE_CREATE.equals(user.getPendingChange())) {
+            body.put("consoleAccess", user.isConsoleAccess());
+            body.put("groups", user.getGroups() != null ? user.getGroups() : List.of());
+        }
+        if (user.getPendingChange() != null) {
+            Map<String, Object> pending = new LinkedHashMap<>();
+            putIfPresent(pending, "consoleAccess", user.getPendingConsoleAccess());
+            putIfPresent(pending, "groups", user.getPendingGroups());
+            pending.put("pendingChange", user.getPendingChange());
+            body.put("pending", pending);
+        }
+        body.put("replicationUser", false);
         return Response.ok(body).build();
     }
 
     @PUT
     @Path("/v1/brokers/{broker-id}/users/{username}")
     public Response updateUser(@PathParam("broker-id") String brokerId,
-                               @PathParam("username") String username) {
-        service.updateUser(brokerId, username);
+                               @PathParam("username") String username,
+                               Map<String, Object> request) {
+        Map<String, Object> safeRequest = request != null ? request : Map.of();
+        service.updateUser(brokerId, username,
+                str(safeRequest, "password"),
+                safeRequest.get("consoleAccess") instanceof Boolean flag ? flag : null,
+                strList(safeRequest.get("groups")));
         return Response.ok(Map.of()).build();
     }
 
     @GET
     @Path("/v1/brokers/{broker-id}/users")
-    public Response listUsers(@PathParam("broker-id") String brokerId) {
-        List<Map<String, Object>> users = new ArrayList<>();
-        for (MqUser u : service.listUsers(brokerId)) {
-            users.add(Map.of("username", u.getUsername()));
-        }
+    public Response listUsers(@PathParam("broker-id") String brokerId,
+                              @QueryParam("maxResults") String maxResultsParam,
+                              @QueryParam("nextToken") String nextToken) {
+        List<MqUser> all = service.listUsers(brokerId);
+        Integer maxResults = Pagination.parseMaxResults(maxResultsParam, "BadRequestException");
+        PaginatedResult<MqUser> page = Pagination.paginate(all, MqUser::getUsername, maxResults, nextToken,
+                100, "BadRequestException");
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("brokerId", brokerId);
-        body.put("users", users);
+        body.put("maxResults", maxResults != null ? maxResults : 100);
+        body.put("users", page.items().stream().map(AmazonMqController::userSummary).toList());
+        if (page.nextToken() != null) {
+            body.put("nextToken", page.nextToken());
+        }
         return Response.ok(body).build();
+    }
+
+    private static Map<String, Object> userSummary(MqUser user) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("username", user.getUsername());
+        putIfPresent(summary, "pendingChange", user.getPendingChange());
+        return summary;
     }
 
     @DELETE
@@ -297,7 +336,7 @@ public class AmazonMqController {
 
     private static Map<String, List<String>> engineVersions() {
         Map<String, List<String>> versions = new LinkedHashMap<>();
-        versions.put(AmazonMqConfigurationService.ENGINE_ACTIVEMQ, List.of("5.18", "5.17.6", "5.16.7", "5.15.16"));
+        versions.put(AmazonMqConfigurationService.ENGINE_ACTIVEMQ, AmazonMqService.ACTIVEMQ_ENGINE_VERSIONS);
         versions.put(AmazonMqConfigurationService.ENGINE_RABBITMQ, AmazonMqService.RABBITMQ_ENGINE_VERSIONS);
         return versions;
     }

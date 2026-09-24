@@ -43,6 +43,7 @@ public class S3Object {
     private Instant retainUntilDate;     // null if no retention
     private String legalHoldStatus;      // "ON" | "OFF" | null
     private String acl;
+    private Instant restoreExpiryDate;   // expiry of a completed RestoreObject copy, null if never restored
 
     // Internal-only per-write stamp (not an S3 versionId, and set even when bucket versioning is
     // off - see S3Service#getLatestObject). A fresh value is assigned every time this key is
@@ -157,6 +158,9 @@ public class S3Object {
 
     public String getAcl() { return acl; }
     public void setAcl(String acl) { this.acl = acl; }
+
+    public Instant getRestoreExpiryDate() { return restoreExpiryDate; }
+    public void setRestoreExpiryDate(Instant restoreExpiryDate) { this.restoreExpiryDate = restoreExpiryDate; }
 
     public String getDataGeneration() { return dataGeneration; }
     public void setDataGeneration(String dataGeneration) { this.dataGeneration = dataGeneration; }

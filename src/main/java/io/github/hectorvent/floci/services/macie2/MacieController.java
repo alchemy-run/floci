@@ -342,30 +342,26 @@ public class MacieController {
 
     @POST @Path("/jobs/list")
     public Response listClassificationJobs(@Context HttpHeaders headers, String body) {
-        JsonNode request = readTree(body);
-        if (request.has("filterCriteria") || request.has("sortCriteria")) {
-            return unsupported(headers, "classification job filtering and sorting");
-        }
-        return listResources(headers, "classification-job", "items", MacieService.limit(request),
-                optionalString(request, "nextToken"));
+        return Response.ok(macieService.listClassificationJobs(
+                region(headers), regionResolver.getAccountId(), readTree(body))).build();
     }
 
     @POST @Path("/jobs")
     public Response createClassificationJob(@Context HttpHeaders headers, String body) {
-        readTree(body);
-        return unsupported(headers, "classification execution: S3 reading and evaluation are not implemented");
+        return Response.ok(macieService.createClassificationJob(
+                region(headers), regionResolver.getAccountId(), readTree(body))).build();
     }
 
     @GET @Path("/_macie2/jobs/{id}")
     public Response describeClassificationJob(@Context HttpHeaders headers, @PathParam("id") String id) {
-        return getResource(headers, "classification-job", id);
+        return Response.ok(macieService.describeClassificationJob(
+                region(headers), regionResolver.getAccountId(), id)).build();
     }
 
     @PATCH @Path("/jobs/{id}")
     public Response updateClassificationJob(@Context HttpHeaders headers, @PathParam("id") String id, String body) {
-        readTree(body);
-        macieService.getResource(region(headers), regionResolver.getAccountId(), "classification-job", id);
-        return unsupported(headers, "classification execution");
+        macieService.updateClassificationJob(region(headers), regionResolver.getAccountId(), id, readTree(body));
+        return empty();
     }
 
     @GET @Path("/classification-export-configuration")

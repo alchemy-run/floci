@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
@@ -72,6 +74,13 @@ public class Cluster {
 
     public String getAclName() { return aclName; }
     public void setAclName(String aclName) { this.aclName = aclName; }
+
+    private List<String> securityGroupIds = new ArrayList<>();
+
+    public List<String> getSecurityGroupIds() { return securityGroupIds; }
+    public void setSecurityGroupIds(List<String> securityGroupIds) {
+        this.securityGroupIds = securityGroupIds != null ? new ArrayList<>(securityGroupIds) : new ArrayList<>();
+    }
 
     public boolean isTlsEnabled() { return tlsEnabled; }
     public void setTlsEnabled(boolean tlsEnabled) { this.tlsEnabled = tlsEnabled; }

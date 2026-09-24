@@ -399,6 +399,73 @@ class RedshiftContainerManagerTest {
         verify(dockerClient, org.mockito.Mockito.times(4)).execCreateCmd("cont-123");
     }
 
+    private ExecCreateCmd startClusterAndRecordExecs(java.util.List<String> commands, String stdout) {
+        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
+        ContainerInfo info = new ContainerInfo("cont-db", Map.of(5432, new EndpointInfo("localhost", 5432)));
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
+        manager.start(ACCOUNT_ID, "db-cluster", "admin", "pass");
+
+        ExecCreateCmd createCmd = mock(ExecCreateCmd.class, org.mockito.Mockito.RETURNS_SELF);
+        when(createCmd.withCmd(any(String[].class))).thenAnswer(invocation -> {
+            commands.add(String.join(" ", (String[]) invocation.getRawArguments()[0]));
+            return createCmd;
+        });
+        ExecCreateCmdResponse createResponse = mock(ExecCreateCmdResponse.class);
+        when(createResponse.getId()).thenReturn("exec-db");
+        when(createCmd.exec()).thenReturn(createResponse);
+        when(dockerClient.execCreateCmd("cont-db")).thenReturn(createCmd);
+
+        ExecStartCmd startCmd = mock(ExecStartCmd.class);
+        when(startCmd.exec(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            ResultCallback.Adapter<Frame> adapter = invocation.getArgument(0);
+            if (stdout != null) {
+                adapter.onNext(new Frame(StreamType.STDOUT, stdout.getBytes(StandardCharsets.UTF_8)));
+            }
+            adapter.onComplete();
+            return adapter;
+        });
+        when(dockerClient.execStartCmd("exec-db")).thenReturn(startCmd);
+        return createCmd;
+    }
+
+    @Test
+    void ensureDatabaseCreatesTheRequestedDatabase() {
+        java.util.List<String> commands = new java.util.ArrayList<>();
+        startClusterAndRecordExecs(commands, null);
+
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "analytics");
+
+        assertEquals(2, commands.size());
+        assertTrue(commands.get(0).contains("SELECT 1 FROM pg_database WHERE datname = 'analytics'"));
+        assertTrue(commands.get(1).endsWith("-c CREATE DATABASE \"analytics\""), commands.get(1));
+    }
+
+    @Test
+    void ensureDatabaseLeavesAnExistingDatabaseAlone() {
+        java.util.List<String> commands = new java.util.ArrayList<>();
+        startClusterAndRecordExecs(commands, "1\n");
+
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "analytics");
+
+        assertEquals(1, commands.size());
+    }
+
+    @Test
+    void ensureDatabaseSkipsTheBootstrapDatabaseAndRejectsUnsafeNames() {
+        java.util.List<String> commands = new java.util.ArrayList<>();
+        startClusterAndRecordExecs(commands, null);
+
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "dev");
+        manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", null);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                manager.ensureDatabase(ACCOUNT_ID, "db-cluster", "admin", "x\"; DROP DATABASE dev; --"));
+
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        assertTrue(commands.isEmpty());
+    }
+
     @Test
     void testAlterUserPasswordContainerNotFound() {
         AwsException ex = assertThrows(AwsException.class, () ->

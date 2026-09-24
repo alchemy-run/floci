@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -15,6 +16,7 @@ import jakarta.inject.Inject;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -43,6 +45,8 @@ public class NetworkFirewallService {
     private final StorageBackend<String, ObjectNode> firewallPolicies;
     private final StorageBackend<String, ObjectNode> firewalls;
     private final StorageBackend<String, ObjectNode> loggingConfigurations;
+    private final StorageBackend<String, ObjectNode> flowOperations;
+    private final StorageBackend<String, ObjectNode> analysisReports;
 
     @Inject
     public NetworkFirewallService(ObjectMapper objectMapper, StorageFactory storageFactory) {
@@ -54,6 +58,10 @@ public class NetworkFirewallService {
                 storageFactory.create("networkfirewall", "network-firewall-firewalls.json",
                         new TypeReference<Map<String, ObjectNode>>() {}),
                 storageFactory.create("networkfirewall", "network-firewall-logging.json",
+                        new TypeReference<Map<String, ObjectNode>>() {}),
+                storageFactory.create("networkfirewall", "network-firewall-flow-operations.json",
+                        new TypeReference<Map<String, ObjectNode>>() {}),
+                storageFactory.create("networkfirewall", "network-firewall-analysis-reports.json",
                         new TypeReference<Map<String, ObjectNode>>() {}));
     }
 
@@ -62,11 +70,24 @@ public class NetworkFirewallService {
                            StorageBackend<String, ObjectNode> firewallPolicies,
                            StorageBackend<String, ObjectNode> firewalls,
                            StorageBackend<String, ObjectNode> loggingConfigurations) {
+        this(objectMapper, ruleGroups, firewallPolicies, firewalls, loggingConfigurations,
+                new InMemoryStorage<>(), new InMemoryStorage<>());
+    }
+
+    NetworkFirewallService(ObjectMapper objectMapper,
+                           StorageBackend<String, ObjectNode> ruleGroups,
+                           StorageBackend<String, ObjectNode> firewallPolicies,
+                           StorageBackend<String, ObjectNode> firewalls,
+                           StorageBackend<String, ObjectNode> loggingConfigurations,
+                           StorageBackend<String, ObjectNode> flowOperations,
+                           StorageBackend<String, ObjectNode> analysisReports) {
         this.objectMapper = objectMapper;
         this.ruleGroups = ruleGroups;
         this.firewallPolicies = firewallPolicies;
         this.firewalls = firewalls;
         this.loggingConfigurations = loggingConfigurations;
+        this.flowOperations = flowOperations;
+        this.analysisReports = analysisReports;
     }
 
     // ---------------------------------------------------------------- rule groups
@@ -516,6 +537,12 @@ public class NetworkFirewallService {
         ObjectNode response = firewallResponse(existing, region);
         firewalls.delete(firewallArn);
         loggingConfigurations.delete(firewallArn);
+        flowOperations.scan(key -> true).stream()
+                .filter(operation -> firewallArn.equals(operation.path("FirewallArn").asText()))
+                .forEach(operation -> flowOperations.delete(operation.path("FlowOperationId").asText()));
+        analysisReports.scan(key -> true).stream()
+                .filter(report -> firewallArn.equals(report.path("FirewallArn").asText()))
+                .forEach(report -> analysisReports.delete(report.path("AnalysisReportId").asText()));
         return response;
     }
 
@@ -744,6 +771,315 @@ public class NetworkFirewallService {
 
     public ObjectNode findFirewall(String arn) {
         return firewalls.get(arn).map(ObjectNode::deepCopy).orElse(null);
+    }
+
+    // ---------------------------------------------------------------- flow operations
+
+    private static final int MAX_FLOW_FILTERS = 20;
+    private static final Set<String> FLOW_OPERATION_TYPES = Set.of("FLOW_CAPTURE", "FLOW_FLUSH");
+    private static final Set<String> ANALYSIS_TYPES = Set.of("TLS_SNI", "HTTP_HOST");
+
+    public ObjectNode startFlowCapture(JsonNode request, String region) {
+        return startFlowOperation(request, region, "FLOW_CAPTURE");
+    }
+
+    public ObjectNode startFlowFlush(JsonNode request, String region) {
+        return startFlowOperation(request, region, "FLOW_FLUSH");
+    }
+
+    /**
+     * Floci has no data plane behind a firewall endpoint, so its flow table is always empty: a
+     * capture or flush runs against the real firewall record, finds no tracked flows, and
+     * completes with an empty result set. The start response reports IN_PROGRESS as AWS does;
+     * the stored operation has already settled to COMPLETED.
+     */
+    private synchronized ObjectNode startFlowOperation(JsonNode request, String region, String type) {
+        requireObject(request);
+        ObjectNode firewall = requireFirewallByArn(request);
+        ObjectNode scope = flowOperationScope(firewall, request, region);
+        ArrayNode filters = validatedFlowFilters(request.get("FlowFilters"));
+        JsonNode minimumAge = request.get("MinimumFlowAgeInSeconds");
+        if (minimumAge != null && !minimumAge.isNull() && (!minimumAge.canConvertToInt() || minimumAge.asInt() < 0)) {
+            throw new AwsException("InvalidRequestException",
+                    "MinimumFlowAgeInSeconds must be a non-negative integer.", 400);
+        }
+
+        String firewallArn = firewall.path("FirewallArn").asText();
+        String flowOperationId = UUID.randomUUID().toString();
+        ObjectNode operation = objectMapper.createObjectNode();
+        operation.put("FirewallArn", firewallArn);
+        operation.setAll(scope);
+        operation.put("FlowOperationId", flowOperationId);
+        operation.put("FlowOperationType", type);
+        operation.put("FlowOperationStatus", "COMPLETED");
+        operation.put("FlowRequestTimestamp", nowEpochSeconds());
+        ObjectNode definition = operation.putObject("FlowOperation");
+        if (minimumAge != null && !minimumAge.isNull()) {
+            definition.put("MinimumFlowAgeInSeconds", minimumAge.asInt());
+        }
+        definition.set("FlowFilters", filters);
+        operation.putArray("Flows");
+        flowOperations.put(flowOperationId, operation);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("FirewallArn", firewallArn);
+        response.put("FlowOperationId", flowOperationId);
+        response.put("FlowOperationStatus", "IN_PROGRESS");
+        return response;
+    }
+
+    public ObjectNode describeFlowOperation(JsonNode request) {
+        requireObject(request);
+        ObjectNode operation = requireFlowOperation(request);
+        ObjectNode response = objectMapper.createObjectNode();
+        for (String field : List.of("FirewallArn", "AvailabilityZone", "VpcEndpointAssociationArn",
+                "VpcEndpointId", "FlowOperationId", "FlowOperationType", "FlowOperationStatus",
+                "StatusMessage", "FlowRequestTimestamp", "FlowOperation")) {
+            copyIfPresent(operation, response, field);
+        }
+        return response;
+    }
+
+    public ObjectNode listFlowOperations(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = requireFirewallByArn(request);
+        String firewallArn = firewall.path("FirewallArn").asText();
+        String type = textOrNull(request, "FlowOperationType");
+        if (type != null) {
+            requireEnum(type, FLOW_OPERATION_TYPES, "FlowOperationType");
+        }
+        String availabilityZone = textOrNull(request, "AvailabilityZone");
+        String vpcEndpointId = textOrNull(request, "VpcEndpointId");
+        String vpcEndpointAssociationArn = textOrNull(request, "VpcEndpointAssociationArn");
+        List<ObjectNode> items = new ArrayList<>();
+        flowOperations.scan(key -> true).stream()
+                .filter(operation -> firewallArn.equals(operation.path("FirewallArn").asText()))
+                .filter(operation -> type == null || type.equals(operation.path("FlowOperationType").asText()))
+                .filter(operation -> availabilityZone == null
+                        || availabilityZone.equals(operation.path("AvailabilityZone").asText(null)))
+                .filter(operation -> vpcEndpointId == null
+                        || vpcEndpointId.equals(operation.path("VpcEndpointId").asText(null)))
+                .filter(operation -> vpcEndpointAssociationArn == null
+                        || vpcEndpointAssociationArn.equals(operation.path("VpcEndpointAssociationArn").asText(null)))
+                .sorted(Comparator.comparingLong((ObjectNode operation) ->
+                                operation.path("FlowRequestTimestamp").asLong()).reversed()
+                        .thenComparing(operation -> operation.path("FlowOperationId").asText()))
+                .forEach(operation -> {
+                    ObjectNode metadata = objectMapper.createObjectNode();
+                    metadata.put("FlowOperationId", operation.path("FlowOperationId").asText());
+                    metadata.put("FlowOperationType", operation.path("FlowOperationType").asText());
+                    metadata.set("FlowRequestTimestamp", operation.path("FlowRequestTimestamp").deepCopy());
+                    metadata.put("FlowOperationStatus", operation.path("FlowOperationStatus").asText());
+                    items.add(metadata);
+                });
+        return paginate(items, request, "FlowOperations");
+    }
+
+    public ObjectNode listFlowOperationResults(JsonNode request) {
+        requireObject(request);
+        ObjectNode operation = requireFlowOperation(request);
+        List<ObjectNode> flows = new ArrayList<>();
+        operation.path("Flows").forEach(flow -> flows.add((ObjectNode) flow));
+        ObjectNode response = paginate(flows, request, "Flows");
+        for (String field : List.of("FirewallArn", "AvailabilityZone", "VpcEndpointAssociationArn",
+                "VpcEndpointId", "FlowOperationId", "FlowOperationStatus", "StatusMessage",
+                "FlowRequestTimestamp")) {
+            copyIfPresent(operation, response, field);
+        }
+        return response;
+    }
+
+    private ObjectNode requireFirewallByArn(JsonNode request) {
+        String firewallArn = requiredText(request, "FirewallArn");
+        ObjectNode firewall = firewalls.get(firewallArn).orElse(null);
+        if (firewall == null) {
+            throw notFound("Firewall", firewallArn);
+        }
+        return firewall;
+    }
+
+    private ObjectNode requireFlowOperation(JsonNode request) {
+        ObjectNode firewall = requireFirewallByArn(request);
+        String flowOperationId = requiredText(request, "FlowOperationId");
+        ObjectNode operation = flowOperations.get(flowOperationId).orElse(null);
+        if (operation == null
+                || !firewall.path("FirewallArn").asText().equals(operation.path("FirewallArn").asText())) {
+            throw notFound("Flow operation", flowOperationId);
+        }
+        return operation;
+    }
+
+    /**
+     * A flow operation is scoped to one firewall endpoint, named by Availability Zone or by VPC
+     * endpoint. Either must be one the firewall actually has. Floci models no VPC endpoint
+     * associations, so an association ARN can never resolve.
+     */
+    private ObjectNode flowOperationScope(ObjectNode firewall, JsonNode request, String region) {
+        String availabilityZone = textOrNull(request, "AvailabilityZone");
+        String vpcEndpointId = textOrNull(request, "VpcEndpointId");
+        String vpcEndpointAssociationArn = textOrNull(request, "VpcEndpointAssociationArn");
+        if (vpcEndpointAssociationArn != null) {
+            throw notFound("VpcEndpointAssociation", vpcEndpointAssociationArn);
+        }
+        JsonNode syncStates = firewallResponse(firewall, region).path("FirewallStatus").path("SyncStates");
+        ObjectNode scope = objectMapper.createObjectNode();
+        if (availabilityZone != null) {
+            if (!syncStates.has(availabilityZone)) {
+                throw new AwsException("InvalidRequestException",
+                        "The firewall has no endpoint in Availability Zone " + availabilityZone + ".", 400);
+            }
+            scope.put("AvailabilityZone", availabilityZone);
+        }
+        if (vpcEndpointId != null) {
+            boolean known = false;
+            for (JsonNode state : syncStates) {
+                if (vpcEndpointId.equals(state.path("Attachment").path("EndpointId").asText(null))) {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known) {
+                throw new AwsException("InvalidRequestException",
+                        "The firewall has no VPC endpoint " + vpcEndpointId + ".", 400);
+            }
+            scope.put("VpcEndpointId", vpcEndpointId);
+        }
+        return scope;
+    }
+
+    private ArrayNode validatedFlowFilters(JsonNode filters) {
+        if (filters == null || !filters.isArray() || filters.isEmpty()) {
+            throw new AwsException("InvalidRequestException", "FlowFilters is required.", 400);
+        }
+        if (filters.size() > MAX_FLOW_FILTERS) {
+            throw new AwsException("InvalidRequestException",
+                    "FlowFilters can contain at most " + MAX_FLOW_FILTERS + " filters.", 400);
+        }
+        for (JsonNode filter : filters) {
+            if (!filter.isObject()) {
+                throw new AwsException("InvalidRequestException", "Each FlowFilter must be an object.", 400);
+            }
+            for (String addressField : List.of("SourceAddress", "DestinationAddress")) {
+                JsonNode address = filter.get(addressField);
+                if (address != null && !address.isNull()) {
+                    String definition = textOrNull(address, "AddressDefinition");
+                    if (definition == null || !isCidr(definition)) {
+                        throw new AwsException("InvalidRequestException",
+                                addressField + ".AddressDefinition must be a CIDR block.", 400);
+                    }
+                }
+            }
+        }
+        return ((ArrayNode) filters).deepCopy();
+    }
+
+    static boolean isCidr(String value) {
+        int slash = value.indexOf('/');
+        if (slash <= 0 || slash == value.length() - 1) {
+            return false;
+        }
+        String address = value.substring(0, slash);
+        int prefix;
+        try {
+            prefix = Integer.parseInt(value.substring(slash + 1));
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        if (address.contains(":")) {
+            return prefix >= 0 && prefix <= 128 && address.matches("[0-9A-Fa-f:.]+");
+        }
+        String[] octets = address.split("\\.", -1);
+        if (octets.length != 4 || prefix < 0 || prefix > 32) {
+            return false;
+        }
+        for (String octet : octets) {
+            if (!octet.matches("\\d{1,3}") || Integer.parseInt(octet) > 255) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // ---------------------------------------------------------------- analysis reports
+
+    /**
+     * A report can only be generated for an analysis type enabled on the firewall through
+     * UpdateFirewallAnalysisSettings. Floci carries no traffic through a firewall, so a report
+     * completes immediately with no findings.
+     */
+    public synchronized ObjectNode startAnalysisReport(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
+                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
+        String analysisType = requiredText(request, "AnalysisType");
+        requireEnum(analysisType, ANALYSIS_TYPES, "AnalysisType");
+        if (!containsText(firewall.path("EnabledAnalysisTypes"), analysisType)) {
+            throw new AwsException("InvalidRequestException",
+                    "Analysis type " + analysisType + " is not enabled for firewall "
+                            + firewall.path("FirewallArn").asText() + ".", 400);
+        }
+        long now = nowEpochSeconds();
+        String reportId = UUID.randomUUID().toString();
+        ObjectNode report = objectMapper.createObjectNode();
+        report.put("AnalysisReportId", reportId);
+        report.put("FirewallArn", firewall.path("FirewallArn").asText());
+        report.put("AnalysisType", analysisType);
+        report.put("Status", "COMPLETED");
+        report.put("ReportTime", now);
+        report.put("StartTime", now - Duration.ofDays(30).toSeconds());
+        report.put("EndTime", now);
+        report.putArray("AnalysisReportResults");
+        analysisReports.put(reportId, report);
+        return objectMapper.createObjectNode().put("AnalysisReportId", reportId);
+    }
+
+    public ObjectNode listAnalysisReports(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
+                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
+        String firewallArn = firewall.path("FirewallArn").asText();
+        List<ObjectNode> items = new ArrayList<>();
+        analysisReports.scan(key -> true).stream()
+                .filter(report -> firewallArn.equals(report.path("FirewallArn").asText()))
+                .sorted(Comparator.comparingLong((ObjectNode report) -> report.path("ReportTime").asLong())
+                        .reversed()
+                        .thenComparing(report -> report.path("AnalysisReportId").asText()))
+                .forEach(report -> {
+                    ObjectNode summary = objectMapper.createObjectNode();
+                    for (String field : List.of("AnalysisReportId", "AnalysisType", "ReportTime", "Status")) {
+                        copyIfPresent(report, summary, field);
+                    }
+                    items.add(summary);
+                });
+        return paginate(items, request, "AnalysisReports");
+    }
+
+    public ObjectNode getAnalysisReportResults(JsonNode request) {
+        requireObject(request);
+        ObjectNode firewall = require(firewalls, textOrNull(request, "FirewallArn"),
+                textOrNull(request, "FirewallName"), "Firewall", "FirewallArn", "FirewallName");
+        String reportId = requiredText(request, "AnalysisReportId");
+        ObjectNode report = analysisReports.get(reportId).orElse(null);
+        if (report == null
+                || !firewall.path("FirewallArn").asText().equals(report.path("FirewallArn").asText())) {
+            throw notFound("Analysis report", reportId);
+        }
+        List<ObjectNode> results = new ArrayList<>();
+        report.path("AnalysisReportResults").forEach(result -> results.add((ObjectNode) result));
+        ObjectNode response = paginate(results, request, "AnalysisReportResults");
+        for (String field : List.of("Status", "StartTime", "EndTime", "ReportTime", "AnalysisType")) {
+            copyIfPresent(report, response, field);
+        }
+        return response;
+    }
+
+    private static boolean containsText(JsonNode array, String expected) {
+        for (JsonNode value : array) {
+            if (expected.equals(value.asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ------------------------------------------------- rule group / policy helpers

@@ -183,6 +183,37 @@ class RedpandaManagerTest {
     }
 
     @Test
+    void iamClusterGetsANamedSaslIamListenerAdvertisingItsBrokerHost() {
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+        when(portAllocator.allocate(9300, 9399)).thenReturn(54321);
+
+        ContainerInfo info = new ContainerInfo("container-iam", Map.of(
+                KAFKA_PORT, new EndpointInfo("localhost", 54321),
+                RedpandaManager.SASL_IAM_PORT, new EndpointInfo("localhost", 60001)));
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
+
+        MskCluster cluster = newCluster();
+        cluster.setIamBrokerHost("boot-abc12345.kafka-serverless.us-east-1.localhost.floci.io");
+        ArgumentCaptor<ContainerSpec> specCaptor = ArgumentCaptor.forClass(ContainerSpec.class);
+
+        manager.startContainer(cluster);
+
+        verify(lifecycleManager).createAndStart(specCaptor.capture());
+        ContainerSpec spec = specCaptor.getValue();
+        int listeners = spec.cmd().indexOf("--kafka-addr");
+        assertTrue(listeners >= 0, "cmd should declare named listeners");
+        assertEquals("internal://0.0.0.0:9092,sasl_iam://0.0.0.0:9098", spec.cmd().get(listeners + 1));
+        int advertised = spec.cmd().indexOf("--advertise-kafka-addr");
+        assertEquals("internal://localhost:54321,"
+                        + "sasl_iam://boot-abc12345.kafka-serverless.us-east-1.localhost.floci.io:9098",
+                spec.cmd().get(advertised + 1));
+        assertEquals(Integer.valueOf(0), spec.portBindings().get(RedpandaManager.SASL_IAM_PORT));
+
+        assertEquals("localhost:54321", cluster.getBootstrapBrokers());
+        assertEquals("localhost:60001", cluster.getIamBackendAddress());
+    }
+
+    @Test
     void containerModeAdvertisesContainerNameAddress() {
         when(containerDetector.isRunningInContainer()).thenReturn(true);
 

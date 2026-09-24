@@ -14,8 +14,19 @@ public class Snapshot {
     private String masterPassword;
     private String sqlDump;
     private int manualSnapshotRetentionPeriod = -1;
+    // Database captured in the dump. Null on snapshots persisted before it was recorded,
+    // which always captured the default "dev" database.
+    private String dbName;
 
     public Snapshot() {}
+
+    public String getDbName() {
+        return dbName;
+    }
+
+    public void setDbName(String dbName) {
+        this.dbName = dbName;
+    }
 
     public Snapshot(String snapshotIdentifier, String clusterIdentifier, String status, int port, String masterUsername) {
         this.snapshotIdentifier = snapshotIdentifier;

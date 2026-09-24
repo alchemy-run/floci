@@ -22,9 +22,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -95,7 +97,9 @@ class MemoryDbIntegrationTest {
                 .statusCode(200)
                 .body("Cluster.Name", equalTo(OPEN_CLUSTER))
                 .body("Cluster.Status", equalTo("available"))
-                .body("Cluster.ClusterEndpoint.Address", equalTo("localhost"))
+                .body("Cluster.TLSEnabled", equalTo(true))
+                .body("Cluster.ClusterEndpoint.Address", startsWith("clustercfg." + OPEN_CLUSTER + "."))
+                .body("Cluster.ClusterEndpoint.Address", containsString(".memorydb.us-east-1."))
                 .body("Cluster.ClusterEndpoint.Port", notNullValue())
             .extract()
                 .path("Cluster.ClusterEndpoint.Port");
@@ -155,14 +159,15 @@ class MemoryDbIntegrationTest {
                 .body("User.Name", equalTo(AUTH_USER))
                 .body("User.Authentication.Type", equalTo("password"));
 
-        // An ACL must include the built-in "default" user (DefaultUserRequired otherwise).
+        // A custom ACL lists only custom users: the built-in "default" user belongs to the
+        // open-access ACL alone.
         memorydb("CreateACL", "{"
                 + "\"ACLName\":\"" + AUTH_ACL + "\","
-                + "\"UserNames\":[\"default\",\"" + AUTH_USER + "\"]}")
+                + "\"UserNames\":[\"" + AUTH_USER + "\"]}")
             .then()
                 .statusCode(200)
                 .body("ACL.Name", equalTo(AUTH_ACL))
-                .body("ACL.UserNames", hasItems("default", AUTH_USER));
+                .body("ACL.UserNames", contains(AUTH_USER));
     }
 
     @Test
@@ -219,7 +224,7 @@ class MemoryDbIntegrationTest {
                 "{\"ClusterName\":\"" + OPEN_CLUSTER + "-reused\",\"ACLName\":\"open-access\"}")
             .then()
                 .statusCode(200)
-                .body("Cluster.ClusterEndpoint.Address", equalTo("localhost"))
+                .body("Cluster.ClusterEndpoint.Address", startsWith("clustercfg." + OPEN_CLUSTER + "-reused."))
             .extract()
                 .path("Cluster.ClusterEndpoint.Port");
 

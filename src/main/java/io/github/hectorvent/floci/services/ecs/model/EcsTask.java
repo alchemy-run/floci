@@ -32,6 +32,12 @@ public class EcsTask {
     private String startedBy;
     /** The owning service's deploymentId when this task was launched; null for RunTask/StartTask and legacy tasks. */
     private String deploymentId;
+    /**
+     * What the deployment circuit breaker has already counted this task as: {@code HEALTHY} once
+     * it reached a healthy RUNNING state, {@code FAILED} once it counted towards failedTasks.
+     * Null until the breaker has seen it. Keeps a task from being counted on every tick.
+     */
+    private String circuitBreakerOutcome;
     private String stoppedReason;
     private List<Container> containers;
     private String containerInstanceArn;
@@ -91,6 +97,7 @@ public class EcsTask {
         this.stoppedAt = other.stoppedAt;
         this.startedBy = other.startedBy;
         this.deploymentId = other.deploymentId;
+        this.circuitBreakerOutcome = other.circuitBreakerOutcome;
         this.stoppedReason = other.stoppedReason;
         this.containers = other.containers;
         this.containerInstanceArn = other.containerInstanceArn;
@@ -167,6 +174,11 @@ public class EcsTask {
 
     public String getDeploymentId() { return deploymentId; }
     public void setDeploymentId(String deploymentId) { this.deploymentId = deploymentId; }
+
+    public String getCircuitBreakerOutcome() { return circuitBreakerOutcome; }
+    public void setCircuitBreakerOutcome(String circuitBreakerOutcome) {
+        this.circuitBreakerOutcome = circuitBreakerOutcome;
+    }
 
     /** The awsvpc network configuration the task was launched with, or null. Carried through from
      *  the RunTask request (including the ecs:runTask Step Functions integration) so it survives the

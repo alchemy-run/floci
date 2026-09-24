@@ -25,6 +25,7 @@ import io.github.hectorvent.floci.services.glue.model.Job;
 import io.github.hectorvent.floci.services.glue.model.JobRun;
 import io.github.hectorvent.floci.services.glue.model.JobUpdate;
 import io.github.hectorvent.floci.services.glue.model.KeySchemaElement;
+import io.github.hectorvent.floci.services.glue.model.LastCrawlInfo;
 import io.github.hectorvent.floci.services.glue.model.Partition;
 import io.github.hectorvent.floci.services.glue.model.PartitionIndex;
 import io.github.hectorvent.floci.services.glue.model.PartitionIndexDescriptor;
@@ -56,6 +57,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -147,6 +149,9 @@ public class GlueService {
     // Glue's partition index states. FAILED also exists but is only reachable through a backfill
     // failure, which is not emulated.
     private static final String INDEX_STATUS_CREATING = "CREATING";
+    private static final String CRAWLER_READY = "READY";
+    private static final String CRAWLER_RUNNING = "RUNNING";
+    private static final String CRAWLER_STOPPING = "STOPPING";
     private static final String INDEX_STATUS_ACTIVE = "ACTIVE";
     private static final String INDEX_STATUS_DELETING = "DELETING";
 
@@ -172,13 +177,23 @@ public class GlueService {
     private final RegionResolver regionResolver;
     private final ResourceGroupsTaggingService resourceGroupsTaggingService;
     private final KmsService kmsService;
+    private final GlueCrawlerRunner crawlerRunner;
+
+    public GlueService(StorageFactory storageFactory,
+                       GlueSchemaRegistryService schemaRegistryService,
+                       RegionResolver regionResolver,
+                       ResourceGroupsTaggingService resourceGroupsTaggingService,
+                       KmsService kmsService) {
+        this(storageFactory, schemaRegistryService, regionResolver, resourceGroupsTaggingService, kmsService, null);
+    }
 
     @Inject
     public GlueService(StorageFactory storageFactory,
                        GlueSchemaRegistryService schemaRegistryService,
                        RegionResolver regionResolver,
                        ResourceGroupsTaggingService resourceGroupsTaggingService,
-                       KmsService kmsService) {
+                       KmsService kmsService,
+                       GlueCrawlerRunner crawlerRunner) {
         this.databaseStore = new GlueCatalogStorage<>(
                 storageFactory.create("glue", "databases.json", new TypeReference<>() {}), regionResolver);
         this.tableStore = new GlueCatalogStorage<>(
@@ -213,6 +228,7 @@ public class GlueService {
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
+        this.crawlerRunner = crawlerRunner;
     }
 
     GlueService(StorageBackend<String, Database> databaseStore,
@@ -234,6 +250,33 @@ public class GlueService {
                 RegionResolver regionResolver,
                 ResourceGroupsTaggingService resourceGroupsTaggingService,
                 KmsService kmsService) {
+        this(databaseStore, tableStore, tableVersionStore, columnStatisticsStore, partitionStore,
+                partitionIndexStore, partitionColumnStatisticsStore, functionStore, jobStore, crawlerStore,
+                classifierStore, connectionStore, resourcePolicyStore, encryptionSettingsStore,
+                securityConfigurationStore, schemaRegistryService, regionResolver, resourceGroupsTaggingService,
+                kmsService, null);
+    }
+
+    GlueService(StorageBackend<String, Database> databaseStore,
+                StorageBackend<String, Table> tableStore,
+                StorageBackend<String, Table> tableVersionStore,
+                StorageBackend<String, Map<String, Object>> columnStatisticsStore,
+                StorageBackend<String, Partition> partitionStore,
+                StorageBackend<String, PartitionIndexDescriptor> partitionIndexStore,
+                StorageBackend<String, Map<String, Object>> partitionColumnStatisticsStore,
+                StorageBackend<String, UserDefinedFunction> functionStore,
+                StorageBackend<String, Job> jobStore,
+                StorageBackend<String, Crawler> crawlerStore,
+                StorageBackend<String, Classifier> classifierStore,
+                StorageBackend<String, Connection> connectionStore,
+                StorageBackend<String, GluePolicy> resourcePolicyStore,
+                StorageBackend<String, DataCatalogEncryptionSettings> encryptionSettingsStore,
+                StorageBackend<String, SecurityConfiguration> securityConfigurationStore,
+                GlueSchemaRegistryService schemaRegistryService,
+                RegionResolver regionResolver,
+                ResourceGroupsTaggingService resourceGroupsTaggingService,
+                KmsService kmsService,
+                GlueCrawlerRunner crawlerRunner) {
         this.databaseStore = new GlueCatalogStorage<>(databaseStore, regionResolver);
         this.tableStore = new GlueCatalogStorage<>(tableStore, regionResolver);
         this.tableVersionStore = new GlueCatalogStorage<>(tableVersionStore, regionResolver);
@@ -256,6 +299,7 @@ public class GlueService {
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
+        this.crawlerRunner = crawlerRunner;
     }
 
     public SecurityConfiguration createSecurityConfiguration(String name, JsonNode encryptionConfiguration,
@@ -1388,23 +1432,109 @@ public class GlueService {
 
 
     public void startCrawler(String name) {
-        Crawler crawler = getCrawler(name);
-        if ("RUNNING".equals(crawler.getState())) {
-            throw new AwsException("CrawlerRunningException", "Crawler is already running: " + name, 400);
+        Objects.requireNonNull(crawlerRunner, "Glue crawler runner is not configured");
+        String accountId = regionResolver.getAccountId();
+        String region = regionResolver.getRegion();
+        synchronized (crawlerStore) {
+            Crawler crawler = getCrawler(name);
+            if (crawlerActive(crawler)) {
+                throw new AwsException("CrawlerRunningException", "Crawler is already running: " + name, 400);
+            }
+            crawler.setState(CRAWLER_RUNNING);
+            crawlerStore.put(name, crawler);
         }
-        crawler.setState("RUNNING");
-        crawler.setLastUpdated(Instant.now());
-        crawlerStore.put(name, crawler);
+        Instant startTime = Instant.now();
+        crawlerRunner.launch(accountId, region, () -> runCrawl(name, accountId, startTime));
     }
 
     public void stopCrawler(String name) {
-        Crawler crawler = getCrawler(name);
-        if (!"RUNNING".equals(crawler.getState())) {
-            throw new AwsException("CrawlerNotRunningException", "Crawler is not running: " + name, 400);
+        synchronized (crawlerStore) {
+            Crawler crawler = getCrawler(name);
+            if (CRAWLER_STOPPING.equals(crawler.getState())) {
+                throw new AwsException("CrawlerStoppingException", "Crawler is stopping: " + name, 400);
+            }
+            if (!CRAWLER_RUNNING.equals(crawler.getState())) {
+                throw new AwsException("CrawlerNotRunningException", "Crawler is not running: " + name, 400);
+            }
+            crawler.setState(CRAWLER_STOPPING);
+            crawlerStore.put(name, crawler);
         }
-        crawler.setState("READY");
-        crawler.setLastUpdated(Instant.now());
-        crawlerStore.put(name, crawler);
+    }
+
+    private static boolean crawlerActive(Crawler crawler) {
+        return CRAWLER_RUNNING.equals(crawler.getState()) || CRAWLER_STOPPING.equals(crawler.getState());
+    }
+
+    private boolean crawlStopRequested(String name) {
+        return crawlerStore.get(name).map(crawler -> !CRAWLER_RUNNING.equals(crawler.getState())).orElse(true);
+    }
+
+    void runCrawl(String name, String accountId, Instant startTime) {
+        try {
+            Crawler crawler = getCrawler(name);
+            if (crawlStopRequested(name)) {
+                finishCrawl(name, "CANCELLED", null, startTime);
+                return;
+            }
+            if (crawler.getDatabaseName() == null || crawler.getDatabaseName().isBlank()) {
+                throw new AwsException("InvalidInputException", "Crawler " + name + " has no DatabaseName.", 400);
+            }
+            getDatabase(crawler.getDatabaseName());
+            List<GlueCrawlerRunner.CrawledTable> tables =
+                    crawlerRunner.crawl(crawler, accountId, () -> crawlStopRequested(name));
+            if (crawlStopRequested(name)) {
+                finishCrawl(name, "CANCELLED", null, startTime);
+                return;
+            }
+            applyCrawl(crawler, tables);
+            finishCrawl(name, "SUCCEEDED", null, startTime);
+        } catch (AwsException e) {
+            finishCrawl(name, "FAILED", e.getMessage(), startTime);
+        } catch (RuntimeException e) {
+            LOG.warnv(e, "Glue crawler {0} failed", name);
+            finishCrawl(name, "FAILED", "Internal Service Exception", startTime);
+        }
+    }
+
+    private void applyCrawl(Crawler crawler, List<GlueCrawlerRunner.CrawledTable> tables) {
+        String databaseName = crawler.getDatabaseName();
+        boolean updateInDatabase = crawler.getSchemaChangePolicy() == null
+                || !"LOG".equals(crawler.getSchemaChangePolicy().getUpdateBehavior());
+        for (GlueCrawlerRunner.CrawledTable crawled : tables) {
+            Table table = crawled.table();
+            Optional<Table> existing = tableStore.get(tableKey(databaseName, table.getName()));
+            if (existing.isEmpty()) {
+                createTable(databaseName, table);
+            } else if (updateInDatabase) {
+                table.setDescription(existing.get().getDescription());
+                updateTable(databaseName, table, null, false);
+            } else {
+                continue;
+            }
+            if (!crawled.partitions().isEmpty()) {
+                batchCreatePartitions(databaseName, table.getName(), crawled.partitions());
+            }
+        }
+    }
+
+    private void finishCrawl(String name, String status, String errorMessage, Instant startTime) {
+        synchronized (crawlerStore) {
+            Optional<Crawler> stored = crawlerStore.get(name);
+            if (stored.isEmpty()) {
+                return;
+            }
+            Crawler crawler = stored.get();
+            LastCrawlInfo lastCrawl = new LastCrawlInfo();
+            lastCrawl.setStatus(status);
+            lastCrawl.setStartTime(startTime);
+            lastCrawl.setErrorMessage(errorMessage);
+            lastCrawl.setMessagePrefix(UUID.randomUUID().toString());
+            crawler.setLastCrawl(lastCrawl);
+            crawler.setCrawlElapsedTime(0L);
+            crawler.setState(CRAWLER_READY);
+            crawlerStore.put(name, crawler);
+        }
+        LOG.infov("Glue Crawler {0} finished: {1}", name, status);
     }
 
     public boolean handlesResourceArn(String resourceArn) {
@@ -2174,7 +2304,7 @@ public class GlueService {
         Crawler existing = crawlerStore.get(name)
                 .orElseThrow(() -> new AwsException("EntityNotFoundException", "Crawler " + update.getName() + " not found.", 400));
 
-        if ("RUNNING".equals(existing.getState())) {
+        if (crawlerActive(existing)) {
             throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
         }
         Crawler updated = new Crawler();
@@ -2182,6 +2312,8 @@ public class GlueService {
         updated.setCreationTime(existing.getCreationTime());
         updated.setLastUpdated(Instant.now());
         updated.setState(existing.getState());
+        updated.setLastCrawl(existing.getLastCrawl());
+        updated.setCrawlElapsedTime(existing.getCrawlElapsedTime());
         updated.setVersion((existing.getVersion() == null ? 1L : existing.getVersion()) + 1L);
 
         updated.setClassifiers(update.getClassifiers() != null ? update.getClassifiers() : existing.getClassifiers());
@@ -2209,7 +2341,7 @@ public class GlueService {
         if (crawlerStore.get(normalizedName).isEmpty()) {
             throw new AwsException("EntityNotFoundException", "Crawler " + name + " not found.", 400);
         }
-        if ("RUNNING".equals(getCrawler(name).getState())) {
+        if (crawlerActive(getCrawler(name))) {
             throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
         }
         crawlerStore.delete(normalizedName);

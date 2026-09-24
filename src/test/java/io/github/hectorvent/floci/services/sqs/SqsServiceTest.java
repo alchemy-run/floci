@@ -1221,6 +1221,106 @@ class SqsServiceTest {
         return "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":\"1\"}";
     }
 
+    @Test
+    void setQueueAttributes_redrivePolicyWithMissingDeadLetterTarget_throwsInvalidParameterValue() {
+        Queue source = sqsService.createQueue("missing-dlq-source", null, "us-east-1");
+        String policy = redrivePolicy(queueArn("missing-dlq-target"));
+
+        AwsException ex = assertThrows(AwsException.class, () -> sqsService.setQueueAttributes(
+                source.getQueueUrl(), Map.of("RedrivePolicy", policy, "VisibilityTimeout", "45"), "us-east-1"));
+
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
+        assertEquals("Value " + policy + " for parameter RedrivePolicy is invalid. "
+                + "Reason: Dead letter target does not exist.", ex.getMessage());
+        Map<String, String> attrs = sqsService.getQueueAttributes(source.getQueueUrl(), List.of("All"), "us-east-1");
+        assertFalse(attrs.containsKey("RedrivePolicy"));
+        assertEquals("30", attrs.get("VisibilityTimeout"), "a rejected request must not apply any attribute");
+    }
+
+    @Test
+    void createQueue_redrivePolicyWithMissingDeadLetterTarget_throwsAndCreatesNothing() {
+        AwsException ex = assertThrows(AwsException.class, () -> sqsService.createQueue("missing-dlq-create",
+                Map.of("RedrivePolicy", redrivePolicy(queueArn("never-created-dlq"))), "us-east-1"));
+
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("Dead letter target does not exist"));
+        assertTrue(sqsService.listQueues("missing-dlq-create", "us-east-1").isEmpty());
+    }
+
+    @Test
+    void redrivePolicy_deadLetterTargetInAnotherRegionOrAccount_doesNotExist() {
+        sqsService.createQueue("elsewhere-dlq", null, "eu-west-1");
+        Queue source = sqsService.createQueue("elsewhere-source", null, "us-east-1");
+
+        AwsException otherRegion = assertThrows(AwsException.class, () -> sqsService.setQueueAttributes(
+                source.getQueueUrl(),
+                Map.of("RedrivePolicy", redrivePolicy("arn:aws:sqs:eu-west-1:000000000000:elsewhere-dlq")),
+                "us-east-1"));
+        assertEquals("InvalidParameterValue", otherRegion.getErrorCode());
+
+        sqsService.createQueue("elsewhere-dlq", null, "us-east-1");
+        AwsException otherAccount = assertThrows(AwsException.class, () -> sqsService.setQueueAttributes(
+                source.getQueueUrl(),
+                Map.of("RedrivePolicy", redrivePolicy("arn:aws:sqs:us-east-1:111111111111:elsewhere-dlq")),
+                "us-east-1"));
+        assertEquals("InvalidParameterValue", otherAccount.getErrorCode());
+    }
+
+    @Test
+    void redrivePolicy_existingDeadLetterTargetIsAcceptedOnCreateAndSet() {
+        sqsService.createQueue("fifo-dlq.fifo", Map.of("FifoQueue", "true"), "us-east-1");
+        Queue fifoSource = sqsService.createQueue("fifo-source.fifo",
+                Map.of("FifoQueue", "true", "RedrivePolicy", redrivePolicy(queueArn("fifo-dlq.fifo"))), "us-east-1");
+        assertNotNull(fifoSource.getAttributes().get("RedrivePolicy"));
+
+        sqsService.createQueue("std-dlq", null, "us-east-1");
+        Queue source = sqsService.createQueue("std-source", null, "us-east-1");
+        sqsService.setQueueAttributes(source.getQueueUrl(),
+                Map.of("RedrivePolicy", redrivePolicy(queueArn("std-dlq"))), "us-east-1");
+        assertEquals(redrivePolicy(queueArn("std-dlq")), sqsService.getQueueAttributes(
+                source.getQueueUrl(), List.of("RedrivePolicy"), "us-east-1").get("RedrivePolicy"));
+
+        sqsService.setQueueAttributes(source.getQueueUrl(), Map.of("RedrivePolicy", ""), "us-east-1");
+        assertFalse(sqsService.getQueueAttributes(source.getQueueUrl(), List.of("All"), "us-east-1")
+                .containsKey("RedrivePolicy"));
+    }
+
+    @Test
+    void redrivePolicy_deletingTheDeadLetterQueueLeavesTheSourceQueueUsable() {
+        Queue dlq = sqsService.createQueue("deleted-dlq", null, "us-east-1");
+        Queue source = sqsService.createQueue("deleted-dlq-source",
+                Map.of("RedrivePolicy", redrivePolicy(queueArn("deleted-dlq"))), "us-east-1");
+        sqsService.deleteQueue(dlq.getQueueUrl(), "us-east-1");
+
+        sqsService.setQueueAttributes(source.getQueueUrl(), Map.of("VisibilityTimeout", "40"), "us-east-1");
+        sqsService.sendMessage(source.getQueueUrl(), "still-works", 0, "us-east-1");
+        List<Message> received = sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1");
+        assertEquals(List.of("still-works"), bodies(received));
+        Map<String, String> attrs = sqsService.getQueueAttributes(source.getQueueUrl(), List.of("All"), "us-east-1");
+        assertEquals("40", attrs.get("VisibilityTimeout"));
+        assertEquals(redrivePolicy(queueArn("deleted-dlq")), attrs.get("RedrivePolicy"));
+    }
+
+    @Test
+    void redrivePolicy_changingTheDeadLetterTargetRoutesToTheNewQueue() {
+        Queue first = sqsService.createQueue("first-dlq", null, "us-east-1");
+        Queue second = sqsService.createQueue("second-dlq", null, "us-east-1");
+        Queue source = sqsService.createQueue("retarget-source",
+                Map.of("RedrivePolicy", redrivePolicy(queueArn("first-dlq"))), "us-east-1");
+        // Receiving once parses and caches the first policy.
+        assertTrue(sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1").isEmpty());
+
+        sqsService.setQueueAttributes(source.getQueueUrl(),
+                Map.of("RedrivePolicy", redrivePolicy(queueArn("second-dlq"))), "us-east-1");
+        sqsService.sendMessage(source.getQueueUrl(), "poison", 0, "us-east-1");
+        assertEquals(1, sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1").size());
+        assertEquals(0, sqsService.receiveMessage(source.getQueueUrl(), 1, 0, 0, "us-east-1").size());
+
+        assertEquals(List.of(), bodies(sqsService.peekMessages(first.getQueueUrl(), "us-east-1")));
+        assertEquals(List.of("poison"), bodies(sqsService.peekMessages(second.getQueueUrl(), "us-east-1")));
+    }
+
     private static List<String> bodies(List<Message> messages) {
         return messages.stream().map(Message::getBody).toList();
     }

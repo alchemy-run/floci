@@ -36,6 +36,7 @@ public class EventSourceMapping {
     private Map<String, String> tags = new HashMap<>();
     private FilterCriteria filterCriteria;
     private Map<String, Object> selfManagedEventSource;
+    private Map<String, Object> amazonManagedKafkaEventSourceConfig;
     private List<String> topics = new ArrayList<>();
     private List<Map<String, Object>> sourceAccessConfigurations = new ArrayList<>();
 
@@ -166,6 +167,14 @@ public class EventSourceMapping {
 
     public void setSelfManagedEventSource(Map<String, Object> selfManagedEventSource) {
         this.selfManagedEventSource = selfManagedEventSource;
+    }
+
+    public Map<String, Object> getAmazonManagedKafkaEventSourceConfig() {
+        return amazonManagedKafkaEventSourceConfig;
+    }
+
+    public void setAmazonManagedKafkaEventSourceConfig(Map<String, Object> amazonManagedKafkaEventSourceConfig) {
+        this.amazonManagedKafkaEventSourceConfig = amazonManagedKafkaEventSourceConfig;
     }
 
     public List<String> getTopics() {

@@ -681,6 +681,92 @@ class CloudHsmV2IntegrationTest {
             .body("HsmId", equalTo(hsmId));
     }
 
+    @Test
+    @Order(45)
+    void createHsmInUninitializedClusterThenInitializeActivates() {
+        String clusterId = given()
+            .header("X-Amz-Target", TARGET_PREFIX + "CreateCluster")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "HsmType": "hsm2m.medium",
+                    "SubnetIds": ["%s"]
+                }
+                """.formatted(subnetId()))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Cluster.State", equalTo("UNINITIALIZED"))
+            .extract().jsonPath().getString("Cluster.ClusterId");
+
+        String hsmId = given()
+            .header("X-Amz-Target", TARGET_PREFIX + "CreateHsm")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "ClusterId": "%s",
+                    "AvailabilityZone": "us-east-1a"
+                }
+                """.formatted(clusterId))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Hsm.ClusterId", equalTo(clusterId))
+            .body("Hsm.State", equalTo("ACTIVE"))
+            .extract().jsonPath().getString("Hsm.HsmId");
+
+        String csr = given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DescribeClusters")
+            .contentType(CONTENT_TYPE)
+            .body("{\"Filters\":{\"clusterIds\":[\"" + clusterId + "\"]}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Clusters[0].State", equalTo("UNINITIALIZED"))
+            .body("Clusters[0].Hsms.size()", equalTo(1))
+            .body("Clusters[0].Hsms[0].HsmId", equalTo(hsmId))
+            .extract().jsonPath().getString("Clusters[0].Certificates.ClusterCsr");
+
+        String[] certs;
+        try { certs = generateCerts(csr); } catch (Exception e) { throw new RuntimeException(e); }
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "InitializeCluster")
+            .contentType(CONTENT_TYPE)
+            .body("""
+                {
+                    "ClusterId": "%s",
+                    "SignedCert": %s,
+                    "TrustAnchor": %s
+                }
+                """.formatted(clusterId, jsonString(certs[0]), jsonString(certs[1])))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("State", equalTo("ACTIVE"));
+
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DeleteHsm")
+            .contentType(CONTENT_TYPE)
+            .body("{\"ClusterId\":\"" + clusterId + "\",\"HsmId\":\"" + hsmId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", TARGET_PREFIX + "DeleteCluster")
+            .contentType(CONTENT_TYPE)
+            .body("{\"ClusterId\":\"" + clusterId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
     // ──────────────────────────── Error Responses ────────────────────────────
 
     @Test

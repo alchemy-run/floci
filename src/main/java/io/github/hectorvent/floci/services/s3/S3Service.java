@@ -46,6 +46,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -63,6 +64,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -85,6 +87,8 @@ public class S3Service implements Resettable, ResourceProvider {
     private static final String AUTHENTICATED_USERS_GROUP_URI = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers";
     private static final String LOG_DELIVERY_GROUP_URI = "http://acs.amazonaws.com/groups/s3/LogDelivery";
     private static final String LEGACY_ACCESS_KEY_ID = "test";
+    // The version id S3 reports for an object written while versioning was never enabled or suspended.
+    static final String NULL_VERSION_ID = "null";
     private static final Set<String> SUPPORTED_SERVER_SIDE_ENCRYPTION_VALUES = Set.of("AES256", "aws:kms", "aws:kms:dsse", "aws:fsx");
     private static final String SSE_C_ALGORITHM = "AES256";
     private static final int SSE_C_KEY_BYTES = 32;
@@ -119,6 +123,8 @@ public class S3Service implements Resettable, ResourceProvider {
     // backend serializes its whole map into a single document on each flush, so payloads
     // (up to 1 MiB each, up to 1,000 per object version) must not be inline.
     private final ConcurrentHashMap<String, byte[]> memoryAnnotationStore = new ConcurrentHashMap<>();
+    // Seeded from the clock so sequencers keep increasing across emulator restarts.
+    private final AtomicLong eventSequence = new AtomicLong(System.currentTimeMillis() * 1_000L);
     // Guards disk writes/deletes against a racing legacy migration for the same path (see
     // copyLegacyFileIfPresent()). Fixed-size stripes keep memory bounded, unlike a per-path
     // map that would need reference counting to ever shrink safely.
@@ -248,6 +254,17 @@ public class S3Service implements Resettable, ResourceProvider {
               RegionResolver regionResolver) {
         this(bucketStore, objectStore, defaultAnnotationStore(), defaultAccountPublicAccessBlockStore(),
                 dataRoot, inMemory, null, null, null, null, lambdaInvoker, null, null,
+                regionResolver, "http://localhost:4566", new ObjectMapper(), false, null, false);
+    }
+
+    /** Package-private constructor for testing notification delivery to SQS and SNS. */
+    S3Service(StorageBackend<String, Bucket> bucketStore,
+              StorageBackend<String, S3Object> objectStore,
+              Path dataRoot, boolean inMemory,
+              SqsService sqsService, SnsService snsService,
+              RegionResolver regionResolver) {
+        this(bucketStore, objectStore, defaultAnnotationStore(), defaultAccountPublicAccessBlockStore(),
+                dataRoot, inMemory, sqsService, snsService, null, null, null, null, null,
                 regionResolver, "http://localhost:4566", new ObjectMapper(), false, null, false);
     }
 
@@ -606,6 +623,7 @@ public class S3Service implements Resettable, ResourceProvider {
                     putObjectForAccount(bucketOwnerAccount,
                             versionedKey(bucketName, key, prev.getVersionId()), prev);
                 } else {
+                    archiveNullVersion(bucketOwnerAccount, bucketName, key, prev);
                     dropPreVersioningAnnotations[0] = true;
                 }
             });
@@ -661,6 +679,17 @@ public class S3Service implements Resettable, ResourceProvider {
             // Write the body before publishing metadata - see the comment in the versioned
             // branch above; the same ordering requirement applies here.
             writeFile(bucketOwnerAccount, bucketName, key, data);
+            if (bucket.getVersioningStatus() != null) {
+                // Suspended versioning: this write becomes the key's single null version. A
+                // numbered version it covers stays in the history as noncurrent, and an earlier
+                // null version that was already noncurrent is replaced, as on S3.
+                if (prev != null && prev.getVersionId() != null) {
+                    prev.setLatest(false);
+                    putObjectForAccount(bucketOwnerAccount,
+                            versionedKey(bucketName, key, prev.getVersionId()), prev);
+                }
+                removeArchivedNullVersion(bucketOwnerAccount, bucketName, key);
+            }
             // An overwrite replaces the object's annotations (AWS drops them on overwrite).
             // The cleanup runs only after the body write succeeds, so a failed PUT keeps the
             // old body together with its annotations; and before the new metadata is published,
@@ -1252,27 +1281,56 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public S3Object getObject(String bucketName, String key, String versionId) {
-        if ("null".equals(versionId)) {
-            String bucketOwnerAccount = resolveBucketEntry(bucketName)
-                    .orElseThrow(() -> new AwsException("NoSuchBucket",
-                            "The specified bucket does not exist.", 404))
-                    .account();
-            S3Object obj = getObjectMetadata(bucketName, key, versionId);
-            obj.setData(readFile(bucketOwnerAccount, bucketName, key));
-            return obj;
-        }
         if (versionId != null) {
             // An explicit version's file is immutable once written (see storeObjectInternal) and
             // never reused by a later PUT, so this pairing can never race a concurrent overwrite.
-            String bucketOwnerAccount = resolveBucketEntry(bucketName)
-                    .orElseThrow(() -> new AwsException("NoSuchBucket",
-                            "The specified bucket does not exist.", 404))
-                    .account();
-            S3Object obj = getObjectMetadata(bucketName, key, versionId);
-            obj.setData(readVersionedFile(bucketOwnerAccount, bucketName, key, versionId));
+            StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+            S3Object obj = reportedCopy(stored.object(), versionId);
+            obj.setData(readStoredVersionData(stored, bucketName, key));
             return obj;
         }
         return getLatestObject(bucketName, key);
+    }
+
+    /**
+     * Resolves one version for a request, applying S3's delete-marker rules: a marker named by
+     * its version id is 405 MethodNotAllowed, a marker that is the current version reads as a
+     * missing key.
+     */
+    private StoredVersion requireStoredVersion(String bucketName, String key, String versionId) {
+        AccountAwareStorageBackend.OwnedEntry<Bucket> ownedBucket = resolveBucketEntry(bucketName)
+                .orElseThrow(() -> new AwsException("NoSuchBucket",
+                        "The specified bucket does not exist.", 404));
+        StoredVersion stored = findStoredVersion(ownedBucket.account(), bucketName, key, versionId)
+                .orElseThrow(() -> versionId != null
+                        ? new AwsException("NoSuchVersion", "The specified version does not exist.", 404)
+                        : new AwsException("NoSuchKey", "The specified key does not exist.", 404));
+        if (stored.object().isDeleteMarker()) {
+            throw versionId != null
+                    ? S3DeleteMarkerException.selected(stored.object())
+                    : S3DeleteMarkerException.current(stored.object());
+        }
+        return stored;
+    }
+
+    /** Body bytes of a resolved version: the plain file while it is the current entry, else its versioned file. */
+    private byte[] readStoredVersionData(StoredVersion stored, String bucketName, String key) {
+        if (stored.storeKey().equals(objectKey(bucketName, key))) {
+            return readFile(stored.account(), bucketName, key);
+        }
+        return readVersionedFile(stored.account(), bucketName, key, stored.object().getVersionId());
+    }
+
+    /**
+     * A detached copy of a stored version as a response reports it: a null version selected with
+     * {@code versionId=null} is reported under that id even while it still lives at the plain key.
+     */
+    private static S3Object reportedCopy(S3Object object, String requestedVersionId) {
+        S3Object copy = copyObject(object);
+        if (copy.getVersionId() == null && NULL_VERSION_ID.equals(requestedVersionId)) {
+            copy.setVersionId(NULL_VERSION_ID);
+        }
+        return copy;
     }
 
     /**
@@ -1348,24 +1406,23 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public InputStream openObjectStream(String bucketName, String key, String versionId) {
-        getObjectMetadata(bucketName, key, versionId);
-        String bucketOwnerAccount = resolveBucketEntry(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket",
-                        "The specified bucket does not exist.", 404))
-                .account();
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        String bucketOwnerAccount = stored.account();
+        boolean plainEntry = stored.storeKey().equals(objectKey(bucketName, key));
+        String storedVersionId = stored.object().getVersionId();
         if (inMemory) {
-            byte[] data = versionId != null && !"null".equals(versionId)
-                    ? memoryDataStore.get(physicalVersionedKey(bucketOwnerAccount, bucketName, key, versionId))
-                    : memoryDataStore.get(physicalKey(bucketOwnerAccount, bucketName, key));
+            byte[] data = plainEntry
+                    ? memoryDataStore.get(physicalKey(bucketOwnerAccount, bucketName, key))
+                    : memoryDataStore.get(physicalVersionedKey(bucketOwnerAccount, bucketName, key, storedVersionId));
             if (data == null) {
                 throw new IllegalStateException("S3 object data is missing for " + bucketName + "/" + key);
             }
             return new ByteArrayInputStream(data);
         }
         try {
-            Path path = versionId != null && !"null".equals(versionId)
-                    ? resolveVersionedPathForRead(bucketOwnerAccount, bucketName, key, versionId)
-                    : resolveObjectPathForRead(bucketOwnerAccount, bucketName, key);
+            Path path = plainEntry
+                    ? resolveObjectPathForRead(bucketOwnerAccount, bucketName, key)
+                    : resolveVersionedPathForRead(bucketOwnerAccount, bucketName, key, storedVersionId);
             return Files.newInputStream(path);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to open S3 object stream", e);
@@ -1373,7 +1430,7 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     public S3Object getObjectMetadata(String bucketName, String key, String versionId) {
-        return copyObject(getStoredObject(bucketName, key, "null".equals(versionId) ? null : versionId));
+        return reportedCopy(requireStoredVersion(bucketName, key, versionId).object(), versionId);
     }
 
     public GetObjectAttributesResult getObjectAttributes(String bucketName, String key, String versionId,
@@ -1410,19 +1467,8 @@ public class S3Service implements Resettable, ResourceProvider {
 
     private AccountAwareStorageBackend.OwnedEntry<S3Object> getStoredObjectEntry(
             String bucketName, String key, String versionId) {
-        AccountAwareStorageBackend.OwnedEntry<Bucket> ownedBucket = resolveBucketEntry(bucketName)
-                .orElseThrow(() -> new AwsException("NoSuchBucket",
-                        "The specified bucket does not exist.", 404));
-
-        String storeKey = versionId != null ? versionedKey(bucketName, key, versionId) : objectKey(bucketName, key);
-        S3Object object = resolveObjectForAccount(ownedBucket.account(), storeKey)
-                .orElseThrow(() -> versionId != null
-                        ? new AwsException("NoSuchVersion", "The specified version does not exist.", 404)
-                        : new AwsException("NoSuchKey", "The specified key does not exist.", 404));
-        if (object.isDeleteMarker()) {
-            throw new AwsException("NoSuchKey", "The specified key does not exist.", 404);
-        }
-        return new AccountAwareStorageBackend.OwnedEntry<>(ownedBucket.account(), object);
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        return new AccountAwareStorageBackend.OwnedEntry<>(stored.account(), stored.object());
     }
 
     // AWS lists part-level checksums only for composite objects; a full-object multipart object
@@ -1501,9 +1547,10 @@ public class S3Service implements Resettable, ResourceProvider {
                     prev.setLatest(false);
                     objectStore.put(versionedKey(bucketName, key, prev.getVersionId()), prev);
                 } else {
-                    // The marker replaces a pre-versioning object: no versioned entry ever
-                    // existed, so its annotations become unreachable and are removed here
-                    // (they are permanent, as on AWS).
+                    // The marker covers a null version, which stays in the history as noncurrent.
+                    // Its annotations were keyed at the plain object key and become unreachable,
+                    // so they are removed here (they are permanent, as on AWS).
+                    archiveNullVersion(ownerId(), bucketName, key, prev);
                     deleteAllAnnotationsFor(annotationParentKey(bucketName, key, null));
                 }
             });
@@ -1513,14 +1560,11 @@ public class S3Service implements Resettable, ResourceProvider {
             LOG.debugv("Created delete marker: {0}/{1} v={2}", bucketName, key, markerId);
             fireNotifications(bucketName, key, "ObjectRemoved:DeleteMarkerCreated", deleteMarker);
             return deleteMarker;
-        } else if ("null".equals(versionId)) {
-            // A null version is stored at the plain object key until a versioned write replaces it.
-            // Treat the literal request value as that null version, not as a versioned key named
-            // "null". A delete marker is not the null version and must remain untouched.
-            S3Object existing = objectStore.get(objectKey(bucketName, key)).orElse(null);
-            if (existing == null || existing.isDeleteMarker() || existing.getVersionId() != null) {
-                return null;
-            }
+        } else if (NULL_VERSION_ID.equals(versionId) && isCurrentNullVersion(bucketName, key)) {
+            // A current null version is stored at the plain object key. Treat the literal request
+            // value as that null version, not as a versioned key named "null". A noncurrent null
+            // version lives at the "null" versioned key and takes the explicit-version path below.
+            S3Object existing = objectStore.get(objectKey(bucketName, key)).orElseThrow();
             checkLockProtection(existing, bypassGovernance);
             objectStore.delete(objectKey(bucketName, key));
             deleteFile(bucketName, key);
@@ -1528,8 +1572,9 @@ public class S3Service implements Resettable, ResourceProvider {
             LOG.debugv("Permanently deleted null version: {0}/{1}", bucketName, key);
             // Versions written before versioning was suspended become current again.
             promoteMostRecentVersion(bucketName, key);
-            fireNotifications(bucketName, key, "ObjectRemoved:Delete", null);
-            return existing;
+            S3Object deleted = reportedCopy(existing, NULL_VERSION_ID);
+            fireNotifications(bucketName, key, "ObjectRemoved:Delete", deleted);
+            return deleted;
         } else if (versionId != null) {
             // Get the specific version before permanent deletion
             S3Object toDelete = getVersionForDeletion(bucketName, key, versionId);
@@ -1555,6 +1600,9 @@ public class S3Service implements Resettable, ResourceProvider {
                     }
                 }
             });
+            if (toDelete != null) {
+                fireNotifications(bucketName, key, "ObjectRemoved:Delete", toDelete);
+            }
             return toDelete;
         } else {
             S3Object existing = objectStore.get(objectKey(bucketName, key)).orElse(null);
@@ -1595,6 +1643,12 @@ public class S3Service implements Resettable, ResourceProvider {
                 deleteFile(bucketName, key);
             }
         }
+    }
+
+    private boolean isCurrentNullVersion(String bucketName, String key) {
+        return objectStore.get(objectKey(bucketName, key))
+                .filter(object -> object.getVersionId() == null && !object.isDeleteMarker())
+                .isPresent();
     }
 
     private S3Object getVersionForDeletion(String bucketName, String key, String versionId) {
@@ -1789,25 +1843,52 @@ public class S3Service implements Resettable, ResourceProvider {
     public S3Object copyObject(String sourceBucket, String sourceKey,
                                String destBucket, String destKey, String versionId, CopyObjectOptions options)
     {
+        return copyObjectVersion(sourceBucket, sourceKey, destBucket, destKey, versionId, options).object();
+    }
+
+    /** The object a copy created, and the source version it was read from ({@code null} for an unversioned source). */
+    public record CopyObjectResult(S3Object object, String sourceVersionId) {}
+
+    public CopyObjectResult copyObjectVersion(String sourceBucket, String sourceKey,
+                                              String destBucket, String destKey, String versionId,
+                                              CopyObjectOptions options) {
         CopyObjectOptions effectiveOptions = options != null ? options : new CopyObjectOptions();
-        S3Object source = getObject(sourceBucket, sourceKey, versionId);
+        S3Object source = getCopySource(sourceBucket, sourceKey, versionId);
         validateSseCustomerAccess(source,
                 effectiveOptions.getCopySourceSseCustomerAlgorithm(),
                 effectiveOptions.getCopySourceSseCustomerKey(),
                 effectiveOptions.getCopySourceSseCustomerKeyMd5());
-        return copyS3Object(sourceBucket, sourceKey,
+        S3Object copy = copyS3Object(sourceBucket, sourceKey,
                 destBucket, destKey, source, effectiveOptions);
+        return new CopyObjectResult(copy, source.getVersionId());
     }
 
     public S3Object copyObject(String sourceBucket, String sourceKey,
                                String destBucket, String destKey, CopyObjectOptions options) {
         CopyObjectOptions effectiveOptions = options != null ? options : new CopyObjectOptions();
-        S3Object source = getObject(sourceBucket, sourceKey);
+        S3Object source = getCopySource(sourceBucket, sourceKey, null);
         validateSseCustomerAccess(source,
                 effectiveOptions.getCopySourceSseCustomerAlgorithm(),
                 effectiveOptions.getCopySourceSseCustomerKey(),
                 effectiveOptions.getCopySourceSseCustomerKeyMd5());
         return copyS3Object(sourceBucket, sourceKey, destBucket, destKey, source, effectiveOptions);
+    }
+
+    /**
+     * Reads a CopyObject/UploadPartCopy source. A delete marker named by its version id is not a
+     * readable source: S3 rejects it with 400 InvalidRequest rather than GetObject's 405, while a
+     * current delete marker reads as a plain missing key (no delete-marker headers on a copy).
+     */
+    public S3Object getCopySource(String sourceBucket, String sourceKey, String versionId) {
+        try {
+            return getObject(sourceBucket, sourceKey, versionId);
+        } catch (S3DeleteMarkerException e) {
+            if (!e.selectedByVersionId()) {
+                throw new AwsException("NoSuchKey", "The specified key does not exist.", 404);
+            }
+            throw new AwsException("InvalidRequest",
+                    "The source of a copy request may not specifically refer to a delete marker by version id.", 400);
+        }
     }
 
     // --- Versioning Operations ---
@@ -2032,31 +2113,42 @@ public class S3Service implements Resettable, ResourceProvider {
     // --- Object Tagging ---
 
     public void putObjectTagging(String bucketName, String key, Map<String, String> tags) {
-        AccountAwareStorageBackend.OwnedEntry<S3Object> ownedObject =
-                getStoredObjectEntry(bucketName, key, null);
-        S3Object obj = ownedObject.value();
-        obj.setTags(tags != null ? tags : new java.util.HashMap<>());
-        putObjectForAccount(ownedObject.account(), objectKey(bucketName, key), obj);
-        LOG.debugv("Put tags on object: {0}/{1}", bucketName, key);
+        putObjectTagging(bucketName, key, null, tags);
+    }
+
+    /**
+     * Replaces the tag set of one version ({@code versionId}) or of the current version, and
+     * returns that version as the response reports it. Other versions keep their own tags.
+     */
+    public S3Object putObjectTagging(String bucketName, String key, String versionId, Map<String, String> tags) {
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        stored.object().setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
+        saveStoredVersion(stored, bucketName, key);
+        LOG.debugv("Put tags on object: {0}/{1} v={2}", bucketName, key, versionId);
+        return reportedCopy(stored.object(), versionId);
     }
 
     public Map<String, String> getObjectTagging(String bucketName, String key) {
         return getObjectTagging(bucketName, key, null);
     }
 
-    /** Tags of one version, or of the current version when {@code versionId} is null or "null". */
+    /** Tags of one version ({@code versionId}, where {@code "null"} is the null version) or of the current version. */
     public Map<String, String> getObjectTagging(String bucketName, String key, String versionId) {
-        S3Object obj = getStoredObject(bucketName, key, "null".equals(versionId) ? null : versionId);
+        S3Object obj = requireStoredVersion(bucketName, key, versionId).object();
         return obj.getTags() != null ? obj.getTags() : Map.of();
     }
 
     public void deleteObjectTagging(String bucketName, String key) {
-        AccountAwareStorageBackend.OwnedEntry<S3Object> ownedObject =
-                getStoredObjectEntry(bucketName, key, null);
-        S3Object obj = ownedObject.value();
-        obj.setTags(new java.util.HashMap<>());
-        putObjectForAccount(ownedObject.account(), objectKey(bucketName, key), obj);
-        LOG.debugv("Deleted tags from object: {0}/{1}", bucketName, key);
+        deleteObjectTagging(bucketName, key, null);
+    }
+
+    /** Removes the tag set of one version or of the current version, and returns that version as reported. */
+    public S3Object deleteObjectTagging(String bucketName, String key, String versionId) {
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        stored.object().setTags(new HashMap<>());
+        saveStoredVersion(stored, bucketName, key);
+        LOG.debugv("Deleted tags from object: {0}/{1} v={2}", bucketName, key, versionId);
+        return reportedCopy(stored.object(), versionId);
     }
 
     // --- Object Annotations ---
@@ -3063,12 +3155,8 @@ public class S3Service implements Resettable, ResourceProvider {
     public void putObjectRetention(String bucketName, String key, String versionId,
                                    String mode, Instant retainUntil, boolean bypassGovernance) {
         requireObjectLockEnabled(bucketName);
-        AccountAwareStorageBackend.OwnedEntry<S3Object> ownedObject =
-                getStoredObjectEntry(bucketName, key, versionId);
-        String storeKey = versionId != null
-                ? versionedKey(bucketName, key, versionId)
-                : objectKey(bucketName, key);
-        S3Object obj = ownedObject.value();
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        S3Object obj = stored.object();
 
         boolean activeComplianceRetention = "COMPLIANCE".equals(obj.getObjectLockMode())
                 && obj.getRetainUntilDate() != null
@@ -3102,7 +3190,7 @@ public class S3Service implements Resettable, ResourceProvider {
 
         obj.setObjectLockMode(mode);
         obj.setRetainUntilDate(retainUntil);
-        putObjectForAccount(ownedObject.account(), storeKey, obj);
+        saveStoredVersion(stored, bucketName, key);
         LOG.debugv("Set retention on {0}/{1}: mode={2}, until={3}", bucketName, key, mode, retainUntil);
     }
 
@@ -3113,14 +3201,9 @@ public class S3Service implements Resettable, ResourceProvider {
 
     public void putObjectLegalHold(String bucketName, String key, String versionId, String status) {
         requireObjectLockEnabled(bucketName);
-        AccountAwareStorageBackend.OwnedEntry<S3Object> ownedObject =
-                getStoredObjectEntry(bucketName, key, versionId);
-        String storeKey = versionId != null
-                ? versionedKey(bucketName, key, versionId)
-                : objectKey(bucketName, key);
-        S3Object obj = ownedObject.value();
-        obj.setLegalHoldStatus(status);
-        putObjectForAccount(ownedObject.account(), storeKey, obj);
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        stored.object().setLegalHoldStatus(status);
+        saveStoredVersion(stored, bucketName, key);
         LOG.debugv("Set legal hold on {0}/{1}: {2}", bucketName, key, status);
     }
 
@@ -3289,7 +3372,20 @@ public class S3Service implements Resettable, ResourceProvider {
                                   String copySourceRange,
                                   SseCustomerHeaders copySourceSseCustomerHeaders,
                                   SseCustomerHeaders sseCustomerHeaders) {
-        S3Object source = getObject(sourceBucket, sourceKey, sourceVersionId);
+        return uploadPartCopyVersion(destBucket, destKey, uploadId, partNumber, sourceBucket, sourceKey,
+                sourceVersionId, copySourceRange, copySourceSseCustomerHeaders, sseCustomerHeaders).eTag();
+    }
+
+    /** The ETag of a part copied from another object, and the source version it was read from. */
+    public record UploadPartCopyResult(String eTag, String sourceVersionId) {}
+
+    public UploadPartCopyResult uploadPartCopyVersion(String destBucket, String destKey, String uploadId,
+                                                      int partNumber, String sourceBucket, String sourceKey,
+                                                      String sourceVersionId, String copySourceRange,
+                                                      SseCustomerHeaders copySourceSseCustomerHeaders,
+                                                      SseCustomerHeaders sseCustomerHeaders) {
+        getMultipartUpload(destBucket, destKey, uploadId);
+        S3Object source = getCopySource(sourceBucket, sourceKey, sourceVersionId);
         validateSseCustomerAccess(source,
                 copySourceSseCustomerHeaders.algorithm(),
                 copySourceSseCustomerHeaders.key(),
@@ -3308,8 +3404,9 @@ public class S3Service implements Resettable, ResourceProvider {
             data = Arrays.copyOfRange(data, start, end + 1);
         }
 
-        return uploadPart(destBucket, destKey, uploadId, partNumber, data,
+        String eTag = uploadPart(destBucket, destKey, uploadId, partNumber, data,
                 sseCustomerHeaders.algorithm(), sseCustomerHeaders.key(), sseCustomerHeaders.keyMd5());
+        return new UploadPartCopyResult(eTag, source.getVersionId());
     }
 
     public S3Object completeMultipartUpload(String bucket, String key, String uploadId, List<Integer> partNumbers,
@@ -3466,12 +3563,64 @@ public class S3Service implements Resettable, ResourceProvider {
     // --- Notification Configuration ---
 
     public void putBucketNotificationConfiguration(String bucketName, NotificationConfiguration config) {
+        putBucketNotificationConfiguration(bucketName, config, false);
+    }
+
+    /**
+     * Stores the configuration and, unless {@code skipDestinationValidation}, validates each
+     * SQS and SNS destination the way S3 does: by sending it an {@code s3:TestEvent} message.
+     * Every put sends one, including a put of an unchanged configuration.
+     */
+    public void putBucketNotificationConfiguration(String bucketName, NotificationConfiguration config,
+                                                   boolean skipDestinationValidation) {
         Bucket bucket = bucketStore.get(bucketName)
                 .orElseThrow(() -> new AwsException("NoSuchBucket",
                         "The specified bucket does not exist.", 404));
         bucket.setNotificationConfiguration(config);
         bucketStore.put(bucketName, bucket);
         LOG.infov("Set notification configuration for bucket: {0}", bucketName);
+        if (!skipDestinationValidation && config != null) {
+            sendTestEvents(bucketName, config, bucket.getRegion());
+        }
+    }
+
+    private void sendTestEvents(String bucketName, NotificationConfiguration config, String bucketRegion) {
+        String testEvent = buildS3TestEventJson(bucketName);
+        if (sqsService != null) {
+            for (String queueArn : config.getQueueConfigurations().stream()
+                    .map(QueueNotification::queueArn).distinct().toList()) {
+                try {
+                    sqsService.sendMessage(sqsUrlFromArn(queueArn), testEvent, 0, extractRegionFromArn(queueArn));
+                } catch (Exception e) {
+                    LOG.warnv("Failed to deliver s3:TestEvent to SQS {0}: {1}", queueArn, e.getMessage());
+                }
+            }
+        }
+        if (snsService != null) {
+            for (String topicArn : config.getTopicConfigurations().stream()
+                    .map(TopicNotification::topicArn).distinct().toList()) {
+                try {
+                    String topicRegion = extractRegionFromArn(topicArn);
+                    snsService.publish(topicArn, null, testEvent, "Amazon S3 Notification",
+                            topicRegion != null ? topicRegion : bucketRegion);
+                } catch (Exception e) {
+                    LOG.warnv("Failed to deliver s3:TestEvent to SNS {0}: {1}", topicArn, e.getMessage());
+                }
+            }
+        }
+    }
+
+    /** The message S3 sends a destination when a notification configuration is put. */
+    String buildS3TestEventJson(String bucketName) {
+        ObjectNode event = objectMapper.createObjectNode();
+        event.put("Service", "Amazon S3");
+        event.put("Event", "s3:TestEvent");
+        event.put("Time", DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
+        event.put("Bucket", bucketName);
+        event.put("RequestId", UUID.randomUUID().toString().replace("-", "").substring(0, 16).toUpperCase());
+        event.put("HostId", Base64.getEncoder().encodeToString(
+                UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8)));
+        return event.toString();
     }
 
     public NotificationConfiguration getBucketNotificationConfiguration(String bucketName) {
@@ -3735,14 +3884,12 @@ public class S3Service implements Resettable, ResourceProvider {
     public void putObjectAcl(String bucketName, String key, String versionId, String bodyAcl, String cannedAcl,
                               String grantRead, String grantWrite, String grantFullControl,
                               String grantReadAcp, String grantWriteAcp) {
-        AccountAwareStorageBackend.OwnedEntry<S3Object> ownedObject =
-                getStoredObjectEntry(bucketName, key, versionId);
-        S3Object obj = ownedObject.value();
-        String resolvedAcl = resolveObjectAclXml(ownedObject.account(), cannedAcl, grantRead,
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        S3Object obj = stored.object();
+        String resolvedAcl = resolveObjectAclXml(stored.account(), cannedAcl, grantRead,
                 grantWrite, grantFullControl, grantReadAcp, grantWriteAcp);
         obj.setAcl(resolvedAcl != null ? resolvedAcl : (bodyAcl.isBlank() ? null : bodyAcl));
-        String storeKey = (versionId != null) ? versionedKey(bucketName, key, versionId) : objectKey(bucketName, key);
-        putObjectForAccount(ownedObject.account(), storeKey, obj);
+        saveStoredVersion(stored, bucketName, key);
     }
 
     /**
@@ -4032,13 +4179,47 @@ public class S3Service implements Resettable, ResourceProvider {
         return xml.end("AccelerateConfiguration").build();
     }
 
-    public void restoreObject(String bucketName, String key, String versionId, String restoreXml) {
-        S3Object object = getObject(bucketName, key, versionId);
+    /**
+     * Restores a temporary copy of an archived version for the requested number of days. The
+     * emulator completes retrieval immediately, so the version's {@code x-amz-restore} status is
+     * {@code ongoing-request="false"} with the expiry date. Returns whether a completed restore
+     * already existed (S3 answers 200 then, 202 for a new request).
+     */
+    public boolean restoreObject(String bucketName, String key, String versionId, String restoreXml) {
+        StoredVersion stored = requireStoredVersion(bucketName, key, versionId);
+        S3Object object = stored.object();
         if (!isRestorableStorageClass(object.getStorageClass())) {
             throw new AwsException("InvalidObjectState",
                     "The operation is not valid for the object's storage class", 403);
         }
-        LOG.infov("Restored object: {0}/{1} (stub)", bucketName, key);
+        Instant now = Instant.now();
+        boolean alreadyRestored = object.getRestoreExpiryDate() != null
+                && now.isBefore(object.getRestoreExpiryDate());
+        object.setRestoreExpiryDate(restoreExpiry(now, restoreXml));
+        saveStoredVersion(stored, bucketName, key);
+        LOG.infov("Restored object: {0}/{1} v={2} until {3}", bucketName, key, versionId,
+                object.getRestoreExpiryDate());
+        return alreadyRestored;
+    }
+
+    /** S3 rounds a restore's expiry up to the next midnight UTC after {@code Days} days. */
+    private static Instant restoreExpiry(Instant now, String restoreXml) {
+        String daysText = restoreXml == null || restoreXml.isBlank()
+                ? null
+                : XmlParser.extractFirst(restoreXml, "Days", null);
+        long days = 1;
+        if (daysText != null) {
+            try {
+                days = Long.parseLong(daysText.trim());
+            } catch (NumberFormatException e) {
+                throw new AwsException("MalformedXML",
+                        "The XML you provided was not well-formed or did not validate against our published schema", 400);
+            }
+            if (days < 1) {
+                throw new AwsException("InvalidArgument", "Days must be a positive integer.", 400);
+            }
+        }
+        return now.plus(days + 1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.DAYS);
     }
 
     private static String defaultAclXml(String id, String displayName) {
@@ -4341,7 +4522,9 @@ public class S3Service implements Resettable, ResourceProvider {
         }
 
         String region = bucket.getRegion();
-        String eventJson = buildS3EventJson(bucketName, key, eventName, obj, region, bucket.isVersioningEnabled());
+        boolean versioned = bucket.getVersioningStatus() != null;
+        String sequencer = nextEventSequencer();
+        String eventJson = buildS3EventJson(bucketName, key, eventName, obj, region, versioned, sequencer);
 
         for (QueueNotification qn : config.getQueueConfigurations()) {
             if (qn.events().stream().anyMatch(p -> matchesEvent(p, eventName)) && qn.matchesKey(key)) {
@@ -4392,7 +4575,7 @@ public class S3Service implements Resettable, ResourceProvider {
                 Map<String, Object> entry = new java.util.HashMap<>();
                 entry.put("Source", "aws.s3");
                 entry.put("DetailType", detailType);
-                entry.put("Detail", buildS3EventBridgeDetail(bucketName, key, eventName, obj, region));
+                entry.put("Detail", buildS3EventBridgeDetail(bucketName, key, eventName, obj, versioned, sequencer));
                 eventBridgeService.putEvents(List.of(entry), region);
                 LOG.debugv("Fired S3 event {0} to EventBridge default bus", eventName);
             } catch (Exception e) {
@@ -4402,7 +4585,7 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     private String buildS3EventBridgeDetail(String bucketName, String key, String eventName,
-                                            S3Object obj, String region) {
+                                            S3Object obj, boolean versioned, String sequencer) {
         try {
             long size = obj != null ? obj.getSize() : 0;
             String eTag = obj != null && obj.getETag() != null ? obj.getETag().replace("\"", "") : "";
@@ -4414,6 +4597,10 @@ public class S3Service implements Resettable, ResourceProvider {
             objectNode.put("key", key);
             objectNode.put("size", size);
             objectNode.put("etag", eTag);
+            if (versioned) {
+                objectNode.put("version-id", obj != null ? reportedVersionId(obj) : NULL_VERSION_ID);
+            }
+            objectNode.put("sequencer", sequencer);
             detail.put("request-id", UUID.randomUUID().toString());
             detail.put("requester", "aws:emulator");
             detail.put("source-ip-address", "127.0.0.1");
@@ -4478,12 +4665,16 @@ public class S3Service implements Resettable, ResourceProvider {
         }
     }
 
-    private String buildS3EventJson(String bucketName, String key, String eventName,
-                                    S3Object obj, String region, boolean isVersionEnabled) {
+    /**
+     * Builds an S3 event notification record. As on S3 the object key is URL-encoded the way an
+     * HTML form encodes it (a space becomes {@code +}, path separators stay literal), removal
+     * events carry no size or ETag, a bucket that has ever had versioning reports the version the
+     * event concerns ({@code "null"} for a null version), and every event carries a sequencer.
+     */
+    String buildS3EventJson(String bucketName, String key, String eventName,
+                            S3Object obj, String region, boolean versioned, String sequencer) {
         try {
             String eventTime = DateTimeFormatter.ISO_INSTANT.format(Instant.now());
-            long size = obj != null ? obj.getSize() : 0;
-            String eTag = obj != null && obj.getETag() != null ? obj.getETag().replace("\"", "") : "";
             String requestId = UUID.randomUUID().toString();
 
             ObjectNode bucketNode = objectMapper.createObjectNode();
@@ -4491,13 +4682,17 @@ public class S3Service implements Resettable, ResourceProvider {
             bucketNode.put("arn", AwsArnUtils.Arn.of("s3", "", "", bucketName).toString());
 
             ObjectNode objectNode = objectMapper.createObjectNode();
-            objectNode.put("key", key);
-            objectNode.put("size", size);
-            objectNode.put("eTag", eTag);
-            if(isVersionEnabled) {
-                String versionId = obj !=null && obj.getVersionId()!=null ? obj.getVersionId() : "";
-                objectNode.put("versionId", versionId);
+            objectNode.put("key", encodeEventKey(key));
+            if (!eventName.startsWith("ObjectRemoved")) {
+                long size = obj != null ? obj.getSize() : 0;
+                String eTag = obj != null && obj.getETag() != null ? obj.getETag().replace("\"", "") : "";
+                objectNode.put("size", size);
+                objectNode.put("eTag", eTag);
             }
+            if (versioned) {
+                objectNode.put("versionId", obj != null ? reportedVersionId(obj) : NULL_VERSION_ID);
+            }
+            objectNode.put("sequencer", sequencer);
             ObjectNode s3Node = objectMapper.createObjectNode();
             s3Node.put("s3SchemaVersion", "1.0");
             s3Node.put("configurationId", "emulator");
@@ -4521,6 +4716,19 @@ public class S3Service implements Resettable, ResourceProvider {
         } catch (Exception e) {
             return "{\"Records\":[]}";
         }
+    }
+
+    /** URL-encodes an object key for an event record: form encoding, with {@code /} left literal. */
+    static String encodeEventKey(String key) {
+        return URLEncoder.encode(key, StandardCharsets.UTF_8).replace("%2F", "/");
+    }
+
+    /**
+     * An ever-increasing hexadecimal sequencer. S3 compares sequencers of events for the same key
+     * to order them, so a later event must always sort after an earlier one.
+     */
+    private String nextEventSequencer() {
+        return String.format("%016X", eventSequence.incrementAndGet());
     }
 
     private void cleanupMultipart(String uploadId) {
@@ -4618,6 +4826,7 @@ public class S3Service implements Resettable, ResourceProvider {
         copy.setRetainUntilDate(source.getRetainUntilDate());
         copy.setLegalHoldStatus(source.getLegalHoldStatus());
         copy.setAcl(source.getAcl());
+        copy.setRestoreExpiryDate(source.getRestoreExpiryDate());
         copy.setDataGeneration(source.getDataGeneration());
         return copy;
     }
@@ -4696,18 +4905,15 @@ public class S3Service implements Resettable, ResourceProvider {
 
     /**
      * AWS CopyObject with {@code x-amz-metadata-directive: REPLACE} stores
-     * {@code binary/octet-stream} when Content-Type is omitted or is the
-     * {@code application/octet-stream} alias.
+     * {@code binary/octet-stream} when Content-Type is omitted; an explicit
+     * Content-Type, {@code application/octet-stream} included, is stored as given.
      */
     static String normalizeReplaceContentType(String contentType) {
         if (contentType == null || contentType.isBlank()) {
             return "binary/octet-stream";
         }
         String base = contentType.split(";", 2)[0].trim();
-        if (base.isEmpty() || "application/octet-stream".equalsIgnoreCase(base)) {
-            return "binary/octet-stream";
-        }
-        return base;
+        return base.isEmpty() ? "binary/octet-stream" : base;
     }
 
     public boolean bucketExists(String bucketName) {
@@ -4807,6 +5013,99 @@ public class S3Service implements Resettable, ResourceProvider {
             return;
         }
         objectStore.put(storeKey, object);
+    }
+
+    private void deleteObjectForAccount(String accountId, String storeKey) {
+        if (objectStore instanceof AccountAwareStorageBackend<?> aware) {
+            @SuppressWarnings("unchecked")
+            AccountAwareStorageBackend<S3Object> typed = (AccountAwareStorageBackend<S3Object>) aware;
+            typed.deleteForAccount(accountId, storeKey);
+            return;
+        }
+        objectStore.delete(storeKey);
+    }
+
+    /** A stored object version together with where it lives, so a mutation writes back to the same entry. */
+    private record StoredVersion(String account, String storeKey, S3Object object) {}
+
+    /**
+     * Resolves one version of a key without interpreting delete markers. {@code null} selects the
+     * current entry; the literal {@code "null"} selects the null version, which lives at the plain
+     * object key while it is current (written with versioning never enabled or suspended) and at
+     * the {@code "null"} versioned key once a later versioned write has made it noncurrent.
+     */
+    private Optional<StoredVersion> findStoredVersion(String account, String bucketName, String key,
+                                                      String versionId) {
+        String latestKey = objectKey(bucketName, key);
+        if (versionId == null) {
+            return resolveObjectForAccount(account, latestKey)
+                    .map(object -> new StoredVersion(account, latestKey, object));
+        }
+        if (NULL_VERSION_ID.equals(versionId)) {
+            Optional<S3Object> current = resolveObjectForAccount(account, latestKey)
+                    .filter(object -> object.getVersionId() == null
+                            || NULL_VERSION_ID.equals(object.getVersionId()));
+            if (current.isPresent()) {
+                return Optional.of(new StoredVersion(account, latestKey, current.get()));
+            }
+        }
+        String storeKey = versionedKey(bucketName, key, versionId);
+        return resolveObjectForAccount(account, storeKey)
+                .map(object -> new StoredVersion(account, storeKey, object));
+    }
+
+    /**
+     * Writes a mutated version back to every entry that holds it: its versioned entry and, while it
+     * is the current version, the plain object key.
+     */
+    private void saveStoredVersion(StoredVersion stored, String bucketName, String key) {
+        S3Object object = stored.object();
+        putObjectForAccount(stored.account(), stored.storeKey(), object);
+        String latestKey = objectKey(bucketName, key);
+        String versionId = object.getVersionId();
+        if (versionId == null || NULL_VERSION_ID.equals(versionId)) {
+            return;
+        }
+        String versionKey = versionedKey(bucketName, key, versionId);
+        if (!versionKey.equals(stored.storeKey())) {
+            putObjectForAccount(stored.account(), versionKey, object);
+        }
+        if (!latestKey.equals(stored.storeKey())) {
+            resolveObjectForAccount(stored.account(), latestKey)
+                    .filter(latest -> versionId.equals(latest.getVersionId()))
+                    .ifPresent(latest -> putObjectForAccount(stored.account(), latestKey, object));
+        }
+    }
+
+    /**
+     * Keeps a null version that a versioned write is about to supersede: its metadata moves to the
+     * {@code "null"} versioned key and its bytes to the matching versioned file, so it stays listed
+     * and readable as {@code versionId=null} after the plain key is overwritten.
+     */
+    private void archiveNullVersion(String account, String bucketName, String key, S3Object current) {
+        if (current.isDeleteMarker()) {
+            return;
+        }
+        byte[] data = readFile(account, bucketName, key);
+        if (data == null) {
+            return;
+        }
+        writeVersionedFile(account, bucketName, key, NULL_VERSION_ID, data);
+        S3Object archived = copyObject(current);
+        archived.setData(null);
+        archived.setVersionId(NULL_VERSION_ID);
+        archived.setLatest(false);
+        putObjectForAccount(account, versionedKey(bucketName, key, NULL_VERSION_ID), archived);
+    }
+
+    /** Drops a noncurrent null version; a new null version replaces it. */
+    private void removeArchivedNullVersion(String account, String bucketName, String key) {
+        String storeKey = versionedKey(bucketName, key, NULL_VERSION_ID);
+        if (resolveObjectForAccount(account, storeKey).isEmpty()) {
+            return;
+        }
+        deleteObjectForAccount(account, storeKey);
+        deleteVersionedFile(account, bucketName, key, NULL_VERSION_ID);
     }
 
     private String objectKey(String bucketName, String key) {
@@ -5084,11 +5383,15 @@ public class S3Service implements Resettable, ResourceProvider {
     }
 
     private void deleteVersionedFile(String bucketName, String key, String versionId) {
+        deleteVersionedFile(ownerId(), bucketName, key, versionId);
+    }
+
+    private void deleteVersionedFile(String accountId, String bucketName, String key, String versionId) {
         if (inMemory) {
-            memoryDataStore.remove(physicalVersionedKey(bucketName, key, versionId));
+            memoryDataStore.remove(physicalVersionedKey(accountId, bucketName, key, versionId));
             return;
         }
-        Path filePath = resolveVersionedPath(bucketName, key, versionId);
+        Path filePath = resolveVersionedPath(accountId, bucketName, key, versionId);
         ReentrantLock lock = diskFileLock(filePath);
         lock.lock();
         try {

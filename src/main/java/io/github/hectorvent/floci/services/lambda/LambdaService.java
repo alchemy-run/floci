@@ -146,6 +146,11 @@ public class LambdaService implements ResourceProvider {
     Instance<LambdaDurableService> durableServiceInstance;
     private LambdaDurableService durableService;
 
+    /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */
+    @Inject
+    Instance<LambdaImageDigestResolver> imageDigestResolverInstance;
+    private LambdaImageDigestResolver imageDigestResolver;
+
     /**
      * Package-private constructor for testing without CDI. Config defaults
      * (timeout=3, memory=128) apply. A real {@link LambdaConcurrencyLimiter}
@@ -503,7 +508,7 @@ public class LambdaService implements ResourceProvider {
         if (code != null) {
             String imageUri = (String) code.get("ImageUri");
             if (imageUri != null) {
-                fn.setImageUri(imageUri);
+                applyImageUri(fn, imageUri);
             }
             String zipFileBase64 = (String) code.get("ZipFile");
             if (zipFileBase64 != null) {
@@ -681,7 +686,7 @@ public class LambdaService implements ResourceProvider {
             extractZipCode(fn, zipFileBase64, region);
         }
         if (imageUri != null) {
-            fn.setImageUri(imageUri);
+            applyImageUri(fn, imageUri);
         }
         if (s3Bucket != null && s3Key != null) {
             if ("hot-reload".equals(s3Bucket)) {
@@ -863,23 +868,16 @@ public class LambdaService implements ResourceProvider {
             fn.setFileSystemConfigs(requestedFileSystemConfigs);
         }
 
-        if (request.containsKey("ImageConfig")) {
-            if (imageConfig != null) {
-                if (imageConfig.containsKey("Command")) {
-                    List<String> cmd = imageConfig.get("Command") instanceof List<?>
-                            ? ((List<?>) imageConfig.get("Command")).stream().map(Object::toString).toList() : null;
-                    fn.setImageConfigCommand(cmd);
-                }
-                if (imageConfig.containsKey("EntryPoint")) {
-                    List<String> ep = imageConfig.get("EntryPoint") instanceof List<?>
-                            ? ((List<?>) imageConfig.get("EntryPoint")).stream().map(Object::toString).toList() : null;
-                    fn.setImageConfigEntryPoint(ep);
-                }
-                if (imageConfig.containsKey("WorkingDirectory")) {
-                    fn.setImageConfigWorkingDirectory(
-                            imageConfig.get("WorkingDirectory") instanceof String wd ? wd : null);
-                }
-            }
+        // ImageConfig is replaced as a whole, as on AWS: a member left out of a supplied ImageConfig
+        // clears that override, so `"ImageConfig": {}` drops every override. Omitting ImageConfig
+        // from the request leaves the current overrides in place.
+        if (imageConfig != null) {
+            fn.setImageConfigCommand(imageConfig.get("Command") instanceof List<?> cmd
+                    ? cmd.stream().map(Object::toString).toList() : null);
+            fn.setImageConfigEntryPoint(imageConfig.get("EntryPoint") instanceof List<?> ep
+                    ? ep.stream().map(Object::toString).toList() : null);
+            fn.setImageConfigWorkingDirectory(
+                    imageConfig.get("WorkingDirectory") instanceof String wd ? wd : null);
         }
 
         fn.setLastModified(System.currentTimeMillis());
@@ -1005,6 +1003,29 @@ public class LambdaService implements ResourceProvider {
     /** Test hook: wire the durable service without CDI. */
     void setDurableService(LambdaDurableService durableService) {
         this.durableService = durableService;
+    }
+
+    /** Test hook: wire the image digest resolver without CDI. */
+    void setImageDigestResolver(LambdaImageDigestResolver imageDigestResolver) {
+        this.imageDigestResolver = imageDigestResolver;
+    }
+
+    /**
+     * Records the image a container-image function deploys. Lambda resolves the tag to its
+     * manifest digest at deploy time and reports that digest as {@code ResolvedImageUri} and
+     * {@code CodeSha256}; a reference that cannot be resolved is kept as given.
+     */
+    private void applyImageUri(LambdaFunction fn, String imageUri) {
+        fn.setImageUri(imageUri);
+        LambdaImageDigestResolver resolver = imageDigestResolver;
+        if (resolver == null && imageDigestResolverInstance != null && imageDigestResolverInstance.isResolvable()) {
+            resolver = imageDigestResolverInstance.get();
+        }
+        String resolved = resolver != null ? resolver.resolve(imageUri) : null;
+        fn.setResolvedImageUri(resolved);
+        if (resolved != null) {
+            fn.setCodeSha256(resolved.substring(resolved.lastIndexOf("@sha256:") + "@sha256:".length()));
+        }
     }
 
     private void purgeDurableExecutions(String region, String functionName) {
@@ -1223,15 +1244,31 @@ public class LambdaService implements ResourceProvider {
         boolean hasKafkaSource = request.containsKey("SelfManagedEventSource") && request.get("SelfManagedEventSource") != null;
         boolean hasTopics = request.containsKey("Topics") && request.get("Topics") != null;
         boolean hasEventSourceArn = request.containsKey("EventSourceArn") && request.get("EventSourceArn") != null;
-        boolean isSelfManagedKafka = hasKafkaSource || hasTopics;
+        // An Amazon MSK source names its cluster in EventSourceArn and its topic in Topics.
+        boolean isMskKafka = hasEventSourceArn && isMskClusterArn(request.get("EventSourceArn"));
+        boolean isSelfManagedKafka = !isMskKafka && (hasKafkaSource || hasTopics);
 
         String eventSourceArn;
         String resolvedRegion;
         Map<String, Object> selfManagedEventSource = null;
         List<String> topics = null;
         List<Map<String, Object>> sourceAccessConfigurations = null;
+        Map<String, Object> amazonManagedKafkaEventSourceConfig = null;
 
-        if (isSelfManagedKafka) {
+        if (isMskKafka) {
+            if (hasKafkaSource) {
+                throw new AwsException("InvalidParameterValueException",
+                        "Cannot specify both EventSourceArn and SelfManagedEventSource", 400);
+            }
+            eventSourceArn = (String) request.get("EventSourceArn");
+            topics = parseMskTopics(request.get("Topics"));
+            amazonManagedKafkaEventSourceConfig = structureMember(request, "AmazonManagedKafkaEventSourceConfig");
+            resolvedRegion = AwsArnUtils.regionOrDefault(eventSourceArn, region);
+            if (fnRef.region() != null && !fnRef.region().equals(resolvedRegion)) {
+                throw new AwsException("InvalidParameterValueException",
+                        "Function ARN region '" + fnRef.region() + "' does not match event source region '" + resolvedRegion + "'", 400);
+            }
+        } else if (isSelfManagedKafka) {
             if (hasEventSourceArn) {
                 throw new AwsException("InvalidParameterValueException",
                         "Cannot specify both EventSourceArn and SelfManagedEventSource/Topics", 400);
@@ -1366,7 +1403,8 @@ public class LambdaService implements ResourceProvider {
 
         EventSourceMapping.FilterCriteria filterCriteria = parseFilterCriteria(request, objectMapper);
 
-        StartingPositionSpec startingPosition = parseStartingPosition(request, eventSourceArn, isSelfManagedKafka);
+        StartingPositionSpec startingPosition = parseStartingPosition(request, eventSourceArn,
+                isSelfManagedKafka || isMskKafka);
 
         String queueUrl = (eventSourceArn != null && eventSourceArn.contains(":sqs:"))
                 ? AwsArnUtils.arnToQueueUrl(eventSourceArn, config != null ? config.effectiveBaseUrl() : null)
@@ -1397,6 +1435,7 @@ public class LambdaService implements ResourceProvider {
         esm.setSelfManagedEventSource(selfManagedEventSource);
         esm.setTopics(topics);
         esm.setSourceAccessConfigurations(sourceAccessConfigurations);
+        esm.setAmazonManagedKafkaEventSourceConfig(amazonManagedKafkaEventSourceConfig);
         esm.setLastModified(System.currentTimeMillis());
 
         esmStore.save(esm);
@@ -1936,6 +1975,15 @@ public class LambdaService implements ResourceProvider {
             esm.setTopics(validatedTopics);
         }
 
+        if (request.get("AmazonManagedKafkaEventSourceConfig") != null) {
+            if (!isMskClusterArn(esm.getEventSourceArn())) {
+                throw new AwsException("InvalidParameterValueException",
+                        "AmazonManagedKafkaEventSourceConfig is only supported for Amazon MSK event sources", 400);
+            }
+            esm.setAmazonManagedKafkaEventSourceConfig(
+                    structureMember(request, "AmazonManagedKafkaEventSourceConfig"));
+        }
+
         if (request.containsKey("SourceAccessConfigurations")) {
             Object rawAccess = request.get("SourceAccessConfigurations");
             if (rawAccess != null) {
@@ -2183,6 +2231,7 @@ public class LambdaService implements ResourceProvider {
             snapshot.setS3Key(fn.getS3Key());
             snapshot.setHotReloadHostPath(fn.getHotReloadHostPath());
             snapshot.setImageUri(fn.getImageUri());
+            snapshot.setResolvedImageUri(fn.getResolvedImageUri());
             snapshot.setImageConfigCommand(fn.getImageConfigCommand());
             snapshot.setImageConfigEntryPoint(fn.getImageConfigEntryPoint());
             snapshot.setImageConfigWorkingDirectory(fn.getImageConfigWorkingDirectory());
@@ -2325,8 +2374,28 @@ public class LambdaService implements ResourceProvider {
                 environment.get("Variables"), "Environment.Variables");
     }
 
+    /** Whether an EventSourceArn names an Amazon MSK cluster ({@code arn:aws:kafka:...:cluster/...}). */
+    static boolean isMskClusterArn(Object eventSourceArn) {
+        return eventSourceArn instanceof String arn && arn.contains(":kafka:") && arn.contains(":cluster/");
+    }
+
+    /** An Amazon MSK event source reads exactly one topic. */
+    private static List<String> parseMskTopics(Object rawTopics) {
+        if (rawTopics == null) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Topics is required for Amazon MSK event sources", 400);
+        }
+        if (!(rawTopics instanceof List<?> topicList) || topicList.size() != 1
+                || !(topicList.getFirst() instanceof String topic) || topic.isBlank()) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Topics must contain exactly one non-blank topic name for Amazon MSK event sources", 400);
+        }
+        return new ArrayList<>(List.of(topic));
+    }
+
     private static void validateEventSourceMappingStructures(Map<String, Object> request) {
         structureMember(request, "ScalingConfig");
+        structureMember(request, "AmazonManagedKafkaEventSourceConfig");
         Map<String, Object> destinationConfig = structureMember(request, "DestinationConfig");
         if (destinationConfig != null) {
             structureValue(destinationConfig.get("OnFailure"), "DestinationConfig.OnFailure");

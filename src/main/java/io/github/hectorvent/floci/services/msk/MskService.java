@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
@@ -13,6 +14,7 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.msk.model.BrokerNodeGroupInfo;
+import io.github.hectorvent.floci.services.msk.model.ClientAuthentication;
 import io.github.hectorvent.floci.services.msk.model.ClusterState;
 import io.github.hectorvent.floci.services.msk.model.ConfigurationRevision;
 import io.github.hectorvent.floci.services.msk.model.ConfigurationRevisionDetail;
@@ -36,7 +38,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -75,18 +80,26 @@ public class MskService implements ResourceProvider {
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final RedpandaManager redpandaManager;
+    private final MskIamGateway iamGateway;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
     private final Object configurationUpdateLock = new Object();
 
-    @Inject
     public MskService(StorageFactory storageFactory, EmulatorConfig config,
                       RegionResolver regionResolver, RedpandaManager redpandaManager) {
+        this(storageFactory, config, regionResolver, redpandaManager, null);
+    }
+
+    @Inject
+    public MskService(StorageFactory storageFactory, EmulatorConfig config,
+                      RegionResolver regionResolver, RedpandaManager redpandaManager,
+                      MskIamGateway iamGateway) {
         this.storage = storageFactory.create("msk", "msk-clusters.json", new TypeReference<Map<String, MskCluster>>() {});
         this.configurationStorage = storageFactory.create("msk", "msk-configurations.json",
                 new TypeReference<Map<String, MskConfiguration>>() {});
         this.config = config;
         this.regionResolver = regionResolver;
         this.redpandaManager = redpandaManager;
+        this.iamGateway = iamGateway;
     }
 
     @PostConstruct
@@ -161,6 +174,9 @@ public class MskService implements ResourceProvider {
             cluster.getCurrentBrokerSoftwareInfo().setConfigurationArn(configurationInfo.getArn());
             cluster.getCurrentBrokerSoftwareInfo().setConfigurationRevision(configurationInfo.getRevision());
         }
+        if (isIamEnabled(request.getClientAuthentication())) {
+            cluster.setIamBrokerHost(iamBrokerHost(cluster));
+        }
 
         if (config.services().msk().mock()) {
             cluster.setState(ClusterState.ACTIVE);
@@ -174,6 +190,7 @@ public class MskService implements ResourceProvider {
         }
 
         storage.put(clusterArn, cluster);
+        startIamGatewayFor(cluster);
         return cluster;
     }
 
@@ -350,6 +367,8 @@ public class MskService implements ResourceProvider {
         cluster.setNumberOfBrokerNodes(0);
         cluster.setZookeeperConnectString(null);
         cluster.setCurrentBrokerSoftwareInfo(null);
+        // SASL/IAM is the only client authentication a serverless cluster has.
+        cluster.setIamBrokerHost(iamBrokerHost(cluster));
 
         if (config.services().msk().mock()) {
             cluster.setState(ClusterState.ACTIVE);
@@ -359,7 +378,51 @@ public class MskService implements ResourceProvider {
         }
 
         storage.put(clusterArn, cluster);
+        startIamGatewayFor(cluster);
         return cluster;
+    }
+
+    private static boolean isIamEnabled(ClientAuthentication clientAuthentication) {
+        return clientAuthentication != null && clientAuthentication.getSasl() != null
+                && clientAuthentication.getSasl().getIam() != null
+                && Boolean.TRUE.equals(clientAuthentication.getSasl().getIam().getEnabled());
+    }
+
+    /**
+     * The broker hostname of a cluster's SASL/IAM endpoint, shaped like MSK's
+     * ({@code boot-<id>.kafka-serverless.<region>} for serverless, {@code b-1.<id>.kafka.<region>}
+     * for provisioned) under Floci's DNS suffix, which resolves to Floci both on the host and in
+     * Floci-launched containers.
+     */
+    String iamBrokerHost(MskCluster cluster) {
+        String arn = cluster.getClusterArn();
+        String id = arn.substring(arn.lastIndexOf('/') + 1).replace("-", "").toLowerCase(Locale.ROOT);
+        if (id.length() > 8) {
+            id = id.substring(0, 8);
+        }
+        String region = cluster.getResourceRegion() != null ? cluster.getResourceRegion() : regionResolver.getRegion();
+        String suffix = config.hostname() != null
+                ? config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX)
+                : EmbeddedDnsServer.DEFAULT_SUFFIX;
+        String prefix = isServerless(cluster) ? "boot-" + id + ".kafka-serverless." : "b-1." + id + ".kafka.";
+        return prefix + region + "." + suffix;
+    }
+
+    /** Mock mode runs no broker, so there is nothing for the SASL/IAM listener to relay to. */
+    private void startIamGatewayFor(MskCluster cluster) {
+        if (iamGateway != null && cluster.getIamBrokerHost() != null && !config.services().msk().mock()) {
+            iamGateway.ensureStarted(this::iamBackendFor);
+        }
+    }
+
+    /** The broker listener behind an ACTIVE cluster's SASL/IAM hostname, in any account. */
+    Optional<String> iamBackendFor(String brokerHost) {
+        return allClusters().stream()
+                .filter(c -> brokerHost.equalsIgnoreCase(c.getIamBrokerHost()))
+                .filter(c -> c.getState() == ClusterState.ACTIVE)
+                .map(MskCluster::getIamBackendAddress)
+                .filter(Objects::nonNull)
+                .findFirst();
     }
 
     public boolean isServerless(MskCluster cluster) {
@@ -406,10 +469,32 @@ public class MskService implements ResourceProvider {
         storage.delete(clusterArn);
     }
 
+    /** The broker's internal plaintext address, for Floci's own consumers (Pipes). */
     public String getBootstrapBrokers(String clusterArn) {
         MskCluster cluster = describeCluster(clusterArn);
         return cluster.getBootstrapBrokers();
     }
+
+    /**
+     * The connection strings GetBootstrapBrokers returns. A serverless cluster only has its
+     * SASL/IAM endpoint; a provisioned one keeps its plaintext endpoint and adds the SASL/IAM one
+     * when IAM client authentication is enabled.
+     */
+    public BootstrapBrokers bootstrapBrokersFor(String clusterArn) {
+        MskCluster cluster = describeCluster(clusterArn);
+        String saslIam = cluster.getIamBrokerHost() != null
+                ? cluster.getIamBrokerHost() + ":" + MskIamGateway.SASL_IAM_PORT
+                : null;
+        if (saslIam != null && cluster.getState() == ClusterState.ACTIVE) {
+            // The listener is started lazily, so a cluster restored from storage gets it too.
+            startIamGatewayFor(cluster);
+        }
+        String plaintext = isServerless(cluster) ? null : cluster.getBootstrapBrokers();
+        return new BootstrapBrokers(plaintext, saslIam);
+    }
+
+    /** GetBootstrapBrokers' connection strings; a null member is omitted from the response. */
+    public record BootstrapBrokers(String bootstrapBrokerString, String bootstrapBrokerStringSaslIam) {}
 
     public MskConfiguration createConfiguration(String name, String description,
                                                  List<String> kafkaVersions, String serverProperties) {

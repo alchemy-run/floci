@@ -614,4 +614,52 @@ class SqsJsonProtocolTest {
             .when().post("/");
         }
     }
+
+    @Test
+    void redrivePolicyWithMissingDeadLetterTargetIsRejected() {
+        String missingDlqArn = "arn:aws:sqs:us-east-1:" + ACCOUNT_ID + ":json-missing-dead-letter";
+        String redrivePolicy = "{\\\"deadLetterTargetArn\\\":\\\"" + missingDlqArn + "\\\",\\\"maxReceiveCount\\\":3}";
+        String sourceUrl = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.CreateQueue")
+            .body("{\"QueueName\":\"json-missing-dlq-source\"}")
+        .when().post("/").then().statusCode(200)
+            .extract().jsonPath().getString("QueueUrl");
+
+        try {
+            given()
+                .contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", "AmazonSQS.SetQueueAttributes")
+                .body("{\"QueueUrl\":\"" + sourceUrl + "\",\"Attributes\":{\"RedrivePolicy\":\"" + redrivePolicy + "\"}}")
+            .when().post("/").then()
+                .statusCode(400)
+                .header("x-amzn-query-error", "InvalidParameterValue;Sender")
+                .body("__type", equalTo("InvalidParameterValue"))
+                .body("message", containsString("for parameter RedrivePolicy is invalid"))
+                .body("message", containsString("Reason: Dead letter target does not exist."));
+
+            given()
+                .contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", "AmazonSQS.CreateQueue")
+                .body("{\"QueueName\":\"json-missing-dlq-create\",\"Attributes\":{\"RedrivePolicy\":\"" + redrivePolicy + "\"}}")
+            .when().post("/").then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterValue"))
+                .body("message", containsString("Dead letter target does not exist"));
+
+            given()
+                .contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", "AmazonSQS.GetQueueUrl")
+                .body("{\"QueueName\":\"json-missing-dlq-create\"}")
+            .when().post("/").then()
+                .statusCode(400)
+                .body("__type", equalTo("QueueDoesNotExist"));
+        } finally {
+            given()
+                .contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", "AmazonSQS.DeleteQueue")
+                .body("{\"QueueUrl\":\"" + sourceUrl + "\"}")
+            .when().post("/");
+        }
+    }
 }

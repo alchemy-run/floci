@@ -485,7 +485,7 @@ class S3ServiceTest {
     }
 
     @Test
-    void copyObjectReplaceNormalizesApplicationOctetStreamToBinary() {
+    void copyObjectReplaceKeepsExplicitApplicationOctetStream() {
         s3Service.createBucket("source-bucket", "us-east-1");
         s3Service.createBucket("dest-bucket", "us-east-1");
         s3Service.putObject("source-bucket", "original.txt", "Content".getBytes(StandardCharsets.UTF_8),
@@ -494,9 +494,22 @@ class S3ServiceTest {
         S3Object copy = s3Service.copyObject("source-bucket", "original.txt", "dest-bucket", "copy.txt",
                 "REPLACE", Map.of(), "STANDARD", "application/octet-stream");
 
-        assertEquals("binary/octet-stream", copy.getContentType());
-        assertEquals("binary/octet-stream",
+        assertEquals("application/octet-stream", copy.getContentType());
+        assertEquals("application/octet-stream",
                 s3Service.getObject("dest-bucket", "copy.txt").getContentType());
+    }
+
+    @Test
+    void copyObjectReplaceWithoutContentTypeStoresBinaryOctetStream() {
+        s3Service.createBucket("source-bucket", "us-east-1");
+        s3Service.createBucket("dest-bucket", "us-east-1");
+        s3Service.putObject("source-bucket", "original.txt", "Content".getBytes(StandardCharsets.UTF_8),
+                "text/plain", null);
+
+        S3Object copy = s3Service.copyObject("source-bucket", "original.txt", "dest-bucket", "copy.txt",
+                "REPLACE", Map.of(), "STANDARD", null);
+
+        assertEquals("binary/octet-stream", copy.getContentType());
     }
 
     @Test

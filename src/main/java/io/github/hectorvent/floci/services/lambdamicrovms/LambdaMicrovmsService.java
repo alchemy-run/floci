@@ -441,22 +441,45 @@ public class LambdaMicrovmsService {
                 .toList();
     }
 
+    /**
+     * Applies an UpdateNetworkConnector. Every member of the VPC egress configuration and the
+     * operator role is mutable; members absent from the request keep their stored value.
+     */
     public NetworkConnector updateConnector(String region, String id,
-                                            List<String> subnetIds, List<String> securityGroupIds) {
+                                            List<String> subnetIds, List<String> securityGroupIds,
+                                            String networkProtocol, List<String> computeResourceTypes,
+                                            String operatorRole) {
         NetworkConnector connector = getConnector(region, id);
-        if (subnetIds != null && !subnetIds.isEmpty()) {
-            if (subnetIds.size() > MAX_CONNECTOR_SUBNETS) {
-                throw new AwsException("InvalidParameterValueException",
-                        "SubnetIds must contain between 1 and " + MAX_CONNECTOR_SUBNETS + " entries", 400);
-            }
+        if (subnetIds != null && subnetIds.size() > MAX_CONNECTOR_SUBNETS) {
+            throw new AwsException("InvalidParameterValueException",
+                    "SubnetIds must contain between 1 and " + MAX_CONNECTOR_SUBNETS + " entries", 400);
+        }
+        boolean changed = false;
+        if (subnetIds != null && !subnetIds.isEmpty() && !subnetIds.equals(connector.subnetIds)) {
             connector.subnetIds = List.copyOf(subnetIds);
-            connector.lastModified = Instant.now();
-            connector.lastUpdateStatus = "Successful";
-            connector.lastUpdateStatusReason = "No configuration changes detected";
+            changed = true;
         }
-        if (securityGroupIds != null) {
+        if (securityGroupIds != null && !securityGroupIds.equals(connector.securityGroupIds)) {
             connector.securityGroupIds = List.copyOf(securityGroupIds);
+            changed = true;
         }
+        if (networkProtocol != null && !networkProtocol.isBlank()
+                && !networkProtocol.equals(connector.networkProtocol)) {
+            connector.networkProtocol = networkProtocol;
+            changed = true;
+        }
+        if (computeResourceTypes != null && !computeResourceTypes.isEmpty()
+                && !computeResourceTypes.equals(connector.associatedComputeResourceTypes)) {
+            connector.associatedComputeResourceTypes = List.copyOf(computeResourceTypes);
+            changed = true;
+        }
+        if (operatorRole != null && !operatorRole.isBlank() && !operatorRole.equals(connector.operatorRole)) {
+            connector.operatorRole = operatorRole;
+            changed = true;
+        }
+        connector.lastModified = Instant.now();
+        connector.lastUpdateStatus = "Successful";
+        connector.lastUpdateStatusReason = changed ? null : "No configuration changes detected";
         persist(connectors, region, connector.id, connector);
         return connector;
     }

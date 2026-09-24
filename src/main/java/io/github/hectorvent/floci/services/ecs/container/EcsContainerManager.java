@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
+import io.github.hectorvent.floci.core.common.docker.ContainerReachableUrls;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
@@ -73,6 +74,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -81,6 +83,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -93,6 +97,10 @@ public class EcsContainerManager {
     private static final Logger LOG = Logger.getLogger(EcsContainerManager.class);
 
     private static final String ATTACHMENT_DELETED = "DELETED";
+
+    /** A URL on a loopback host, with its scheme (group 1) and explicit port (group 2). */
+    private static final Pattern LOOPBACK_URL = Pattern.compile(
+            "(?i)((?:https?|wss?)://)(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::(\\d+))?(?=[/?#\"'\\s,}\\]]|$)");
 
     /** EC2 error codes the task ENI path can raise, none of which RunTask declares. */
     private static final Set<String> EC2_NETWORK_LOOKUP_FAILURES =
@@ -223,7 +231,7 @@ public class EcsContainerManager {
             String metadataId = UUID.randomUUID().toString().replace("-", "");
             metadataIdsByContainer.put(def.getName(), metadataId);
             envVarsByContainer.put(def, buildEnvVars(def, overridesByName.get(def.getName()), region,
-                    metadataId));
+                    metadataId, taskPorts(taskDef)));
             imagesByContainer.put(def, ecrRegistryManager.rewriteImageUri(def.getImage()));
         }
 
@@ -1462,8 +1470,81 @@ public class EcsContainerManager {
         }
     }
 
+    /** Every port a container of the task listens on: loopback URLs to these stay inside the task. */
+    static Set<Integer> taskPorts(TaskDefinition taskDef) {
+        Set<Integer> ports = new HashSet<>();
+        if (taskDef == null || taskDef.getContainerDefinitions() == null) {
+            return ports;
+        }
+        for (ContainerDefinition def : taskDef.getContainerDefinitions()) {
+            if (def.getPortMappings() == null) {
+                continue;
+            }
+            for (PortMapping pm : def.getPortMappings()) {
+                if (pm.containerPort() > 0) {
+                    ports.add(pm.containerPort());
+                }
+                if (pm.hostPort() > 0) {
+                    ports.add(pm.hostPort());
+                }
+            }
+        }
+        return ports;
+    }
+
+    /**
+     * Makes a loopback URL in a task's plain environment reachable from the task container, the
+     * way Lambda containers see them: {@code localhost} inside the container is the container
+     * itself, so a URL naming a service on the developer machine (an OTLP collector, a local dev
+     * server) is pointed at {@code host.docker.internal}, and one on Floci's own port at Floci.
+     * A loopback URL on a port a container of the same task listens on is a sidecar the task
+     * reaches over its own network namespace, so a value carrying one is left untouched apart
+     * from its other loopback URLs.
+     */
+    static String containerReachableEnvValue(String value, Set<Integer> taskPorts, int gatewayPort) {
+        String rewritten = ContainerReachableUrls.rewriteFunctionEnv(value, gatewayPort);
+        if (rewritten == null || rewritten.equals(value) || taskPorts.isEmpty()) {
+            return rewritten;
+        }
+        Matcher matcher = LOOPBACK_URL.matcher(value);
+        boolean referencesTaskPort = false;
+        while (matcher.find()) {
+            if (taskPorts.contains(loopbackUrlPort(matcher))) {
+                referencesTaskPort = true;
+                break;
+            }
+        }
+        if (!referencesTaskPort) {
+            return rewritten;
+        }
+        matcher.reset();
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            String url = matcher.group();
+            String replacement = taskPorts.contains(loopbackUrlPort(matcher))
+                    ? url
+                    : ContainerReachableUrls.rewriteFunctionEnv(url, gatewayPort);
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private static int loopbackUrlPort(Matcher matcher) {
+        if (matcher.group(2) != null) {
+            return Integer.parseInt(matcher.group(2));
+        }
+        String scheme = matcher.group(1).toLowerCase(Locale.ROOT);
+        return scheme.startsWith("https") || scheme.startsWith("wss") ? 443 : 80;
+    }
+
+    private int gatewayPort() {
+        int port = config.port();
+        return port > 0 ? port : ContainerReachableUrls.DEFAULT_HOST_GATEWAY_PORT;
+    }
+
     private List<String> buildEnvVars(ContainerDefinition def, ContainerOverride override, String region,
-                                      String metadataId) {
+                                      String metadataId, Set<Integer> taskPorts) {
         // AWS SDK baseline (endpoint + region + credentials) first so the task can reach the
         // emulator, then the task-def environment, then task-def secrets, then the override
         // environment. Later entries win on key conflict, so an explicit task-def value or
@@ -1481,9 +1562,10 @@ public class EcsContainerManager {
         if (metadataId != null && flociEndpoint != null) {
             envMap.put("ECS_CONTAINER_METADATA_URI_V4", flociEndpoint + "/v4/" + metadataId);
         }
+        int gatewayPort = gatewayPort();
         if (def.getEnvironment() != null) {
             for (var kv : def.getEnvironment()) {
-                envMap.put(kv.name(), kv.value());
+                envMap.put(kv.name(), containerReachableEnvValue(kv.value(), taskPorts, gatewayPort));
             }
         }
         if (def.getSecrets() != null) {
@@ -1493,7 +1575,7 @@ public class EcsContainerManager {
         }
         if (override != null && override.getEnvironment() != null) {
             for (var kv : override.getEnvironment()) {
-                envMap.put(kv.name(), kv.value());
+                envMap.put(kv.name(), containerReachableEnvValue(kv.value(), taskPorts, gatewayPort));
             }
         }
         List<String> envVars = new ArrayList<>();

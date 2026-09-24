@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -86,6 +87,15 @@ final class RdsEngineCatalog {
             }
         }
         return List.copyOf(defaults.values());
+    }
+
+    /** Every DB parameter group family the catalog's engine versions map to. */
+    static Set<String> families() {
+        Set<String> families = new LinkedHashSet<>();
+        for (Version entry : VERSIONS) {
+            families.add(entry.family());
+        }
+        return families;
     }
 
     static String defaultVersion(String engine) {

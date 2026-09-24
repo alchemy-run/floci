@@ -79,10 +79,13 @@ public class DocDbQueryHandler {
         String masterUsername = params.getFirst("MasterUsername");
         String masterPassword = params.getFirst("MasterUserPassword");
         boolean iamEnabled = "true".equalsIgnoreCase(params.getFirst("EnableIAMDatabaseAuthentication"));
+        boolean manageMasterUserPassword = "true".equalsIgnoreCase(params.getFirst("ManageMasterUserPassword"));
 
         // Tags given at create are readable back on a live account; they go in with the record.
         DocDbCluster cluster = service.createDbCluster(id, engineVersion,
-                masterUsername, masterPassword, iamEnabled, clusterSettings(params, true), parseTags(params));
+                masterUsername, masterPassword, iamEnabled, clusterSettings(params, true), parseTags(params),
+                optionalInt(params.getFirst("Port")), manageMasterUserPassword,
+                params.getFirst("MasterUserSecretKmsKeyId"));
         return Response.ok(AwsQueryResponse.envelope("CreateDBCluster", AwsNamespaces.RDS,
                 clusterXml(cluster))).build();
     }
@@ -240,7 +243,7 @@ public class DocDbQueryHandler {
     /**
      * The cluster settings a request carries. DBSubnetGroupName, StorageEncrypted and KmsKeyId are
      * fixed at create and not in the ModifyDBCluster shape, so a modify reads the rest only. Port
-     * is not taken from the request: the port a cluster reports is the one it is reachable on.
+     * is read by CreateDBCluster itself: the port a cluster reports is the one it is reachable on.
      */
     private static DocDbClusterSettings clusterSettings(MultivaluedMap<String, String> params, boolean create) {
         List<String> securityGroups = memberList(params, "VpcSecurityGroupIds.VpcSecurityGroupId.");
@@ -328,6 +331,15 @@ public class DocDbQueryHandler {
                 .elem("DBClusterArn", c.getDbClusterArn());
         if (c.getKmsKeyId() != null && !c.getKmsKeyId().isBlank()) {
             xml.elem("KmsKeyId", c.getKmsKeyId());
+        }
+        if (c.getMasterUserSecretArn() != null && !c.getMasterUserSecretArn().isBlank()) {
+            xml.start("MasterUserSecret")
+               .elem("SecretArn", c.getMasterUserSecretArn())
+               .elem("SecretStatus", c.getMasterUserSecretStatus() != null ? c.getMasterUserSecretStatus() : "active");
+            if (c.getMasterUserSecretKmsKeyId() != null && !c.getMasterUserSecretKmsKeyId().isBlank()) {
+                xml.elem("KmsKeyId", c.getMasterUserSecretKmsKeyId());
+            }
+            xml.end("MasterUserSecret");
         }
         xml.start("VpcSecurityGroups");
         for (String groupId : c.getVpcSecurityGroupIds()) {

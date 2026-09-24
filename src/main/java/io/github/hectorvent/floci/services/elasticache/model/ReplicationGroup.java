@@ -20,6 +20,11 @@ public class ReplicationGroup {
     private Endpoint configurationEndpoint;
     private Instant createdAt;
     private int proxyPort;
+    /**
+     * The port the engine accepts connections on, which is the group's AWS {@code Port}. Zero on
+     * records written before it was tracked, when the engine listened on the proxy port.
+     */
+    private int enginePort;
     private String authToken; // stored plain-text for PASSWORD auth validation in the proxy
     private Set<String> associatedUserIds = new HashSet<>();
     private String arn;
@@ -84,6 +89,9 @@ public class ReplicationGroup {
 
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
+
+    public int getEnginePort() { return enginePort; }
+    public void setEnginePort(int enginePort) { this.enginePort = enginePort; }
 
     public String getAuthToken() { return authToken; }
     public void setAuthToken(String authToken) { this.authToken = authToken; }

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -14,47 +15,91 @@ import io.github.hectorvent.floci.services.macie2.model.MacieState;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.Bucket;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 @ApplicationScoped
 public class MacieService implements Resettable {
+    private static final Logger LOG = Logger.getLogger(MacieService.class);
+
     private final AccountAwareStorageBackend<MacieState> states;
     private final AccountAwareStorageBackend<MacieMember> members;
 
     private final S3Service s3Service;
+
+    // Classification job execution. Run bookkeeping is guarded by this service's monitor.
+    private final Executor jobExecutor;
+    private final ExecutorService ownedJobExecutor;
+    private final Map<String, JobRun> runs = new HashMap<>();
+    private ScheduledExecutorService jobScheduler;
 
     @Inject
     public MacieService(StorageFactory storageFactory, S3Service s3Service) {
         this(storageFactory.create("macie2", "macie2-state.json",
                         new TypeReference<Map<String, MacieState>>() {}),
                 storageFactory.create("macie2", "macie2-members.json",
-                        new TypeReference<Map<String, MacieMember>>() {}), s3Service);
+                        new TypeReference<Map<String, MacieMember>>() {}), s3Service, null);
     }
 
     MacieService(AccountAwareStorageBackend<MacieState> states,
                  AccountAwareStorageBackend<MacieMember> members) {
-        this(states, members, null);
+        this(states, members, null, null);
     }
 
     MacieService(AccountAwareStorageBackend<MacieState> states,
                  AccountAwareStorageBackend<MacieMember> members, S3Service s3Service) {
+        this(states, members, s3Service, null);
+    }
+
+    MacieService(AccountAwareStorageBackend<MacieState> states,
+                 AccountAwareStorageBackend<MacieMember> members, S3Service s3Service, Executor jobExecutor) {
         this.states = states;
         this.members = members;
         this.s3Service = s3Service;
+        if (jobExecutor == null) {
+            this.ownedJobExecutor = Executors.newFixedThreadPool(JOB_WORKERS,
+                    Thread.ofPlatform().daemon().name("macie2-classification-", 0).factory());
+            this.jobExecutor = ownedJobExecutor;
+        } else {
+            this.ownedJobExecutor = null;
+            this.jobExecutor = jobExecutor;
+        }
+    }
+
+    @PreDestroy
+    synchronized void shutdown() {
+        if (ownedJobExecutor != null) {
+            ownedJobExecutor.shutdownNow();
+        }
+        if (jobScheduler != null) {
+            jobScheduler.shutdownNow();
+            jobScheduler = null;
+        }
     }
 
     public MacieState state(String region) {
@@ -108,6 +153,8 @@ public class MacieService implements Resettable {
 
     public synchronized void disableMacie(String region, String accountId) {
         MacieState state = requireSessionForAccount(region, accountId);
+        // Disabling Macie deletes every job, so in-flight runs stop without committing findings.
+        stopRuns(run -> run.accountId.equals(accountId) && run.region.equals(region));
         state.setEnabled(false);
         state.setStatus(null);
         state.setFindingPublishingFrequency(null);
@@ -252,7 +299,7 @@ public class MacieService implements Resettable {
         words.forEach(word -> requireText(word, field, minimumLength, 90));
     }
 
-    private static void requireText(String value, String field, int minimumLength, int maximumLength) {
+    static void requireText(String value, String field, int minimumLength, int maximumLength) {
         if (value == null || value.codePointCount(0, value.length()) < minimumLength
                 || value.codePointCount(0, value.length()) > maximumLength) {
             throw validation(field + " must contain " + minimumLength + " to " + maximumLength + " characters.");
@@ -541,7 +588,7 @@ public class MacieService implements Resettable {
         return response;
     }
 
-    public ObjectNode getResource(String region, String accountId, String kind, String id) {
+    public synchronized ObjectNode getResource(String region, String accountId, String kind, String id) {
         ObjectNode document = requireSessionForAccount(region, accountId).getDocuments().get(kind + "/" + id);
         if (document == null) {
             throw notFound("The requested Macie " + kind + " does not exist.");
@@ -643,8 +690,8 @@ public class MacieService implements Resettable {
             throw notFound("The resource ARN does not belong to this account and region.");
         }
         String[] identity = arn.substring(prefix.length()).split("/", -1);
-        if (identity.length != 2 || !List.of("allow-list", "custom-data-identifier", "findings-filter")
-                .contains(identity[0])) {
+        if (identity.length != 2 || !List.of("allow-list", "custom-data-identifier", "findings-filter",
+                        MacieClassificationJobs.KIND).contains(identity[0])) {
             throw validation("Invalid Macie resource ARN.");
         }
         ObjectNode document = getResource(region, accountId, identity[0], identity[1]);
@@ -783,10 +830,10 @@ public class MacieService implements Resettable {
 
     public ObjectNode listManagedIdentifiers(String region, String accountId, JsonNode request) {
         requireSessionForAccount(region, accountId);
-        // Catalog metadata only. Classification execution is rejected independently.
-        List<ObjectNode> catalog = List.of(
-                object().put("id", "EMAIL_ADDRESS").put("category", "PERSONAL"),
-                object().put("id", "USA_SOCIAL_SECURITY_NUMBER").put("category", "PERSONAL"));
+        // The managed identifiers that classification jobs evaluate in Floci.
+        List<ObjectNode> catalog = MacieDataClassifier.MANAGED.stream()
+                .map(identifier -> object().put("id", identifier.id()).put("category", identifier.category()))
+                .toList();
         return page(catalog, "items", limit(request), text(request, "nextToken", false));
     }
 
@@ -1015,7 +1062,7 @@ public class MacieService implements Resettable {
         return node;
     }
 
-    private List<ObjectNode> documents(String region, String accountId, String kind) {
+    private synchronized List<ObjectNode> documents(String region, String accountId, String kind) {
         return requireSessionForAccount(region, accountId).getDocuments().entrySet().stream()
                 .filter(entry -> entry.getKey().startsWith(kind + "/"))
                 .sorted(Map.Entry.comparingByKey()).map(entry -> entry.getValue().deepCopy()).toList();
@@ -1064,7 +1111,7 @@ public class MacieService implements Resettable {
         return value.intValue();
     }
 
-    private static String text(JsonNode request, String field, boolean required) {
+    static String text(JsonNode request, String field, boolean required) {
         JsonNode value = request.get(field);
         if (value == null && !required) {
             return null;
@@ -1075,7 +1122,7 @@ public class MacieService implements Resettable {
         return value.textValue();
     }
 
-    private static List<String> strings(JsonNode node, String field) {
+    static List<String> strings(JsonNode node, String field) {
         if (node.isMissingNode()) {
             return List.of();
         }
@@ -1092,7 +1139,7 @@ public class MacieService implements Resettable {
         return result;
     }
 
-    private static Map<String, String> readTags(JsonNode node) {
+    static Map<String, String> readTags(JsonNode node) {
         if (node.isMissingNode()) {
             return Map.of();
         }
@@ -1109,20 +1156,631 @@ public class MacieService implements Resettable {
         return validateTags(tags);
     }
 
-    private static ObjectNode tagsNode(Map<String, String> tags) {
+    static ObjectNode tagsNode(Map<String, String> tags) {
         ObjectNode node = object();
         tags.forEach(node::put);
         return node;
     }
 
-    private static ObjectNode object() {
+    static ObjectNode object() {
         return JsonNodeFactory.instance.objectNode();
+    }
+
+    // --- Classification jobs ---
+
+    private static final String JOB = MacieClassificationJobs.KIND;
+    private static final int JOB_WORKERS = 2;
+    private static final long SCHEDULER_PERIOD_SECONDS = 60;
+    private static final String STOP_CANCELLED = "CANCELLED";
+    private static final String STOP_PAUSED = "USER_PAUSED";
+
+    /** One in-progress (or user-paused) run of a job. Mutable fields are guarded by the service monitor. */
+    static final class JobRun {
+        final String accountId;
+        final String region;
+        final String jobId;
+        /** Only objects changed after this instant are analyzed; null analyzes every object. */
+        final Instant changedAfter;
+        /** Skip objects that already have a finding from this job (a run restarted after a Floci restart). */
+        final boolean skipReported;
+        final Set<String> processed = new HashSet<>();
+        String stop;
+        boolean active;
+        volatile boolean errors;
+
+        JobRun(String accountId, String region, String jobId, Instant changedAfter, boolean skipReported) {
+            this.accountId = accountId;
+            this.region = region;
+            this.jobId = jobId;
+            this.changedAfter = changedAfter;
+            this.skipReported = skipReported;
+        }
+
+        String key() {
+            return runKey(accountId, region, jobId);
+        }
+    }
+
+    /** What a run evaluates, snapshotted from the job and the identifiers it references. */
+    private record RunPlan(ObjectNode job, List<MacieDataClassifier.Rule> rules, List<Pattern> allowList,
+                           Map<String, JsonNode> customSeverityLevels) {}
+
+    private record Outcome(ObjectNode finding, boolean error) {}
+
+    private static String runKey(String accountId, String region, String jobId) {
+        return accountId + "/" + region + "/" + jobId;
+    }
+
+    public synchronized ObjectNode createClassificationJob(String region, String accountId, JsonNode request) {
+        MacieState state = requireSessionForAccount(region, accountId);
+        String token = text(request, "clientToken", true);
+        String tokenKey = JOB + "/" + token;
+        ObjectNode previous = state.getCreateRequests().get(tokenKey);
+        if (previous != null) {
+            if (!previous.path("request").equals(request)) {
+                throw conflict("clientToken has already been used with different parameters.");
+            }
+            return previous.withObject("/response").deepCopy();
+        }
+        ObjectNode job = MacieClassificationJobs.definition(request, accountId,
+                member -> members.getForAccount(accountId, memberKey(region, member))
+                        .map(existing -> isCurrentMember(existing.relationshipStatus())).orElse(false),
+                id -> {
+                    ObjectNode identifier = state.getDocuments().get("custom-data-identifier/" + id);
+                    return identifier != null && !identifier.path("deleted").asBoolean();
+                },
+                id -> state.getDocuments().containsKey("allow-list/" + id));
+        String id = UUID.randomUUID().toString().replace("-", "");
+        String now = Instant.now().toString();
+        String jobArn = "arn:aws:macie2:" + region + ":" + accountId + ":" + JOB + "/" + id;
+        job.put("jobId", id);
+        job.put("jobArn", jobArn);
+        job.put("clientToken", token);
+        job.put("createdAt", now);
+        job.put("lastRunTime", now);
+        job.put("jobStatus", "IDLE");
+        job.set("lastRunErrorStatus", object().put("code", "NONE"));
+        job.set("statistics", object().put("approximateNumberOfObjectsToProcess", 0).put("numberOfRuns", 0));
+        state.getDocuments().put(JOB + "/" + id, job);
+        ObjectNode response = object().put("jobArn", jobArn).put("jobId", id);
+        ObjectNode receipt = object();
+        receipt.set("request", request.deepCopy());
+        receipt.set("response", response.deepCopy());
+        state.getCreateRequests().put(tokenKey, receipt);
+        states.putForAccount(accountId, region, state);
+
+        boolean scheduled = MacieClassificationJobs.SCHEDULED.equals(job.path("jobType").asText());
+        if (!scheduled || job.path("initialRun").asBoolean(false)) {
+            startRun(accountId, region, id, null, false, true);
+        }
+        if (scheduled) {
+            ensureJobScheduler();
+        }
+        return response;
+    }
+
+    public synchronized ObjectNode describeClassificationJob(String region, String accountId, String jobId) {
+        MacieState state = requireSessionForAccount(region, accountId);
+        expirePausedJobs(accountId, region, state);
+        ObjectNode job = state.getDocuments().get(JOB + "/" + jobId);
+        if (job == null) {
+            throw notFound("The classification job " + jobId + " does not exist.");
+        }
+        return job.deepCopy();
+    }
+
+    public synchronized ObjectNode listClassificationJobs(String region, String accountId, JsonNode request) {
+        MacieState state = requireSessionForAccount(region, accountId);
+        MacieClassificationJobs.validateListRequest(request);
+        expirePausedJobs(accountId, region, state);
+        JsonNode filter = request.get("filterCriteria");
+        List<ObjectNode> summaries = state.getDocuments().entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(JOB + "/"))
+                .map(Map.Entry::getValue)
+                .filter(job -> MacieClassificationJobs.listed(job, filter))
+                .sorted(MacieClassificationJobs.listOrder(request.get("sortCriteria")))
+                .map(MacieClassificationJobs::summary)
+                .toList();
+        return page(summaries, "items", limit(request), text(request, "nextToken", false));
+    }
+
+    /**
+     * Applies UpdateClassificationJob: CANCELLED (from IDLE, PAUSED, RUNNING, USER_PAUSED),
+     * USER_PAUSED (from IDLE, PAUSED, RUNNING) and RUNNING (resume, from USER_PAUSED).
+     */
+    public synchronized void updateClassificationJob(String region, String accountId, String jobId, JsonNode request) {
+        MacieState state = requireSessionForAccount(region, accountId);
+        String target = text(request, "jobStatus", true);
+        if (!List.of("CANCELLED", "USER_PAUSED", "RUNNING").contains(target)) {
+            throw validation("jobStatus must be CANCELLED, RUNNING, or USER_PAUSED.");
+        }
+        expirePausedJobs(accountId, region, state);
+        ObjectNode job = state.getDocuments().get(JOB + "/" + jobId);
+        if (job == null) {
+            throw notFound("The classification job " + jobId + " does not exist.");
+        }
+        String current = job.path("jobStatus").asText();
+        String key = runKey(accountId, region, jobId);
+        switch (target) {
+            case "CANCELLED" -> {
+                requireTransition(current, target, List.of("IDLE", "PAUSED", "RUNNING", "USER_PAUSED"));
+                JobRun run = runs.remove(key);
+                if (run != null) {
+                    run.stop = STOP_CANCELLED;
+                }
+                job.put("jobStatus", "CANCELLED");
+                job.remove("userPausedDetails");
+                job.withObject("/statistics").put("approximateNumberOfObjectsToProcess", 0);
+            }
+            case "USER_PAUSED" -> {
+                requireTransition(current, target, List.of("IDLE", "PAUSED", "RUNNING"));
+                JobRun run = runs.get(key);
+                if (run != null) {
+                    run.stop = STOP_PAUSED;
+                }
+                Instant now = Instant.now();
+                job.put("jobStatus", "USER_PAUSED");
+                job.set("userPausedDetails", object().put("jobPausedAt", now.toString())
+                        .put("jobExpiresAt", now.plus(MacieClassificationJobs.PAUSE_EXPIRY).toString()));
+            }
+            default -> {
+                requireTransition(current, target, List.of("USER_PAUSED"));
+                job.remove("userPausedDetails");
+                JobRun run = runs.get(key);
+                if (run != null) {
+                    run.stop = null;
+                    job.put("jobStatus", "RUNNING");
+                    states.putForAccount(accountId, region, state);
+                    if (!run.active) {
+                        run.active = true;
+                        submit(run);
+                    }
+                    return;
+                }
+                if (MacieClassificationJobs.ONE_TIME.equals(job.path("jobType").asText())) {
+                    // The paused run's progress was lost (Floci restarted): rerun, skipping objects already reported.
+                    states.putForAccount(accountId, region, state);
+                    startRun(accountId, region, jobId, null, true, false);
+                    return;
+                }
+                job.put("jobStatus", "IDLE");
+            }
+        }
+        states.putForAccount(accountId, region, state);
+    }
+
+    private static void requireTransition(String current, String target, List<String> allowed) {
+        if (!allowed.contains(current)) {
+            throw conflict("The job's status is " + current + ", so it can't be changed to " + target + ".");
+        }
+    }
+
+    /** Starts a run under the service monitor: the job becomes RUNNING before the worker is queued. */
+    private void startRun(String accountId, String region, String jobId, Instant changedAfter,
+                          boolean skipReported, boolean newRun) {
+        MacieState state = states.getForAccount(accountId, region).orElse(null);
+        ObjectNode job = state == null ? null : state.getDocuments().get(JOB + "/" + jobId);
+        if (job == null) {
+            return;
+        }
+        job.put("jobStatus", "RUNNING");
+        if (newRun) {
+            job.put("lastRunTime", Instant.now().toString());
+            job.set("lastRunErrorStatus", object().put("code", "NONE"));
+            ObjectNode statistics = job.withObject("/statistics");
+            statistics.put("numberOfRuns", statistics.path("numberOfRuns").asLong() + 1);
+        }
+        states.putForAccount(accountId, region, state);
+        JobRun run = new JobRun(accountId, region, jobId, changedAfter, skipReported);
+        run.active = true;
+        runs.put(run.key(), run);
+        submit(run);
+    }
+
+    private void submit(JobRun run) {
+        try {
+            jobExecutor.execute(() -> execute(run));
+        } catch (RejectedExecutionException e) {
+            run.errors = true;
+            finishRun(run, true);
+        }
+    }
+
+    private void stopRuns(Predicate<JobRun> selected) {
+        runs.values().removeIf(run -> {
+            if (selected.test(run)) {
+                run.stop = STOP_CANCELLED;
+                return true;
+            }
+            return false;
+        });
+    }
+
+    /** Runs one job execution on a worker thread; state is only touched under the service monitor. */
+    private void execute(JobRun run) {
+        boolean failed = false;
+        try {
+            RunPlan plan;
+            synchronized (this) {
+                if (stopped(run)) {
+                    return;
+                }
+                plan = plan(run);
+                if (plan == null) {
+                    run.active = false;
+                    runs.remove(run.key(), run);
+                    return;
+                }
+            }
+            List<MacieClassificationJobs.Candidate> candidates = sample(plan.job(), candidates(run, plan.job()));
+            synchronized (this) {
+                if (stopped(run)) {
+                    return;
+                }
+                long remaining = candidates.stream().filter(c -> !run.processed.contains(c.id())).count();
+                updateJob(run, job -> job.withObject("/statistics")
+                        .put("approximateNumberOfObjectsToProcess", remaining));
+            }
+            for (MacieClassificationJobs.Candidate candidate : candidates) {
+                synchronized (this) {
+                    if (stopped(run)) {
+                        return;
+                    }
+                    if (run.processed.contains(candidate.id())) {
+                        continue;
+                    }
+                }
+                Outcome outcome = classify(run, plan, candidate);
+                synchronized (this) {
+                    if (STOP_CANCELLED.equals(run.stop)) {
+                        run.active = false;
+                        return;
+                    }
+                    commit(run, candidate, outcome);
+                }
+            }
+        } catch (RuntimeException e) {
+            LOG.warnv(e, "Macie classification job {0} failed", run.jobId);
+            failed = true;
+        }
+        finishRun(run, failed);
+    }
+
+    /** True (and the worker exits) when the run was cancelled or paused. */
+    private boolean stopped(JobRun run) {
+        if (run.stop == null) {
+            return false;
+        }
+        run.active = false;
+        return true;
+    }
+
+    private synchronized void finishRun(JobRun run, boolean failed) {
+        if (run.stop != null) {
+            run.active = false;
+            return;
+        }
+        run.active = false;
+        runs.remove(run.key(), run);
+        updateJob(run, job -> {
+            if (!"RUNNING".equals(job.path("jobStatus").asText())) {
+                return;
+            }
+            boolean scheduled = MacieClassificationJobs.SCHEDULED.equals(job.path("jobType").asText());
+            job.put("jobStatus", scheduled ? "IDLE" : "COMPLETE");
+            job.set("lastRunErrorStatus", object().put("code", failed || run.errors ? "ERROR" : "NONE"));
+            job.withObject("/statistics").put("approximateNumberOfObjectsToProcess", 0);
+        });
+    }
+
+    private void updateJob(JobRun run, java.util.function.Consumer<ObjectNode> change) {
+        MacieState state = states.getForAccount(run.accountId, run.region).orElse(null);
+        ObjectNode job = state == null || !state.isEnabled() ? null : state.getDocuments().get(JOB + "/" + run.jobId);
+        if (job != null) {
+            change.accept(job);
+            states.putForAccount(run.accountId, run.region, state);
+        }
+    }
+
+    private RunPlan plan(JobRun run) {
+        MacieState state = states.getForAccount(run.accountId, run.region).orElse(null);
+        ObjectNode job = state == null || !state.isEnabled() ? null : state.getDocuments().get(JOB + "/" + run.jobId);
+        if (job == null) {
+            return null;
+        }
+        String selector = job.path("managedDataIdentifierSelector").asText("RECOMMENDED");
+        List<String> managedIds = strings(job.path("managedDataIdentifierIds"), "managedDataIdentifierIds");
+        List<MacieDataClassifier.Rule> rules = new ArrayList<>();
+        for (MacieDataClassifier.ManagedIdentifier identifier : MacieDataClassifier.MANAGED) {
+            boolean selected = switch (selector) {
+                case "ALL" -> true;
+                case "INCLUDE" -> managedIds.contains(identifier.id());
+                case "EXCLUDE" -> !managedIds.contains(identifier.id());
+                case "NONE" -> false;
+                default -> identifier.recommended();
+            };
+            if (selected) {
+                rules.add(MacieDataClassifier.rule(identifier));
+            }
+        }
+        Map<String, JsonNode> severityLevels = new HashMap<>();
+        // Deleted custom identifiers are soft-deleted and still apply to jobs that reference them.
+        for (String id : strings(job.path("customDataIdentifierIds"), "customDataIdentifierIds")) {
+            ObjectNode identifier = state.getDocuments().get("custom-data-identifier/" + id);
+            if (identifier == null) {
+                continue;
+            }
+            rules.add(new MacieDataClassifier.Rule(id, identifier.path("name").asText(),
+                    identifier.path("arn").asText(), null, Pattern.compile(identifier.path("regex").asText()),
+                    strings(identifier.path("keywords"), "keywords"),
+                    strings(identifier.path("ignoreWords"), "ignoreWords"),
+                    identifier.path("maximumMatchDistance").asInt(50), value -> true));
+            severityLevels.put(id, identifier.path("severityLevels"));
+        }
+        List<Pattern> allowList = new ArrayList<>();
+        for (String id : strings(job.path("allowListIds"), "allowListIds")) {
+            ObjectNode list = state.getDocuments().get("allow-list/" + id);
+            if (list != null && list.path("criteria").has("regex")) {
+                allowList.add(Pattern.compile(list.path("criteria").path("regex").asText()));
+            }
+        }
+        return new RunPlan(job.deepCopy(), rules, allowList, severityLevels);
+    }
+
+    /** Lists the in-scope objects of every bucket the job selects, reading S3 as the bucket owner. */
+    private List<MacieClassificationJobs.Candidate> candidates(JobRun run, ObjectNode job) {
+        JsonNode definition = job.path("s3JobDefinition");
+        List<MacieClassificationJobs.Target> targets = new ArrayList<>();
+        if (definition.has("bucketDefinitions")) {
+            for (JsonNode bucketDefinition : definition.path("bucketDefinitions")) {
+                String owner = bucketDefinition.path("accountId").asText();
+                List<Bucket> buckets = RequestScopes.callAs(owner, s3Service::listBuckets);
+                for (String name : strings(bucketDefinition.path("buckets"), "buckets")) {
+                    Bucket bucket = buckets.stream().filter(b -> name.equals(b.getName())).findFirst().orElse(null);
+                    if (bucket == null || !run.region.equals(bucketRegion(bucket))) {
+                        LOG.infov("Macie job {0}: bucket {1} does not exist in {2}", run.jobId, name, run.region);
+                        run.errors = true;
+                        continue;
+                    }
+                    targets.add(new MacieClassificationJobs.Target(owner, bucket));
+                }
+            }
+        } else {
+            JsonNode criteria = definition.path("bucketCriteria");
+            for (Bucket bucket : RequestScopes.callAs(run.accountId, s3Service::listBuckets)) {
+                if (run.region.equals(bucketRegion(bucket))
+                        && MacieClassificationJobs.bucketSelected(criteria, run.accountId, bucket)) {
+                    targets.add(new MacieClassificationJobs.Target(run.accountId, bucket));
+                }
+            }
+        }
+        JsonNode scoping = definition.get("scoping");
+        boolean tagScoped = MacieClassificationJobs.scopingUsesTags(scoping);
+        List<MacieClassificationJobs.Candidate> candidates = new ArrayList<>();
+        for (MacieClassificationJobs.Target target : targets) {
+            String name = target.bucket().getName();
+            List<S3Object> objects;
+            try {
+                objects = RequestScopes.callAs(target.accountId(),
+                        () -> s3Service.listObjects(name, null, null, Integer.MAX_VALUE));
+            } catch (AwsException e) {
+                LOG.infov("Macie job {0}: cannot list bucket {1}: {2}", run.jobId, name, e.getMessage());
+                run.errors = true;
+                continue;
+            }
+            for (S3Object object : objects) {
+                if (object.isDeleteMarker() || object.getKey() == null || object.getKey().endsWith("/")) {
+                    continue;
+                }
+                if (run.changedAfter != null && (object.getLastModified() == null
+                        || !object.getLastModified().isAfter(run.changedAfter))) {
+                    continue;
+                }
+                Map<String, String> tags = object.getTags();
+                if (tagScoped && (tags == null || tags.isEmpty())) {
+                    tags = RequestScopes.callAs(target.accountId(),
+                            () -> s3Service.getObjectTagging(name, object.getKey()));
+                }
+                if (MacieClassificationJobs.objectInScope(scoping, object.getKey(), object.getSize(),
+                        object.getLastModified(), tags)) {
+                    candidates.add(new MacieClassificationJobs.Candidate(target, object.getKey(), object.getSize(),
+                            object.getLastModified()));
+                }
+            }
+        }
+        candidates.sort(Comparator.comparing(MacieClassificationJobs.Candidate::id));
+        return candidates;
+    }
+
+    private static String bucketRegion(Bucket bucket) {
+        return bucket.getRegion() == null || bucket.getRegion().isBlank() ? "us-east-1" : bucket.getRegion();
+    }
+
+    /** Applies samplingPercentage: a random subset, stable for a run, of at most that share of objects. */
+    private static List<MacieClassificationJobs.Candidate> sample(ObjectNode job,
+                                                                  List<MacieClassificationJobs.Candidate> candidates) {
+        int percentage = job.path("samplingPercentage").asInt(100);
+        if (percentage >= 100) {
+            return candidates;
+        }
+        List<MacieClassificationJobs.Candidate> shuffled = new ArrayList<>(candidates);
+        long seed = (job.path("jobId").asText() + "/" + job.path("statistics").path("numberOfRuns").asLong())
+                .hashCode();
+        java.util.Collections.shuffle(shuffled, new java.util.Random(seed));
+        List<MacieClassificationJobs.Candidate> selected =
+                new ArrayList<>(shuffled.subList(0, (int) ((long) candidates.size() * percentage / 100)));
+        selected.sort(Comparator.comparing(MacieClassificationJobs.Candidate::id));
+        return selected;
+    }
+
+    private Outcome classify(JobRun run, RunPlan plan, MacieClassificationJobs.Candidate candidate) {
+        String bucket = candidate.target().bucket().getName();
+        if (candidate.size() > MacieClassificationJobs.MAX_OBJECT_BYTES) {
+            LOG.infov("Macie job {0}: skipped {1}/{2}: object exceeds {3} bytes", run.jobId, bucket,
+                    candidate.key(), MacieClassificationJobs.MAX_OBJECT_BYTES);
+            return new Outcome(null, false);
+        }
+        S3Object object;
+        try {
+            object = RequestScopes.callAs(candidate.target().accountId(),
+                    () -> s3Service.getObject(bucket, candidate.key()));
+        } catch (AwsException e) {
+            if ("NoSuchKey".equals(e.getErrorCode())) {
+                return new Outcome(null, false);
+            }
+            LOG.infov("Macie job {0}: cannot read {1}/{2}: {3}", run.jobId, bucket, candidate.key(), e.getMessage());
+            return new Outcome(null, true);
+        } catch (RuntimeException e) {
+            LOG.infov("Macie job {0}: cannot read {1}/{2}: {3}", run.jobId, bucket, candidate.key(), e.getMessage());
+            return new Outcome(null, true);
+        }
+        byte[] data = object.getData() == null ? new byte[0] : object.getData();
+        String text = MacieClassificationJobs.decodeText(data);
+        if (text == null) {
+            LOG.debugv("Macie job {0}: skipped {1}/{2}: not a text object", run.jobId, bucket, candidate.key());
+            return new Outcome(null, false);
+        }
+        MacieDataClassifier.Evaluation evaluation =
+                MacieDataClassifier.evaluate(text, plan.rules(), plan.allowList());
+        ObjectNode finding = MacieClassificationJobs.finding(UUID.randomUUID().toString().replace("-", ""),
+                run.region, run.accountId, plan.job(), candidate, object, evaluation,
+                plan.customSeverityLevels(), Instant.now());
+        return new Outcome(finding, false);
+    }
+
+    private void commit(JobRun run, MacieClassificationJobs.Candidate candidate, Outcome outcome) {
+        run.processed.add(candidate.id());
+        if (outcome.error()) {
+            run.errors = true;
+        }
+        MacieState state = states.getForAccount(run.accountId, run.region).orElse(null);
+        ObjectNode job = state == null || !state.isEnabled() ? null : state.getDocuments().get(JOB + "/" + run.jobId);
+        if (job == null) {
+            return;
+        }
+        ObjectNode finding = outcome.finding();
+        if (finding != null && !(run.skipReported && alreadyReported(state, run.jobId, finding))) {
+            List<JsonNode> filters = state.getDocuments().entrySet().stream()
+                    .filter(entry -> entry.getKey().startsWith("findings-filter/"))
+                    .map(Map.Entry::getValue)
+                    .filter(filter -> "ARCHIVE".equals(filter.path("action").asText()))
+                    .map(JsonNode.class::cast)
+                    .toList();
+            finding.put("archived", filters.stream()
+                    .anyMatch(filter -> matches(finding, filter.path("findingCriteria"))));
+            state.getDocuments().put("finding/" + finding.path("id").asText(), finding);
+        }
+        ObjectNode statistics = job.withObject("/statistics");
+        statistics.put("approximateNumberOfObjectsToProcess",
+                Math.max(0, statistics.path("approximateNumberOfObjectsToProcess").asLong() - 1));
+        states.putForAccount(run.accountId, run.region, state);
+    }
+
+    private static boolean alreadyReported(MacieState state, String jobId, ObjectNode finding) {
+        JsonNode object = finding.path("resourcesAffected").path("s3Object");
+        return state.getDocuments().entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith("finding/"))
+                .map(Map.Entry::getValue)
+                .anyMatch(existing -> jobId.equals(existing.path("classificationDetails").path("jobId").asText())
+                        && object.path("path").equals(existing.path("resourcesAffected").path("s3Object").path("path"))
+                        && object.path("eTag").equals(existing.path("resourcesAffected").path("s3Object").path("eTag")));
+    }
+
+    /** Paused jobs expire after 30 days: a one-time job is cancelled; a scheduled job's paused run is dropped. */
+    private void expirePausedJobs(String accountId, String region, MacieState state) {
+        Instant now = Instant.now();
+        boolean changed = false;
+        for (Map.Entry<String, ObjectNode> entry : new ArrayList<>(state.getDocuments().entrySet())) {
+            ObjectNode job = entry.getValue();
+            if (!entry.getKey().startsWith(JOB + "/") || !"USER_PAUSED".equals(job.path("jobStatus").asText())) {
+                continue;
+            }
+            String expiresAt = job.path("userPausedDetails").path("jobExpiresAt").asText(null);
+            if (expiresAt == null || Instant.parse(expiresAt).isAfter(now)) {
+                continue;
+            }
+            JobRun run = runs.remove(runKey(accountId, region, job.path("jobId").asText()));
+            if (run != null) {
+                run.stop = STOP_CANCELLED;
+            }
+            if (MacieClassificationJobs.ONE_TIME.equals(job.path("jobType").asText())) {
+                job.put("jobStatus", "CANCELLED");
+                job.withObject("/statistics").put("approximateNumberOfObjectsToProcess", 0);
+                changed = true;
+            } else if (run != null) {
+                job.withObject("/statistics").put("approximateNumberOfObjectsToProcess", 0);
+                changed = true;
+            }
+        }
+        if (changed) {
+            states.putForAccount(accountId, region, state);
+        }
+    }
+
+    private synchronized void ensureJobScheduler() {
+        if (jobScheduler != null) {
+            return;
+        }
+        jobScheduler = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().daemon().name("macie2-job-scheduler").factory());
+        jobScheduler.scheduleWithFixedDelay(() -> {
+            try {
+                runDueJobs(Instant.now());
+            } catch (RuntimeException e) {
+                LOG.warnv(e, "Macie job scheduling failed");
+            }
+        }, SCHEDULER_PERIOD_SECONDS, SCHEDULER_PERIOD_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Starts scheduled runs whose start time has passed, and settles RUNNING jobs whose worker
+     * no longer exists (Floci restarted mid-run with persistent storage).
+     */
+    synchronized void runDueJobs(Instant now) {
+        for (AccountAwareStorageBackend.AccountEntry<MacieState> entry : states.scanAllAccountEntries(key -> true)) {
+            String accountId = entry.accountId();
+            String region = entry.key();
+            MacieState state = entry.value();
+            if (!state.isEnabled()) {
+                continue;
+            }
+            expirePausedJobs(accountId, region, state);
+            List<ObjectNode> jobs = state.getDocuments().entrySet().stream()
+                    .filter(document -> document.getKey().startsWith(JOB + "/"))
+                    .map(Map.Entry::getValue).toList();
+            for (ObjectNode job : jobs) {
+                String jobId = job.path("jobId").asText();
+                String status = job.path("jobStatus").asText();
+                boolean scheduled = MacieClassificationJobs.SCHEDULED.equals(job.path("jobType").asText());
+                if ("RUNNING".equals(status) && !runs.containsKey(runKey(accountId, region, jobId))) {
+                    if (scheduled) {
+                        job.put("jobStatus", "IDLE");
+                        job.set("lastRunErrorStatus", object().put("code", "ERROR"));
+                        states.putForAccount(accountId, region, state);
+                    } else {
+                        startRun(accountId, region, jobId, null, true, false);
+                    }
+                    continue;
+                }
+                if (!scheduled || !"IDLE".equals(status)) {
+                    continue;
+                }
+                Instant lastRun = Instant.parse(job.path("lastRunTime").asText());
+                if (MacieClassificationJobs.nextRun(job.path("scheduleFrequency"), lastRun).isAfter(now)) {
+                    continue;
+                }
+                // A scheduled run analyzes objects created or changed since the previous run started;
+                // without an initial run, the first run covers objects changed since the job was created.
+                startRun(accountId, region, jobId, lastRun, false, true);
+            }
+        }
     }
 
     public record Page<T>(List<T> items, String nextToken) {}
 
     @Override
-    public void clear() {
+    public synchronized void clear() {
+        stopRuns(run -> true);
         states.clear();
         members.clear();
     }
@@ -1137,7 +1795,7 @@ public class MacieService implements Resettable {
         }
     }
 
-    private static AwsException validation(String message) {
+    static AwsException validation(String message) {
         return new AwsException("ValidationException", message, 400);
     }
 
@@ -1145,7 +1803,7 @@ public class MacieService implements Resettable {
         return new AwsException("ConflictException", message, 409);
     }
 
-    private static AwsException notFound(String message) {
+    static AwsException notFound(String message) {
         return new AwsException("ResourceNotFoundException", message, 404);
     }
 

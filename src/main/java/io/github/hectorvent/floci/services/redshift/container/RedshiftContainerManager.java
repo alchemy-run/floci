@@ -165,6 +165,54 @@ public class RedshiftContainerManager {
         return "floci-redshift-" + accountId + "-" + clusterIdentifier;
     }
 
+    /**
+     * Creates the cluster's CreateCluster DBName database in the backing engine when it is not
+     * the bootstrap "dev" database. Idempotent: an existing database (an adopted container, or
+     * a retried create) is left as is. The new database is cloned from template1, which
+     * already carries the Redshift catalog views, so it needs no separate bootstrap.
+     */
+    public void ensureDatabase(String accountId, String clusterIdentifier, String username, String dbName) {
+        if (dbName == null || dbName.isBlank() || "dev".equals(dbName)) {
+            return;
+        }
+        if (!dbName.matches("^[a-z_][a-z0-9_$]{0,63}$")) {
+            throw new AwsException("InvalidParameterValue", "DBName " + dbName + " is not a valid database name", 400);
+        }
+        RedshiftContainerHandle handle = containers.get(containerKey(accountId, clusterIdentifier));
+        if (handle == null) {
+            throw new AwsException("ClusterNotFound", "Cluster container for " + clusterIdentifier + " not found", 404);
+        }
+        String effectiveUser = (username != null && !username.isBlank()) ? username : "postgres";
+        String[] exists = new String[]{
+                "psql", "-h", "127.0.0.1", "-U", effectiveUser, "-d", "dev", "-tA",
+                "-c", "SELECT 1 FROM pg_database WHERE datname = '" + dbName + "'"
+        };
+        String[] create = new String[]{
+                "psql", "-h", "127.0.0.1", "-v", "ON_ERROR_STOP=1", "-U", effectiveUser, "-d", "dev",
+                "-c", "CREATE DATABASE \"" + dbName + "\""
+        };
+        try {
+            ExecResult probe = execInContainer(handle.getContainerId(), exists, 15);
+            if (probe.exitCode() == 0 && "1".equals(probe.stdout().trim())) {
+                return;
+            }
+            ExecResult result = execInContainer(handle.getContainerId(), create, 30);
+            if (result.exitCode() != 0) {
+                LOG.warnv("CREATE DATABASE {0} failed for cluster {1} (exit {2}): {3}",
+                        dbName, clusterIdentifier, result.exitCode(), result.stderr());
+                throw new AwsException("InternalFailure",
+                        "Failed to create database " + dbName + " for cluster " + clusterIdentifier, 500);
+            }
+            LOG.infov("Created database {0} for Redshift cluster {1}", dbName, clusterIdentifier);
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.errorv(e, "Error creating database {0} for cluster {1}", dbName, clusterIdentifier);
+            throw new AwsException("InternalFailure",
+                    "Failed to create database " + dbName + " for cluster " + clusterIdentifier + ": " + e.getMessage(), 500);
+        }
+    }
+
     public void takeSnapshot(String accountId, String clusterIdentifier, String username, String dbname, Path outputFile) {
         RedshiftContainerHandle handle = containers.get(containerKey(accountId, clusterIdentifier));
         if (handle == null) {

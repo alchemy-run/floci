@@ -1036,6 +1036,68 @@ class EsmIntegrationTest {
             .body("UUID", equalTo(uuid));
     }
 
+    @Test
+    @Order(81)
+    void createAmazonMskEventSourceMapping() {
+        String clusterArn = "arn:aws:kafka:" + REGION + ":" + ACCOUNT_ID
+                + ":cluster/esm-msk-cluster/0f3c9d1e-2b4a-4c5d-8e6f-7a8b9c0d1e2f-s1";
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "Topics": ["orders"],
+                    "StartingPosition": "LATEST",
+                    "AmazonManagedKafkaEventSourceConfig": {"ConsumerGroupId": "orders-consumers"}
+                }
+                """.formatted(FUNCTION_NAME, clusterArn))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("EventSourceArn", equalTo(clusterArn))
+            .body("Topics[0]", equalTo("orders"))
+            .body("StartingPosition", equalTo("LATEST"))
+            .body("AmazonManagedKafkaEventSourceConfig.ConsumerGroupId", equalTo("orders-consumers"))
+            .body("$", not(hasKey("SelfManagedEventSource")))
+        .extract()
+            .path("UUID");
+
+        given()
+            .queryParam("FunctionName", FUNCTION_NAME)
+            .queryParam("EventSourceArn", clusterArn)
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(200)
+            .body("EventSourceMappings.size()", equalTo(1))
+            .body("EventSourceMappings[0].UUID", equalTo(uuid))
+            .body("EventSourceMappings[0].Topics[0]", equalTo("orders"));
+
+        // An MSK source reads exactly one topic.
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "Topics": ["orders", "payments"],
+                    "StartingPosition": "LATEST"
+                }
+                """.formatted(FUNCTION_NAME, clusterArn))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(400);
+
+        given()
+        .when()
+            .delete(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(202);
+    }
+
     // ──────────────────────────── Multi-account ESM ────────────────────────────
 
     /**

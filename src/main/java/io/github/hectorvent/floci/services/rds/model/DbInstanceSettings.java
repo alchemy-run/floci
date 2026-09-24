@@ -11,6 +11,8 @@ import java.util.Set;
 /**
  * The storage and backup settings of a DB instance as a request carries them: a null member is
  * one the request left out. On create that means the AWS default, on modify it means unchanged.
+ * {@code port} is CreateDBInstance's listener port; ModifyDBInstance's DBPortNumber is applied
+ * separately because it moves the endpoint.
  */
 @RegisterForReflection
 public record DbInstanceSettings(Boolean storageEncrypted,
@@ -26,7 +28,29 @@ public record DbInstanceSettings(Boolean storageEncrypted,
                                  String engineLifecycleSupport,
                                  List<String> enabledCloudwatchLogsExports,
                                  LogExportChanges logExportChanges,
-                                 Integer maxAllocatedStorage) {
+                                 Integer maxAllocatedStorage,
+                                 Integer port) {
+
+    /** The settings without a listener port, which the service defaults from the engine. */
+    public DbInstanceSettings(Boolean storageEncrypted,
+                              String kmsKeyId,
+                              Integer backupRetentionPeriod,
+                              String preferredBackupWindow,
+                              String preferredMaintenanceWindow,
+                              Boolean copyTagsToSnapshot,
+                              Integer monitoringInterval,
+                              String monitoringRoleArn,
+                              Boolean performanceInsightsEnabled,
+                              Integer performanceInsightsRetentionPeriod,
+                              String engineLifecycleSupport,
+                              List<String> enabledCloudwatchLogsExports,
+                              LogExportChanges logExportChanges,
+                              Integer maxAllocatedStorage) {
+        this(storageEncrypted, kmsKeyId, backupRetentionPeriod, preferredBackupWindow,
+                preferredMaintenanceWindow, copyTagsToSnapshot, monitoringInterval, monitoringRoleArn,
+                performanceInsightsEnabled, performanceInsightsRetentionPeriod, engineLifecycleSupport,
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, null);
+    }
 
     /** The settings a caller that touches none of the monitoring members gives. */
     public DbInstanceSettings(Boolean storageEncrypted,
@@ -174,7 +198,7 @@ public record DbInstanceSettings(Boolean storageEncrypted,
                 backupWindow, maintenanceWindow, copyTagsToSnapshot,
                 monitoringInterval, monitoringRoleArn, performanceInsightsEnabled,
                 performanceInsightsRetentionPeriod, engineLifecycleSupport,
-                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage);
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port);
     }
 
     public DbInstanceSettings withKmsKeyId(String resolvedKmsKeyId) {
@@ -182,9 +206,10 @@ public record DbInstanceSettings(Boolean storageEncrypted,
                 preferredBackupWindow, preferredMaintenanceWindow, copyTagsToSnapshot,
                 monitoringInterval, monitoringRoleArn, performanceInsightsEnabled,
                 performanceInsightsRetentionPeriod, engineLifecycleSupport,
-                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage);
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port);
     }
 
+    /** The listener port is not applied here: it moves the endpoint, which the service owns. */
     public void applyTo(DbInstance instance) {
         if (storageEncrypted != null) {
             instance.setStorageEncrypted(storageEncrypted);

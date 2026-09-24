@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.bedrockagentcore;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.bedrockagentcore.model.Branch;
@@ -15,7 +17,11 @@ import org.jboss.logging.Logger;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -169,6 +175,61 @@ public class BedrockAgentCoreEventService {
         return eventId;
     }
 
+    /**
+     * Actors that have recorded at least one event in the memory, in id order. An actor exists
+     * only through its events, so a memory with none lists no actors rather than failing.
+     */
+    public PaginatedResult<String> listActors(String memoryId, Integer maxResults, String nextToken, String region) {
+        requireMemory(memoryId, region);
+        String prefix = memoryId + "::";
+        Set<String> actors = new TreeSet<>();
+        for (MemoryEvent event : eventStore.scan(k -> k.startsWith(prefix))) {
+            actors.add(event.getActorId());
+        }
+        return Pagination.paginate(new ArrayList<>(actors), actor -> actor, maxResults, nextToken,
+                MAX_RESULTS_LIMIT, MAX_RESULTS_LIMIT, "ValidationException");
+    }
+
+    /**
+     * An actor's sessions, newest first. A session is created by its first event, so its
+     * {@code createdAt} is the earliest event timestamp it holds. Every session derived here has
+     * events, which is exactly what the only filter AgentCore defines, {@code HAS_EVENTS}, keeps.
+     */
+    public PaginatedResult<SessionSummary> listSessions(String memoryId, String actorId, String eventFilter,
+                                                        Integer maxResults, String nextToken, String region) {
+        requireMemory(memoryId, region);
+        requireField(actorId, "actorId");
+        if (eventFilter != null && !"HAS_EVENTS".equals(eventFilter)) {
+            throw new AwsException("ValidationException",
+                    "1 validation error detected: Value '" + eventFilter + "' at 'filter.eventFilter' "
+                            + "failed to satisfy constraint: Member must satisfy enum value set: [HAS_EVENTS]", 400);
+        }
+        String prefix = memoryId + "::" + actorId + "::";
+        Map<String, Double> firstEventAt = new HashMap<>();
+        for (MemoryEvent event : eventStore.scan(k -> k.startsWith(prefix))) {
+            if (!actorId.equals(event.getActorId())) {
+                continue;
+            }
+            double timestamp = event.getEventTimestamp() == null ? 0d : event.getEventTimestamp();
+            firstEventAt.merge(event.getSessionId(), timestamp, Math::min);
+        }
+        List<SessionSummary> sessions = new ArrayList<>();
+        for (Map.Entry<String, Double> entry : firstEventAt.entrySet()) {
+            sessions.add(new SessionSummary(entry.getKey(), actorId, entry.getValue()));
+        }
+        return Pagination.paginate(sessions, BedrockAgentCoreEventService::newestFirstCursor, maxResults, nextToken,
+                MAX_RESULTS_LIMIT, MAX_RESULTS_LIMIT, "ValidationException");
+    }
+
+    /** One entry of {@code ListSessions}. {@code createdAt} is epoch seconds. */
+    public record SessionSummary(String sessionId, String actorId, double createdAt) {}
+
+    /** Sorts ascending as newest first: the inverted creation time leads, the id breaks ties. */
+    private static String newestFirstCursor(SessionSummary summary) {
+        long millis = Math.round(summary.createdAt() * 1000d);
+        return String.format("%019d", Long.MAX_VALUE - Math.max(0L, millis)) + "#" + summary.sessionId();
+    }
+
     // ── validation ───────────────────────────────────────────────
 
     /**
@@ -176,7 +237,7 @@ public class BedrockAgentCoreEventService {
      * that cannot be an id at all, and {@code ResourceNotFoundException} only for a well-formed id
      * that does not resolve.
      */
-    private void requireMemory(String memoryId, String region) {
+    void requireMemory(String memoryId, String region) {
         if (memoryId == null || !MEMORY_ID.matcher(memoryId).matches()) {
             throw new AwsException("ValidationException",
                     "Invalid memoryId: not a valid memory ID or ARN", 400);

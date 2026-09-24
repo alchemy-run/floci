@@ -44,6 +44,15 @@ public class DbCluster {
     private Map<String, String> tags = new LinkedHashMap<>();
     private String engineMode;
     private boolean storageEncrypted;
+    // The listener port clients connect to. 0 on a record persisted before it was modelled,
+    // which reads as the engine default.
+    private int port;
+    private List<String> vpcSecurityGroupIds = new ArrayList<>();
+    private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
+    private boolean deletionProtection;
+    private String networkType;
+    // AWS keeps one day of automated backups when CreateDBCluster omits it.
+    private int backupRetentionPeriod = 1;
 
     private String dockerVolumeName;
     private String volumeId;
@@ -187,6 +196,29 @@ public class DbCluster {
 
     public boolean isStorageEncrypted() { return storageEncrypted; }
     public void setStorageEncrypted(boolean storageEncrypted) { this.storageEncrypted = storageEncrypted; }
+
+    public int getPort() { return port; }
+    public void setPort(int port) { this.port = port; }
+
+    public List<String> getVpcSecurityGroupIds() { return vpcSecurityGroupIds; }
+    public void setVpcSecurityGroupIds(List<String> vpcSecurityGroupIds) {
+        this.vpcSecurityGroupIds = vpcSecurityGroupIds != null ? new ArrayList<>(vpcSecurityGroupIds) : new ArrayList<>();
+    }
+
+    public List<String> getEnabledCloudwatchLogsExports() { return enabledCloudwatchLogsExports; }
+    public void setEnabledCloudwatchLogsExports(List<String> enabledCloudwatchLogsExports) {
+        this.enabledCloudwatchLogsExports = enabledCloudwatchLogsExports != null
+                ? new ArrayList<>(enabledCloudwatchLogsExports) : new ArrayList<>();
+    }
+
+    public boolean isDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
+
+    public int getBackupRetentionPeriod() { return backupRetentionPeriod; }
+    public void setBackupRetentionPeriod(int backupRetentionPeriod) { this.backupRetentionPeriod = backupRetentionPeriod; }
 
     public String getDockerVolumeName() { return dockerVolumeName; }
     public void setDockerVolumeName(String dockerVolumeName) { this.dockerVolumeName = dockerVolumeName; }

@@ -169,8 +169,7 @@ class MacieSessionIntegrationTest {
         request(ACCOUNT, EAST).body("{}").post("/findings").then().statusCode(200)
                 .body("findingIds", hasSize(0));
         request(ACCOUNT, EAST).body("{}").post("/jobs").then().statusCode(400)
-                .body("__type", equalTo("ValidationException"))
-                .body("message", org.hamcrest.Matchers.containsString("S3 reading and evaluation are not implemented"));
+                .body("__type", equalTo("ValidationException"));
         request(ACCOUNT, EAST).body("{}").post("/jobs/list").then().statusCode(200)
                 .body("items", hasSize(0));
     }
@@ -275,7 +274,8 @@ class MacieSessionIntegrationTest {
                 .body("configuration", equalTo(Map.of()));
         request(ACCOUNT, EAST).get("/usage").then().statusCode(200).body("usageTotals", hasSize(0));
         request(ACCOUNT, EAST).body("{}").post("/managed-data-identifiers/list").then().statusCode(200)
-                .body("items[0].id", equalTo("EMAIL_ADDRESS"));
+                .body("items.id", org.hamcrest.Matchers.hasItems("EMAIL_ADDRESS", "USA_SOCIAL_SECURITY_NUMBER"))
+                .body("items.find { it.id == 'EMAIL_ADDRESS' }.category", equalTo("PERSONAL_INFORMATION"));
         request(ACCOUNT, EAST).body("{}").post("/datasources/s3/statistics").then().statusCode(200)
                 .body("bucketCount", equalTo(0));
         request(ACCOUNT, EAST).body("{}").post("/datasources/search-resources").then().statusCode(200)

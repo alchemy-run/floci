@@ -372,7 +372,7 @@ class AmazonMqControllerIntegrationTest {
     }
 
     @Test
-    void rejectsActiveMqEngine() {
+    void rejectsActiveMqBrokerWithoutUsers() {
         given()
             .contentType("application/json")
             .body("""
@@ -383,6 +383,113 @@ class AmazonMqControllerIntegrationTest {
         .when()
             .post("/v1/brokers")
         .then()
-            .statusCode(400);
+            .statusCode(400)
+            .body("__type", equalTo("BadRequestException"));
+    }
+
+    @Test
+    void activeMqBrokerExposesEveryProtocolAndItsUsers() {
+        String brokerId = given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("""
+                {"brokerName": "it-activemq-broker", "engineType": "ACTIVEMQ",
+                 "deploymentMode": "SINGLE_INSTANCE", "hostInstanceType": "mq.t3.micro",
+                 "publiclyAccessible": true, "autoMinorVersionUpgrade": true,
+                 "users": [{"username": "alchemyadmin", "password": "SuperSecretPassw0rd!"}],
+                 "tags": {"team": "messaging"}}
+                """)
+        .when()
+            .post("/v1/brokers")
+        .then()
+            .statusCode(200)
+            .body("brokerArn", containsString(":broker:it-activemq-broker:"))
+            .extract().path("brokerId");
+
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}", brokerId)
+            .then().statusCode(200)
+            .body("engineType", equalTo("ACTIVEMQ"))
+            .body("engineVersion", equalTo("5.18"))
+            .body("brokerState", equalTo("RUNNING"))
+            .body("deploymentMode", equalTo("SINGLE_INSTANCE"))
+            .body("brokerInstances[0].endpoints", hasSize(5))
+            .body("brokerInstances[0].endpoints[0]", startsWith("tcp://"))
+            .body("brokerInstances[0].consoleURL", startsWith("http://"))
+            .body("users.username", contains("alchemyadmin"))
+            .body("tags.team", equalTo("messaging"));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"mode\":\"SWITCHOVER\"}")
+            .post("/v1/brokers/{id}/promote", brokerId)
+            .then().statusCode(400).body("__type", equalTo("BadRequestException"));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .post("/v1/brokers/{id}/reboot", brokerId)
+            .then().statusCode(200);
+
+        given().header("Authorization", MQ_AUTH).delete("/v1/brokers/{id}", brokerId)
+            .then().statusCode(200).body("brokerId", equalTo(brokerId));
+    }
+
+    @Test
+    void activeMqUserApiStagesChangesUntilReboot() {
+        String brokerId = given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("""
+                {"brokerName": "it-activemq-users", "engineType": "ActiveMQ",
+                 "deploymentMode": "SINGLE_INSTANCE", "hostInstanceType": "mq.t3.micro",
+                 "users": [{"username": "alchemyadmin", "password": "SuperSecretPassw0rd!"}]}
+                """)
+            .post("/v1/brokers")
+            .then().statusCode(200).extract().path("brokerId");
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"password\": \"AnotherSecretPassw0rd!\", \"consoleAccess\": true, \"groups\": [\"tenants\"]}")
+            .post("/v1/brokers/{id}/users/alchemytenant", brokerId)
+            .then().statusCode(200);
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"password\": \"AnotherSecretPassw0rd!\"}")
+            .post("/v1/brokers/{id}/users/alchemytenant", brokerId)
+            .then().statusCode(409).body("__type", equalTo("ConflictException"));
+
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}/users/alchemytenant", brokerId)
+            .then().statusCode(200)
+            .body("brokerId", equalTo(brokerId))
+            .body("username", equalTo("alchemytenant"))
+            .body("consoleAccess", nullValue())
+            .body("pending.pendingChange", equalTo("CREATE"))
+            .body("pending.consoleAccess", equalTo(true))
+            .body("pending.groups", contains("tenants"));
+
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}/users", brokerId)
+            .then().statusCode(200)
+            .body("brokerId", equalTo(brokerId))
+            .body("users.username", contains("alchemyadmin", "alchemytenant"))
+            .body("users.find { it.username == 'alchemytenant' }.pendingChange", equalTo("CREATE"));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"consoleAccess\": true}")
+            .put("/v1/brokers/{id}/users/alchemynonexistentuser", brokerId)
+            .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .body("{\"consoleAccess\": true}")
+            .put("/v1/brokers/{id}/users/alchemyadmin", brokerId)
+            .then().statusCode(200);
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}/users/alchemyadmin", brokerId)
+            .then().statusCode(200)
+            .body("consoleAccess", equalTo(false))
+            .body("pending.pendingChange", equalTo("UPDATE"))
+            .body("pending.consoleAccess", equalTo(true));
+
+        given().header("Authorization", MQ_AUTH).delete("/v1/brokers/{id}/users/alchemytenant", brokerId)
+            .then().statusCode(200);
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}/users/alchemytenant", brokerId)
+            .then().statusCode(404).body("__type", equalTo("NotFoundException"));
+
+        given().header("Authorization", MQ_AUTH).contentType("application/json")
+            .post("/v1/brokers/{id}/reboot", brokerId)
+            .then().statusCode(200);
+        given().header("Authorization", MQ_AUTH).get("/v1/brokers/{id}/users/alchemyadmin", brokerId)
+            .then().statusCode(200)
+            .body("consoleAccess", equalTo(true))
+            .body("pending", nullValue());
     }
 }

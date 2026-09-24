@@ -33,6 +33,8 @@ public class RedpandaManager {
     private static final Logger LOG = Logger.getLogger(RedpandaManager.class);
     private static final int KAFKA_PORT = 9092;
     static final int ADMIN_PORT = 9644;
+    /** The port MSK serves its SASL/IAM listener on, used for the broker listener behind the gateway too. */
+    static final int SASL_IAM_PORT = MskIamGateway.SASL_IAM_PORT;
 
     // Redpanda's Admin API exposes readiness at /v1/status/ready. /ready always returns 404
     private static final String ADMIN_READY_PATH = "/v1/status/ready";
@@ -137,11 +139,21 @@ public class RedpandaManager {
             kafkaAdvertiseAddr = containerName + ":" + KAFKA_PORT;
         }
 
-        // Build command
+        // Build command. A cluster with IAM client authentication gets a second, named listener
+        // behind the SASL/IAM gateway: it advertises the broker hostname on 9098, so a client
+        // that bootstraps through the gateway is sent back through it for every broker.
+        String iamBrokerHost = cluster.getIamBrokerHost();
         List<String> cmd = new ArrayList<>(List.of(
                 "redpanda", "start", "--overprovisioned", "--smp", "1",
-                "--memory", "512M", "--reserve-memory", "0M",
-                "--advertise-kafka-addr", kafkaAdvertiseAddr));
+                "--memory", "512M", "--reserve-memory", "0M"));
+        if (iamBrokerHost == null) {
+            cmd.addAll(List.of("--advertise-kafka-addr", kafkaAdvertiseAddr));
+        } else {
+            cmd.addAll(List.of(
+                    "--kafka-addr", "internal://0.0.0.0:" + KAFKA_PORT + ",sasl_iam://0.0.0.0:" + SASL_IAM_PORT,
+                    "--advertise-kafka-addr", "internal://" + kafkaAdvertiseAddr
+                            + ",sasl_iam://" + iamBrokerHost + ":" + SASL_IAM_PORT));
+        }
 
         // Build container spec. Publish Kafka/admin ports to the host only in
         // native mode; in Docker mode producers/consumers reach the broker via
@@ -157,8 +169,14 @@ public class RedpandaManager {
 
         if (!containerDetector.isRunningInContainer()) {
             specBuilder.withPortBinding(KAFKA_PORT, kafkaHostPort).withDynamicPort(ADMIN_PORT);
+            if (iamBrokerHost != null) {
+                specBuilder.withDynamicPort(SASL_IAM_PORT);
+            }
         } else {
             specBuilder.withExposedPort(KAFKA_PORT).withExposedPort(ADMIN_PORT);
+            if (iamBrokerHost != null) {
+                specBuilder.withExposedPort(SASL_IAM_PORT);
+            }
         }
 
         // Handle persistence mounting
@@ -195,6 +213,12 @@ public class RedpandaManager {
 
         cluster.setBootstrapBrokers(kafkaEndpoint.host() + ":" + kafkaEndpoint.port());
         LOG.infov("Redpanda container {0} started. Bootstrap: {1}", info.containerId(), cluster.getBootstrapBrokers());
+        if (iamBrokerHost != null) {
+            EndpointInfo iamEndpoint = info.getEndpoint(SASL_IAM_PORT);
+            cluster.setIamBackendAddress(iamEndpoint != null
+                    ? iamEndpoint.host() + ":" + iamEndpoint.port()
+                    : kafkaEndpoint.host() + ":" + SASL_IAM_PORT);
+        }
 
         // Attach log streaming (new feature)
         String shortId = info.containerId().length() >= 8

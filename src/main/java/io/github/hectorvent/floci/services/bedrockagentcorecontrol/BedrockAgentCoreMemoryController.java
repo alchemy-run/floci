@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreEventService;
+import io.github.hectorvent.floci.services.bedrockagentcore.BedrockAgentCoreMemoryRecordService;
 import io.github.hectorvent.floci.services.bedrockagentcore.model.Branch;
 import io.github.hectorvent.floci.services.bedrockagentcore.model.MemoryEvent;
 import io.github.hectorvent.floci.services.bedrockagentcore.model.PayloadType;
@@ -47,15 +48,18 @@ public class BedrockAgentCoreMemoryController {
 
     private final BedrockAgentCoreMemoryService service;
     private final BedrockAgentCoreEventService eventService;
+    private final BedrockAgentCoreMemoryRecordService recordService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
     public BedrockAgentCoreMemoryController(BedrockAgentCoreMemoryService service,
                                             BedrockAgentCoreEventService eventService,
+                                            BedrockAgentCoreMemoryRecordService recordService,
                                             RegionResolver regionResolver, ObjectMapper objectMapper) {
         this.service = service;
         this.eventService = eventService;
+        this.recordService = recordService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -278,6 +282,188 @@ public class BedrockAgentCoreMemoryController {
         } catch (AwsException e) {
             return error(e, "deleting event");
         }
+    }
+
+    @POST
+    @Path("/{memoryId}/actors")
+    public Response listActors(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = json(body);
+            PaginatedResult<String> page = eventService.listActors(memoryId, optionalInt(request, "maxResults"),
+                    text(request, "nextToken"), region);
+            ObjectNode out = objectMapper.createObjectNode();
+            ArrayNode actors = out.putArray("actorSummaries");
+            page.items().forEach(actorId -> actors.addObject().put("actorId", actorId));
+            if (page.nextToken() != null) {
+                out.put("nextToken", page.nextToken());
+            }
+            return Response.ok(out).build();
+        } catch (Exception e) {
+            return error(e, "listing actors");
+        }
+    }
+
+    @POST
+    @Path("/{memoryId}/actor/{actorId}/sessions")
+    public Response listSessions(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                 @PathParam("actorId") String actorId, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            JsonNode request = json(body);
+            JsonNode filter = request.get("filter");
+            PaginatedResult<BedrockAgentCoreEventService.SessionSummary> page = eventService.listSessions(
+                    memoryId, actorId, filter == null ? null : text(filter, "eventFilter"),
+                    optionalInt(request, "maxResults"), text(request, "nextToken"), region);
+            ObjectNode out = objectMapper.createObjectNode();
+            ArrayNode sessions = out.putArray("sessionSummaries");
+            for (BedrockAgentCoreEventService.SessionSummary summary : page.items()) {
+                ObjectNode node = sessions.addObject();
+                node.put("sessionId", summary.sessionId());
+                node.put("actorId", summary.actorId());
+                node.put("createdAt", summary.createdAt());
+            }
+            if (page.nextToken() != null) {
+                out.put("nextToken", page.nextToken());
+            }
+            return Response.ok(out).build();
+        } catch (Exception e) {
+            return error(e, "listing sessions");
+        }
+    }
+
+    @POST
+    @Path("/{memoryId}/memoryRecords/batchCreate")
+    public Response batchCreateMemoryRecords(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                             String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            // BatchCreateMemoryRecords is modeled with a 201, unlike the other batch operations.
+            return Response.status(201).entity(recordService.batchCreate(memoryId, json(body), region)).build();
+        } catch (Exception e) {
+            return error(e, "creating memory records");
+        }
+    }
+
+    @POST
+    @Path("/{memoryId}/memoryRecords/batchUpdate")
+    public Response batchUpdateMemoryRecords(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                             String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            return Response.ok(recordService.batchUpdate(memoryId, json(body), region)).build();
+        } catch (Exception e) {
+            return error(e, "updating memory records");
+        }
+    }
+
+    @POST
+    @Path("/{memoryId}/memoryRecords/batchDelete")
+    public Response batchDeleteMemoryRecords(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                             String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            return Response.ok(recordService.batchDelete(memoryId, json(body), region)).build();
+        } catch (Exception e) {
+            return error(e, "deleting memory records");
+        }
+    }
+
+    /** ListMemoryRecords is a POST to the collection path; the filters travel in the body. */
+    @POST
+    @Path("/{memoryId}/memoryRecords")
+    public Response listMemoryRecords(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                      String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            return Response.ok(recordService.list(memoryId, json(body), region)).build();
+        } catch (Exception e) {
+            return error(e, "listing memory records");
+        }
+    }
+
+    /** GetMemoryRecord uses the singular {@code memoryRecord} segment; DeleteMemoryRecord the plural. */
+    @GET
+    @Path("/{memoryId}/memoryRecord/{memoryRecordId}")
+    public Response getMemoryRecord(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                    @PathParam("memoryRecordId") String memoryRecordId) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            return Response.ok(recordService.getRecord(memoryId, memoryRecordId, region)).build();
+        } catch (Exception e) {
+            return error(e, "getting memory record");
+        }
+    }
+
+    @DELETE
+    @Path("/{memoryId}/memoryRecords/{memoryRecordId}")
+    public Response deleteMemoryRecord(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                       @PathParam("memoryRecordId") String memoryRecordId) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            ObjectNode out = objectMapper.createObjectNode();
+            out.put("memoryRecordId", recordService.deleteRecord(memoryId, memoryRecordId, region));
+            return Response.ok(out).build();
+        } catch (Exception e) {
+            return error(e, "deleting memory record");
+        }
+    }
+
+    @POST
+    @Path("/{memoryId}/retrieve")
+    public Response retrieveMemoryRecords(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                          String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            return Response.ok(recordService.retrieve(memoryId, json(body), region)).build();
+        } catch (Exception e) {
+            return error(e, "retrieving memory records");
+        }
+    }
+
+    @POST
+    @Path("/{memoryId}/extractionJobs")
+    public Response listMemoryExtractionJobs(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                             String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            return Response.ok(recordService.listExtractionJobs(memoryId, json(body), region)).build();
+        } catch (Exception e) {
+            return error(e, "listing memory extraction jobs");
+        }
+    }
+
+    @POST
+    @Path("/{memoryId}/extractionJobs/start")
+    public Response startMemoryExtractionJob(@Context HttpHeaders headers, @PathParam("memoryId") String memoryId,
+                                             String body) {
+        String region = regionResolver.resolveRegion(headers);
+        try {
+            ObjectNode out = objectMapper.createObjectNode();
+            out.put("jobId", recordService.startExtractionJob(memoryId, json(body), region));
+            return Response.ok(out).build();
+        } catch (Exception e) {
+            return error(e, "starting memory extraction job");
+        }
+    }
+
+    private JsonNode json(String body) throws Exception {
+        JsonNode request = objectMapper.readTree(body != null && !body.isBlank() ? body : "{}");
+        if (!request.isObject()) {
+            throw new AwsException("ValidationException", "request body must be a JSON object", 400);
+        }
+        return request;
+    }
+
+    private static Integer optionalInt(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.canConvertToInt()) {
+            throw new AwsException("ValidationException", field + " must be an integer", 400);
+        }
+        return value.asInt();
     }
 
     /** Request body of {@code CreateEvent}; {@code sessionId} and {@code branch} are optional. */

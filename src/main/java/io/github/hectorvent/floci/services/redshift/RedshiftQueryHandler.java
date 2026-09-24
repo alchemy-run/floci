@@ -87,17 +87,16 @@ public class RedshiftQueryHandler {
             String clusterSubnetGroupName = params.getFirst("ClusterSubnetGroupName");
             List<String> vpcSecurityGroupIds = memberList(params, "VpcSecurityGroupIds");
             List<String> iamRoleArns = memberList(params, "IamRoles");
+            RedshiftService.ClusterOptions options = clusterOptions(params);
 
             String region = regionResolver.resolveRegionFromAuth(authorizationHeader);
             Cluster cluster = manageMasterPassword
                     ? service.createClusterWithManagedMasterPassword(identifier, nodeType, masterUsername,
                             clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns,
-                            params.getFirst("MasterPasswordSecretKmsKeyId"), region)
-                    : iamRoleArns.isEmpty()
-                    ? service.createCluster(identifier, nodeType, masterUsername, masterUserPassword,
-                            clusterSubnetGroupName, vpcSecurityGroupIds)
+                            params.getFirst("MasterPasswordSecretKmsKeyId"), region, options)
                     : service.createCluster(identifier, nodeType, masterUsername, masterUserPassword,
-                            clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns);
+                            clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, options);
+            applyCreateTags(params, "cluster", identifier);
             String xml = new XmlBuilder()
                     .start("CreateClusterResponse")
                       .start("CreateClusterResult")
@@ -656,7 +655,8 @@ public class RedshiftQueryHandler {
             String clusterParameterGroupName = params.getFirst("ClusterParameterGroupName");
             List<String> vpcSecurityGroupIds = memberList(params, "VpcSecurityGroupIds");
             Cluster cluster = service.modifyCluster(clusterIdentifier, nodeType, numberOfNodes,
-                    masterUserPassword, clusterParameterGroupName, vpcSecurityGroupIds);
+                    masterUserPassword, clusterParameterGroupName, vpcSecurityGroupIds,
+                    booleanParam(params, "PubliclyAccessible"), booleanParam(params, "Encrypted"));
             String xml = new XmlBuilder()
                     .start("ModifyClusterResponse")
                       .start("ModifyClusterResult")
@@ -908,6 +908,10 @@ public class RedshiftQueryHandler {
             .elem("ClusterIdentifier", cluster.getClusterIdentifier())
             .elem("NodeType", cluster.getNodeType())
             .elem("MasterUsername", cluster.getMasterUsername())
+            .elem("DBName", cluster.getDbName() != null && !cluster.getDbName().isBlank() ? cluster.getDbName() : "dev")
+            .elem("NumberOfNodes", String.valueOf(cluster.getNumberOfNodes()))
+            .elem("PubliclyAccessible", String.valueOf(cluster.isPubliclyAccessible()))
+            .elem("Encrypted", String.valueOf(cluster.isEncrypted()))
             .elem("ClusterStatus", cluster.getClusterStatus())
             .elem("ClusterAvailabilityStatus", availabilityStatus(cluster.getClusterStatus()))
             .elem("AvailabilityZoneRelocationStatus", "disabled")
@@ -986,6 +990,7 @@ public class RedshiftQueryHandler {
             .elem("ClusterIdentifier", snapshot.getClusterIdentifier())
             .elem("Status", snapshot.getStatus())
             .elem("Port", String.valueOf(snapshot.getPort()))
+            .elem("DBName", snapshot.getDbName() != null && !snapshot.getDbName().isBlank() ? snapshot.getDbName() : "dev")
             .elem("MasterUsername", snapshot.getMasterUsername())
             .elem("ManualSnapshotRetentionPeriod", snapshot.getManualSnapshotRetentionPeriod());
         appendTags(builder, snapshot.getTags());
@@ -1255,6 +1260,38 @@ public class RedshiftQueryHandler {
             String value = params.getFirst(prefix + "." + i + ".Value");
             tags.put(key, value == null ? "" : value);
         }
+    }
+
+    // CreateCluster: ClusterType single-node always means one node; multi-node requires
+    // NumberOfNodes of at least 2. PubliclyAccessible defaults to false and Encrypted to true,
+    // matching the current AWS defaults for new provisioned clusters.
+    private static RedshiftService.ClusterOptions clusterOptions(MultivaluedMap<String, String> params) {
+        String clusterType = params.getFirst("ClusterType");
+        Integer numberOfNodes = parseOptionalInteger(params, "NumberOfNodes");
+        int nodes;
+        if ("multi-node".equals(clusterType)) {
+            if (numberOfNodes == null || numberOfNodes < 2) {
+                throw new AwsException("InvalidParameterValue",
+                        "Number of nodes for cluster type multi-node must be greater than or equal to 2", 400);
+            }
+            nodes = numberOfNodes;
+        } else if ("single-node".equals(clusterType)) {
+            nodes = 1;
+        } else if (clusterType == null || clusterType.isBlank()) {
+            if (numberOfNodes != null && numberOfNodes < 1) {
+                throw new AwsException("InvalidParameterValue", "NumberOfNodes must be at least 1.", 400);
+            }
+            nodes = numberOfNodes != null ? numberOfNodes : 1;
+        } else {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid cluster type. Valid values are single-node and multi-node.", 400);
+        }
+        Boolean publiclyAccessible = booleanParam(params, "PubliclyAccessible");
+        Boolean encrypted = booleanParam(params, "Encrypted");
+        return new RedshiftService.ClusterOptions(params.getFirst("DBName"), nodes,
+                publiclyAccessible != null && publiclyAccessible,
+                encrypted == null || encrypted,
+                parseOptionalInteger(params, "Port"));
     }
 
     private static Integer parseOptionalInteger(MultivaluedMap<String, String> params, String parameterName) {

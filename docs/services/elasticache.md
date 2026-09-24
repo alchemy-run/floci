@@ -114,6 +114,23 @@ Cluster mode requires a Valkey 8.1+ image (the default `valkey/valkey:8` qualifi
 `cluster-announce-client-ipv4` support. Each node consumes one port from the proxy range, so size
 `FLOCI_SERVICES_ELASTICACHE_PROXY_BASE_PORT`/`_MAX_PORT` to the number of nodes you need.
 
+`ModifyReplicationGroupShardConfiguration` reshards a cluster-mode group online. Adding shards
+starts their nodes (with `ReplicasPerNodeGroup` replicas each), joins them to the running cluster,
+and moves slots so every shard owns an equal contiguous range; keys in a moved slot migrate with it.
+Decreasing `NodeGroupCount` requires `NodeGroupsToRemove` or `NodeGroupsToRetain`: the removed
+shards hand their slots and keys to the remaining shards before their nodes are forgotten and
+stopped. `ReshardingConfiguration` slot hints are not applied; slots are always spread evenly.
+
+### Ports
+
+When Floci runs in Docker, every cluster-mode-disabled replication group is served by its own
+container on the Docker network, so its endpoint is that container's address on the group's
+`Port` (6379 unless the request names another). Any number of groups can use the same `Port` at
+once, as on AWS where every group has its own hostname, and VPC workloads such as Lambda functions
+connect to it directly. Host access goes through the group's proxy, which takes a free port from
+the proxy range. When Floci runs on the host, the endpoint is the proxy itself, so a requested
+`Port` must be free in the proxy range.
+
 ```bash
 aws elasticache create-replication-group \
   --replication-group-id my-sharded-cache \

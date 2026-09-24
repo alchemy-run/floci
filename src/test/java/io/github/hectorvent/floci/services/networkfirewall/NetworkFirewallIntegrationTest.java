@@ -1103,6 +1103,119 @@ class NetworkFirewallIntegrationTest {
             .extract().path("UpdateToken");
     }
 
+    @Test
+    void flowCapture_runsAgainstTheFirewallAndCompletesWithNoTrackedFlows() {
+        String name = "FlowCaptureFirewall";
+        String arn = firewallArn(name);
+        createFirewall(name, "", "subnet-f10w00000000000001");
+        String filters = "\"FlowFilters\":[{\"SourceAddress\":{\"AddressDefinition\":\"10.78.1.10/32\"}}]";
+
+        String operationId = call("StartFlowCapture", "{\"FirewallArn\":\"" + arn + "\"," + filters + "}")
+            .statusCode(200)
+            .body("FirewallArn", equalTo(arn))
+            .body("FlowOperationStatus", equalTo("IN_PROGRESS"))
+            .extract().path("FlowOperationId");
+
+        call("DescribeFlowOperation",
+                "{\"FirewallArn\":\"" + arn + "\",\"FlowOperationId\":\"" + operationId + "\"}")
+            .statusCode(200)
+            .body("FlowOperationId", equalTo(operationId))
+            .body("FlowOperationType", equalTo("FLOW_CAPTURE"))
+            .body("FlowOperationStatus", equalTo("COMPLETED"))
+            .body("FlowOperation.FlowFilters[0].SourceAddress.AddressDefinition", equalTo("10.78.1.10/32"))
+            .body("FlowRequestTimestamp", not(nullValue()));
+
+        call("ListFlowOperations", "{\"FirewallArn\":\"" + arn + "\",\"FlowOperationType\":\"FLOW_CAPTURE\"}")
+            .statusCode(200)
+            .body("FlowOperations.FlowOperationId", contains(operationId))
+            .body("FlowOperations[0].FlowOperationStatus", equalTo("COMPLETED"));
+
+        call("ListFlowOperations", "{\"FirewallArn\":\"" + arn + "\",\"FlowOperationType\":\"FLOW_FLUSH\"}")
+            .statusCode(200)
+            .body("FlowOperations", empty());
+
+        call("ListFlowOperationResults",
+                "{\"FirewallArn\":\"" + arn + "\",\"FlowOperationId\":\"" + operationId + "\"}")
+            .statusCode(200)
+            .body("FlowOperationStatus", equalTo("COMPLETED"))
+            .body("Flows", empty());
+
+        call("StartFlowFlush", "{\"FirewallArn\":\"" + arn + "\"," + filters + "}")
+            .statusCode(200)
+            .body("FlowOperationStatus", equalTo("IN_PROGRESS"));
+        call("ListFlowOperations", "{\"FirewallArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("FlowOperations", hasSize(2));
+    }
+
+    @Test
+    void flowOperations_validateTheFirewallScopeAndFilters() {
+        String name = "FlowValidationFirewall";
+        String arn = firewallArn(name);
+        createFirewall(name, "", "subnet-f10w00000000000002");
+        String filters = "\"FlowFilters\":[{\"SourceAddress\":{\"AddressDefinition\":\"10.0.0.1/32\"}}]";
+
+        call("StartFlowCapture", "{\"FirewallArn\":\"" + firewallArn("NoSuchFlowFirewall") + "\"," + filters + "}")
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+        call("StartFlowCapture", "{\"FirewallArn\":\"" + arn + "\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+        call("StartFlowCapture", "{\"FirewallArn\":\"" + arn + "\","
+                + "\"FlowFilters\":[{\"SourceAddress\":{\"AddressDefinition\":\"not-a-cidr\"}}]}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+        call("StartFlowCapture", "{\"FirewallArn\":\"" + arn + "\",\"AvailabilityZone\":\"us-east-1f\"," + filters + "}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+        call("StartFlowCapture", "{\"FirewallArn\":\"" + arn + "\",\"AvailabilityZone\":\"us-east-1a\"," + filters + "}")
+            .statusCode(200);
+        call("DescribeFlowOperation", "{\"FirewallArn\":\"" + arn + "\",\"FlowOperationId\":\"missing\"}")
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void analysisReports_requireAnEnabledAnalysisTypeAndCompleteWithoutFindings() {
+        String name = "AnalysisReportFirewall";
+        String arn = firewallArn(name);
+        createFirewall(name, "", "subnet-a0a1000000000001");
+
+        call("StartAnalysisReport", "{\"FirewallArn\":\"" + arn + "\",\"AnalysisType\":\"TLS_SNI\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+        call("ListAnalysisReports", "{\"FirewallArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("AnalysisReports", empty());
+        call("GetAnalysisReportResults",
+                "{\"FirewallArn\":\"" + arn + "\",\"AnalysisReportId\":\"alchemy-nonexistent-analysis-report-id\"}")
+            .statusCode(400)
+            .body("__type", equalTo("ResourceNotFoundException"));
+
+        call("UpdateFirewallAnalysisSettings",
+                "{\"FirewallArn\":\"" + arn + "\",\"EnabledAnalysisTypes\":[\"TLS_SNI\"]}")
+            .statusCode(200);
+        String reportId = call("StartAnalysisReport",
+                "{\"FirewallName\":\"" + name + "\",\"AnalysisType\":\"TLS_SNI\"}")
+            .statusCode(200)
+            .extract().path("AnalysisReportId");
+
+        call("ListAnalysisReports", "{\"FirewallArn\":\"" + arn + "\"}")
+            .statusCode(200)
+            .body("AnalysisReports.AnalysisReportId", contains(reportId))
+            .body("AnalysisReports[0].AnalysisType", equalTo("TLS_SNI"))
+            .body("AnalysisReports[0].Status", equalTo("COMPLETED"));
+        call("GetAnalysisReportResults",
+                "{\"FirewallArn\":\"" + arn + "\",\"AnalysisReportId\":\"" + reportId + "\"}")
+            .statusCode(200)
+            .body("Status", equalTo("COMPLETED"))
+            .body("AnalysisType", equalTo("TLS_SNI"))
+            .body("AnalysisReportResults", empty());
+        call("StartAnalysisReport", "{\"FirewallArn\":\"" + arn + "\",\"AnalysisType\":\"HTTP_HOST\"}")
+            .statusCode(400)
+            .body("__type", equalTo("InvalidRequestException"));
+    }
+
     private static String firewallArn(String name) {
         return "arn:aws:network-firewall:us-east-1:723679240095:firewall/" + name;
     }

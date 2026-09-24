@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import io.github.hectorvent.floci.services.rds.model.DbCluster;
 import io.github.hectorvent.floci.services.rds.model.DbClusterEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
+import io.github.hectorvent.floci.services.rds.model.DbClusterSettings;
 import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
@@ -487,10 +488,17 @@ public class RdsQueryHandler {
         try {
             DbInstanceSettings settings = instanceSettings(params, false);
             List<String> vpcSecurityGroupIds = vpcSecurityGroupIds(params);
+            Integer dbPortNumber = optionalInt(params.getFirst("DBPortNumber"));
+            if (dbPortNumber != null) {
+                service.validateDbInstancePortChange(id, dbPortNumber, region);
+            }
             DbInstance instance = service.modifyDbInstance(
                     id, newPassword, iamEnabled, dbSubnetGroupName,
                     vpcSecurityGroupIds, optionGroupName, region, autoMinorVersionUpgrade,
                     settings, publiclyAccessible);
+            if (dbPortNumber != null) {
+                instance = service.modifyDbInstancePort(id, dbPortNumber, region);
+            }
             String result = dbInstanceXml(instance);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBInstance", AwsNamespaces.RDS, result)).build();
         } catch (AwsException e) {
@@ -522,7 +530,10 @@ public class RdsQueryHandler {
                 params.getFirst("EngineLifecycleSupport"),
                 includeEncryption ? cloudwatchLogsExports(params) : null,
                 includeEncryption ? null : cloudwatchLogsExportChanges(params),
-                optionalInt(params.getFirst("MaxAllocatedStorage")));
+                optionalInt(params.getFirst("MaxAllocatedStorage")),
+                // CreateDBInstance names the listener Port; ModifyDBInstance's DBPortNumber is
+                // applied on its own.
+                includeEncryption ? optionalInt(params.getFirst("Port")) : null);
     }
 
     /**
@@ -867,6 +878,17 @@ public class RdsQueryHandler {
             Double serverlessV2Max = parseDoubleParam(params, "ServerlessV2ScalingConfiguration.MaxCapacity");
             Integer serverlessV2SecondsUntilAutoPause = parseIntegerParam(
                     params, "ServerlessV2ScalingConfiguration.SecondsUntilAutoPause");
+            List<String> clusterGroups = vpcSecurityGroupIds(params);
+            DbClusterSettings clusterSettings = new DbClusterSettings(
+                    optionalInt(params.getFirst("Port")),
+                    clusterGroups.isEmpty() ? null : clusterGroups,
+                    cloudwatchLogsExports(params),
+                    null,
+                    optionalBoolean(params.getFirst("DeletionProtection")),
+                    params.getFirst("NetworkType"),
+                    optionalInt(params.getFirst("BackupRetentionPeriod")));
+            RdsService.validateClusterSettings(engine, engineVersion, clusterSettings);
+            Map<String, String> tags = parseTags(params);
             String globalClusterIdentifier = params.getFirst("GlobalClusterIdentifier");
             DbCluster cluster = globalClusterIdentifier != null && !globalClusterIdentifier.isBlank()
                     ? service.createDbClusterInGlobalCluster(globalClusterIdentifier, id, engine,
@@ -878,7 +900,11 @@ public class RdsQueryHandler {
                             masterPassword, databaseName, iamEnabled, paramGroupName,
                             dbSubnetGroupName, availabilityZone, multiAz, region,
                             serverlessV2Min, serverlessV2Max, serverlessV2SecondsUntilAutoPause,
-                            manageMasterUserPassword, masterUserSecretKmsKeyId, engineMode, storageEncrypted);
+                            manageMasterUserPassword, masterUserSecretKmsKeyId, engineMode, storageEncrypted,
+                            clusterSettings.port());
+            if (!clusterSettings.isEmpty() || (tags != null && !tags.isEmpty())) {
+                cluster = service.applyDbClusterSettings(id, region, clusterSettings, tags);
+            }
             String result = dbClusterXml(cluster);
             return Response.ok(AwsQueryResponse.envelope("CreateDBCluster", AwsNamespaces.RDS, result)).build();
         } catch (AwsException e) {
@@ -988,9 +1014,24 @@ public class RdsQueryHandler {
             Double serverlessV2Max = parseDoubleParam(params, "ServerlessV2ScalingConfiguration.MaxCapacity");
             Integer serverlessV2SecondsUntilAutoPause = parseIntegerParam(
                     params, "ServerlessV2ScalingConfiguration.SecondsUntilAutoPause");
+            List<String> clusterGroups = vpcSecurityGroupIds(params);
+            DbClusterSettings clusterSettings = new DbClusterSettings(
+                    optionalInt(params.getFirst("Port")),
+                    clusterGroups.isEmpty() ? null : clusterGroups,
+                    null,
+                    cloudwatchLogsExportChanges(params),
+                    optionalBoolean(params.getFirst("DeletionProtection")),
+                    params.getFirst("NetworkType"),
+                    optionalInt(params.getFirst("BackupRetentionPeriod")));
+            if (!clusterSettings.isEmpty()) {
+                service.validateDbClusterSettings(id, region, clusterSettings);
+            }
             DbCluster cluster = service.modifyDbCluster(id, newPassword, iamEnabled,
                     serverlessV2Min, serverlessV2Max, serverlessV2SecondsUntilAutoPause,
                     manageMasterUserPassword, masterUserSecretKmsKeyId, region);
+            if (!clusterSettings.isEmpty()) {
+                cluster = service.applyDbClusterSettings(id, region, clusterSettings, null);
+            }
             String result = dbClusterXml(cluster);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBCluster", AwsNamespaces.RDS, result)).build();
         } catch (AwsException e) {
@@ -2274,9 +2315,10 @@ public class RdsQueryHandler {
     private Response handleDescribeDbClusterEndpoints(MultivaluedMap<String, String> params) {
         Collection<DbClusterEndpoint> result = service.listDbClusterEndpoints(
                 params.getFirst("DBClusterIdentifier"), params.getFirst("DBClusterEndpointIdentifier"));
+        // The DBClusterEndpointList member's xmlName is DBClusterEndpointList, not DBClusterEndpoint.
         XmlBuilder xml = new XmlBuilder().start("DBClusterEndpoints");
         for (DbClusterEndpoint endpoint : result) {
-            xml.start("DBClusterEndpoint").raw(dbClusterEndpointInnerXml(endpoint)).end("DBClusterEndpoint");
+            xml.start("DBClusterEndpointList").raw(dbClusterEndpointInnerXml(endpoint)).end("DBClusterEndpointList");
         }
         xml.end("DBClusterEndpoints");
         return Response.ok(AwsQueryResponse.envelope("DescribeDBClusterEndpoints", AwsNamespaces.RDS, xml.build())).build();
@@ -2562,9 +2604,32 @@ public class RdsQueryHandler {
     }
 
     private String vpcSecurityGroupsXml(DbInstance i) {
-        List<String> groupIds = i.getVpcSecurityGroupIds().isEmpty()
+        return vpcSecurityGroupsXml(memberVpcSecurityGroupIds(i));
+    }
+
+    /**
+     * The API reference documents an Aurora instance's security groups as managed by its DB
+     * cluster, so a member reports the cluster's groups rather than any it was created with.
+     */
+    private List<String> memberVpcSecurityGroupIds(DbInstance i) {
+        String clusterId = i.getDbClusterIdentifier();
+        if (clusterId != null && !clusterId.isBlank()) {
+            try {
+                DbCluster cluster = service.getDbCluster(clusterId, regionFromRdsArn(i.getDbInstanceArn()));
+                if (cluster != null && !cluster.getVpcSecurityGroupIds().isEmpty()) {
+                    return cluster.getVpcSecurityGroupIds();
+                }
+            } catch (AwsException e) {
+                // the cluster is gone; report what the instance holds
+            }
+        }
+        return i.getVpcSecurityGroupIds();
+    }
+
+    private static String vpcSecurityGroupsXml(List<String> configured) {
+        List<String> groupIds = configured == null || configured.isEmpty()
                 ? List.of("sg-00000000")
-                : i.getVpcSecurityGroupIds();
+                : configured;
         XmlBuilder xml = new XmlBuilder().start("VpcSecurityGroups");
         for (String groupId : groupIds) {
             xml.start("VpcSecurityGroupMembership")
@@ -2681,17 +2746,23 @@ public class RdsQueryHandler {
            .elem("MultiAZ", c.isMultiAz())
            .elem("StorageEncrypted", c.isStorageEncrypted())
            .elem("AvailabilityZone", c.getAvailabilityZone() != null ? c.getAvailabilityZone() : config.defaultAvailabilityZone())
+           .elem("BackupRetentionPeriod", c.getBackupRetentionPeriod())
            .elem("PreferredMaintenanceWindow", "mon:00:00-mon:03:00")
            .elem("PreferredBackupWindow", "04:00-06:00")
-           .start("VpcSecurityGroups")
-             .start("VpcSecurityGroupMembership")
-               .elem("VpcSecurityGroupId", "sg-00000000")
-               .elem("Status", "active")
-             .end("VpcSecurityGroupMembership")
-           .end("VpcSecurityGroups")
+           .raw(vpcSecurityGroupsXml(c.getVpcSecurityGroupIds()))
            .elem("DBSubnetGroup", c.getDbSubnetGroupName() != null ? c.getDbSubnetGroupName() : "default")
            .elem("DbClusterResourceId", c.getDbClusterResourceId())
-           .elem("DBClusterArn", c.getDbClusterArn());
+           .elem("DBClusterArn", c.getDbClusterArn())
+           .elem("DeletionProtection", c.isDeletionProtection())
+           .elem("NetworkType", c.getNetworkType() != null ? c.getNetworkType() : "IPV4");
+        if (c.getEnabledCloudwatchLogsExports() != null && !c.getEnabledCloudwatchLogsExports().isEmpty()) {
+            xml.start("EnabledCloudwatchLogsExports");
+            c.getEnabledCloudwatchLogsExports().forEach(t -> xml.elem("member", t));
+            xml.end("EnabledCloudwatchLogsExports");
+        }
+        xml.start("TagList");
+        writeTags(xml, c.getTags());
+        xml.end("TagList");
         if (c.getMasterUserSecretArn() != null && !c.getMasterUserSecretArn().isBlank()) {
             xml.start("MasterUserSecret")
                     .elem("SecretArn", c.getMasterUserSecretArn())

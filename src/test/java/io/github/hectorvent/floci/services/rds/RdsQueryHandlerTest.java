@@ -493,7 +493,7 @@ class RdsQueryHandlerTest {
         when(service.createDbCluster(eq("mycluster"), eq("aurora-postgresql"), any(),
                 eq("omni_admin"), isNull(), eq("omni"), eq(false), isNull(),
                 isNull(), isNull(), eq(false), any(),
-                isNull(), isNull(), isNull(), eq(true), eq("kms-key-1"), isNull(), eq(false)))
+                isNull(), isNull(), isNull(), eq(true), eq("kms-key-1"), isNull(), eq(false), isNull()))
                 .thenReturn(cluster);
 
         MultivaluedMap<String, String> p = params();
@@ -513,7 +513,7 @@ class RdsQueryHandlerTest {
         verify(service).createDbCluster(eq("mycluster"), eq("aurora-postgresql"), any(),
                 eq("omni_admin"), isNull(), eq("omni"), eq(false), isNull(),
                 isNull(), isNull(), eq(false), any(),
-                isNull(), isNull(), isNull(), eq(true), eq("kms-key-1"), isNull(), eq(false));
+                isNull(), isNull(), isNull(), eq(true), eq("kms-key-1"), isNull(), eq(false), isNull());
     }
 
     @Test
@@ -521,7 +521,7 @@ class RdsQueryHandlerTest {
         DbCluster cluster = makeCluster("mycluster");
         when(service.createDbCluster(any(), any(), any(), any(), any(), any(), anyBoolean(), any(),
                 any(), any(), anyBoolean(), any(), any(), any(), any(), eq(false), isNull(),
-                any(), anyBoolean()))
+                any(), anyBoolean(), any()))
                 .thenReturn(cluster);
 
         MultivaluedMap<String, String> p = params();
@@ -532,6 +532,161 @@ class RdsQueryHandlerTest {
 
         String body = (String) response.getEntity();
         assertFalse(body.contains("<MasterUserSecret>"));
+    }
+
+    // The Alchemy DBInstance tests create an Aurora cluster with Port, VpcSecurityGroupIds,
+    // EnableCloudwatchLogsExports, NetworkType and DeletionProtection, then read every one back.
+    @Test
+    void createDbClusterAppliesAndReportsListenerNetworkAndLogSettings() {
+        DbCluster cluster = makeCluster("mycluster");
+        cluster.setEngineIdentifier("aurora-postgresql");
+        cluster.setEndpoint(new io.github.hectorvent.floci.services.rds.model.DbEndpoint(
+                "mycluster.cluster-c0.us-east-1.rds.localhost.floci.io", 5434));
+        cluster.setVpcSecurityGroupIds(List.of("sg-cluster"));
+        cluster.setEnabledCloudwatchLogsExports(List.of("postgresql"));
+        cluster.setNetworkType("IPV4");
+        cluster.setTags(Map.of("owner", "alchemy"));
+        when(service.createDbCluster(any(), any(), any(), any(), any(), any(), anyBoolean(), any(),
+                any(), any(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), any(),
+                any(), anyBoolean(), eq(5434)))
+                .thenReturn(makeCluster("mycluster"));
+        when(service.applyDbClusterSettings(eq("mycluster"), any(), any(), any())).thenReturn(cluster);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBClusterIdentifier", "mycluster");
+        p.add("Engine", "aurora-postgresql");
+        p.add("MasterUsername", "alchemy");
+        p.add("Port", "5434");
+        p.add("VpcSecurityGroupIds.VpcSecurityGroupId.1", "sg-cluster");
+        p.add("EnableCloudwatchLogsExports.member.1", "postgresql");
+        p.add("NetworkType", "IPV4");
+        p.add("DeletionProtection", "false");
+        p.add("Tags.member.1.Key", "owner");
+        p.add("Tags.member.1.Value", "alchemy");
+        Response response = handler.handle("CreateDBCluster", p);
+
+        assertEquals(200, response.getStatus());
+        ArgumentCaptor<io.github.hectorvent.floci.services.rds.model.DbClusterSettings> settings =
+                ArgumentCaptor.forClass(io.github.hectorvent.floci.services.rds.model.DbClusterSettings.class);
+        verify(service).applyDbClusterSettings(eq("mycluster"), any(), settings.capture(),
+                eq(Map.of("owner", "alchemy")));
+        assertEquals(5434, settings.getValue().port());
+        assertEquals(List.of("sg-cluster"), settings.getValue().vpcSecurityGroupIds());
+        assertEquals(List.of("postgresql"), settings.getValue().enabledCloudwatchLogsExports());
+        assertEquals(Boolean.FALSE, settings.getValue().deletionProtection());
+        assertEquals("IPV4", settings.getValue().networkType());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<Port>5434</Port>"), body);
+        assertTrue(body.contains("<EnabledCloudwatchLogsExports><member>postgresql</member></EnabledCloudwatchLogsExports>"), body);
+        assertTrue(body.contains("<DeletionProtection>false</DeletionProtection>"), body);
+        assertTrue(body.contains("<NetworkType>IPV4</NetworkType>"), body);
+        assertTrue(body.contains("<VpcSecurityGroupId>sg-cluster</VpcSecurityGroupId>"), body);
+        assertTrue(body.contains("<Key>owner</Key>"), body);
+    }
+
+    @Test
+    void createDbClusterRejectsALogTypeTheEngineCannotExport() {
+        MultivaluedMap<String, String> p = params();
+        p.add("DBClusterIdentifier", "mycluster");
+        p.add("Engine", "aurora-postgresql");
+        p.add("MasterUsername", "alchemy");
+        p.add("EnableCloudwatchLogsExports.member.1", "slowquery");
+        Response response = handler.handle("CreateDBCluster", p);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("InvalidParameterCombination"));
+        verify(service, never()).createDbCluster(any(), any(), any(), any(), any(), any(),
+                anyBoolean(), any(), any(), any(), anyBoolean(), any(),
+                any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void modifyDbClusterAppliesLogExportDeltasAndPortAfterValidating() {
+        DbCluster cluster = makeCluster("mycluster");
+        when(service.modifyDbCluster(eq("mycluster"), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), any())).thenReturn(cluster);
+        when(service.applyDbClusterSettings(eq("mycluster"), any(), any(), isNull())).thenReturn(cluster);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBClusterIdentifier", "mycluster");
+        p.add("Port", "6543");
+        p.add("CloudwatchLogsExportConfiguration.EnableLogTypes.member.1", "instance");
+        p.add("CloudwatchLogsExportConfiguration.DisableLogTypes.member.1", "postgresql");
+        handler.handle("ModifyDBCluster", p);
+
+        ArgumentCaptor<io.github.hectorvent.floci.services.rds.model.DbClusterSettings> settings =
+                ArgumentCaptor.forClass(io.github.hectorvent.floci.services.rds.model.DbClusterSettings.class);
+        org.mockito.InOrder order = inOrder(service);
+        order.verify(service).validateDbClusterSettings(eq("mycluster"), any(), any());
+        order.verify(service).modifyDbCluster(eq("mycluster"), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(), isNull(), any());
+        order.verify(service).applyDbClusterSettings(eq("mycluster"), any(), settings.capture(), isNull());
+        assertEquals(6543, settings.getValue().port());
+        assertEquals(List.of("instance"), settings.getValue().logExportChanges().enableLogTypes());
+        assertEquals(List.of("postgresql"), settings.getValue().logExportChanges().disableLogTypes());
+    }
+
+    @Test
+    void modifyDbInstanceDbPortNumberMovesTheEndpointAfterTheRestOfTheChange() {
+        DbInstance instance = makeInstance("mydb");
+        DbInstance moved = makeInstance("mydb");
+        moved.setEndpoint(new io.github.hectorvent.floci.services.rds.model.DbEndpoint("mydb.host", 6432));
+        when(service.modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(), any(),
+                isNull(), any(DbInstanceSettings.class), isNull())).thenReturn(instance);
+        when(service.modifyDbInstancePort("mydb", 6432, null)).thenReturn(moved);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "mydb");
+        p.add("DBPortNumber", "6432");
+        Response response = handler.handle("ModifyDBInstance", p);
+
+        org.mockito.InOrder order = inOrder(service);
+        order.verify(service).validateDbInstancePortChange("mydb", 6432, null);
+        order.verify(service).modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(),
+                any(), isNull(), any(DbInstanceSettings.class), isNull());
+        order.verify(service).modifyDbInstancePort("mydb", 6432, null);
+        assertTrue(((String) response.getEntity()).contains("<Port>6432</Port>"));
+    }
+
+    // AWS documents an Aurora instance's security groups as managed by its cluster.
+    @Test
+    void auroraMemberReportsItsClustersSecurityGroups() {
+        DbInstance member = makeInstance("member");
+        member.setDbClusterIdentifier("mycluster");
+        member.setDbInstanceArn("arn:aws:rds:us-east-1:000000000000:db:member");
+        DbCluster cluster = makeCluster("mycluster");
+        cluster.setVpcSecurityGroupIds(List.of("sg-cluster"));
+        when(service.listDbInstances("member", null)).thenReturn(List.of(member));
+        when(service.getDbCluster("mycluster", "us-east-1")).thenReturn(cluster);
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "member");
+        String body = (String) handler.handle("DescribeDBInstances", p).getEntity();
+
+        assertTrue(body.contains("<VpcSecurityGroupId>sg-cluster</VpcSecurityGroupId>"), body);
+        assertFalse(body.contains("sg-00000000"), body);
+    }
+
+    @Test
+    void createDbInstancePassesThePortInItsSettings() {
+        when(service.createDbInstance(any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(),
+                any(), any(), any(), any(), anyBoolean(), any(DbInstanceSettings.class), any()))
+                .thenReturn(makeInstance("mydb"));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "mydb");
+        p.add("Engine", "postgres");
+        p.add("MasterUsername", "admin");
+        p.add("MasterUserPassword", "Password123");
+        p.add("Port", "5434");
+        handler.handle("CreateDBInstance", p);
+
+        ArgumentCaptor<DbInstanceSettings> settings = ArgumentCaptor.forClass(DbInstanceSettings.class);
+        verify(service).createDbInstance(any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(),
+                any(), any(), any(), any(), anyBoolean(), settings.capture(), any());
+        assertEquals(5434, settings.getValue().port());
     }
 
     @Test
@@ -1166,7 +1321,7 @@ class RdsQueryHandlerTest {
         assertTrue(body.contains("MasterUserPassword"), body);
         verify(service, never()).createDbCluster(any(), any(), any(), any(), any(), any(),
                 anyBoolean(), any(), any(), any(), anyBoolean(), any(),
-                any(), any(), any(), anyBoolean(), any(), any(), anyBoolean());
+                any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
@@ -1185,7 +1340,7 @@ class RdsQueryHandlerTest {
         assertTrue(body.toLowerCase().contains("retention"), body);
         verify(service, never()).createDbCluster(any(), any(), any(), any(), any(), any(),
                 anyBoolean(), any(), any(), any(), anyBoolean(), any(),
-                any(), any(), any(), anyBoolean(), any(), any(), anyBoolean());
+                any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
@@ -2797,7 +2952,8 @@ class RdsQueryHandlerTest {
         Response response = handler.handle("DescribeDBClusterEndpoints", params());
 
         String body = (String) response.getEntity();
-        assertTrue(body.contains("<DBClusterEndpoint>"));
+        assertTrue(body.contains("<DBClusterEndpoints><DBClusterEndpointList>"));
+        assertFalse(body.contains("<DBClusterEndpoint>"));
         assertTrue(body.contains("<DBClusterEndpointIdentifier>reader</DBClusterEndpointIdentifier>"));
     }
 

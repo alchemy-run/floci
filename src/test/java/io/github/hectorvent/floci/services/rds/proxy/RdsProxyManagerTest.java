@@ -176,6 +176,41 @@ class RdsProxyManagerTest {
         registry.clear();
     }
 
+    // An instance's endpoint port (5432 for every PostgreSQL instance, as on AWS) is served by the
+    // manager's endpoint router in front of the instance's internal proxy port, and released with it.
+    @Test
+    void advertisedEndpointPortIsServedUntilTheProxyStops() throws IOException {
+        RdsProxyTlsCertificates tls = mock(RdsProxyTlsCertificates.class);
+        RdsProxyManager manager = new RdsProxyManager(mock(RdsSigV4Validator.class), tls, testConfig());
+        int proxyPort = availablePort();
+        int endpointPort = availablePort();
+        try {
+            start(manager, "rds-resource:arn:aws:rds:us-east-1:000000000000:db:mydb", proxyPort);
+
+            assertTrue(manager.advertise("rds-resource:arn:aws:rds:us-east-1:000000000000:db:mydb",
+                    java.util.List.of("mydb.c0.us-east-1.rds.localhost.floci.io"), endpointPort));
+
+            assertPortUnavailable(endpointPort);
+            org.mockito.Mockito.verify(tls).ensureHost("mydb.c0.us-east-1.rds.localhost.floci.io");
+            manager.stopProxy("rds-resource:arn:aws:rds:us-east-1:000000000000:db:mydb");
+            assertPortAvailable(endpointPort);
+            assertPortAvailable(proxyPort);
+        } finally {
+            manager.stopAll();
+        }
+    }
+
+    @Test
+    void advertisingWithoutARunningProxyIsANoOp() throws IOException {
+        RdsProxyManager manager = new RdsProxyManager(
+                mock(RdsSigV4Validator.class), mock(RdsProxyTlsCertificates.class), testConfig());
+        int endpointPort = availablePort();
+
+        assertTrue(manager.advertise("missing", java.util.List.of("missing.host"), endpointPort));
+
+        assertPortAvailable(endpointPort);
+    }
+
     private static void start(RdsProxyManager manager, String key, int proxyPort) {
         manager.startProxy(key, DatabaseEngine.POSTGRES, false, proxyPort,
                 "localhost", 1, "localhost", "admin", "secret", "app", (user, password) -> true);

@@ -81,8 +81,11 @@ class RdsStopStartIntegrationTest {
         DbInstance running = rdsService.getDbInstance(id);
         String containerId = running.getContainerId();
         int port = running.getEndpoint().port();
+        // The endpoint port is shared by every instance on it, as on AWS; the instance's own
+        // listener is its proxy port behind the endpoint router.
+        int listener = running.getProxyPort();
         psql(containerId, "CREATE TABLE marker(v text); INSERT INTO marker VALUES ('before-stop');");
-        assertTrue(portOpen(port), "the endpoint must accept connections while available");
+        assertTrue(portOpen(listener), "the instance must accept connections while available");
 
         query("StopDBInstance")
                 .formParam("DBInstanceIdentifier", id)
@@ -93,7 +96,7 @@ class RdsStopStartIntegrationTest {
         DbInstance stopped = rdsService.getDbInstance(id);
         assertNull(stopped.getContainerId(), "a stopped instance has no container");
         assertFalse(containerExists(containerId), "the container is gone while stopped");
-        assertFalse(portOpen(port), "the endpoint refuses connections while stopped");
+        assertFalse(portOpen(listener), "the instance refuses connections while stopped");
 
         query("ModifyDBInstance")
                 .formParam("DBInstanceIdentifier", id)
@@ -113,7 +116,7 @@ class RdsStopStartIntegrationTest {
         waitForInstance(id, "available");
         DbInstance started = rdsService.getDbInstance(id);
         assertTrue(started.getEndpoint().port() == port, "the endpoint keeps its port");
-        assertTrue(portOpen(port), "the endpoint accepts connections again");
+        assertTrue(portOpen(started.getProxyPort()), "the instance accepts connections again");
         assertTrue(psql(started.getContainerId(), "SELECT v FROM marker;").contains("before-stop"),
                 "the row written before the stop must survive on the volume");
 

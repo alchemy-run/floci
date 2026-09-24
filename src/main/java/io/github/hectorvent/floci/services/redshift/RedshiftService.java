@@ -8,6 +8,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -40,18 +41,23 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -157,18 +163,20 @@ public class RedshiftService {
                 LOG.infov("Recovering container for persisted cluster: {0}", cluster.getClusterIdentifier());
                 RedshiftContainerHandle handle = containerManager.adoptOrStart(
                         entry.accountId(), cluster.getClusterIdentifier(), cluster.getMasterUsername(), password);
+                containerManager.ensureDatabase(entry.accountId(), cluster.getClusterIdentifier(),
+                        cluster.getMasterUsername(), dbNameOf(cluster));
 
                 // A cluster persisted before the auth proxy existed has proxyPort == 0. Allocate one
                 // now; its endpoint changes exactly once after this upgrade. Existing clusters keep
                 // their stored port so the endpoint is stable across restarts.
                 int proxyPort = cluster.getProxyPort() > 0 ? cluster.getProxyPort() : allocateProxyPort();
                 usedPorts.add(proxyPort);
-                Endpoint endpoint = proxyEndpoint(proxyPort);
+                Endpoint endpoint = storedEndpoint(cluster, proxyPort);
                 cluster.setProxyPort(proxyPort);
                 proxyManager.startProxy(
                         relayKey(entry.accountId(), cluster.getClusterIdentifier()), proxyPort,
                         handle.getHost(), handle.getPort(), endpoint.getAddress(),
-                        cluster.getMasterUsername(), password, CLUSTER_DB_NAME,
+                        cluster.getMasterUsername(), password, dbNameOf(cluster),
                         passwordValidatorFor(entry.accountId(), cluster.getClusterIdentifier()),
                         cluster.getIamRoleArns());
                 cluster.setContainerHost(handle.getHost());
@@ -210,9 +218,30 @@ public class RedshiftService {
     public synchronized Cluster createCluster(String identifier, String nodeType, String username, String password,
                                                String clusterSubnetGroupName, List<String> vpcSecurityGroupIds,
                                                List<String> iamRoleArns) {
+        return createCluster(identifier, nodeType, username, password, clusterSubnetGroupName,
+                vpcSecurityGroupIds, iamRoleArns, ClusterOptions.defaults());
+    }
+
+    /**
+     * CreateCluster settings beyond identity and credentials. {@code port} is the port the
+     * cluster should accept connections on; null means the configured default (5439).
+     */
+    public record ClusterOptions(String dbName, int numberOfNodes, boolean publiclyAccessible,
+                                 boolean encrypted, Integer port) {
+        public static ClusterOptions defaults() {
+            return new ClusterOptions(CLUSTER_DB_NAME, 1, false, true, null);
+        }
+    }
+
+    public synchronized Cluster createCluster(String identifier, String nodeType, String username, String password,
+                                               String clusterSubnetGroupName, List<String> vpcSecurityGroupIds,
+                                               List<String> iamRoleArns, ClusterOptions options) {
         if (clusters.get(identifier).isPresent()) {
             throw new AwsException("ClusterAlreadyExists", "Cluster " + identifier + " already exists", 400);
         }
+        ClusterOptions effective = options != null ? options : ClusterOptions.defaults();
+        String dbName = validateDbName(effective.dbName());
+        int preferredPort = validatePort(effective.port());
         // A previous cluster with this identifier may have been deleted without its temp
         // credentials being cleared; drop them so the new cluster starts with none.
         credentialBroker.revokeCluster(clusters.accountId(), identifier);
@@ -225,24 +254,27 @@ public class RedshiftService {
         cluster.setClusterSubnetGroupName(clusterSubnetGroupName);
         cluster.setVpcSecurityGroupIds(vpcSecurityGroupIds != null ? vpcSecurityGroupIds : List.of());
         cluster.setIamRoleArns(iamRoleArns != null ? List.copyOf(iamRoleArns) : List.of());
+        cluster.setDbName(dbName);
+        cluster.setNumberOfNodes(Math.max(1, effective.numberOfNodes()));
+        cluster.setPubliclyAccessible(effective.publiclyAccessible());
+        cluster.setEncrypted(effective.encrypted());
         cluster.setClusterStatus("creating");
         clusters.put(identifier, cluster);
         clusters.flush();
 
         // Start container, then front it with an auth proxy so the advertised endpoint is
         // reachable from outside the Docker network.
-        // Hoisted out of the try so a failure after allocateProxyPort() still returns the port.
+        // Hoisted out of the try so a failure after the proxy port is claimed still returns it.
         int proxyPort = -1;
         try {
             String accountId = clusters.accountId();
             RedshiftContainerHandle handle = containerManager.start(accountId, identifier, username, password);
-            proxyPort = allocateProxyPort();
-            Endpoint endpoint = proxyEndpoint(proxyPort);
+            containerManager.ensureDatabase(accountId, identifier, username, dbName);
+            String host = endpointHost(identifier);
+            proxyPort = startProxyPreferringPort(accountId, identifier, preferredPort, handle, host,
+                    username, password, dbName, cluster.getIamRoleArns());
+            Endpoint endpoint = new Endpoint(host, proxyPort);
             cluster.setProxyPort(proxyPort);
-            proxyManager.startProxy(relayKey(accountId, identifier), proxyPort,
-                    handle.getHost(), handle.getPort(), endpoint.getAddress(),
-                    username, password, CLUSTER_DB_NAME,
-                    passwordValidatorFor(accountId, identifier), cluster.getIamRoleArns());
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
             cluster.setEndpoint(endpoint);
@@ -283,12 +315,20 @@ public class RedshiftService {
             String identifier, String nodeType, String username, String clusterSubnetGroupName,
             List<String> vpcSecurityGroupIds, List<String> iamRoleArns,
             String kmsKeyId, String region) {
+        return createClusterWithManagedMasterPassword(identifier, nodeType, username, clusterSubnetGroupName,
+                vpcSecurityGroupIds, iamRoleArns, kmsKeyId, region, ClusterOptions.defaults());
+    }
+
+    public synchronized Cluster createClusterWithManagedMasterPassword(
+            String identifier, String nodeType, String username, String clusterSubnetGroupName,
+            List<String> vpcSecurityGroupIds, List<String> iamRoleArns,
+            String kmsKeyId, String region, ClusterOptions options) {
         if (secretsManagerService == null) {
             throw new AwsException("InternalFailure", "Secrets Manager is unavailable", 500);
         }
         String password = RandomPasswordGenerator.generate(objectMapper.createObjectNode());
         Cluster cluster = createCluster(identifier, nodeType, username, password,
-                clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns);
+                clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, options);
         String secretName = "redshift/" + identifier;
         String secretString = managedMasterSecret(cluster, password);
         Secret secret;
@@ -897,6 +937,17 @@ public class RedshiftService {
     public synchronized Cluster modifyCluster(String clusterIdentifier, String nodeType, Integer numberOfNodes,
                                                String masterUserPassword, String clusterParameterGroupName,
                                                List<String> vpcSecurityGroupIds) {
+        return modifyCluster(clusterIdentifier, nodeType, numberOfNodes, masterUserPassword,
+                clusterParameterGroupName, vpcSecurityGroupIds, null, null);
+    }
+
+    public synchronized Cluster modifyCluster(String clusterIdentifier, String nodeType, Integer numberOfNodes,
+                                               String masterUserPassword, String clusterParameterGroupName,
+                                               List<String> vpcSecurityGroupIds, Boolean publiclyAccessible,
+                                               Boolean encrypted) {
+        if (numberOfNodes != null && numberOfNodes < 1) {
+            throw new AwsException("InvalidParameterValue", "NumberOfNodes must be at least 1.", 400);
+        }
         Cluster cluster = clusters.get(clusterIdentifier)
                 .orElseThrow(() -> new AwsException("ClusterNotFound", "Cluster " + clusterIdentifier + " not found", 404));
 
@@ -912,11 +963,19 @@ public class RedshiftService {
             updateManagedMasterSecret(cluster, masterUserPassword);
         }
 
-        // NodeType only updates metadata, it does not resize the underlying Postgres container
-        // (Redshift node-count has no equivalent here). NumberOfNodes is accepted for API-shape
-        // compatibility but is not modelled or stored anywhere, known gap, see plan Task 9.
+        // NodeType and NumberOfNodes only update metadata: a single Postgres container backs the
+        // cluster whatever its node layout, so a resize never moves data.
         if (nodeType != null && !nodeType.isBlank()) {
             cluster.setNodeType(nodeType);
+        }
+        if (numberOfNodes != null) {
+            cluster.setNumberOfNodes(numberOfNodes);
+        }
+        if (publiclyAccessible != null) {
+            cluster.setPubliclyAccessible(publiclyAccessible);
+        }
+        if (encrypted != null) {
+            cluster.setEncrypted(encrypted);
         }
         if (clusterParameterGroupName != null && !clusterParameterGroupName.isBlank()) {
             cluster.setClusterParameterGroupName(clusterParameterGroupName);
@@ -980,7 +1039,7 @@ public class RedshiftService {
                     .put("password", password)
                     .put("host", cluster.getEndpoint() == null ? "" : cluster.getEndpoint().getAddress())
                     .put("port", cluster.getEndpoint() == null ? 0 : cluster.getEndpoint().getPort())
-                    .put("dbname", CLUSTER_DB_NAME)
+                    .put("dbname", dbNameOf(cluster))
                     .toString();
         } catch (RuntimeException e) {
             throw new AwsException("InternalFailure", "Failed to encode managed master secret", 500);
@@ -1011,7 +1070,8 @@ public class RedshiftService {
             String accountId = clusters.accountId();
             String key = relayKey(accountId, clusterIdentifier);
 
-            containerManager.takeSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), tempDump);
+            String dbName = dbNameOf(cluster);
+            containerManager.takeSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), dbName, tempDump);
             proxyManager.stopProxy(key);
             containerManager.stop(accountId, clusterIdentifier);
             originalTornDown = true;
@@ -1019,22 +1079,23 @@ public class RedshiftService {
             String password = cluster.getMasterPassword() != null ? cluster.getMasterPassword() : "admin";
             RedshiftContainerHandle handle = containerManager.start(
                     accountId, clusterIdentifier, cluster.getMasterUsername(), password);
+            containerManager.ensureDatabase(accountId, clusterIdentifier, cluster.getMasterUsername(), dbName);
 
             // Reuse the stored proxy port so the advertised endpoint is unchanged by a reboot.
             if (proxyPort < 0) {
                 proxyPort = allocateProxyPort();
             }
             usedPorts.add(proxyPort);
-            Endpoint endpoint = proxyEndpoint(proxyPort);
+            Endpoint endpoint = storedEndpoint(cluster, proxyPort);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(key, proxyPort, handle.getHost(), handle.getPort(),
-                    endpoint.getAddress(), cluster.getMasterUsername(), password, CLUSTER_DB_NAME,
+                    endpoint.getAddress(), cluster.getMasterUsername(), password, dbName,
                     passwordValidatorFor(accountId, clusterIdentifier), cluster.getIamRoleArns());
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
             cluster.setEndpoint(endpoint);
 
-            containerManager.restoreSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), tempDump);
+            containerManager.restoreSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), dbName, tempDump);
             cluster.setClusterStatus("available");
             rebooted = true;
         } catch (AwsException e) {
@@ -1133,6 +1194,7 @@ public class RedshiftService {
         snapshot.setStatus("available");
         snapshot.setMasterUsername(cluster.getMasterUsername());
         snapshot.setMasterPassword(cluster.getMasterPassword());
+        snapshot.setDbName(dbNameOf(cluster));
         if (cluster.getEndpoint() != null) {
             snapshot.setPort(cluster.getEndpoint().getPort());
         } else {
@@ -1148,7 +1210,8 @@ public class RedshiftService {
         }
         try {
             Files.createDirectories(dumpDir);
-            containerManager.takeSnapshot(clusters.accountId(), clusterIdentifier, cluster.getMasterUsername(), dumpFile);
+            containerManager.takeSnapshot(clusters.accountId(), clusterIdentifier, cluster.getMasterUsername(),
+                    dbNameOf(cluster), dumpFile);
             snapshot.setSqlDump(dumpFile.toString());
         } catch (AwsException e) {
             throw e;
@@ -1205,6 +1268,7 @@ public class RedshiftService {
         Snapshot copy = new Snapshot(targetIdentifier, source.getClusterIdentifier(), "available", source.getPort(),
                 source.getMasterUsername(), target.toString());
         copy.setMasterPassword(source.getMasterPassword());
+        copy.setDbName(source.getDbName());
         copy.setTags(new LinkedHashMap<>(source.getTags()));
         copy.setManualSnapshotRetentionPeriod(retention);
         snapshots.put(targetIdentifier, copy);
@@ -1293,33 +1357,40 @@ public class RedshiftService {
                 .filter(p -> p != null && !p.isBlank())
                 .orElse("admin");
 
+        String dbName = snapshot.getDbName() != null && !snapshot.getDbName().isBlank()
+                ? snapshot.getDbName() : CLUSTER_DB_NAME;
+
         Cluster cluster = new Cluster();
         cluster.setClusterIdentifier(clusterIdentifier);
         cluster.setNodeType(effectiveNodeType);
         cluster.setMasterUsername(username);
         cluster.setMasterPassword(password);
+        cluster.setDbName(dbName);
+        cluster.setEncrypted(true);
         cluster.setClusterStatus("creating");
         clusters.put(clusterIdentifier, cluster);
         clusters.flush();
 
-        // Hoisted out of the try so a failure after allocateProxyPort() still returns the port.
+        // Hoisted out of the try so a failure after the proxy port is claimed still returns it.
         int proxyPort = -1;
         try {
             String accountId = clusters.accountId();
             RedshiftContainerHandle handle = containerManager.start(accountId, clusterIdentifier, username, password);
-            proxyPort = allocateProxyPort();
-            Endpoint endpoint = proxyEndpoint(proxyPort);
+            containerManager.ensureDatabase(accountId, clusterIdentifier, username, dbName);
+            String host = endpointHost(clusterIdentifier);
+            // AWS restores onto the source cluster's port by default.
+            int preferredPort = snapshot.getPort() > 0 ? snapshot.getPort() : defaultClusterPort();
+            proxyPort = startProxyPreferringPort(accountId, clusterIdentifier, preferredPort, handle, host,
+                    username, password, dbName, cluster.getIamRoleArns());
+            Endpoint endpoint = new Endpoint(host, proxyPort);
             cluster.setProxyPort(proxyPort);
-            proxyManager.startProxy(relayKey(accountId, clusterIdentifier), proxyPort,
-                    handle.getHost(), handle.getPort(), endpoint.getAddress(),
-                    username, password, CLUSTER_DB_NAME,
-                    passwordValidatorFor(accountId, clusterIdentifier), cluster.getIamRoleArns());
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
             cluster.setEndpoint(endpoint);
 
             if (hasDump) {
-                containerManager.restoreSnapshot(clusters.accountId(), clusterIdentifier, username, Paths.get(sqlDump));
+                containerManager.restoreSnapshot(clusters.accountId(), clusterIdentifier, username, dbName,
+                        Paths.get(sqlDump));
             }
 
             cluster.setClusterStatus("available");
@@ -1850,6 +1921,9 @@ public class RedshiftService {
     // ── Proxy Helpers (shared with modify/reboot/restore) ────────────────────
 
     private static final String CLUSTER_DB_NAME = "dev";
+    private static final Pattern DB_NAME = Pattern.compile("^[a-z_][a-z0-9_$]{0,63}$");
+    private static final Set<String> RESERVED_DB_NAMES = Set.of("template0", "template1", "padb_harvest", "sys");
+    private static final Pattern IP_LITERAL = Pattern.compile("^[0-9.]+$|.*:.*");
 
     private int allocateProxyPort() {
         int base = config.services().redshift().proxyBasePort();
@@ -1909,11 +1983,119 @@ public class RedshiftService {
         }
     }
 
-    private Endpoint proxyEndpoint(int proxyPort) {
-        String host = config.services().redshift().endpointHost()
-                .filter(h -> !h.isBlank())
-                .orElseGet(dockerHostResolver::resolve);
+    /**
+     * Hostname advertised for a new cluster endpoint. An explicit {@code endpoint-host} wins;
+     * otherwise the AWS shape {@code <cluster>.<id>.<region>.redshift.amazonaws.com} is kept
+     * with the Floci wildcard domain (or the configured Floci hostname) in place of
+     * {@code amazonaws.com}. The embedded DNS resolves it to Floci for containers and public
+     * DNS resolves the default domain to loopback on the host. A configured IP address cannot
+     * carry a prefix and is used as is.
+     */
+    String endpointHost(String clusterIdentifier) {
+        Optional<String> configured = config.services().redshift().endpointHost().filter(h -> !h.isBlank());
+        if (configured.isPresent()) {
+            return configured.get();
+        }
+        String suffix = config.hostname()
+                .filter(h -> !h.isBlank() && !"localhost".equalsIgnoreCase(h))
+                .orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
+        if (IP_LITERAL.matcher(suffix).matches()) {
+            return suffix;
+        }
+        String region = regionResolver.getRegion();
+        String accountId = clusters.accountId();
+        return clusterIdentifier.toLowerCase(Locale.ROOT) + "." + endpointId(accountId, region) + "."
+                + region + ".redshift." + suffix;
+    }
+
+    // AWS gives every account and region a stable 12-character endpoint label.
+    private static String endpointId(String accountId, String region) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(("redshift:" + accountId + ":" + region).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, 12);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+    }
+
+    /** Keeps a cluster's advertised host stable across reboot and restart recovery. */
+    private Endpoint storedEndpoint(Cluster cluster, int proxyPort) {
+        Endpoint current = cluster.getEndpoint();
+        String host = current != null && current.getAddress() != null && !current.getAddress().isBlank()
+                ? current.getAddress()
+                : endpointHost(cluster.getClusterIdentifier());
         return new Endpoint(host, proxyPort);
+    }
+
+    /**
+     * Starts the cluster's auth proxy on the port the cluster was created with (5439 unless
+     * CreateCluster set Port), as AWS does. Every AWS cluster has its own host, but here all
+     * clusters share Floci's address, so when that port is already held by another cluster or
+     * cannot be bound the proxy falls back to the configured proxy port range and the endpoint
+     * reports the port actually listening. Returns the bound port; on failure the claimed
+     * port is released (or deliberately leaked if its listener could not be closed).
+     */
+    private int startProxyPreferringPort(String accountId, String identifier, int preferredPort,
+                                         RedshiftContainerHandle handle, String advertisedHost,
+                                         String username, String password, String dbName,
+                                         List<String> iamRoleArns) {
+        if (preferredPort > 0 && usedPorts.add(preferredPort)) {
+            try {
+                proxyManager.startProxy(relayKey(accountId, identifier), preferredPort,
+                        handle.getHost(), handle.getPort(), advertisedHost, username, password, dbName,
+                        passwordValidatorFor(accountId, identifier), iamRoleArns);
+                return preferredPort;
+            } catch (RuntimeException e) {
+                LOG.infov("Redshift cluster {0} cannot listen on port {1} ({2}); using the proxy port range",
+                        identifier, preferredPort, e.getMessage());
+                if (!stopProxyAndReleasePortSafely(identifier, preferredPort)) {
+                    throw e;
+                }
+            }
+        }
+        int port = allocateProxyPort();
+        try {
+            proxyManager.startProxy(relayKey(accountId, identifier), port,
+                    handle.getHost(), handle.getPort(), advertisedHost, username, password, dbName,
+                    passwordValidatorFor(accountId, identifier), iamRoleArns);
+            return port;
+        } catch (RuntimeException e) {
+            stopProxyAndReleasePortSafely(identifier, port);
+            throw e;
+        }
+    }
+
+    private int defaultClusterPort() {
+        return config.services().redshift().defaultPort();
+    }
+
+    private static String dbNameOf(Cluster cluster) {
+        String dbName = cluster.getDbName();
+        return dbName != null && !dbName.isBlank() ? dbName : CLUSTER_DB_NAME;
+    }
+
+    // CreateCluster DBName: 1 to 64 characters, lowercase letters, digits, underscores or
+    // dollar signs, not starting with a digit or dollar sign, and not a system database name.
+    private static String validateDbName(String dbName) {
+        if (dbName == null || dbName.isEmpty()) {
+            return CLUSTER_DB_NAME;
+        }
+        if (!DB_NAME.matcher(dbName).matches() || RESERVED_DB_NAMES.contains(dbName)) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBName must contain 1 to 64 lowercase alphanumeric characters and must not be a reserved word.", 400);
+        }
+        return dbName;
+    }
+
+    private int validatePort(Integer port) {
+        if (port == null) {
+            return defaultClusterPort();
+        }
+        if (port < 1150 || port > 65535) {
+            throw new AwsException("InvalidParameterValue", "Port must be between 1150 and 65535.", 400);
+        }
+        return port;
     }
 
     private String relayKey(String accountId, String clusterIdentifier) {

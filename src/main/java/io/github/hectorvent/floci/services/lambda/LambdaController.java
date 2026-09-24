@@ -104,7 +104,8 @@ public class LambdaController {
         if ("Image".equals(fn.getPackageType()) && fn.getImageUri() != null) {
             code.put("RepositoryType", "ECR");
             code.put("ImageUri", fn.getImageUri());
-            code.put("ResolvedImageUri", fn.getImageUri());
+            code.put("ResolvedImageUri", fn.getResolvedImageUri() != null
+                    ? fn.getResolvedImageUri() : fn.getImageUri());
         } else {
             // Path-style URL to the package in Floci's own S3, built from the
             // request so it targets the same endpoint the client is talking to.
@@ -327,11 +328,16 @@ public class LambdaController {
 
     @GET
     @Path("/event-source-mappings")
-    public Response listEventSourceMappings(@QueryParam("FunctionName") String functionArn) {
+    public Response listEventSourceMappings(@QueryParam("FunctionName") String functionArn,
+                                            @QueryParam("EventSourceArn") String eventSourceArn) {
         List<EventSourceMapping> esms = lambdaService.listEventSourceMappings(functionArn);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("EventSourceMappings");
         for (EventSourceMapping esm : esms) {
+            if (eventSourceArn != null && !eventSourceArn.isBlank()
+                    && !eventSourceArn.equals(esm.getEventSourceArn())) {
+                continue;
+            }
             items.add(objectMapper.valueToTree(buildEsmResponse(esm)));
         }
         return Response.ok(root).build();
@@ -407,6 +413,11 @@ public class LambdaController {
 
         if (esm.getSelfManagedEventSource() != null) {
             node.set("SelfManagedEventSource", objectMapper.valueToTree(esm.getSelfManagedEventSource()));
+        }
+
+        if (esm.getAmazonManagedKafkaEventSourceConfig() != null) {
+            node.set("AmazonManagedKafkaEventSourceConfig",
+                    objectMapper.valueToTree(esm.getAmazonManagedKafkaEventSourceConfig()));
         }
 
         if (esm.getTopics() != null && !esm.getTopics().isEmpty()) {

@@ -1420,6 +1420,13 @@ public interface EmulatorConfig {
         String defaultImage();
 
         /**
+         * Image for every ActiveMQ broker. Empty when Floci should pick the ActiveMQ Classic
+         * image matching the requested engine version.
+         * Env: FLOCI_SERVICES_AMAZONMQ_ACTIVEMQ_IMAGE
+         */
+        Optional<String> activemqImage();
+
+        /**
          * Host port range the AMQP listener (container port 5672) is published on, one
          * port per broker. Published in both topologies: no Floci-internal proxy fronts
          * the broker, so the Docker host-port binding is the only way a client outside
@@ -2932,6 +2939,45 @@ public interface EmulatorConfig {
         /** Reply used when a request carries no user message, which is a legitimate call. */
         @WithDefault("No user message was supplied.")
         String harnessEmptyReply();
+
+        /** Image a code interpreter session runs in; executeCode and executeCommand exec inside it. */
+        @WithDefault("python:3.12-slim")
+        String codeInterpreterImage();
+
+        /** Memory limit of one code interpreter session container. */
+        @WithDefault("512")
+        int codeInterpreterMemoryMb();
+
+        /** Concurrent READY code interpreter sessions before StartCodeInterpreterSession is refused. */
+        @WithDefault("5")
+        int codeInterpreterMaxActiveSessions();
+
+        /** Headless Chrome image a browser session runs; it must serve the DevTools protocol on 9222. */
+        @WithDefault("chromedp/headless-shell:151.0.7922.109")
+        String browserImage();
+
+        /** Memory limit of one browser session container. */
+        @WithDefault("1024")
+        int browserMemoryMb();
+
+        /** Concurrent READY browser sessions before StartBrowserSession is refused. */
+        @WithDefault("3")
+        int browserMaxActiveSessions();
+
+        /** Upper bound on one InvokeCodeInterpreter execution. */
+        @WithDefault("300")
+        int toolExecutionTimeoutSeconds();
+
+        /** Seconds to wait for a new browser session's DevTools endpoint to answer. */
+        @WithDefault("60")
+        int browserStartupTimeoutSeconds();
+
+        /** Docker network for session containers; falls back to the global services network. */
+        Optional<String> dockerNetwork();
+
+        /** Pull the session images in the background when a code interpreter or browser is created. */
+        @WithDefault("true")
+        boolean prewarmImages();
     }
 
     /** Classic (2012-06-01) Elastic Load Balancing — a separate API from {@link ElbV2ServiceConfig}. */

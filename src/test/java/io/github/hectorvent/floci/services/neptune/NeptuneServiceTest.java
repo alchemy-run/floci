@@ -40,6 +40,7 @@ import static org.mockito.Mockito.when;
 class NeptuneServiceTest {
 
     private NeptuneService service;
+    private EmulatorConfig config;
     private NeptuneContainerManager containerManager;
     private NeptuneProxyManager proxyManager;
     private EmulatorConfig.NeptuneServiceConfig neptuneConfig;
@@ -53,7 +54,7 @@ class NeptuneServiceTest {
         containerManager = mock(NeptuneContainerManager.class);
         proxyManager = mock(NeptuneProxyManager.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
-        EmulatorConfig config = mock(EmulatorConfig.class);
+        config = mock(EmulatorConfig.class);
         currentAccount = "000000000000";
         currentRegion = "us-east-1";
         regionResolver = mock(RegionResolver.class);
@@ -259,7 +260,8 @@ class NeptuneServiceTest {
         NeptuneCluster created = service.createDbCluster("no-docker-cluster", "1.3.2.1", false);
 
         assertEquals("available", created.getStatus());
-        assertEquals("localhost", created.getEndpoint());
+        assertEquals("no-docker-cluster.cluster-" + NeptuneEndpoints.hash("000000000000", "us-east-1")
+                + ".us-east-1.neptune.localhost", created.getEndpoint());
         assertEquals(18182, created.getProxyPort());
         verify(proxyManager, never()).startProxy(anyString(), anyInt(), anyString(), anyInt());
 
@@ -461,6 +463,32 @@ class NeptuneServiceTest {
         assertEquals("tuned", modified.getDbParameterGroupName());
         assertEquals("mon:02:00-mon:03:00", modified.getPreferredMaintenanceWindow());
         assertEquals("db.r5.large", modified.getDbInstanceClass(), "An omitted DBInstanceClass must keep its value");
+    }
+
+    @Test
+    void endpointsTakeTheAwsShapeUnderFlociDnsSuffix() {
+        String hash = NeptuneEndpoints.hash("000000000000", "us-east-1");
+        NeptuneCluster cluster = service.createDbCluster("Graph", "1.3.2.1", false);
+        NeptuneInstance instance = service.createDbInstance("Writer", "Graph", "db.serverless", null, false);
+
+        assertEquals("graph.cluster-" + hash + ".us-east-1.neptune.localhost", cluster.getEndpoint());
+        assertEquals("graph.cluster-ro-" + hash + ".us-east-1.neptune.localhost", cluster.getReaderEndpoint());
+        assertEquals("writer." + hash + ".us-east-1.neptune.localhost", instance.getEndpoint());
+        assertEquals(cluster.getPort(), instance.getPort());
+        assertTrue(hash.matches("[a-z0-9]{12}"), hash);
+    }
+
+    @Test
+    void endpointsFallBackToTheWildcardDnsSuffixAndDifferPerRegion() {
+        when(config.hostname()).thenReturn(Optional.empty());
+        NeptuneCluster east = service.createDbCluster("regional", "1.3.2.1", false);
+        currentRegion = "eu-west-1";
+        NeptuneCluster west = service.createDbCluster("regional", "1.3.2.1", false);
+
+        assertTrue(east.getEndpoint().endsWith(".us-east-1.neptune.localhost.floci.io"), east.getEndpoint());
+        assertTrue(west.getEndpoint().endsWith(".eu-west-1.neptune.localhost.floci.io"), west.getEndpoint());
+        assertNotEquals(NeptuneEndpoints.hash("000000000000", "us-east-1"),
+                NeptuneEndpoints.hash("000000000000", "eu-west-1"));
     }
 
     @Test

@@ -17,8 +17,6 @@ import org.jboss.logging.Logger;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -28,9 +26,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DocDbContainerManager {
 
     private static final Logger LOG = Logger.getLogger(DocDbContainerManager.class);
-    private static final int MONGO_PORT = 27017;
-    private static final int BACKEND_READY_DEADLINE_MS = 60_000;
-    private static final int BACKEND_READY_RETRY_MS = 200;
+    static final String REPLICA_SET = "rs0";
+    private static final int MEMORY_LIMIT_MB = 1024;
+    private static final String WIRED_TIGER_CACHE_GB = "0.25";
+    // mongod starts twice (the entrypoint creates the root user first) before the set elects it
+    private static final int BACKEND_READY_DEADLINE_MS = 120_000;
+    private static final int BACKEND_READY_RETRY_MS = 500;
     private static final int BACKEND_PROBE_CONNECT_MS = 2_000;
 
     private final ContainerBuilder containerBuilder;
@@ -66,9 +67,10 @@ public class DocDbContainerManager {
      *
      * @return the container handle, or {@code null} when no Docker daemon is reachable
      */
-    public DocDbContainerHandle tryStart(String clusterId, String image, String masterUsername, String masterPassword) {
+    public DocDbContainerHandle tryStart(String clusterId, String image, String masterUsername,
+                                         String masterPassword, String memberHost, int port) {
         try {
-            DocDbContainerHandle handle = start(clusterId, image, masterUsername, masterPassword);
+            DocDbContainerHandle handle = start(clusterId, image, masterUsername, masterPassword, memberHost, port);
             dockerUnavailableLogged = false;
             return handle;
         } catch (RuntimeException e) {
@@ -100,35 +102,49 @@ public class DocDbContainerManager {
         }
     }
 
-    public DocDbContainerHandle start(String clusterId, String image, String masterUsername, String masterPassword) {
+    /**
+     * Starts the MongoDB backend of one cluster as a single-member replica set named
+     * {@code rs0}, as DocumentDB presents itself to drivers. The member is advertised as
+     * {@code memberHost:port}, the cluster endpoint clients are given, so a driver that discovers
+     * the set's hosts is sent back to that endpoint; inside the container the name maps to the
+     * container itself, which is how mongod recognises the member as itself. The backend speaks
+     * plaintext: the cluster's listener terminates TLS in front of it.
+     */
+    public DocDbContainerHandle start(String clusterId, String image, String masterUsername,
+                                      String masterPassword, String memberHost, int port) {
         LOG.infov("Starting DocumentDB container for cluster: {0}", clusterId);
 
         String containerName = ContainerStorageHelper.resourceName(config, "docdb", null, clusterId);
         lifecycleManager.removeIfExists(containerName);
 
         List<String> envVars = List.of(
-        "MONGO_INITDB_ROOT_USERNAME=" + masterUsername,
-        "MONGO_INITDB_ROOT_PASSWORD=" + masterPassword
-        );
+                "MONGO_INITDB_ROOT_USERNAME=" + masterUsername,
+                "MONGO_INITDB_ROOT_PASSWORD=" + masterPassword,
+                "FLOCI_DOCDB_HOST=" + memberHost,
+                "FLOCI_DOCDB_PORT=" + port);
 
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
                 .withDockerNetwork(config.services().docdb().dockerNetwork())
                 .withLogRotation()
                 .withEnv(envVars)
+                .withMemoryMb(MEMORY_LIMIT_MB)
+                .withExtraHost(memberHost, "127.0.0.1")
+                .withEntrypoint(List.of("sh", "-c"))
+                .withCmd(List.of(replicaSetScript()))
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
                         "docdb", clusterId, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
 
         if (!containerDetector.isRunningInContainer()) {
-            specBuilder.withDynamicPort(MONGO_PORT);
+            // Clients reach the backend through the cluster proxy, never directly.
+            specBuilder.withLoopbackPortBinding(port, 0);
         } else {
-            specBuilder.withExposedPort(MONGO_PORT);
+            specBuilder.withExposedPort(port);
         }
-
 
         ContainerSpec spec = specBuilder.build();
         ContainerInfo info = lifecycleManager.createAndStart(spec);
-        EndpointInfo endpoint = info.getEndpoint(MONGO_PORT);
+        EndpointInfo endpoint = info.getEndpoint(port);
 
         LOG.infov("DocumentDB container for cluster {0}: {1}", clusterId, endpoint);
 
@@ -147,9 +163,41 @@ public class DocDbContainerManager {
                 info.containerId(), logGroup, logStream, region, "docdb:" + clusterId);
         handle.setLogStream(logHandle);
 
-        waitForBackendReady(clusterId, endpoint.host(), endpoint.port());
+        try {
+            waitForBackendReady(clusterId, endpoint.host(), endpoint.port(), BACKEND_READY_DEADLINE_MS);
+        } catch (RuntimeException e) {
+            stop(handle);
+            throw e;
+        }
 
         return handle;
+    }
+
+    /**
+     * The container command: a key file, which a replica set with authentication needs, mongod
+     * started through the image's entrypoint (which creates the root user first), and the replica
+     * set initiated with the advertised member once mongod accepts the root user.
+     */
+    static String replicaSetScript() {
+        return "set -eu\n"
+                + "keyfile=/tmp/floci-docdb-keyfile\n"
+                + "head -c 756 /dev/urandom | base64 | tr -d '\\n' > \"$keyfile\"\n"
+                + "chown mongodb:mongodb \"$keyfile\"\n"
+                + "chmod 400 \"$keyfile\"\n"
+                + "docker-entrypoint.sh mongod --replSet " + REPLICA_SET + " --keyFile \"$keyfile\" "
+                + "--bind_ip_all --port \"$FLOCI_DOCDB_PORT\" --wiredTigerCacheSizeGB " + WIRED_TIGER_CACHE_GB + " &\n"
+                + "mongod_pid=$!\n"
+                + "trap 'kill -TERM \"$mongod_pid\" 2>/dev/null; wait \"$mongod_pid\"; exit 0' TERM INT\n"
+                + "until mongosh --quiet --host 127.0.0.1 --port \"$FLOCI_DOCDB_PORT\" "
+                + "-u \"$MONGO_INITDB_ROOT_USERNAME\" -p \"$MONGO_INITDB_ROOT_PASSWORD\" "
+                + "--authenticationDatabase admin --eval "
+                + "'try { rs.status() } catch (e) { rs.initiate({ _id: \"" + REPLICA_SET + "\", members: "
+                + "[{ _id: 0, host: process.env.FLOCI_DOCDB_HOST + \":\" + process.env.FLOCI_DOCDB_PORT }] }) }' "
+                + ">/dev/null 2>&1; do\n"
+                + "  kill -0 \"$mongod_pid\" 2>/dev/null || exit 1\n"
+                + "  sleep 1\n"
+                + "done\n"
+                + "wait \"$mongod_pid\"\n";
     }
 
     public void stop(DocDbContainerHandle handle) {
@@ -170,34 +218,32 @@ public class DocDbContainerManager {
         }
     }
 
-    private static void waitForBackendReady(String clusterId, String host, int port) {
-        long deadline = System.currentTimeMillis() + BACKEND_READY_DEADLINE_MS;
+    /** Waits until the backend answers {@code hello} as the replica set's writable primary. */
+    static void waitForBackendReady(String clusterId, String host, int port, long deadlineMs) {
+        long deadline = System.currentTimeMillis() + deadlineMs;
         int attempt = 0;
         while (System.currentTimeMillis() < deadline) {
             attempt++;
-            try (Socket s = new Socket()) {
-                s.connect(new InetSocketAddress(host, port), BACKEND_PROBE_CONNECT_MS);
-                if (attempt > 1) {
+            try {
+                if (MongoHelloProbe.isWritablePrimary(host, port, BACKEND_PROBE_CONNECT_MS)) {
                     LOG.infov("MongoDB backend ready for cluster {0} after {1} probe attempt(s)",
                             clusterId, attempt);
+                    return;
                 }
-                return;
-            } catch (IOException e) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debugv("MongoDB probe for cluster {0} attempt {1}: {2}",
-                            clusterId, attempt, e.getMessage());
-                }
+            } catch (IOException | RuntimeException e) {
+                LOG.debugv("MongoDB probe for cluster {0} attempt {1}: {2}",
+                        clusterId, attempt, e.getMessage());
             }
             try {
                 Thread.sleep(BACKEND_READY_RETRY_MS);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException(
+                throw new IllegalStateException(
                         "Interrupted while waiting for MongoDB backend " + clusterId, ie);
             }
         }
-        throw new RuntimeException(
-                "MongoDB backend for cluster " + clusterId + " did not become ready on "
-                        + host + ":" + port + " within " + BACKEND_READY_DEADLINE_MS + "ms");
+        throw new IllegalStateException(
+                "MongoDB backend for cluster " + clusterId + " did not become a writable replica set primary on "
+                        + host + ":" + port + " within " + deadlineMs + "ms");
     }
 }

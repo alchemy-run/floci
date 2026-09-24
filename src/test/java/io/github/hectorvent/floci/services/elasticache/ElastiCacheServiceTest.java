@@ -1108,4 +1108,185 @@ class ElastiCacheServiceTest {
         service.deleteCacheParameterGroup("custom-pg");
         assertTrue(service.findParameterGroup("custom-pg").isEmpty());
     }
+
+    private void stubContainerPerGroup() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenAnswer(inv ->
+                new ElastiCacheContainerHandle("cid-" + inv.getArgument(0, String.class),
+                        inv.getArgument(0, String.class), "172.20.0." + (10 + inv.getArgument(0, String.class).length()),
+                        inv.getArgument(2, Integer.class)));
+    }
+
+    @Test
+    void containerModeGivesEveryGroupTheDefaultPortOnItsOwnAddress() {
+        // On AWS every group has its own hostname, so two groups both listen on 6379.
+        stubContainerPerGroup();
+
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp", null));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp-two", null));
+
+        assertEquals(6379, first.getConfigurationEndpoint().port());
+        assertEquals(6379, second.getConfigurationEndpoint().port());
+        assertFalse(first.getConfigurationEndpoint().address()
+                .equals(second.getConfigurationEndpoint().address()));
+        assertTrue(first.getProxyPort() != second.getProxyPort(), "Host proxies still need their own ports");
+        verify(containerManager).tryStart(eq("grp"), anyString(), eq(6379));
+        verify(containerManager).tryStart(eq("grp-two"), anyString(), eq(6379));
+        assertTrue(service.memberCacheClusters(second).stream().allMatch(member -> member.port() == 6379));
+    }
+
+    @Test
+    void containerModeHonorsAPortAnotherGroupAlreadyUses() {
+        // A replacement with a new Port is created before the old group is deleted, and any number
+        // of groups may pin the same Port: the Port is not a global resource.
+        stubContainerPerGroup();
+
+        service.createReplicationGroup(singleNodeRequest("grp", 16390));
+        ReplicationGroup replacement = service.createReplicationGroup(singleNodeRequest("grp-two", 16390));
+
+        assertEquals(16390, replacement.getConfigurationEndpoint().port());
+        assertEquals(16390, replacement.getEnginePort());
+        assertTrue(replacement.getProxyPort() != 16390, "The proxy port moves aside, the Port does not");
+        verify(containerManager).tryStart(eq("grp-two"), anyString(), eq(16390));
+    }
+
+    @Test
+    void containerModeAcceptsAPortOutsideTheProxyRange() {
+        stubContainerPerGroup();
+
+        ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 7000));
+
+        assertEquals(7000, group.getConfigurationEndpoint().port());
+        assertEquals(16379, group.getProxyPort());
+    }
+
+    @Test
+    void containerModeRejectsAnInvalidPort() {
+        stubContainerPerGroup();
+
+        AwsException thrown = assertThrows(AwsException.class,
+                () -> service.createReplicationGroup(singleNodeRequest("grp", 70000)));
+
+        assertEquals("InvalidParameterValue", thrown.getErrorCode());
+        verify(containerManager, never()).tryStart(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void deletingAContainerModeGroupReleasesOnlyItsProxyPort() {
+        stubContainerPerGroup();
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp", null));
+
+        service.deleteReplicationGroup("grp");
+        ReplicationGroup next = service.createReplicationGroup(singleNodeRequest("grp-two", null));
+
+        assertEquals(first.getProxyPort(), next.getProxyPort());
+        assertEquals(6379, next.getConfigurationEndpoint().port());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void addingShardsJoinsNewNodesAndRebalancesSlotsEvenly() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 2, 0));
+
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 3, List.of(), List.of());
+
+        assertEquals(3, group.getNumNodeGroups());
+        assertEquals(List.of("0001", "0002", "0003"), group.getClusterNodes().stream()
+                .map(ClusterNode::getNodeGroupId).toList());
+        assertEquals(List.of("0-5460", "5461-10921", "10922-16383"), group.getClusterNodes().stream()
+                .map(ClusterNode::getSlots).toList());
+        assertEquals("grp-0003-001", group.getClusterNodes().get(2).getMemberClusterId());
+        assertEquals(3, group.getClusterNodes().stream().map(ClusterNode::getProxyPort).distinct().count());
+
+        ArgumentCaptor<List<ValkeyClusterFormation.ShardMember>> members = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Map<String, String>> current = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, String>> desired = ArgumentCaptor.forClass(Map.class);
+        verify(clusterFormation).reshard(eq("grp"), members.capture(), current.capture(), desired.capture());
+        assertEquals(Map.of("0001", "0-8191", "0002", "8192-16383"), current.getValue());
+        assertEquals(Map.of("0001", "0-5460", "0002", "5461-10921", "0003", "10922-16383"), desired.getValue());
+        assertEquals(List.of(false, false, true), members.getValue().stream()
+                .map(ValkeyClusterFormation.ShardMember::joining).toList());
+        verify(containerManager, times(3)).start(anyString(), anyString(), any());
+        verify(proxyManager).startProxy(eq("grp-0003-001"), any(), anyInt(), anyString(), anyInt(), any());
+        assertEquals(3, service.getReplicationGroup("grp").getClusterNodes().size());
+    }
+
+    @Test
+    void removingAShardMovesItsSlotsAwayAndStopsItsNodes() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 3, 0));
+
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 2, List.of("0002"), List.of());
+
+        assertEquals(List.of("0001", "0003"), group.getClusterNodes().stream()
+                .map(ClusterNode::getNodeGroupId).toList());
+        assertEquals(List.of("0-8191", "8192-16383"), group.getClusterNodes().stream()
+                .map(ClusterNode::getSlots).toList());
+        verify(clusterFormation).reshard(eq("grp"),
+                argThat(members -> members.stream().filter(ValkeyClusterFormation.ShardMember::leaving)
+                        .map(ValkeyClusterFormation.ShardMember::nodeGroupId).toList().equals(List.of("0002"))),
+                any(), eq(Map.of("0001", "0-8191", "0003", "8192-16383")));
+        verify(proxyManager).stopProxy("grp-0002-001");
+        verify(containerManager, times(1)).stop(any());
+    }
+
+    @Test
+    void retainingShardsRemovesTheRest() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 3, 0));
+
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 1, List.of(), List.of("0003"));
+
+        assertEquals(List.of("0003"), group.getClusterNodes().stream().map(ClusterNode::getNodeGroupId).toList());
+        assertEquals("0-16383", group.getClusterNodes().getFirst().getSlots());
+        assertEquals(group.getClusterNodes().getFirst().getProxyPort(), group.getConfigurationEndpoint().port());
+    }
+
+    @Test
+    void decreasingShardsWithoutNamingThemIsRejected() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 2, 0));
+
+        AwsException missing = assertThrows(AwsException.class,
+                () -> service.modifyShardConfiguration("grp", 1, List.of(), List.of()));
+        assertEquals("InvalidParameterValue", missing.getErrorCode());
+
+        AwsException unknown = assertThrows(AwsException.class,
+                () -> service.modifyShardConfiguration("grp", 1, List.of("0009"), List.of()));
+        assertEquals("InvalidParameterValue", unknown.getErrorCode());
+
+        AwsException both = assertThrows(AwsException.class,
+                () -> service.modifyShardConfiguration("grp", 1, List.of("0002"), List.of("0001")));
+        assertEquals("InvalidParameterCombination", both.getErrorCode());
+        verify(clusterFormation, never()).reshard(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void aFailedReshardRollsBackTheAddedNodesAndKeepsTheTopology() {
+        stubPerNodeContainers();
+        service.createReplicationGroup(clusterRequest("grp", 2, 0));
+        doThrow(new RuntimeException("reshard boom"))
+                .when(clusterFormation).reshard(anyString(), any(), any(), any());
+
+        assertThrows(RuntimeException.class,
+                () -> service.modifyShardConfiguration("grp", 3, List.of(), List.of()));
+
+        verify(proxyManager).stopProxy("grp-0003-001");
+        verify(containerManager, times(1)).stop(any());
+        ReplicationGroup group = service.getReplicationGroup("grp");
+        assertEquals(2, group.getNumNodeGroups());
+        assertEquals(List.of("0-8191", "8192-16383"), group.getClusterNodes().stream()
+                .map(ClusterNode::getSlots).toList());
+    }
+
+    @Test
+    void shardCountOnAClusterModeDisabledGroupOnlyRecordsTheCount() {
+        service.createReplicationGroup("grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
+
+        ReplicationGroup group = service.modifyShardConfiguration("grp", 2, List.of(), List.of());
+
+        assertEquals(2, group.getNumNodeGroups());
+        verify(clusterFormation, never()).reshard(anyString(), any(), any(), any());
+    }
 }
