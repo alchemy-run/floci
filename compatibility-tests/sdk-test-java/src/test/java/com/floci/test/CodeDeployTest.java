@@ -6,9 +6,13 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.codedeploy.CodeDeployClient;
 import software.amazon.awssdk.services.codedeploy.model.AppSpecContent;
+import software.amazon.awssdk.services.codedeploy.model.BatchGetApplicationRevisionsResponse;
 import software.amazon.awssdk.services.codedeploy.model.BatchGetApplicationsResponse;
 import software.amazon.awssdk.services.codedeploy.model.BatchGetDeploymentGroupsResponse;
 import software.amazon.awssdk.services.codedeploy.model.BatchGetDeploymentsResponse;
@@ -18,14 +22,19 @@ import software.amazon.awssdk.services.codedeploy.model.CreateApplicationRespons
 import software.amazon.awssdk.services.codedeploy.model.CreateDeploymentConfigResponse;
 import software.amazon.awssdk.services.codedeploy.model.CreateDeploymentGroupResponse;
 import software.amazon.awssdk.services.codedeploy.model.CreateDeploymentResponse;
+import software.amazon.awssdk.services.codedeploy.model.DeploymentDoesNotExistException;
+import software.amazon.awssdk.services.codedeploy.model.DeploymentIdRequiredException;
 import software.amazon.awssdk.services.codedeploy.model.DeploymentOption;
 import software.amazon.awssdk.services.codedeploy.model.DeploymentReadyAction;
 import software.amazon.awssdk.services.codedeploy.model.DeploymentStatus;
 import software.amazon.awssdk.services.codedeploy.model.DeploymentStyle;
 import software.amazon.awssdk.services.codedeploy.model.DeploymentType;
+import software.amazon.awssdk.services.codedeploy.model.GetApplicationRevisionResponse;
 import software.amazon.awssdk.services.codedeploy.model.GetDeploymentConfigResponse;
 import software.amazon.awssdk.services.codedeploy.model.GetDeploymentGroupResponse;
 import software.amazon.awssdk.services.codedeploy.model.GetDeploymentResponse;
+import software.amazon.awssdk.services.codedeploy.model.InvalidRevisionException;
+import software.amazon.awssdk.services.codedeploy.model.ListApplicationRevisionsResponse;
 import software.amazon.awssdk.services.codedeploy.model.ListApplicationsResponse;
 import software.amazon.awssdk.services.codedeploy.model.ListDeploymentConfigsResponse;
 import software.amazon.awssdk.services.codedeploy.model.ListDeploymentGroupsResponse;
@@ -34,8 +43,11 @@ import software.amazon.awssdk.services.codedeploy.model.ListDeploymentsResponse;
 import software.amazon.awssdk.services.codedeploy.model.ListTagsForResourceResponse;
 import software.amazon.awssdk.services.codedeploy.model.MinimumHealthyHosts;
 import software.amazon.awssdk.services.codedeploy.model.MinimumHealthyHostsType;
+import software.amazon.awssdk.services.codedeploy.model.RevisionDoesNotExistException;
 import software.amazon.awssdk.services.codedeploy.model.RevisionLocation;
 import software.amazon.awssdk.services.codedeploy.model.RevisionLocationType;
+import software.amazon.awssdk.services.codedeploy.model.RevisionRequiredException;
+import software.amazon.awssdk.services.codedeploy.model.S3Location;
 import software.amazon.awssdk.services.codedeploy.model.Tag;
 import software.amazon.awssdk.services.codedeploy.model.TrafficRoutingType;
 import software.amazon.awssdk.services.lambda.LambdaClient;
@@ -180,6 +192,7 @@ class CodeDeployTest {
                 .deploymentGroupName("sdk-lambda-dg"));
 
         assertThat(resp.deploymentGroupInfo().deploymentGroupName()).isEqualTo("sdk-lambda-dg");
+        assertThat(resp.deploymentGroupInfo().computePlatform()).isEqualTo(ComputePlatform.LAMBDA);
         assertThat(resp.deploymentGroupInfo().deploymentConfigName())
                 .isEqualTo("CodeDeployDefault.LambdaAllAtOnce");
     }
@@ -280,6 +293,103 @@ class CodeDeployTest {
         assertThat(after.applications()).doesNotContain("sdk-lambda-app");
     }
 
+    @Test
+    void unknownDeploymentControlsReturnTypedSdkErrors() {
+        assertThatThrownBy(() -> codedeploy.stopDeployment(r -> r.deploymentId("d-AAAAAAAAA")))
+                .isInstanceOf(DeploymentDoesNotExistException.class);
+        assertThatThrownBy(() -> codedeploy.continueDeployment(r -> r.deploymentId("d-AAAAAAAAA")))
+                .isInstanceOf(DeploymentDoesNotExistException.class);
+        assertThatThrownBy(() -> codedeploy.putLifecycleEventHookExecutionStatus(r -> r
+                .deploymentId("d-AAAAAAAAA").lifecycleEventHookExecutionId("unknown").status("Succeeded")))
+                .isInstanceOf(DeploymentDoesNotExistException.class);
+        assertThatThrownBy(() -> codedeploy.stopDeployment(r -> r.build()))
+                .isInstanceOf(DeploymentIdRequiredException.class);
+        assertThatThrownBy(() -> codedeploy.continueDeployment(r -> r.build()))
+                .isInstanceOf(DeploymentIdRequiredException.class);
+        assertThatThrownBy(() -> codedeploy.putLifecycleEventHookExecutionStatus(r -> r.build()))
+                .isInstanceOf(DeploymentIdRequiredException.class);
+    }
+
+    @Test
+    void missingRevisionAndGroupPlatformRoundTripThroughSdk() {
+        String app = "sdk-cd-platform-errors";
+        codedeploy.createApplication(r -> r.applicationName(app).computePlatform(ComputePlatform.LAMBDA));
+        try {
+            codedeploy.createDeploymentGroup(r -> r.applicationName(app).deploymentGroupName("group")
+                    .deploymentConfigName("CodeDeployDefault.LambdaAllAtOnce").serviceRoleArn(ROLE));
+            assertThat(codedeploy.getDeploymentGroup(r -> r.applicationName(app).deploymentGroupName("group"))
+                    .deploymentGroupInfo().computePlatform()).isEqualTo(ComputePlatform.LAMBDA);
+            assertThatThrownBy(() -> codedeploy.createDeployment(r -> r.applicationName(app).deploymentGroupName("group")))
+                    .isInstanceOf(RevisionRequiredException.class);
+            assertThatThrownBy(() -> codedeploy.createDeployment(r -> r.applicationName(app).deploymentGroupName("group")
+                    .revision(RevisionLocation.builder().build()))).isInstanceOf(InvalidRevisionException.class);
+            codedeploy.updateDeploymentGroup(r -> r.applicationName(app).currentDeploymentGroupName("group")
+                    .deploymentConfigName("CodeDeployDefault.LambdaCanary10Percent5Minutes"));
+            GetDeploymentGroupResponse updated = codedeploy.getDeploymentGroup(r -> r.applicationName(app).deploymentGroupName("group"));
+            assertThat(updated.deploymentGroupInfo().computePlatform()).isEqualTo(ComputePlatform.LAMBDA);
+            assertThat(updated.deploymentGroupInfo().deploymentConfigName()).isEqualTo("CodeDeployDefault.LambdaCanary10Percent5Minutes");
+            assertThat(codedeploy.listDeployments(r -> r.applicationName(app).deploymentGroupName("group")).deployments()).isEmpty();
+            codedeploy.deleteDeploymentGroup(r -> r.applicationName(app).deploymentGroupName("group"));
+        } finally {
+            codedeploy.deleteApplication(r -> r.applicationName(app));
+        }
+    }
+
+    @Test
+    void revisionMetadataRoundTripsWithTypedErrorsAndSdkScopeIsolation() {
+        String app = "sdk-cd-revision-metadata";
+        RevisionLocation revision = RevisionLocation.builder().revisionType(RevisionLocationType.S3)
+                .s3Location(S3Location.builder().bucket("metadata-only-sdk-bucket").key("releases/app.zip")
+                        .bundleType("zip").version("v1").eTag("bundle-etag").build()).build();
+        try (CodeDeployClient owner = scopedClient(Region.US_EAST_1, "000000000021");
+             CodeDeployClient otherAccount = scopedClient(Region.US_EAST_1, "000000000022");
+             CodeDeployClient otherRegion = scopedClient(Region.US_WEST_2, "000000000021")) {
+            for (CodeDeployClient client : List.of(owner, otherAccount, otherRegion)) {
+                client.createApplication(r -> r.applicationName(app).computePlatform(ComputePlatform.LAMBDA));
+            }
+            try {
+                assertThatThrownBy(() -> owner.getApplicationRevision(r -> r.applicationName(app).revision(revision)))
+                        .isInstanceOf(RevisionDoesNotExistException.class);
+                assertThatThrownBy(() -> owner.registerApplicationRevision(r -> r.applicationName(app)))
+                        .isInstanceOf(RevisionRequiredException.class);
+                owner.registerApplicationRevision(r -> r.applicationName(app).revision(revision).description("metadata-only bundle"));
+                owner.registerApplicationRevision(r -> r.applicationName(app).revision(revision).description("updated metadata"));
+                GetApplicationRevisionResponse got = owner.getApplicationRevision(r -> r.applicationName(app).revision(revision));
+                assertThat(got.applicationName()).isEqualTo(app);
+                assertThat(got.revision()).isEqualTo(revision);
+                assertThat(got.revisionInfo().description()).isEqualTo("updated metadata");
+                assertThat(got.revisionInfo().registerTime()).isNotNull();
+                assertThat(got.revisionInfo().deploymentGroups()).isEmpty();
+                assertThat(got.revisionInfo().firstUsedTime()).isNull();
+                ListApplicationRevisionsResponse listed = owner.listApplicationRevisions(r -> r.applicationName(app)
+                        .s3Bucket("metadata-only-sdk-bucket").s3KeyPrefix("releases/").deployed("exclude"));
+                assertThat(listed.revisions()).containsExactly(revision);
+                BatchGetApplicationRevisionsResponse batch = owner.batchGetApplicationRevisions(r -> r
+                        .applicationName(app).revisions(revision));
+                assertThat(batch.applicationName()).isEqualTo(app);
+                assertThat(batch.revisions()).hasSize(1);
+                assertThat(batch.revisions().get(0).revisionLocation()).isEqualTo(revision);
+                assertThat(batch.revisions().get(0).genericRevisionInfo().description()).isEqualTo("updated metadata");
+                assertThat(batch.revisions().get(0).genericRevisionInfo().registerTime()).isEqualTo(got.revisionInfo().registerTime());
+                for (CodeDeployClient isolated : List.of(otherAccount, otherRegion)) {
+                    assertThat(isolated.listApplicationRevisions(r -> r.applicationName(app)).revisions()).isEmpty();
+                    assertThatThrownBy(() -> isolated.getApplicationRevision(r -> r.applicationName(app).revision(revision)))
+                            .isInstanceOf(RevisionDoesNotExistException.class);
+                    assertThat(isolated.batchGetApplicationRevisions(r -> r.applicationName(app).revisions(revision)).revisions()).isEmpty();
+                }
+            } finally {
+                for (CodeDeployClient client : List.of(owner, otherAccount, otherRegion)) {
+                    client.deleteApplication(r -> r.applicationName(app));
+                }
+            }
+        }
+    }
+
+    private CodeDeployClient scopedClient(Region region, String account) {
+        return CodeDeployClient.builder().endpointOverride(TestFixtures.endpoint()).region(region)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(account, "test"))).build();
+    }
+
     // ---- Phase 2: Lambda deployment via CodeDeploy ----
 
     @Test
@@ -299,6 +409,14 @@ class CodeDeployTest {
         PublishVersionResponse pv1 = lambda.publishVersion(r -> r.functionName(DEPLOY_FUNCTION));
         v1 = pv1.version();
         assertThat(v1).isNotBlank();
+
+        // A second version needs a real change behind it. AWS does not publish a version when the
+        // code and configuration have not moved since the last one, so two publishes in a row
+        // return the same version. A blue/green deployment shifts between two different builds
+        // anyway, so deploy one here rather than publishing the same bytes twice.
+        lambda.updateFunctionCode(r -> r
+                .functionName(DEPLOY_FUNCTION)
+                .zipFile(SdkBytes.fromByteArray(LambdaUtils.handlerZip())));
 
         PublishVersionResponse pv2 = lambda.publishVersion(r -> r.functionName(DEPLOY_FUNCTION));
         v2 = pv2.version();

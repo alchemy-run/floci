@@ -21,6 +21,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Running MicroVMs, each backed by a local Docker container built by
@@ -39,7 +41,7 @@ public class MicrovmRuntimeService {
 
     static final int DEFAULT_PORT = 8080;
     private static final int DEFAULT_MEMORY_MIB = 512;
-    private static final int DEFAULT_MAX_DURATION_SECONDS = 3600;
+    private static final int DEFAULT_MAX_DURATION_SECONDS = 28800;
 
     private final MicrovmStore microvmStore;
     private final MicrovmImageService imageService;
@@ -48,6 +50,8 @@ public class MicrovmRuntimeService {
     private final LaunchedContainerAwsEnv awsEnv;
     private final EmulatorConfig config;
     private final SecureRandom random = new SecureRandom();
+    /** Containers whose in-VM server has answered at least one proxied request. */
+    private final Set<String> servedContainers = ConcurrentHashMap.newKeySet();
 
     @Inject
     public MicrovmRuntimeService(MicrovmStore microvmStore, MicrovmImageService imageService,
@@ -64,7 +68,7 @@ public class MicrovmRuntimeService {
 
     // ──────────────────────────── lifecycle ────────────────────────────
 
-    public Map<String, Object> runMicrovm(String region, String accountId, Map<String, Object> request) {
+    public synchronized Map<String, Object> runMicrovm(String region, String accountId, Map<String, Object> request) {
         Object imageIdentifier = request.get("imageIdentifier");
         if (!(imageIdentifier instanceof String imageId) || imageId.isBlank()) {
             throw new AwsException("ValidationException", "imageIdentifier is required", 400);
@@ -129,13 +133,17 @@ public class MicrovmRuntimeService {
         } else {
             vm.setMaximumDurationInSeconds(DEFAULT_MAX_DURATION_SECONDS);
         }
-        vm.setIngressNetworkConnectors(stringList(request.get("ingressNetworkConnectors")));
-        vm.setEgressNetworkConnectors(stringList(request.get("egressNetworkConnectors")));
+        vm.setIngressNetworkConnectors(request.containsKey("ingressNetworkConnectors")
+                ? stringList(request.get("ingressNetworkConnectors"))
+                : List.of("arn:aws:lambda:" + region + ":aws:network-connector:aws-network-connector:HTTP_INGRESS"));
+        vm.setEgressNetworkConnectors(request.containsKey("egressNetworkConnectors")
+                ? stringList(request.get("egressNetworkConnectors"))
+                : List.of("arn:aws:lambda:" + region + ":aws:network-connector:aws-network-connector:INTERNET_EGRESS"));
 
         List<String> env = new ArrayList<>();
         env.add("PORT=" + port);
         // Baseline AWS env so in-VM SDK calls (capability bindings) reach Floci.
-        env.addAll(awsEnv.sdkBaselineEnv(region, Optional.empty()));
+        env.addAll(awsEnv.sdkBaselineEnv(region, Optional.empty(), Optional.empty(), accountId));
         Object versionEnv = version.getConfig().get("environmentVariables");
         if (versionEnv instanceof Map<?, ?> map) {
             map.forEach((k, v) -> {
@@ -194,7 +202,10 @@ public class MicrovmRuntimeService {
     }
 
     public void suspendMicrovm(String region, String microvmIdentifier) {
-        MicrovmRecord vm = requireMicrovm(region, microvmIdentifier);
+        suspendMicrovm(requireMicrovm(region, microvmIdentifier));
+    }
+
+    private void suspendMicrovm(MicrovmRecord vm) {
         if ("SUSPENDED".equals(vm.getState())) {
             return;
         }
@@ -206,7 +217,10 @@ public class MicrovmRuntimeService {
     }
 
     public void resumeMicrovm(String region, String microvmIdentifier) {
-        MicrovmRecord vm = requireMicrovm(region, microvmIdentifier);
+        resumeMicrovm(requireMicrovm(region, microvmIdentifier));
+    }
+
+    void resumeMicrovm(MicrovmRecord vm) {
         if ("RUNNING".equals(vm.getState())) {
             return;
         }
@@ -223,7 +237,10 @@ public class MicrovmRuntimeService {
     }
 
     public void terminateMicrovm(String region, String microvmIdentifier, String reason) {
-        MicrovmRecord vm = requireMicrovm(region, microvmIdentifier);
+        terminateMicrovm(requireMicrovm(region, microvmIdentifier), reason);
+    }
+
+    private void terminateMicrovm(MicrovmRecord vm, String reason) {
         if ("TERMINATED".equals(vm.getState())) {
             return;
         }
@@ -240,6 +257,7 @@ public class MicrovmRuntimeService {
                 }
             }
             lifecycleManager.stopAndRemove(vm.getContainerId(), null);
+            servedContainers.remove(vm.getContainerId());
         }
         vm.setContainerId(null);
         vm.setState("TERMINATED");
@@ -252,6 +270,17 @@ public class MicrovmRuntimeService {
 
     public Optional<MicrovmRecord> findById(String microvmId) {
         return microvmStore.findById(microvmId);
+    }
+
+    /** Whether the VM's current container has answered a proxied request since it started. */
+    public boolean hasServed(MicrovmRecord vm) {
+        return vm.getContainerId() != null && servedContainers.contains(vm.getContainerId());
+    }
+
+    public void markServed(MicrovmRecord vm) {
+        if (vm.getContainerId() != null) {
+            servedContainers.add(vm.getContainerId());
+        }
     }
 
     /** Records data-plane activity — the idle policy's input. */
@@ -280,11 +309,11 @@ public class MicrovmRuntimeService {
                 switch (action) {
                     case "suspend" -> {
                         LOG.infov("Idle policy: suspending MicroVM {0}", vm.getMicrovmId());
-                        suspendMicrovm(vm.getRegion(), vm.getMicrovmId());
+                        suspendMicrovm(vm);
                     }
-                    case "expire" -> terminateMicrovm(vm.getRegion(), vm.getMicrovmId(),
+                    case "expire" -> terminateMicrovm(vm,
                             "Suspended MicroVM exceeded idlePolicy.suspendedDurationSeconds");
-                    case "max-duration" -> terminateMicrovm(vm.getRegion(), vm.getMicrovmId(),
+                    case "max-duration" -> terminateMicrovm(vm,
                             "MicroVM exceeded maximumDurationInSeconds");
                     default -> { }
                 }
@@ -352,7 +381,8 @@ public class MicrovmRuntimeService {
     private static boolean matchesImage(String imageArn, String identifier) {
         return identifier.startsWith("arn:")
                 ? imageArn.equals(identifier)
-                : imageArn.endsWith(":microvm-image/" + identifier);
+                : imageArn.endsWith(":microvm-image/" + identifier)
+                    || imageArn.endsWith(":microvm-image:" + identifier);
     }
 
     private static int resolvePort(MicrovmImageVersionRecord version) {

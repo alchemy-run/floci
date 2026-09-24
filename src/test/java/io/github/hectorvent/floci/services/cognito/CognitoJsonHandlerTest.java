@@ -8,27 +8,34 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ReservedTags;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.acm.AcmService;
+import io.github.hectorvent.floci.services.cognito.model.ManagedLoginBranding;
+import io.github.hectorvent.floci.services.cognito.model.UserPool;
+import io.github.hectorvent.floci.services.cognito.model.UserPoolClient;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Spliterators;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 class CognitoJsonHandlerTest {
 
     private CognitoJsonHandler handler;
+    private CognitoService service;
     private ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         RegionResolver regionResolver = new RegionResolver("us-east-1", "000000000000");
-        CognitoService service = new CognitoService(
+        service = new CognitoService(
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -37,10 +44,36 @@ class CognitoJsonHandlerTest {
                 new InMemoryStorage<>(), // revokedTokenStore
                 "http://localhost:4566",
                 regionResolver,
-                null
+                null,
+                mock(AcmService.class)
         );
         handler = new CognitoJsonHandler(service,
                 new CognitoManagedLoginBrandingService(new InMemoryStorage<>(), service), mapper);
+    }
+
+    @Test
+    void legacyBrandingMigratesToTheClientWithoutLosingTheStyle() {
+        UserPool pool = service.createUserPool(Map.of("PoolName", "legacy-branding"), "us-east-1");
+        UserPoolClient client = service.createUserPoolClient(pool.getId(), "client", false, false, List.of(), List.of());
+        ManagedLoginBranding legacy = new ManagedLoginBranding();
+        legacy.setUserPoolId(pool.getId());
+        legacy.setClientId(client.getClientId());
+        legacy.setManagedLoginBrandingId("12345678-1234-4234-8234-123456789012");
+        legacy.setUseCognitoProvidedValues(true);
+        InMemoryStorage<String, ManagedLoginBranding> legacyStore = new InMemoryStorage<>();
+        String key = pool.getId() + "::" + legacy.getManagedLoginBrandingId();
+        legacyStore.put(key, legacy);
+        CognitoManagedLoginBrandingService branding = new CognitoManagedLoginBrandingService(legacyStore, service);
+
+        assertEquals(legacy.getManagedLoginBrandingId(),
+                branding.describeByClient(pool.getId(), client.getClientId()).getManagedLoginBrandingId());
+        assertTrue(legacyStore.get(key).isEmpty());
+        assertTrue(service.describeManagedLoginBranding(pool.getId(), legacy.getManagedLoginBrandingId())
+                .isUseCognitoProvidedValues());
+        assertTrue(branding.mergedSettings(legacy).containsKey("components"));
+        service.deleteUserPoolClient(pool.getId(), client.getClientId());
+        assertThrows(AwsException.class,
+                () -> branding.describe(pool.getId(), legacy.getManagedLoginBrandingId()));
     }
 
     @Test
@@ -184,6 +217,33 @@ class CognitoJsonHandlerTest {
         assertNotNull(pool.get("AdminCreateUserConfig"));
         assertNotNull(pool.get("AccountRecoverySetting"));
         assertEquals("ESSENTIALS", pool.get("UserPoolTier").asText());
+    }
+
+    @Test
+    void createAndDescribeUserPoolAgreeOnUnconfiguredOptionalBlocks() {
+        // #2200: CreateUserPool and a later DescribeUserPool disagreed on DeviceConfiguration,
+        // EmailConfiguration, and UserPoolAddOns when the request never configured them - an
+        // empty object one moment, filled in or absent the next - so a Terraform apply looked
+        // clean and the very next plan reported perpetual drift.
+        ObjectNode request = mapper.createObjectNode();
+        request.put("PoolName", "minimal-pool");
+
+        JsonNode created = (JsonNode) handler.handle("CreateUserPool", request, "us-east-1").getEntity();
+        JsonNode createdPool = created.get("UserPool");
+
+        ObjectNode describeReq = mapper.createObjectNode();
+        describeReq.put("UserPoolId", createdPool.get("Id").asText());
+        JsonNode described = (JsonNode) handler.handle("DescribeUserPool", describeReq, "us-east-1").getEntity();
+        JsonNode describedPool = described.get("UserPool");
+
+        for (JsonNode pool : java.util.List.of(createdPool, describedPool)) {
+            // AWS's JSON protocol serializes only members with a value provided - an
+            // unconfigured pool omits these keys entirely, it doesn't write a JSON null
+            // (confirmed against moto's DescribeUserPool, which never emits either key unset).
+            assertFalse(pool.has("DeviceConfiguration"));
+            assertFalse(pool.has("UserPoolAddOns"));
+            assertEquals("COGNITO_DEFAULT", pool.get("EmailConfiguration").get("EmailSendingAccount").asText());
+        }
     }
 
     @Test
@@ -574,7 +634,7 @@ class CognitoJsonHandlerTest {
         createDomain.put("UserPoolId", poolId);
         createDomain.put("Domain", "handler-auth");
         JsonNode domainCreated = (JsonNode) handler.handle("CreateUserPoolDomain", createDomain, "us-east-1").getEntity();
-        assertTrue(domainCreated.get("CloudFrontDomain").asText().endsWith(".cloudfront.net"));
+        assertFalse(domainCreated.has("CloudFrontDomain"));
 
         ObjectNode describeDomain = mapper.createObjectNode();
         describeDomain.put("Domain", "handler-auth");
@@ -604,4 +664,46 @@ class CognitoJsonHandlerTest {
                 .collect(Collectors.toSet());
     }
 
+    private String createPoolWithPrefixDomain(String domain) {
+        ObjectNode poolReq = mapper.createObjectNode().put("PoolName", "domain-pool");
+        String poolId = ((JsonNode) handler.handle("CreateUserPool", poolReq, "us-east-1").getEntity())
+                .get("UserPool").get("Id").asText();
+        ObjectNode domainReq = mapper.createObjectNode()
+                .put("Domain", domain)
+                .put("UserPoolId", poolId)
+                .put("ManagedLoginVersion", 1);
+        handler.handle("CreateUserPoolDomain", domainReq, "us-east-1");
+        return poolId;
+    }
+
+    @Test
+    void updateUserPoolDomainTreatsANullManagedLoginVersionAsAbsent() {
+        String poolId = createPoolWithPrefixDomain("null-version");
+        ObjectNode updateReq = mapper.createObjectNode().put("Domain", "null-version").put("UserPoolId", poolId);
+        updateReq.putNull("ManagedLoginVersion");
+
+        JsonNode updated = (JsonNode) handler.handle("UpdateUserPoolDomain", updateReq, "us-east-1").getEntity();
+
+        assertEquals(1, updated.get("ManagedLoginVersion").asInt());
+        JsonNode described = (JsonNode) handler.handle("DescribeUserPoolDomain",
+                mapper.createObjectNode().put("Domain", "null-version"), "us-east-1").getEntity();
+        assertEquals(1, described.get("DomainDescription").get("ManagedLoginVersion").asInt());
+    }
+
+    @Test
+    void userPoolDomainRejectsAManagedLoginVersionThatIsNotAnInteger() {
+        String poolId = createPoolWithPrefixDomain("typed-version");
+        ObjectNode updateReq = mapper.createObjectNode()
+                .put("Domain", "typed-version")
+                .put("UserPoolId", poolId)
+                .put("ManagedLoginVersion", "two");
+
+        AwsException failure = assertThrows(AwsException.class,
+                () -> handler.handle("UpdateUserPoolDomain", updateReq, "us-east-1"));
+
+        assertEquals("SerializationException", failure.getErrorCode());
+        JsonNode described = (JsonNode) handler.handle("DescribeUserPoolDomain",
+                mapper.createObjectNode().put("Domain", "typed-version"), "us-east-1").getEntity();
+        assertEquals(1, described.get("DomainDescription").get("ManagedLoginVersion").asInt());
+    }
 }

@@ -11,7 +11,9 @@ import static org.hamcrest.Matchers.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class EventBridgeConnectionIntegrationTest {
 
-    private static final String CT = "application/x-amz-json-1.1";
+    private static final String EB_CT = "application/x-amz-json-1.1";
+
+    private static String connectionArn;
 
     @BeforeAll
     static void configureRestAssured() {
@@ -20,9 +22,257 @@ class EventBridgeConnectionIntegrationTest {
 
     @Test
     @Order(1)
+    void createConnection() {
+        connectionArn = given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.CreateConnection")
+                .body("""
+                        {
+                          "Name": "test-http-ingress-connection",
+                          "Description": "Connection integration test",
+                          "AuthorizationType": "API_KEY",
+                          "AuthParameters": {
+                            "ApiKeyAuthParameters": {
+                              "ApiKeyName": "x-api-key",
+                              "ApiKeyValue": "super-secret-value"
+                            },
+                            "InvocationHttpParameters": {
+                              "HeaderParameters": [
+                                {"Key": "x-tenant", "Value": "acme", "IsValueSecret": false},
+                                {"Key": "x-token", "Value": "hidden-token", "IsValueSecret": true}
+                              ]
+                            }
+                          }
+                        }
+                        """)
+                .when().post("/")
+                .then().statusCode(200)
+                .body("ConnectionArn", startsWith("arn:aws:events:us-east-1:000000000000:connection/test-http-ingress-connection/"))
+                .body("ConnectionState", equalTo("AUTHORIZED"))
+                .body("CreationTime", notNullValue())
+                .body("LastModifiedTime", notNullValue())
+                .extract().jsonPath().getString("ConnectionArn");
+    }
+
+    @Test
+    @Order(2)
+    void createDuplicateConnectionFails() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.CreateConnection")
+                .body("""
+                        {
+                          "Name": "test-http-ingress-connection",
+                          "AuthorizationType": "API_KEY",
+                          "AuthParameters": {
+                            "ApiKeyAuthParameters": {"ApiKeyName": "k", "ApiKeyValue": "v"}
+                          }
+                        }
+                        """)
+                .when().post("/")
+                .then().statusCode(400)
+                .body("__type", equalTo("ResourceAlreadyExistsException"));
+    }
+
+    @Test
+    @Order(3)
+    void describeConnection() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DescribeConnection")
+                .body("{\"Name\":\"test-http-ingress-connection\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("Name", equalTo("test-http-ingress-connection"))
+                .body("ConnectionArn", equalTo(connectionArn))
+                .body("ConnectionState", equalTo("AUTHORIZED"))
+                .body("AuthorizationType", equalTo("API_KEY"))
+                .body("Description", equalTo("Connection integration test"))
+                .body("SecretArn", startsWith("arn:aws:secretsmanager:us-east-1:000000000000:secret:events!connection/"))
+                .body("CreationTime", notNullValue())
+                .body("LastAuthorizedTime", notNullValue());
+    }
+
+    @Test
+    @Order(4)
+    void describeConnectionStripsSecrets() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DescribeConnection")
+                .body("{\"Name\":\"test-http-ingress-connection\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("AuthParameters.ApiKeyAuthParameters.ApiKeyName", equalTo("x-api-key"))
+                .body("AuthParameters.ApiKeyAuthParameters.ApiKeyValue", nullValue())
+                .body("AuthParameters.InvocationHttpParameters.HeaderParameters[0].Value", equalTo("acme"))
+                .body("AuthParameters.InvocationHttpParameters.HeaderParameters[1].Value", equalTo("*"));
+    }
+
+    @Test
+    @Order(5)
+    void updateChangingAuthTypeWithoutAuthParametersFails() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.UpdateConnection")
+                .body("""
+                        {
+                          "Name": "test-http-ingress-connection",
+                          "AuthorizationType": "BASIC"
+                        }
+                        """)
+                .when().post("/")
+                .then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    @Order(6)
+    void updateConnection() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.UpdateConnection")
+                .body("""
+                        {
+                          "Name": "test-http-ingress-connection",
+                          "Description": "Updated description",
+                          "AuthorizationType": "BASIC",
+                          "AuthParameters": {
+                            "BasicAuthParameters": {"Username": "user", "Password": "pass"}
+                          }
+                        }
+                        """)
+                .when().post("/")
+                .then().statusCode(200)
+                .body("ConnectionArn", equalTo(connectionArn))
+                .body("ConnectionState", equalTo("AUTHORIZED"));
+
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DescribeConnection")
+                .body("{\"Name\":\"test-http-ingress-connection\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("Description", equalTo("Updated description"))
+                .body("AuthorizationType", equalTo("BASIC"))
+                .body("AuthParameters.BasicAuthParameters.Username", equalTo("user"))
+                .body("AuthParameters.BasicAuthParameters.Password", nullValue());
+    }
+
+    @Test
+    @Order(7)
+    void listConnections() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.ListConnections")
+                .body("{\"NamePrefix\":\"test-http-ingress\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("Connections", hasSize(1))
+                .body("Connections[0].Name", equalTo("test-http-ingress-connection"))
+                .body("Connections[0].ConnectionArn", equalTo(connectionArn))
+                .body("Connections[0].ConnectionState", equalTo("AUTHORIZED"))
+                .body("Connections[0].AuthParameters", nullValue());
+    }
+
+    @Test
+    @Order(8)
+    void describeMissingConnectionFails() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DescribeConnection")
+                .body("{\"Name\":\"no-such-connection\"}")
+                .when().post("/")
+                .then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(9)
+    void invalidAuthorizationTypeFails() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.CreateConnection")
+                .body("""
+                        {
+                          "Name": "bad-auth-connection",
+                          "AuthorizationType": "MAGIC",
+                          "AuthParameters": {
+                            "ApiKeyAuthParameters": {"ApiKeyName": "k", "ApiKeyValue": "v"}
+                          }
+                        }
+                        """)
+                .when().post("/")
+                .then().statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    @Order(10)
+    void deleteConnection() {
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DeleteConnection")
+                .body("{\"Name\":\"test-http-ingress-connection\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("ConnectionArn", equalTo(connectionArn))
+                .body("ConnectionState", equalTo("DELETING"));
+
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DescribeConnection")
+                .body("{\"Name\":\"test-http-ingress-connection\"}")
+                .when().post("/")
+                .then().statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    @Order(11)
+    void describeConnectionTreatsOmittedIsValueSecretAsSecret() {
+        // IsValueSecret is optional; AWS treats an omitted flag as secret. A header
+        // parameter that doesn't set it must still come back masked, not in cleartext.
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.CreateConnection")
+                .body("""
+                        {
+                          "Name": "test-omitted-secret-flag-connection",
+                          "AuthorizationType": "API_KEY",
+                          "AuthParameters": {
+                            "ApiKeyAuthParameters": {"ApiKeyName": "k", "ApiKeyValue": "v"},
+                            "InvocationHttpParameters": {
+                              "HeaderParameters": [
+                                {"Key": "X-Internal-Token", "Value": "hunter2"}
+                              ]
+                            }
+                          }
+                        }
+                        """)
+                .when().post("/")
+                .then().statusCode(200);
+
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DescribeConnection")
+                .body("{\"Name\":\"test-omitted-secret-flag-connection\"}")
+                .when().post("/")
+                .then().statusCode(200)
+                .body("AuthParameters.InvocationHttpParameters.HeaderParameters[0].Value", equalTo("*"));
+
+        given()
+                .contentType(EB_CT)
+                .header("X-Amz-Target", "AWSEvents.DeleteConnection")
+                .body("{\"Name\":\"test-omitted-secret-flag-connection\"}")
+                .when().post("/")
+                .then().statusCode(200);
+    }
+
+    @Test
+    @Order(21)
     void createConnectionReturnsAuthorizedArnAndHidesSecretOnDescribe() {
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.CreateConnection")
             .body("""
                 {
@@ -45,7 +295,7 @@ class EventBridgeConnectionIntegrationTest {
             .body("ConnectionState", equalTo("AUTHORIZED"));
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeConnection")
             .body("{\"Name\":\"eb-conn-test\"}")
         .when()
@@ -62,10 +312,10 @@ class EventBridgeConnectionIntegrationTest {
     }
 
     @Test
-    @Order(2)
+    @Order(22)
     void updateConnectionSyncsDescription() {
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.UpdateConnection")
             .body("""
                 {
@@ -80,7 +330,7 @@ class EventBridgeConnectionIntegrationTest {
             .body("ConnectionArn", notNullValue());
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeConnection")
             .body("{\"Name\":\"eb-conn-test\"}")
         .when()
@@ -91,10 +341,10 @@ class EventBridgeConnectionIntegrationTest {
     }
 
     @Test
-    @Order(3)
+    @Order(23)
     void createAndUpdateApiDestination() {
         String connectionArn = given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeConnection")
             .body("{\"Name\":\"eb-conn-test\"}")
         .when()
@@ -104,7 +354,7 @@ class EventBridgeConnectionIntegrationTest {
             .extract().jsonPath().getString("ConnectionArn");
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.CreateApiDestination")
             .body("""
                 {
@@ -123,7 +373,7 @@ class EventBridgeConnectionIntegrationTest {
             .body("ApiDestinationState", equalTo("ACTIVE"));
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeApiDestination")
             .body("{\"Name\":\"eb-dest-test\"}")
         .when()
@@ -134,7 +384,7 @@ class EventBridgeConnectionIntegrationTest {
             .body("InvocationRateLimitPerSecond", equalTo(5));
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.UpdateApiDestination")
             .body("""
                 {
@@ -148,7 +398,7 @@ class EventBridgeConnectionIntegrationTest {
             .statusCode(200);
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeApiDestination")
             .body("{\"Name\":\"eb-dest-test\"}")
         .when()
@@ -159,10 +409,10 @@ class EventBridgeConnectionIntegrationTest {
     }
 
     @Test
-    @Order(4)
+    @Order(24)
     void deleteConnectionWhileDestinationExistsIsConflict() {
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DeleteConnection")
             .body("{\"Name\":\"eb-conn-test\"}")
         .when()
@@ -173,10 +423,10 @@ class EventBridgeConnectionIntegrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(25)
     void deleteDestinationThenConnection() {
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DeleteApiDestination")
             .body("{\"Name\":\"eb-dest-test\"}")
         .when()
@@ -185,7 +435,7 @@ class EventBridgeConnectionIntegrationTest {
             .statusCode(200);
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeApiDestination")
             .body("{\"Name\":\"eb-dest-test\"}")
         .when()
@@ -195,7 +445,7 @@ class EventBridgeConnectionIntegrationTest {
             .body("__type", equalTo("ResourceNotFoundException"));
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DeleteConnection")
             .body("{\"Name\":\"eb-conn-test\"}")
         .when()
@@ -204,26 +454,26 @@ class EventBridgeConnectionIntegrationTest {
             .statusCode(200);
 
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeConnection")
             .body("{\"Name\":\"eb-conn-test\"}")
         .when()
             .post("/")
         .then()
-            .statusCode(404)
+            .statusCode(400)
             .body("__type", equalTo("ResourceNotFoundException"));
     }
 
     @Test
     void describeMissingConnectionIsNotFound() {
         given()
-            .contentType(CT)
+            .contentType(EB_CT)
             .header("X-Amz-Target", "AWSEvents.DescribeConnection")
             .body("{\"Name\":\"does-not-exist\"}")
         .when()
             .post("/")
         .then()
-            .statusCode(404)
+            .statusCode(400)
             .body("__type", equalTo("ResourceNotFoundException"));
     }
 }

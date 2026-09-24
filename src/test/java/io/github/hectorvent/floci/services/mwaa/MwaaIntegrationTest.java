@@ -147,6 +147,39 @@ class MwaaIntegrationTest {
     }
 
     @Test
+    @Order(8)
+    void invokeRestApiOnMissingEnvironmentIsResourceNotFound() {
+        given().contentType(JSON)
+                .body("{\"Path\":\"/dags\",\"Method\":\"GET\"}")
+                .when().post("/restapi/mwaa-it-missing-env")
+                .then().statusCode(404)
+                .header("X-Amzn-Errortype", "ResourceNotFoundException");
+    }
+
+    @Test
+    @Order(8)
+    void invokeRestApiValidatesMethod() {
+        given().contentType(JSON)
+                .body("{\"Path\":\"/dags\",\"Method\":\"HEAD\"}")
+                .when().post("/restapi/" + ENV)
+                .then().statusCode(400)
+                .header("X-Amzn-Errortype", "ValidationException");
+    }
+
+    @Test
+    @Order(8)
+    void invokeRestApiInMockModeReportsTheWebserverUnavailable() {
+        // mock=true runs no Airflow container, so there is no REST API to relay to.
+        given().contentType(JSON)
+                .body("{\"Path\":\"/dags\",\"Method\":\"GET\"}")
+                .when().post("/restapi/" + ENV)
+                .then().statusCode(400)
+                .header("X-Amzn-Errortype", "RestApiServerException")
+                .body("RestApiStatusCode", equalTo(503))
+                .body("RestApiResponse.status", equalTo(503));
+    }
+
+    @Test
     @Order(9)
     void deleteEnvironment() {
         given().contentType(JSON)

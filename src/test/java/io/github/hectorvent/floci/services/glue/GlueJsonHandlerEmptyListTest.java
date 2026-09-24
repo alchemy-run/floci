@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
+import io.github.hectorvent.floci.services.kms.KmsService;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingService;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,9 +22,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Verifies the wire-accurate empty-list responses for the read-only Glue actions on resources
- * the emulator does not model (GetJobs, GetCrawlers, ListDataQualityRulesets, GetSecurityConfigurations).
- * Each must return HTTP 200, an empty list under its result key, and omit NextToken.
+ * Verifies the wire-accurate empty-list responses for an unmodeled Glue action and an
+ * empty newly modeled resource collection. Each must return HTTP 200, an empty list
+ * under its result key, and omit NextToken.
  */
 class GlueJsonHandlerEmptyListTest {
 
@@ -40,18 +42,9 @@ class GlueJsonHandlerEmptyListTest {
         GlueSchemaRegistryService schemaRegistryService =
                 new GlueSchemaRegistryService(storageFactory, regionResolver);
         GlueService glueService = new GlueService(
-                storageFactory, schemaRegistryService, regionResolver, new ResourceGroupsTaggingService(storageFactory));
+            storageFactory, schemaRegistryService, regionResolver,
+            new ResourceGroupsTaggingService(storageFactory), new KmsService(storageFactory, regionResolver));
         handler = new GlueJsonHandler(glueService, schemaRegistryService, mapper);
-    }
-
-    @Test
-    void getJobsReturnsEmptyJobsList() throws Exception {
-        assertEmptyList("GetJobs", "Jobs");
-    }
-
-    @Test
-    void getCrawlersReturnsEmptyCrawlersList() throws Exception {
-        assertEmptyList("GetCrawlers", "Crawlers");
     }
 
     @Test
@@ -83,10 +76,10 @@ class GlueJsonHandlerEmptyListTest {
         }
 
         @Override
-        public <V> StorageBackend<String, V> create(String serviceName,
+        public <V> AccountAwareStorageBackend<V> create(String serviceName,
                                                      String fileName,
                                                      TypeReference<Map<String, V>> typeReference) {
-            return new InMemoryStorage<>();
+            return AccountAwareStorageBackend.inMemory("000000000000");
         }
     }
 }

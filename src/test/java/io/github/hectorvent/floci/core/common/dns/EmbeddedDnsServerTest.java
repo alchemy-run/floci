@@ -1,6 +1,13 @@
 package io.github.hectorvent.floci.core.common.dns;
 
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.vertx.core.Vertx;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
 
 import java.net.DatagramPacket;
@@ -8,8 +15,13 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class EmbeddedDnsServerTest {
 
@@ -18,6 +30,203 @@ class EmbeddedDnsServerTest {
     @BeforeEach
     void setUp() {
         dns = new EmbeddedDnsServer(List.of("localhost.floci.io"));
+    }
+
+    @Test
+    void sourceModeIsOptInAndDoesNotOpenAHostListenerByDefault() {
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        Vertx vertx = mock(Vertx.class);
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        EmbeddedDnsServer server = new EmbeddedDnsServer(config, mock(ContainerDetector.class), vertx, helper);
+        assertTrue(server.getServerIp().isEmpty());
+        verifyNoInteractions(vertx, helper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 53, 1023, 65536})
+    void sourceModeRejectsPrivilegedAndInvalidHostDnsPorts(int port) {
+        EmulatorConfig config = sourceConfig();
+        when(config.dns().sourcePort()).thenReturn(port);
+        Vertx vertx = mock(Vertx.class);
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        assertThrows(IllegalArgumentException.class,
+                () -> new EmbeddedDnsServer(config, mock(ContainerDetector.class), vertx, helper));
+        verifyNoInteractions(vertx, helper);
+    }
+
+    @Test
+    void sourceModeRequiresMainGatewayTlsAndNoHost443Listener() {
+        EmulatorConfig config = sourceConfig();
+        when(config.tls().awsHttpsPort()).thenReturn(443);
+        Vertx vertx = mock(Vertx.class);
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        assertThrows(IllegalStateException.class,
+                () -> new EmbeddedDnsServer(config, mock(ContainerDetector.class), vertx, helper));
+        when(config.tls().awsHttpsPort()).thenReturn(0);
+        when(config.tls().enabled()).thenReturn(false);
+        assertThrows(IllegalStateException.class,
+                () -> new EmbeddedDnsServer(config, mock(ContainerDetector.class), vertx, helper));
+        verifyNoInteractions(vertx, helper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"127.0.0.1", "0.0.0.0", "::1", "host.docker.internal", "10.0.0.256", "224.0.0.1"})
+    void sourceModeRejectsNonReachableIpv4Advertisements(String address) {
+        assertThrows(IllegalArgumentException.class, () -> EmbeddedDnsServer.requireBridgeAddress(address));
+    }
+
+    @Test
+    @Timeout(20)
+    void sourceModeResolvesAwsAndSharedGatewayHostsToTheHelperWithoutIpv6Escape() throws Exception {
+        Vertx vertx = Vertx.vertx();
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        when(helper.start(anyInt())).thenReturn("172.18.0.9");
+        EmbeddedDnsServer server = null;
+        try {
+            server = new EmbeddedDnsServer(sourceConfig(), mock(ContainerDetector.class), vertx, helper);
+            var portCaptor = org.mockito.ArgumentCaptor.forClass(Integer.class);
+            verify(helper).start(portCaptor.capture());
+            int port = portCaptor.getValue();
+            assertTrue(port >= 1024);
+            assertEquals(Optional.of("172.18.0.9"), server.getServerIp());
+            assertTrue(server.isSourceMode());
+            for (String host : List.of("sync-states.us-east-1.amazonaws.com", "localhost.floci.io",
+                    "bucket.localhost.floci.io")) {
+                byte[] query = buildQuery(host, (short) 0x1234);
+                byte[] response = query(port, query);
+                assertEquals(1, ByteBuffer.wrap(response).getShort(6));
+                assertArrayEquals(new byte[]{(byte) 172, 18, 0, 9},
+                        java.util.Arrays.copyOfRange(response, response.length - 4, response.length));
+                ByteBuffer.wrap(query).putShort(query.length - 4, (short) 28);
+                response = query(port, query);
+                assertEquals(0, ByteBuffer.wrap(response).getShort(6));
+                assertEquals(0, response[3] & 0x0f);
+            }
+        } finally {
+            if (server != null) {
+                server.stop();
+                assertTrue(server.getServerIp().isEmpty());
+                verify(helper).stop();
+            }
+            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    @Timeout(20)
+    void sourceModeBindFailureIsFatalAndLeavesTheExistingListenerAlone() throws Exception {
+        Vertx vertx = Vertx.vertx();
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        try (DatagramSocket occupied = new DatagramSocket(0, InetAddress.getByName("127.0.0.1"))) {
+            EmulatorConfig config = sourceConfig();
+            when(config.dns().sourcePort()).thenReturn(occupied.getLocalPort());
+            assertThrows(IllegalStateException.class,
+                    () -> new EmbeddedDnsServer(config, mock(ContainerDetector.class), vertx, helper));
+            assertFalse(occupied.isClosed());
+            verifyNoInteractions(helper);
+        } finally {
+            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    @Timeout(20)
+    void sourceModeHelperFailureStopsTheOwnedHelper() throws Exception {
+        Vertx vertx = Vertx.vertx();
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        when(helper.start(anyInt())).thenThrow(new IllegalStateException("bridge failed"));
+        try {
+            assertThrows(IllegalStateException.class,
+                    () -> new EmbeddedDnsServer(sourceConfig(), mock(ContainerDetector.class), vertx, helper));
+            verify(helper).stop();
+        } finally {
+            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @Timeout(20)
+    void sourceModeAnswersBeforeValidationButAdvertisesOnlyAfterSuccess(boolean failProbe) throws Exception {
+        Vertx vertx = Vertx.vertx();
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        AtomicInteger port = new AtomicInteger();
+        AtomicReference<EmbeddedDnsServer> observed = new AtomicReference<>();
+        when(helper.start(anyInt())).thenAnswer(invocation -> {
+            port.set(invocation.getArgument(0));
+            return "172.18.0.9";
+        });
+        doAnswer(invocation -> {
+            byte[] request = SourceNetworkHelper.readinessQuery((short) 0x1234);
+            byte[] response = query(port.get(), request);
+            SourceNetworkHelper.validateDnsResponse(request, response, "172.18.0.9");
+            assertTrue(observed.get().getServerIp().isEmpty());
+            if (failProbe) {
+                throw new IllegalStateException("DNS roundtrip failed");
+            }
+            return null;
+        }).when(helper).awaitDns("172.18.0.9");
+        try {
+            Executable construct = () -> new EmbeddedDnsServer(
+                    sourceConfig(), mock(ContainerDetector.class), vertx, helper) {
+                @Override
+                Optional<String> resolveARecord(String name, String myIp) {
+                    observed.set(this);
+                    return super.resolveARecord(name, myIp);
+                }
+            };
+            if (failProbe) {
+                IllegalStateException failure = assertThrows(IllegalStateException.class, construct);
+                assertEquals("DNS roundtrip failed", failure.getCause().getMessage());
+                assertTrue(observed.get().getServerIp().isEmpty());
+                verify(helper).stop();
+            } else {
+                assertDoesNotThrow(construct);
+                assertEquals(Optional.of("172.18.0.9"), observed.get().getServerIp());
+            }
+            verify(helper).awaitDns("172.18.0.9");
+        } finally {
+            if (observed.get() != null) {
+                observed.get().stop();
+            }
+            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void dockerModeKeepsItsEmbeddedDnsAndDoesNotStartASourceHelper() {
+        EmulatorConfig config = sourceConfig();
+        ContainerDetector detector = mock(ContainerDetector.class);
+        when(detector.isRunningInContainer()).thenReturn(true);
+        Vertx vertx = mock(Vertx.class);
+        io.vertx.core.datagram.DatagramSocket socket = mock(io.vertx.core.datagram.DatagramSocket.class);
+        when(vertx.createDatagramSocket(any())).thenReturn(socket);
+        when(socket.listen(53, "0.0.0.0")).thenReturn(io.vertx.core.Future.succeededFuture(socket));
+        SourceNetworkHelper helper = mock(SourceNetworkHelper.class);
+        EmbeddedDnsServer server = new EmbeddedDnsServer(config, detector, vertx, helper);
+        assertFalse(server.isSourceMode());
+        assertTrue(server.getServerIp().isPresent());
+        verifyNoInteractions(helper);
+        server.stop();
+    }
+
+    private EmulatorConfig sourceConfig() {
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.dns().sourceEnabled()).thenReturn(true);
+        when(config.port()).thenReturn(4566);
+        when(config.tls().enabled()).thenReturn(true);
+        when(config.tls().awsHttpsPort()).thenReturn(0);
+        return config;
+    }
+
+    private byte[] query(int port, byte[] request) throws Exception {
+        try (DatagramSocket client = new DatagramSocket()) {
+            client.setSoTimeout(2000);
+            client.send(new DatagramPacket(request, request.length, InetAddress.getByName("127.0.0.1"), port));
+            DatagramPacket reply = new DatagramPacket(new byte[4096], 4096);
+            client.receive(reply);
+            return java.util.Arrays.copyOf(reply.getData(), reply.getLength());
+        }
     }
 
     // ── matchesSuffix — configured suffix ────────────────────────────────────
@@ -136,6 +345,23 @@ class EmbeddedDnsServerTest {
                         .orElseThrow());
         assertTrue(dns.resolveARecord("execute-api.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
         assertTrue(dns.resolveARecord("abc123xyz.execute-api.amazonaws.com", "172.19.0.2").isEmpty());
+    }
+
+    @Test
+    void resolveARecord_iotAccountEndpointsMapToFloci() {
+        for (String host : List.of(
+                "a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com",
+                "a1b2c3d4e5f6g7.iot.eu-west-1.amazonaws.com",
+                "a1b2c3d4e5f6g7.credentials.iot.us-east-1.amazonaws.com",
+                "a1b2c3d4e5f6g7.jobs.iot.us-east-1.amazonaws.com",
+                "data-ats.iot.us-west-2.amazonaws.com",
+                "a1b2c3d4e5f6g7-ats.iot.cn-north-1.amazonaws.com.cn")) {
+            assertEquals("172.19.0.2", dns.resolveARecord(host, "172.19.0.2").orElseThrow(), host);
+        }
+        // The control plane is reached through AWS_ENDPOINT_URL and is not an account endpoint.
+        assertTrue(dns.resolveARecord("iot.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("a1b2c3d4e5f6g7.iot.amazonaws.com", "172.19.0.2").isEmpty());
+        assertTrue(dns.resolveARecord("a1b2c3d4e5f6g7.other.iot.us-east-1.amazonaws.com", "172.19.0.2").isEmpty());
     }
 
     @Test

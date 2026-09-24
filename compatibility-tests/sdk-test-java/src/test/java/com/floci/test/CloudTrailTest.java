@@ -87,7 +87,7 @@ class CloudTrailTest {
 
         GetTrailStatusResponse started = cloudTrail.getTrailStatus(r -> r.name(trailName));
         assertThat(started.isLogging()).isTrue();
-        assertThat(started.latestDeliveryTime()).isNotNull();
+        assertThat(started.latestDeliveryTime()).isNull();
 
         cloudTrail.stopLogging(r -> r.name(trailName));
 
@@ -108,5 +108,66 @@ class CloudTrailTest {
 
         assertThatThrownBy(() -> cloudTrail.getTrailStatus(r -> r.name(trailName)))
                 .isInstanceOf(TrailNotFoundException.class);
+    }
+
+    @Test
+    @Order(7)
+    void lookupEventsReadsActualSsmCallsWithoutATrail() {
+        String name = "/cloudtrail/" + TestFixtures.uniqueName("history");
+        java.time.Instant start = java.time.Instant.now().minusSeconds(1);
+        try (var ssm = TestFixtures.ssmClient()) {
+            try {
+                ssm.putParameter(r -> r.name(name).type("String").value("private-value"));
+                var events = cloudTrail.lookupEvents(r -> r.startTime(start).maxResults(50)
+                        .lookupAttributes(a -> a.attributeKey("EventName").attributeValue("PutParameter"))).events();
+                assertThat(events).anySatisfy(event -> {
+                    assertThat(event.eventSource()).isEqualTo("ssm.amazonaws.com");
+                    assertThat(event.eventTime()).isNotNull();
+                    assertThat(event.eventId()).isNotBlank();
+                    assertThat(event.cloudTrailEvent()).contains(name).doesNotContain("private-value");
+                });
+            } finally {
+                ssm.deleteParameter(r -> r.name(name));
+            }
+        }
+        assertThatThrownBy(() -> cloudTrail.lookupEvents(r -> r.maxResults(51)))
+                .isInstanceOf(software.amazon.awssdk.services.cloudtrail.model.InvalidMaxResultsException.class);
+    }
+
+    @Test
+    @Order(8)
+    void listPublicKeysDoesNotInventDigestSigningKeys() {
+        assertThat(cloudTrail.listPublicKeys(r -> {}).publicKeyList()).isEmpty();
+        assertThatThrownBy(() -> cloudTrail.listPublicKeys(r -> r
+                .startTime(java.time.Instant.ofEpochSecond(2)).endTime(java.time.Instant.ofEpochSecond(1))))
+                .isInstanceOf(software.amazon.awssdk.services.cloudtrail.model.InvalidTimeRangeException.class);
+    }
+
+    @Test
+    @Order(9)
+    void eventDataStoreControlPlaneHasTypedErrorsAndStableIdentity() {
+        String name = TestFixtures.uniqueName("lake-sdk");
+        String arn = cloudTrail.createEventDataStore(r -> r.name(name).retentionPeriod(7)
+                .multiRegionEnabled(false).startIngestion(false).terminationProtectionEnabled(false))
+                .eventDataStoreArn();
+        try {
+            var observed = cloudTrail.getEventDataStore(r -> r.eventDataStore(arn));
+            assertThat(observed.name()).isEqualTo(name);
+            assertThat(observed.statusAsString()).isEqualTo("STOPPED_INGESTION");
+            assertThat(cloudTrail.listEventDataStoresPaginator(r -> {}).stream()
+                    .flatMap(page -> page.eventDataStores().stream()).toList())
+                    .anySatisfy(store -> assertThat(store.eventDataStoreArn()).isEqualTo(arn));
+            var updated = cloudTrail.updateEventDataStore(r -> r.eventDataStore(arn).retentionPeriod(14));
+            assertThat(updated.eventDataStoreArn()).isEqualTo(arn);
+            assertThat(updated.retentionPeriod()).isEqualTo(14);
+            assertThatThrownBy(() -> cloudTrail.createEventDataStore(r -> r.name(name)))
+                    .isInstanceOf(software.amazon.awssdk.services.cloudtrail.model.EventDataStoreAlreadyExistsException.class);
+        } finally {
+            cloudTrail.deleteEventDataStore(r -> r.eventDataStore(arn));
+        }
+        assertThat(cloudTrail.getEventDataStore(r -> r.eventDataStore(arn)).statusAsString()).isEqualTo("PENDING_DELETION");
+        assertThatThrownBy(() -> cloudTrail.getEventDataStore(r -> r
+                .eventDataStore("00000000-0000-0000-0000-000000000000")))
+                .isInstanceOf(software.amazon.awssdk.services.cloudtrail.model.EventDataStoreNotFoundException.class);
     }
 }

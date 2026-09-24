@@ -1,14 +1,18 @@
 package io.github.hectorvent.floci.services.lambda;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.json.config.JsonPathConfig;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.math.BigDecimal;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -29,6 +33,8 @@ class EsmIntegrationTest {
             "arn:aws:sqs:" + REGION + ":" + ACCOUNT_ID + ":" + QUEUE_NAME;
     private static final String FUNCTION_ARN =
             "arn:aws:lambda:" + REGION + ":" + ACCOUNT_ID + ":function:" + FUNCTION_NAME;
+    private static final String STREAM_ARN =
+            "arn:aws:kinesis:" + REGION + ":" + ACCOUNT_ID + ":stream/esm-test-stream";
     private static final String NON_DEFAULT_ACCOUNT = "000000000001";
     private static final String MULTI_ACCOUNT_QUEUE_NAME = "esm-multi-account-queue";
     private static final String MULTI_ACCOUNT_FUNCTION_NAME = "esm-multi-account-fn";
@@ -135,6 +141,62 @@ class EsmIntegrationTest {
     }
 
     @Test
+    void maximumBatchingWindowRoundTripsThroughCreateGetAndUpdate() {
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "BatchSize": 2,
+                    "MaximumBatchingWindowInSeconds": 5
+                }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("MaximumBatchingWindowInSeconds", equalTo(5))
+        .extract()
+            .path("UUID");
+
+        given()
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(200)
+            .body("MaximumBatchingWindowInSeconds", equalTo(5));
+
+        given()
+            .contentType("application/json")
+            .body("{\"MaximumBatchingWindowInSeconds\": 0}")
+        .when()
+            .put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(202)
+            .body("MaximumBatchingWindowInSeconds", equalTo(0));
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    void createEventSourceMappingRejectsMaximumBatchingWindowAbove300() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "MaximumBatchingWindowInSeconds": 301
+                }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(400);
+    }
+
+    @Test
     void updateEventSourceMappingReturnsFailureConfig() {
         String streamArn = "arn:aws:dynamodb:us-east-1:000000000000:table/esm-table/stream/2026-01-01T00:00:00.000";
         String destinationArn = "arn:aws:sqs:us-east-1:000000000000:esm-updated-failure-config-dlq";
@@ -161,6 +223,8 @@ class EsmIntegrationTest {
                 .body("""
                         {
                           "BisectBatchOnFunctionError": true,
+                          "MaximumRetryAttempts": 3,
+                          "MaximumRecordAgeInSeconds": 120,
                           "DestinationConfig": {
                             "OnFailure": {
                               "Destination": "%s"
@@ -173,6 +237,8 @@ class EsmIntegrationTest {
                 .then()
                 .statusCode(202)
                 .body("BisectBatchOnFunctionError", equalTo(true))
+                .body("MaximumRetryAttempts", equalTo(3))
+                .body("MaximumRecordAgeInSeconds", equalTo(120))
                 .body("DestinationConfig.OnFailure.Destination", equalTo(destinationArn));
 
         given()
@@ -181,12 +247,31 @@ class EsmIntegrationTest {
                 .then()
                 .statusCode(200)
                 .body("BisectBatchOnFunctionError", equalTo(true))
+                .body("MaximumRetryAttempts", equalTo(3))
+                .body("MaximumRecordAgeInSeconds", equalTo(120))
                 .body("DestinationConfig.OnFailure.Destination", equalTo(destinationArn));
 
         given()
                 .delete(LAMBDA_BASE + "/event-source-mappings/" + uuid)
                 .then()
                 .statusCode(202);
+    }
+
+    @Test
+    void createEventSourceMappingRejectsMaximumRecordAgeBelowMinimum() {
+        given()
+                .contentType("application/json")
+                .body("""
+                        {
+                          "FunctionName": "%s",
+                          "EventSourceArn": "%s",
+                          "MaximumRecordAgeInSeconds": 59
+                        }
+                        """.formatted(FUNCTION_NAME, QUEUE_ARN))
+                .when()
+                .post(LAMBDA_BASE + "/event-source-mappings")
+                .then()
+                .statusCode(400);
     }
 
     @Test
@@ -204,6 +289,8 @@ class EsmIntegrationTest {
                 .then()
                 .statusCode(202)
                 .body("$", not(hasKey("BisectBatchOnFunctionError")))
+                .body("$", not(hasKey("MaximumRetryAttempts")))
+                .body("$", not(hasKey("MaximumRecordAgeInSeconds")))
                 .body("$", not(hasKey("DestinationConfig")))
                 .extract()
                 .path("UUID");
@@ -723,6 +810,294 @@ class EsmIntegrationTest {
         }
     }
 
+    // ──────────────────────────── StartingPosition ────────────────────────────
+
+    @Test
+    @Order(70)
+    void createEventSourceMappingWithStartingPositionRoundTrips() {
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "StartingPosition": "LATEST"
+                }
+                """.formatted(FUNCTION_NAME, STREAM_ARN))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("StartingPosition", equalTo("LATEST"))
+        .extract()
+            .path("UUID");
+
+        given()
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(200)
+            .body("StartingPosition", equalTo("LATEST"));
+
+        // List has its own response-building path, and Terraform refreshes through it too.
+        given()
+            .queryParam("FunctionName", FUNCTION_NAME)
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(200)
+            .body("EventSourceMappings.find { it.UUID == '" + uuid + "' }.StartingPosition",
+                    equalTo("LATEST"));
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    @Order(71)
+    void createEventSourceMappingWithAtTimestampRoundTripsItsTimestamp() {
+        double startingPositionTimestamp = 1787036486.712;
+
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "StartingPosition": "AT_TIMESTAMP",
+                    "StartingPositionTimestamp": %s
+                }
+                """.formatted(FUNCTION_NAME, STREAM_ARN, startingPositionTimestamp))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("StartingPosition", equalTo("AT_TIMESTAMP"))
+        .extract()
+            .path("UUID");
+
+        // Lambda is a restJson1 service, so the timestamp goes out as epoch seconds — the same
+        // convention it came in on, and the one LastModified already uses. Read as BigDecimal
+        // because RestAssured's default float mapping cannot hold millisecond precision at this
+        // magnitude, and would report a passing round-trip as a ~57s drift.
+        BigDecimal returned = given()
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(200)
+            .body("StartingPosition", equalTo("AT_TIMESTAMP"))
+        .extract()
+            .jsonPath(new JsonPathConfig(JsonPathConfig.NumberReturnType.BIG_DECIMAL))
+            .get("StartingPositionTimestamp");
+        assertEquals(startingPositionTimestamp, returned.doubleValue(), 0.001);
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    @Order(72)
+    void responseOmitsStartingPositionWhenUnset() {
+        // AWS omits the field on mappings that have none (SQS sources never do) rather than
+        // returning it as null.
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s"
+                }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("$", not(hasKey("StartingPosition")))
+            .body("$", not(hasKey("StartingPositionTimestamp")))
+        .extract()
+            .path("UUID");
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    @Order(73)
+    void createEventSourceMappingRejectsUnknownStartingPosition() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "StartingPosition": "AT_SEQUENCE_NUMBER"
+                }
+                """.formatted(FUNCTION_NAME, STREAM_ARN))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(400)
+            .body("message", containsString("TRIM_HORIZON, LATEST, AT_TIMESTAMP"));
+    }
+
+    @Test
+    @Order(74)
+    void createEventSourceMappingRejectsAtTimestampWithoutATimestamp() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "StartingPosition": "AT_TIMESTAMP"
+                }
+                """.formatted(FUNCTION_NAME, STREAM_ARN))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(400)
+            .body("message", containsString("StartingPositionTimestamp is required"));
+    }
+
+    @Test
+    @Order(75)
+    void createEventSourceMappingRejectsAtTimestampOnANonKinesisSource() {
+        String dynamoStreamArn =
+                "arn:aws:dynamodb:" + REGION + ":" + ACCOUNT_ID
+                        + ":table/esm-at-timestamp-table/stream/2026-01-01T00:00:00.000";
+
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "StartingPosition": "AT_TIMESTAMP",
+                    "StartingPositionTimestamp": 1787036486.712
+                }
+                """.formatted(FUNCTION_NAME, dynamoStreamArn))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(400)
+            .body("message", containsString("only supported for Amazon Kinesis"));
+    }
+
+    // ──────────────────────────── Self-Managed Kafka ESM ────────────────────────────
+
+    @Test
+    @Order(80)
+    void createSelfManagedKafkaEventSourceMapping() {
+        // Create Self-Managed Apache Kafka ESM with SelfManagedEventSource, Topics, and StartingPosition
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "SelfManagedEventSource": {
+                        "Endpoints": {
+                            "KAFKA_BOOTSTRAP_SERVERS": ["b-1.example.com:9092", "b-2.example.com:9092"]
+                        }
+                    },
+                    "Topics": ["orders", "payments"],
+                    "StartingPosition": "TRIM_HORIZON"
+                }
+                """.formatted(FUNCTION_NAME))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("UUID", notNullValue())
+            .body("State", equalTo("Enabled"))
+            .body("$", not(hasKey("EventSourceArn")))
+            .body("SelfManagedEventSource.Endpoints.KAFKA_BOOTSTRAP_SERVERS",
+                    hasItems("b-1.example.com:9092", "b-2.example.com:9092"))
+            .body("Topics", hasItems("orders", "payments"))
+            .body("StartingPosition", equalTo("TRIM_HORIZON"))
+        .extract()
+            .path("UUID");
+
+        // Verify GET by UUID
+        given()
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(200)
+            .body("UUID", equalTo(uuid))
+            .body("$", not(hasKey("EventSourceArn")))
+            .body("SelfManagedEventSource.Endpoints.KAFKA_BOOTSTRAP_SERVERS",
+                    hasItems("b-1.example.com:9092", "b-2.example.com:9092"))
+            .body("Topics", hasItems("orders", "payments"))
+            .body("StartingPosition", equalTo("TRIM_HORIZON"));
+
+        // Verify DELETE by UUID
+        given()
+        .when()
+            .delete(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(202)
+            .body("UUID", equalTo(uuid));
+    }
+
+    @Test
+    @Order(81)
+    void createAmazonMskEventSourceMapping() {
+        String clusterArn = "arn:aws:kafka:" + REGION + ":" + ACCOUNT_ID
+                + ":cluster/esm-msk-cluster/0f3c9d1e-2b4a-4c5d-8e6f-7a8b9c0d1e2f-s1";
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "Topics": ["orders"],
+                    "StartingPosition": "LATEST",
+                    "AmazonManagedKafkaEventSourceConfig": {"ConsumerGroupId": "orders-consumers"}
+                }
+                """.formatted(FUNCTION_NAME, clusterArn))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("EventSourceArn", equalTo(clusterArn))
+            .body("Topics[0]", equalTo("orders"))
+            .body("StartingPosition", equalTo("LATEST"))
+            .body("AmazonManagedKafkaEventSourceConfig.ConsumerGroupId", equalTo("orders-consumers"))
+            .body("$", not(hasKey("SelfManagedEventSource")))
+        .extract()
+            .path("UUID");
+
+        given()
+            .queryParam("FunctionName", FUNCTION_NAME)
+            .queryParam("EventSourceArn", clusterArn)
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(200)
+            .body("EventSourceMappings.size()", equalTo(1))
+            .body("EventSourceMappings[0].UUID", equalTo(uuid))
+            .body("EventSourceMappings[0].Topics[0]", equalTo("orders"));
+
+        // An MSK source reads exactly one topic.
+        given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "Topics": ["orders", "payments"],
+                    "StartingPosition": "LATEST"
+                }
+                """.formatted(FUNCTION_NAME, clusterArn))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(400);
+
+        given()
+        .when()
+            .delete(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(202);
+    }
+
     // ──────────────────────────── Multi-account ESM ────────────────────────────
 
     /**
@@ -844,5 +1219,242 @@ class EsmIntegrationTest {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    // ──────────────────────────── FilterCriteria ────────────────────────────
+
+    /** Embeds a raw JSON pattern as a properly-escaped JSON string value in a request body. */
+    private static String jsonString(String raw) {
+        return "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    /** Builds {@code n} comma-separated {@code {"Pattern": <raw>}} filter entries for a Filters array. */
+    private static String repeatFilter(String rawPattern, int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append("{ \"Pattern\": ").append(jsonString(rawPattern)).append(" }");
+        }
+        return sb.toString();
+    }
+
+    @Test
+    @Order(76)
+    void createEventSourceMappingWithFilterCriteriaRoundTrips() {
+        String pattern = "{\"body\":{\"type\":[\"order\"]}}";
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "BatchSize": 5,
+                    "FilterCriteria": { "Filters": [ { "Pattern": %s } ] }
+                }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN, jsonString(pattern)))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("FilterCriteria.Filters[0].Pattern", equalTo(pattern))
+        .extract()
+            .path("UUID");
+
+        given()
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then()
+            .statusCode(200)
+            .body("FilterCriteria.Filters[0].Pattern", equalTo(pattern));
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    @Order(77)
+    void responseOmitsFilterCriteriaWhenUnset() {
+        // The original bug's wire symptom was FilterCriteria: null; AWS omits the key entirely when unset.
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "BatchSize": 2
+                }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when()
+            .post(LAMBDA_BASE + "/event-source-mappings")
+        .then()
+            .statusCode(202)
+            .body("$", not(hasKey("FilterCriteria")))
+        .extract()
+            .path("UUID");
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    @Order(78)
+    void updateEventSourceMappingAddsReplacesAndClearsFilterCriteria() {
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s", "BatchSize": 2 }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(202).extract().path("UUID");
+
+        // Add
+        String first = "{\"body\":{\"type\":[\"order\"]}}";
+        given().contentType("application/json")
+            .body("{ \"FilterCriteria\": { \"Filters\": [ { \"Pattern\": " + jsonString(first) + " } ] } }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then().statusCode(202).body("FilterCriteria.Filters[0].Pattern", equalTo(first));
+
+        // Replace whole set
+        String second = "{\"body\":{\"type\":[\"refund\"]}}";
+        given().contentType("application/json")
+            .body("{ \"FilterCriteria\": { \"Filters\": [ { \"Pattern\": " + jsonString(second) + " } ] } }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then().statusCode(202)
+            .body("FilterCriteria.Filters.size()", equalTo(1))
+            .body("FilterCriteria.Filters[0].Pattern", equalTo(second));
+
+        // Clear with empty object
+        given().contentType("application/json").body("{ \"FilterCriteria\": {} }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then().statusCode(202).body("$", not(hasKey("FilterCriteria")));
+
+        // Re-add, then clear with empty Filters array
+        given().contentType("application/json")
+            .body("{ \"FilterCriteria\": { \"Filters\": [ { \"Pattern\": " + jsonString(first) + " } ] } }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+        given().contentType("application/json").body("{ \"FilterCriteria\": { \"Filters\": [] } }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then().statusCode(202).body("$", not(hasKey("FilterCriteria")));
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    @Order(79)
+    void createEventSourceMappingRejectsInvalidFilterCriteria() {
+        // malformed JSON pattern
+        given().contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s",
+                  "FilterCriteria": { "Filters": [ { "Pattern": %s } ] } }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN, jsonString("{oops")))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(400);
+
+        // scalar (non-array/object) value: a silent drop-all pattern
+        given().contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s",
+                  "FilterCriteria": { "Filters": [ { "Pattern": %s } ] } }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN, jsonString("{\"eventName\":\"INSERT\"}")))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(400);
+
+        // FilterCriteria not an object
+        given().contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s", "FilterCriteria": "nope" }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(400);
+
+        // more than 5 filters
+        String sixFilters = repeatFilter("{\"a\":[1]}", 6);
+        given().contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s",
+                  "FilterCriteria": { "Filters": [ %s ] } }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN, sixFilters))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(400);
+
+        // pattern longer than 4096 chars
+        String oversized = "{\"a\":[\"" + "x".repeat(4087) + "\"]}"; // 4097 chars
+        given().contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s",
+                  "FilterCriteria": { "Filters": [ { "Pattern": %s } ] } }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN, jsonString(oversized)))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(400);
+    }
+
+    @Test
+    @Order(80)
+    void updateEventSourceMappingRejectsInvalidFilterCriteria() {
+        String uuid = given()
+            .contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s", "BatchSize": 2 }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(202).extract().path("UUID");
+
+        given().contentType("application/json")
+            .body("{ \"FilterCriteria\": { \"Filters\": [ { \"Pattern\": " + jsonString("{oops") + " } ] } }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then().statusCode(400);
+
+        // FilterCriteria not an object
+        given().contentType("application/json").body("{ \"FilterCriteria\": \"nope\" }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then().statusCode(400);
+
+        // more than 5 filters
+        given().contentType("application/json")
+            .body("{ \"FilterCriteria\": { \"Filters\": [ " + repeatFilter("{\"a\":[1]}", 6) + " ] } }")
+        .when().put(LAMBDA_BASE + "/event-source-mappings/" + uuid)
+        .then().statusCode(400);
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuid).then().statusCode(202);
+    }
+
+    @Test
+    @Order(81)
+    void listEventSourceMappingsEchoesFilterCriteria() {
+        String pattern = "{\"body\":{\"type\":[\"order\"]}}";
+        String uuidWith = given()
+            .contentType("application/json")
+            .body("""
+                {
+                    "FunctionName": "%s",
+                    "EventSourceArn": "%s",
+                    "BatchSize": 3,
+                    "FilterCriteria": { "Filters": [ { "Pattern": %s } ] }
+                }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN, jsonString(pattern)))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(202).extract().path("UUID");
+
+        String uuidWithout = given()
+            .contentType("application/json")
+            .body("""
+                { "FunctionName": "%s", "EventSourceArn": "%s", "BatchSize": 4 }
+                """.formatted(FUNCTION_NAME, QUEUE_ARN))
+        .when().post(LAMBDA_BASE + "/event-source-mappings")
+        .then().statusCode(202).extract().path("UUID");
+
+        given()
+        .when()
+            .get(LAMBDA_BASE + "/event-source-mappings?FunctionName=" + FUNCTION_ARN)
+        .then()
+            .statusCode(200)
+            .body("EventSourceMappings.find { it.UUID == '" + uuidWith + "' }.FilterCriteria.Filters[0].Pattern",
+                    equalTo(pattern))
+            .body("EventSourceMappings.find { it.UUID == '" + uuidWithout + "' }.FilterCriteria",
+                    nullValue());
+
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuidWith).then().statusCode(202);
+        given().delete(LAMBDA_BASE + "/event-source-mappings/" + uuidWithout).then().statusCode(202);
     }
 }

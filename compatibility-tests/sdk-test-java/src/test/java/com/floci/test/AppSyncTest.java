@@ -1,19 +1,31 @@
 package com.floci.test;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.appsync.AppSyncClient;
 import software.amazon.awssdk.services.appsync.model.*;
+import software.amazon.awssdk.services.iam.IamClient;
+import software.amazon.awssdk.services.lambda.LambdaClient;
+import software.amazon.awssdk.services.lambda.model.Environment;
+import software.amazon.awssdk.services.lambda.model.FunctionCode;
+import software.amazon.awssdk.services.lambda.model.InvokeResponse;
+import software.amazon.awssdk.services.lambda.model.Runtime;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -36,6 +48,146 @@ class AppSyncTest {
             try { client.deleteGraphqlApi(r -> r.apiId(apiId)); } catch (Exception ignored) {}
         }
         if (client != null) client.close();
+    }
+
+    @Test
+    @Order(201)
+    @Timeout(120)
+    @DisplayName("Lambda signs GraphQL requests to the advertised endpoint with execution-role field permissions")
+    void lambdaQueriesAdvertisedEndpointWithFieldScopedIam() throws Exception {
+        String name = TestFixtures.uniqueName("appsync-signed");
+        GraphqlApi api = client.createGraphqlApi(r -> r.name(name).authenticationType("AWS_IAM")).graphqlApi();
+        String signedApiId = api.apiId();
+        try (IamClient iam = TestFixtures.iamClient(); LambdaClient lambda = TestFixtures.lambdaClient()) {
+            String roleArn = iam.createRole(r -> r.roleName(name).assumeRolePolicyDocument("""
+                    {"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+                    "Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}
+                    """)).role().arn();
+            try {
+                client.startSchemaCreation(r -> r.apiId(signedApiId).definition(SdkBytes.fromUtf8String("""
+                        type Query { add(a: Int!, b: Int!): Int! greeting: String }
+                        schema { query: Query }
+                        """)));
+                assertThat(pollSchemaStatusToTerminal(signedApiId)).isEqualTo(SchemaStatus.SUCCESS);
+                client.putGraphqlApiEnvironmentVariables(r -> r.apiId(signedApiId)
+                        .environmentVariables(Map.of("GREETING", "hello from ctx.env")));
+                client.createDataSource(r -> r.apiId(signedApiId).name("local").type("NONE"));
+                Map<String, String> resolvers = Map.of(
+                        "add", """
+                            export function request(ctx) { return { payload: ctx.args.a + ctx.args.b }; }
+                            export function response(ctx) { return ctx.result; }
+                            """,
+                        "greeting", """
+                            export function request(ctx) { return { payload: null }; }
+                            export function response(ctx) { return ctx.env.GREETING; }
+                            """);
+                for (Map.Entry<String, String> resolver : resolvers.entrySet()) {
+                    client.createResolver(r -> r.apiId(signedApiId).typeName("Query")
+                            .fieldName(resolver.getKey()).dataSourceName("local").code(resolver.getValue())
+                            .runtime(AppSyncRuntime.builder().name("APPSYNC_JS").runtimeVersion("1.0.0").build()));
+                }
+                iam.putRolePolicy(r -> r.roleName(name).policyName("graphql").policyDocument("""
+                        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"appsync:GraphQL",
+                        "Resource":"%s/types/*/fields/*"}]}
+                        """.formatted(api.arn())));
+                String endpoint = client.getGraphqlApi(r -> r.apiId(signedApiId)).graphqlApi().uris().get("GRAPHQL");
+                SdkBytes handlerZip = SdkBytes.fromByteArray(signedGraphqlHandlerZip());
+                lambda.createFunction(r -> r.functionName(name).runtime(Runtime.NODEJS20_X)
+                        .role(roleArn).handler("index.handler").timeout(30)
+                        .environment(Environment.builder().variables(Map.of("GRAPHQL_URL", endpoint)).build())
+                        .code(FunctionCode.builder().zipFile(handlerZip).build()));
+                try {
+                    String query = "query($a: Int!, $b: Int!) { add(a: $a, b: $b) greeting }";
+                    JsonNode first = invokeGraphql(lambda, name, Map.of("query", query, "variables", Map.of("a", 2, "b", 3)));
+                    assertThat(first.path("status").asInt()).isEqualTo(200);
+                    assertThat(first.path("result").has("errors")).isFalse();
+                    assertThat(first.at("/result/data/add").asInt()).isEqualTo(5);
+                    assertThat(first.at("/result/data/greeting").asText()).isEqualTo("hello from ctx.env");
+
+                    client.putGraphqlApiEnvironmentVariables(r -> r.apiId(signedApiId)
+                            .environmentVariables(Map.of("GREETING", "updated environment")));
+                    JsonNode updated = invokeGraphql(lambda, name,
+                            Map.of("query", query, "variables", Map.of("a", -4, "b", 11)));
+                    assertThat(updated.path("status").asInt()).isEqualTo(200);
+                    assertThat(updated.at("/result/data/add").asInt()).isEqualTo(7);
+                    assertThat(updated.at("/result/data/greeting").asText()).isEqualTo("updated environment");
+
+                    JsonNode invalid = invokeGraphql(lambda, name, Map.of("query", "{ nonexistentField }"));
+                    assertThat(invalid.path("status").asInt()).isEqualTo(200);
+                    assertThat(invalid.at("/result/errors").size()).isGreaterThan(0);
+
+                    iam.putRolePolicy(r -> r.roleName(name).policyName("deny-greeting").policyDocument("""
+                            {"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"appsync:GraphQL",
+                            "Resource":"%s/types/Query/fields/greeting"}]}
+                            """.formatted(api.arn())));
+                    JsonNode denied = invokeGraphql(lambda, name,
+                            Map.of("query", query, "variables", Map.of("a", 1, "b", 8)));
+                    assertThat(denied.path("status").asInt()).isEqualTo(200);
+                    assertThat(denied.at("/result/data/add").asInt()).isEqualTo(9);
+                    assertThat(denied.at("/result/data/greeting").isNull()).isTrue();
+                    assertThat(denied.at("/result/errors/0/errorType").asText()).isEqualTo("Unauthorized");
+                } finally {
+                    lambda.deleteFunction(r -> r.functionName(name));
+                }
+            } finally {
+                for (String policy : iam.listRolePolicies(r -> r.roleName(name)).policyNames()) {
+                    iam.deleteRolePolicy(r -> r.roleName(name).policyName(policy));
+                }
+                iam.deleteRole(r -> r.roleName(name));
+            }
+        } finally {
+            client.deleteGraphqlApi(r -> r.apiId(signedApiId));
+        }
+    }
+
+    private static JsonNode invokeGraphql(LambdaClient lambda, String functionName, Map<String, Object> request)
+            throws IOException {
+        SdkBytes payload = SdkBytes.fromUtf8String(mapper.writeValueAsString(request));
+        InvokeResponse response = lambda.invoke(r -> r.functionName(functionName)
+                .payload(payload)
+                .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(45))));
+        assertThat(response.functionError()).as(response.payload().asUtf8String()).isNull();
+        return mapper.readTree(response.payload().asUtf8String());
+    }
+
+    private static byte[] signedGraphqlHandlerZip() throws IOException {
+        String code = """
+                const { createHash, createHmac } = require('node:crypto');
+                const hash = value => createHash('sha256').update(value).digest('hex');
+                const hmac = (key, value) => createHmac('sha256', key).update(value).digest();
+                exports.handler = async event => {
+                    const url = new URL(process.env.GRAPHQL_URL);
+                    const body = JSON.stringify(event);
+                    const date = new Date().toISOString().replace(/[-:]|\\.\\d{3}/g, '');
+                    const day = date.slice(0, 8);
+                    const region = process.env.AWS_REGION;
+                    const scope = `${day}/${region}/appsync/aws4_request`;
+                    const headers = {
+                        'content-type': 'application/json',
+                        'host': url.host,
+                        'x-amz-date': date,
+                        'x-amz-security-token': process.env.AWS_SESSION_TOKEN
+                    };
+                    const names = Object.keys(headers).sort();
+                    const canonicalHeaders = names.map(name => `${name}:${headers[name]}\\n`).join('');
+                    const canonical = ['POST', url.pathname, '', canonicalHeaders, names.join(';'), hash(body)].join('\\n');
+                    const toSign = ['AWS4-HMAC-SHA256', date, scope, hash(canonical)].join('\\n');
+                    const key = hmac(hmac(hmac(hmac(`AWS4${process.env.AWS_SECRET_ACCESS_KEY}`, day), region),
+                        'appsync'), 'aws4_request');
+                    headers.authorization = `AWS4-HMAC-SHA256 Credential=${process.env.AWS_ACCESS_KEY_ID}/${scope}, ` +
+                        `SignedHeaders=${names.join(';')}, Signature=${hmac(key, toSign).toString('hex')}`;
+                    delete headers.host;
+                    const response = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
+                    return { status: response.status, result: await response.json() };
+                };
+                """;
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            zip.putNextEntry(new ZipEntry("index.js"));
+            zip.write(code.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        return bytes.toByteArray();
     }
 
     // ── GraphQL API CRUD ────────────────────────────────────────────────
@@ -117,10 +269,11 @@ class AppSyncTest {
     // ── API Keys ────────────────────────────────────────────────────────
 
     private static String keyId;
+    private static String apiKeyValue;
 
     @Test
     @Order(20)
-    void createApiKey() {
+    void createApiKey() throws Exception {
         long expiresEpoch = Instant.parse("2027-01-01T00:00:00Z").getEpochSecond();
         CreateApiKeyResponse resp = client.createApiKey(CreateApiKeyRequest.builder()
                 .apiId(apiId)
@@ -132,6 +285,9 @@ class AppSyncTest {
         keyId = resp.apiKey().id();
         assertThat(keyId).isNotBlank();
         assertThat(resp.apiKey().description()).isEqualTo("sdk-test-key");
+        // As on AWS, the id is the key value sent as x-api-key.
+        assertThat(keyId).matches("da2-[a-z0-9]{26}");
+        apiKeyValue = keyId;
     }
 
     @Test
@@ -171,6 +327,50 @@ class AppSyncTest {
                 .build());
 
         assertThat(resp).isNotNull();
+    }
+
+    @Test
+    @Order(24)
+    void httpExecuteWithApiKeyReturns200() throws Exception {
+        String url = TestFixtures.endpoint() + "/v1/apis/" + apiId + "/graphql";
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .header("x-api-key", apiKeyValue)
+                .POST(HttpRequest.BodyPublishers.ofString("{\"query\":\"{ hello }\"}"))
+                .build();
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(resp.statusCode()).isEqualTo(200);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = mapper.readValue(resp.body(), Map.class);
+        assertThat(body).containsKey("data");
+        assertThat(body.get("errors")).isNull();
+    }
+
+    @Test
+    @Order(25)
+    void httpExecuteWithoutApiKeyReturns401() throws Exception {
+        String url = TestFixtures.endpoint() + "/v1/apis/" + apiId + "/graphql";
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"query\":\"{ hello }\"}"))
+                .build();
+        HttpResponse<String> resp = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(resp.statusCode()).isEqualTo(401);
+        assertThat(resp.headers().firstValue("x-amzn-errortype").orElse(""))
+                .contains("UnauthorizedException");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = mapper.readValue(resp.body(), Map.class);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> errors = (List<Map<String, Object>>) body.get("errors");
+        assertThat(errors).isNotEmpty();
+        assertThat(errors.get(0).get("errorType")).isEqualTo("UnauthorizedException");
+        assertThat(errors.get(0).get("message")).isEqualTo("Missing authorization header");
+        assertThat(body.get("data")).isNull();
+        assertThat(body.get("__type")).isNull();
     }
 
     // ── Data Sources ────────────────────────────────────────────────────
@@ -550,6 +750,10 @@ class AppSyncTest {
     }
 
     private SchemaStatus pollSchemaStatusToTerminal() {
+        return pollSchemaStatusToTerminal(apiId);
+    }
+
+    private SchemaStatus pollSchemaStatusToTerminal(String apiId) {
         Instant deadline = Instant.now().plus(Duration.ofSeconds(10));
         SchemaStatus s = client.getSchemaCreationStatus(r -> r.apiId(apiId)).status();
         while (s == SchemaStatus.PROCESSING && Instant.now().isBefore(deadline)) {
@@ -575,6 +779,8 @@ class AppSyncTest {
                         .build());
 
         assertThat(resp.status()).isNotNull();
+        SchemaStatus terminal = pollSchemaStatusToTerminal();
+        assertThat(terminal).isEqualTo(SchemaStatus.SUCCESS);
     }
 
     // ── Channel Namespaces ─────────────────────────────────────────────

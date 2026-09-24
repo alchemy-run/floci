@@ -31,6 +31,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -43,13 +44,18 @@ import java.util.Map;
 @Consumes(MediaType.APPLICATION_JSON)
 public class IotController {
 
+    private static final Logger LOG = Logger.getLogger(IotController.class);
+
     private final IotService iotService;
+    private final IotTagHandler iotTagHandler;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public IotController(IotService iotService, RegionResolver regionResolver, ObjectMapper objectMapper) {
+    public IotController(IotService iotService, IotTagHandler iotTagHandler, RegionResolver regionResolver,
+                         ObjectMapper objectMapper) {
         this.iotService = iotService;
+        this.iotTagHandler = iotTagHandler;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -126,10 +132,12 @@ public class IotController {
 
     @POST
     @Path("/untag")
-    public Response untagResource(String body) {
+    public Response untagResource(@Context HttpHeaders headers, String body) {
         try {
             JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
-            iotService.untagResource(request.path("resourceArn").asText(null), parseTagKeys(request.path("tagKeys")));
+            // Through the tag handler, like /tags, so every IoT resource kind is reachable here.
+            iotTagHandler.untagResource(regionResolver.resolveRegion(headers),
+                    request.path("resourceArn").asText(null), parseTagKeys(request.path("tagKeys")));
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (JsonProcessingException e) {
             throw new AwsException("InvalidRequestException", e.getMessage(), 400);
@@ -485,8 +493,10 @@ public class IotController {
     @Path("/thing-types/{thingTypeName}/deprecate")
     @Consumes(MediaType.WILDCARD)
     public Response deprecateThingType(@Context HttpHeaders headers,
-                                       @PathParam("thingTypeName") String thingTypeName) {
-        iotService.deprecateThingType(thingTypeName, regionResolver.resolveRegion(headers));
+                                       @PathParam("thingTypeName") String thingTypeName,
+                                       String body) {
+        boolean undoDeprecate = parseProperties(body, "undoDeprecate").asBoolean(false);
+        iotService.deprecateThingType(thingTypeName, undoDeprecate, regionResolver.resolveRegion(headers));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -937,7 +947,13 @@ public class IotController {
         description.put("certificateId", certificate.getCertificateId());
         description.put("certificatePem", certificate.getCertificatePem());
         description.put("status", certificate.getStatus());
+        description.put("certificateMode", "DEFAULT");
         putEpoch(description, "creationDate", certificate.getCreationDate());
+        if (certificate.getNotBefore() != null && certificate.getNotAfter() != null) {
+            ObjectNode validity = description.putObject("validity");
+            putEpoch(validity, "notBefore", certificate.getNotBefore());
+            putEpoch(validity, "notAfter", certificate.getNotAfter());
+        }
         return description;
     }
 
@@ -1113,6 +1129,16 @@ public class IotController {
             response.set("actions", objectMapper.readTree(rule.getActionsJson()));
         } catch (JsonProcessingException e) {
             response.putArray("actions");
+        }
+        if (rule.getAwsIotSqlVersion() != null) {
+            response.put("awsIotSqlVersion", rule.getAwsIotSqlVersion());
+        }
+        if (rule.getErrorActionJson() != null) {
+            try {
+                response.set("errorAction", objectMapper.readTree(rule.getErrorActionJson()));
+            } catch (JsonProcessingException e) {
+                LOG.warnv(e, "Stored error action of topic rule {0} is not JSON", rule.getRuleName());
+            }
         }
         return response;
     }

@@ -106,6 +106,24 @@ class EmulatorInfoControllerIntegrationTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"/_floci/ca.pem", "/_localstack/ca.pem"})
+    void caPem_returnsTheLocalCaAsPlainText(String path) throws Exception {
+        String pem = given()
+            .when().get(path)
+            .then()
+                .statusCode(200)
+                .contentType(startsWith("text/plain"))
+                .extract().body().asString();
+
+        var cert = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
+                .generateCertificate(new java.io.ByteArrayInputStream(pem.getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
+        assertTrue(cert.getBasicConstraints() >= 0, "must be a CA certificate");
+        assertEquals(cert.getSubjectX500Principal(), cert.getIssuerX500Principal());
+        assertEquals(pem, given().when().get("/_floci/ca.pem").then().extract().body().asString(),
+                "the same CA on every call");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"/_floci/state/reset", "/_localstack/state/reset", "/_floci/state/nuke", "/_localstack/state/nuke"})
     void stateReset_returnsOkOnAllPaths(String path) {
         given()
@@ -114,6 +132,24 @@ class EmulatorInfoControllerIntegrationTest {
                 .statusCode(200)
                 .contentType("application/json")
                 .body("status", equalTo("OK"));
+    }
+
+    @Test
+    void stateReset_keepsBootstrapStateOfServicesThatReseedOnClear() {
+        // IAM Identity Center recreates its bootstrap instance in clear(). A reset that wiped
+        // storage after that step left every SCIM call answering 401 until a restart.
+        given()
+            .when().post("/_floci/state/reset")
+            .then()
+                .statusCode(200);
+
+        given()
+            .header("Authorization", "Bearer floci-scim-token")
+        .when()
+            .get("/9067f2a3c1-00000000-0000-0000-0000-000000000000/scim/v2/ServiceProviderConfig")
+        .then()
+            .statusCode(200)
+            .body("schemas[0]", equalTo("urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"));
     }
 
     @Test

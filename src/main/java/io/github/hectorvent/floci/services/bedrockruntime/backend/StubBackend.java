@@ -1,10 +1,15 @@
 package io.github.hectorvent.floci.services.bedrockruntime.backend;
 
+import io.github.hectorvent.floci.core.common.AwsEventStreamWriter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
+import java.io.OutputStream;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Dummy response builder for Bedrock Runtime. Stateless.
@@ -73,5 +78,35 @@ public class StubBackend implements BedrockBackend {
         } catch (Exception e) {
             throw new RuntimeException("Failed to serialize InvokeModel response", e);
         }
+    }
+
+    @Override
+    public Consumer<OutputStream> converseStream(String modelId, ObjectNode bedrockRequest) {
+        return output -> {
+            AwsEventStreamWriter.writeEvent(objectMapper, output, "messageStart",
+                    objectMapper.createObjectNode().put("role", "assistant"));
+
+            List<String> flociStubResponse = List.of("Floci stub response", " for model=", modelId);
+            for (String fragment : flociStubResponse) {
+                ObjectNode contentBlockDelta = objectMapper.createObjectNode();
+                contentBlockDelta.put("contentBlockIndex", 0);
+                contentBlockDelta.putObject("delta").put("text", fragment);
+                AwsEventStreamWriter.writeEvent(objectMapper, output, "contentBlockDelta", contentBlockDelta);
+            }
+
+            AwsEventStreamWriter.writeEvent(objectMapper, output, "contentBlockStop",
+                    objectMapper.createObjectNode().put("contentBlockIndex", 0));
+
+            AwsEventStreamWriter.writeEvent(objectMapper, output, "messageStop",
+                    objectMapper.createObjectNode().put("stopReason", "end_turn"));
+
+            ObjectNode metadata = objectMapper.createObjectNode();
+            metadata.putObject("usage")
+                    .put("inputTokens", 10)
+                    .put("outputTokens", 12)
+                    .put("totalTokens", 22);
+            metadata.putObject("metrics").put("latencyMs", 1);
+            AwsEventStreamWriter.writeEvent(objectMapper, output, "metadata", metadata);
+        };
     }
 }

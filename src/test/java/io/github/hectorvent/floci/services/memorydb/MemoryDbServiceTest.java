@@ -4,9 +4,13 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.elasticache.proxy.SigV4Validator;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.ParameterGroup;
+import io.github.hectorvent.floci.services.memorydb.model.MemoryDbMetadata.SubnetGroup;
 import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerHandle;
 import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerManager;
 import io.github.hectorvent.floci.services.memorydb.model.Acl;
@@ -48,6 +52,8 @@ class MemoryDbServiceTest {
     private MemoryDbProxyManager proxyManager;
     private SigV4Validator sigV4Validator;
     private EmulatorConfig.MemoryDbServiceConfig mdbConfig;
+    private EmulatorConfig config;
+    private Ec2Service ec2Service;
 
     @BeforeEach
     void setUp() {
@@ -55,7 +61,7 @@ class MemoryDbServiceTest {
         proxyManager = mock(MemoryDbProxyManager.class);
         sigV4Validator = mock(SigV4Validator.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
-        EmulatorConfig config = mock(EmulatorConfig.class);
+        config = mock(EmulatorConfig.class);
         RegionResolver regionResolver = mock(RegionResolver.class);
 
         EmulatorConfig.ServicesConfig servicesConfig = mock(EmulatorConfig.ServicesConfig.class);
@@ -71,13 +77,14 @@ class MemoryDbServiceTest {
                 AwsArnUtils.Arn.of(inv.getArgument(0), inv.getArgument(1),
                         "000000000000", inv.getArgument(2)).toString());
 
-        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> new InMemoryStorage<>());
-        when(containerManager.start(anyString(), anyString()))
+        when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
+        when(containerManager.tryStart(anyString(), anyString()))
                 .thenReturn(new MemoryDbContainerHandle("cid", "cluster", "localhost", 6379));
         doNothing().when(proxyManager).startProxy(anyString(), anyBoolean(), anyInt(), anyString(), anyInt(), any());
 
+        ec2Service = mock(Ec2Service.class);
         service = new MemoryDbService(containerManager, proxyManager, sigV4Validator,
-                storageFactory, config, regionResolver);
+                storageFactory, config, regionResolver, ec2Service);
     }
 
     @Test
@@ -91,7 +98,7 @@ class MemoryDbServiceTest {
         assertEquals("my-cluster", created.getName());
         assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
         assertEquals("arn:aws:memorydb:us-east-1:000000000000:cluster/my-cluster", created.getArn());
-        assertEquals("localhost", created.getClusterEndpoint().address());
+        assertAwsShapedEndpoint("my-cluster", created);
 
         assertEquals(1, service.describeClusters("my-cluster").size());
         assertEquals(1, service.describeClusters(null).size());
@@ -159,7 +166,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("app-acl");
-        aclSpec.setUserNames(List.of("default", "app-user"));
+        aclSpec.setUserNames(List.of("app-user"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -184,7 +191,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("iam-acl");
-        aclSpec.setUserNames(List.of("default", "iam-user"));
+        aclSpec.setUserNames(List.of("iam-user"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -253,19 +260,123 @@ class MemoryDbServiceTest {
     }
 
     @Test
-    void createAclRequiresDefaultUser() {
-        User userSpec = new User();
-        userSpec.setName("solo");
-        userSpec.setAuthMode(AuthMode.PASSWORD);
-        userSpec.setPasswords(List.of("p"));
-        userSpec.setAccessString("on ~* +@all");
-        service.createUser(userSpec, "us-east-1");
+    void createAclAcceptsCustomUsersWithoutTheDefaultUser() {
+        service.createUser(passwordUser("solo", "p"), "us-east-1");
 
         Acl aclSpec = new Acl();
-        aclSpec.setName("no-default-acl");
-        aclSpec.setUserNames(List.of("solo")); // missing the required "default" user
+        aclSpec.setName("custom-acl");
+        aclSpec.setUserNames(List.of("solo"));
+        Acl created = service.createAcl(aclSpec, "us-east-1");
+
+        assertEquals(List.of("solo"), created.getUserNames());
+        assertEquals("active", created.getStatus());
+        assertEquals(List.of("custom-acl"), service.aclNamesForUser("solo", "us-east-1"));
+        assertEquals(List.of("open-access"), service.aclNamesForUser("default", "us-east-1"));
+    }
+
+    @Test
+    void createAclAllowsAnEmptyUserList() {
+        Acl aclSpec = new Acl();
+        aclSpec.setName("empty-acl");
+        aclSpec.setUserNames(List.of());
+
+        assertTrue(service.createAcl(aclSpec, "us-east-1").getUserNames().isEmpty());
+    }
+
+    @Test
+    void createAclRejectsTheBuiltinDefaultUser() {
+        service.createUser(passwordUser("member", "p"), "us-east-1");
+
+        Acl aclSpec = new Acl();
+        aclSpec.setName("with-default");
+        aclSpec.setUserNames(List.of("default", "member"));
         AwsException ex = assertThrows(AwsException.class, () -> service.createAcl(aclSpec, "us-east-1"));
-        assertEquals("DefaultUserRequired", ex.jsonType());
+
+        assertEquals("InvalidParameterValueException", ex.jsonType());
+        assertTrue(service.describeAcls(null, "us-east-1").stream()
+                .noneMatch(acl -> "with-default".equals(acl.getName())));
+    }
+
+    @Test
+    void emptyAclClusterRejectsEveryConnection() {
+        Acl aclSpec = new Acl();
+        aclSpec.setName("locked");
+        aclSpec.setUserNames(List.of());
+        service.createAcl(aclSpec, "us-east-1");
+        service.createCluster(cluster("locked-cluster", "locked"), "us-east-1");
+
+        verify(proxyManager).startProxy(anyString(), eq(true), anyInt(), anyString(), anyInt(), any());
+        assertFalse(service.authenticate("locked-cluster", null, "anything", "us-east-1"));
+        assertFalse(service.authenticate("locked-cluster", "default", "", "us-east-1"));
+    }
+
+    @Test
+    void updateAclAddsAndRemovesMembers() {
+        service.createUser(passwordUser("first", "p1"), "us-east-1");
+        service.createUser(passwordUser("second", "p2"), "us-east-1");
+        service.createAcl(acl("rotating", "first"), "us-east-1");
+
+        Acl updated = service.updateAcl("rotating", List.of("second"), List.of("first"), "us-east-1");
+
+        assertEquals(List.of("second"), updated.getUserNames());
+        assertEquals(List.of("second"),
+                service.describeAcls("rotating", "us-east-1").iterator().next().getUserNames());
+    }
+
+    @Test
+    void updateAclValidatesTheRequestedMembership() {
+        service.createUser(passwordUser("member", "p"), "us-east-1");
+        service.createAcl(acl("guarded", "member"), "us-east-1");
+
+        assertEquals("InvalidParameterValueException", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of("default"), List.of(), "us-east-1")).jsonType());
+        assertEquals("DuplicateUserNameFault", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of("member"), List.of(), "us-east-1")).jsonType());
+        assertEquals("UserNotFoundFault", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of("ghost"), List.of(), "us-east-1")).jsonType());
+        assertEquals("InvalidParameterCombinationException", assertThrows(AwsException.class, () ->
+                service.updateAcl("guarded", List.of(), List.of(), "us-east-1")).jsonType());
+        assertEquals("ACLNotFoundFault", assertThrows(AwsException.class, () ->
+                service.updateAcl("missing", List.of("member"), List.of(), "us-east-1")).jsonType());
+        assertEquals("InvalidParameterValueException", assertThrows(AwsException.class, () ->
+                service.updateAcl("open-access", List.of("member"), List.of(), "us-east-1")).jsonType());
+        assertEquals(List.of("member"),
+                service.describeAcls("guarded", "us-east-1").iterator().next().getUserNames());
+    }
+
+    @Test
+    void securityGroupsAreRecordedOnCreateAndReplacedOnUpdate() {
+        Cluster spec = cluster("sg-cluster", "open-access");
+        spec.setSecurityGroupIds(List.of("sg-1"));
+        assertEquals(List.of("sg-1"), service.createCluster(spec, "us-east-1").getSecurityGroupIds());
+
+        service.updateCluster("sg-cluster", null, List.of("sg-2", "sg-3"), "us-east-1");
+        assertEquals(List.of("sg-2", "sg-3"), service.getCluster("sg-cluster", "us-east-1").getSecurityGroupIds());
+
+        service.updateCluster("sg-cluster", "described", null, "us-east-1");
+        assertEquals(List.of("sg-2", "sg-3"), service.getCluster("sg-cluster", "us-east-1").getSecurityGroupIds());
+    }
+
+    @Test
+    void endpointHostUsesTheConfiguredFlociHostnameAsTheDomain() {
+        when(config.hostname()).thenReturn(Optional.of("floci"));
+
+        String host = service.resolveEndpointHost("Cache", "000000000000", "eu-west-1");
+
+        assertTrue(host.matches("clustercfg\\.cache\\.[0-9a-f]{6}\\.memorydb\\.eu-west-1\\.floci"), host);
+    }
+
+    @Test
+    void endpointHostKeepsAConfiguredIpAddress() {
+        when(config.hostname()).thenReturn(Optional.of("192.168.1.20"));
+
+        assertEquals("192.168.1.20", service.resolveEndpointHost("cache", "000000000000", "us-east-1"));
+    }
+
+    private static void assertAwsShapedEndpoint(String clusterName, Cluster cluster) {
+        String address = cluster.getClusterEndpoint().address();
+        assertTrue(address.matches("clustercfg\\." + clusterName
+                + "\\.[0-9a-f]{6}\\.memorydb\\.us-east-1\\.localhost\\.floci\\.io"), address);
     }
 
     @Test
@@ -279,7 +390,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("dup-acl");
-        aclSpec.setUserNames(List.of("default", "dup", "dup"));
+        aclSpec.setUserNames(List.of("dup", "dup"));
         AwsException ex = assertThrows(AwsException.class, () -> service.createAcl(aclSpec, "us-east-1"));
         assertEquals("DuplicateUserNameFault", ex.jsonType());
     }
@@ -309,7 +420,7 @@ class MemoryDbServiceTest {
 
         Acl aclSpec = new Acl();
         aclSpec.setName("in-use");
-        aclSpec.setUserNames(List.of("default", "u1"));
+        aclSpec.setUserNames(List.of("u1"));
         service.createAcl(aclSpec, "us-east-1");
 
         Cluster spec = new Cluster();
@@ -332,7 +443,7 @@ class MemoryDbServiceTest {
     void failedProvisioningReleasesProxyPort() {
         when(mdbConfig.proxyBasePort()).thenReturn(16400);
         when(mdbConfig.proxyMaxPort()).thenReturn(16400); // exactly one port available
-        when(containerManager.start(anyString(), anyString()))
+        when(containerManager.tryStart(anyString(), anyString()))
                 .thenThrow(new RuntimeException("docker unavailable"))
                 .thenReturn(new MemoryDbContainerHandle("cid", "c2", "localhost", 6379));
 
@@ -352,7 +463,7 @@ class MemoryDbServiceTest {
     @Test
     void failedProvisioningRollsBackContainerAndReleasesProxyPort() {
         MemoryDbContainerHandle handle = new MemoryDbContainerHandle("cid", "c1", "localhost", 6379);
-        when(containerManager.start(anyString(), anyString())).thenReturn(handle);
+        when(containerManager.tryStart(anyString(), anyString())).thenReturn(handle);
 
         // Proxy startup blows up after the port is reserved and the container is started.
         doThrow(new RuntimeException("proxy boom"))
@@ -387,11 +498,11 @@ class MemoryDbServiceTest {
 
     @Test
     void failedContainerStartupCleansUpContainerByNameAndReleasesPort() {
-        // containerManager.start(...) throws — this models both a container that never started
+        // containerManager.tryStart(...) throws — this models both a container that never started
         // and (crucially) a readiness timeout, where start() created + registered the container
         // before throwing, so no handle ever reaches the service.
         doThrow(new RuntimeException("readiness boom"))
-                .when(containerManager).start(eq("c1"), anyString());
+                .when(containerManager).tryStart(eq("c1"), anyString());
 
         Cluster spec = new Cluster();
         spec.setName("c1");
@@ -407,7 +518,7 @@ class MemoryDbServiceTest {
         verify(containerManager).stopByClusterName("c1");
 
         // The reserved proxy port was still released: a subsequent successful create reuses the base port.
-        when(containerManager.start(anyString(), anyString()))
+        when(containerManager.tryStart(anyString(), anyString()))
                 .thenReturn(new MemoryDbContainerHandle("cid", "c2", "localhost", 6379));
         Cluster second = new Cluster();
         second.setName("c2");
@@ -427,7 +538,7 @@ class MemoryDbServiceTest {
         Cluster created = service.createCluster(spec, "us-east-1");
 
         assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
-        assertEquals("localhost", created.getClusterEndpoint().address());
+        assertAwsShapedEndpoint("mock-cluster", created);
         assertEquals(6379, created.getClusterEndpoint().port());
         verifyNoInteractions(containerManager);
     }
@@ -436,7 +547,7 @@ class MemoryDbServiceTest {
     void concurrentCreateForSameNameIsRejectedWhileFirstIsProvisioning() throws InterruptedException {
         CountDownLatch startedLatch = new CountDownLatch(1);
         CountDownLatch releaseLatch = new CountDownLatch(1);
-        when(containerManager.start(anyString(), anyString())).thenAnswer(inv -> {
+        when(containerManager.tryStart(anyString(), anyString())).thenAnswer(inv -> {
             startedLatch.countDown();
             assertTrue(releaseLatch.await(5, TimeUnit.SECONDS), "test timed out waiting for release");
             return new MemoryDbContainerHandle("cid", "c1", "localhost", 6379);
@@ -462,5 +573,163 @@ class MemoryDbServiceTest {
         firstRequest.join(5000);
 
         assertEquals(ClusterStatus.AVAILABLE, service.getCluster("c1").getStatus());
+    }
+
+    @Test
+    void sameNamesAreScopedToRegion() {
+        User firstUser = passwordUser("shared-user", "one");
+        User secondUser = passwordUser("shared-user", "two");
+        service.createUser(firstUser, "us-east-1");
+        service.createUser(secondUser, "eu-west-1");
+
+        Acl firstAcl = acl("shared-acl", "shared-user");
+        Acl secondAcl = acl("shared-acl", "shared-user");
+        service.createAcl(firstAcl, "us-east-1");
+        service.createAcl(secondAcl, "eu-west-1");
+
+        Cluster first = cluster("shared-cluster", "shared-acl");
+        Cluster second = cluster("shared-cluster", "shared-acl");
+        service.createCluster(first, "us-east-1");
+        service.createCluster(second, "eu-west-1");
+
+        assertEquals("one", service.describeUsers("shared-user", "us-east-1").iterator().next()
+                .getPasswords().get(0));
+        assertEquals("two", service.describeUsers("shared-user", "eu-west-1").iterator().next()
+                .getPasswords().get(0));
+        assertEquals("arn:aws:memorydb:us-east-1:000000000000:cluster/shared-cluster",
+                service.getCluster("shared-cluster", "us-east-1").getArn());
+        assertEquals("arn:aws:memorydb:eu-west-1:000000000000:cluster/shared-cluster",
+                service.getCluster("shared-cluster", "eu-west-1").getArn());
+        assertThrows(AwsException.class, () -> service.getCluster("shared-cluster", "ap-southeast-1"));
+    }
+
+    @Test
+    void parameterUpdatesValidateAtomicallyAndResetAllToDefaults() {
+        ParameterGroup group = service.createParameterGroup("params", "memorydb_valkey7", "test", Map.of(), "us-east-1");
+        service.updateParameterGroup(group.name(), Map.of("maxmemory-policy", "allkeys-lru", "timeout", "10"), "us-east-1");
+        assertEquals("allkeys-lru", service.getParameterGroup("params", "us-east-1").parameters().get("maxmemory-policy"));
+        assertThrows(AwsException.class, () -> service.updateParameterGroup("params",
+                Map.of("maxmemory-policy", "volatile-lru", "unknown-parameter", "value"), "us-east-1"));
+        assertEquals("allkeys-lru", service.getParameterGroup("params", "us-east-1").parameters().get("maxmemory-policy"));
+        service.resetParameterGroup("params", true, List.of(), "us-east-1");
+        assertTrue(service.getParameterGroup("params", "us-east-1").parameters().isEmpty());
+        assertEquals("noeviction", service.describeParameters("params", "us-east-1").stream()
+                .filter(parameter -> parameter.name().equals("maxmemory-policy")).findFirst().orElseThrow().value());
+        assertEquals("InvalidParameterGroupStateFault", assertThrows(AwsException.class,
+                () -> service.deleteParameterGroup("default.memorydb-valkey7", "us-east-1")).jsonType());
+    }
+
+    @Test
+    void groupDeletionRejectsAttachedClusters() {
+        when(mdbConfig.mock()).thenReturn(true);
+        service.createParameterGroup("attached-params", "memorydb_valkey7", null, Map.of(), "us-east-1");
+        Subnet subnet = new Subnet();
+        subnet.setSubnetId("subnet-one");
+        subnet.setVpcId("vpc-one");
+        subnet.setAvailabilityZone("us-east-1a");
+        subnet.setRegion("us-east-1");
+        subnet.setOwnerId("000000000000");
+        when(ec2Service.requireSubnet("us-east-1", "subnet-one")).thenReturn(subnet);
+        SubnetGroup group = service.createSubnetGroup("attached-subnets", "test", List.of("subnet-one"), Map.of(), "us-east-1");
+        assertEquals("vpc-one", group.vpcId());
+        Cluster spec = cluster("attached-cluster", "open-access");
+        spec.setParameterGroupName("attached-params");
+        spec.setSubnetGroupName("attached-subnets");
+        service.createCluster(spec, "us-east-1");
+        assertEquals("InvalidParameterGroupStateFault", assertThrows(AwsException.class,
+                () -> service.deleteParameterGroup("attached-params", "us-east-1")).jsonType());
+        assertEquals("SubnetGroupInUseFault", assertThrows(AwsException.class,
+                () -> service.deleteSubnetGroup("attached-subnets", "us-east-1")).jsonType());
+        service.deleteCluster("attached-cluster", "us-east-1");
+        service.deleteParameterGroup("attached-params", "us-east-1");
+        service.deleteSubnetGroup("attached-subnets", "us-east-1");
+    }
+
+    @Test
+    void snapshotsRequireRealBackendAndDoNotCreateRecordsOnFailure() {
+        when(mdbConfig.mock()).thenReturn(true);
+        service.createCluster(cluster("metadata-only", "open-access"), "us-east-1");
+        assertEquals("InvalidClusterStateFault", assertThrows(AwsException.class,
+                () -> service.createSnapshot("metadata-only", "not-created", Map.of(), "us-east-1")).jsonType());
+        assertTrue(service.describeSnapshots(null, null, null, "us-east-1").isEmpty());
+        assertEquals("InvalidClusterStateFault", assertThrows(AwsException.class,
+                () -> service.deleteCluster("metadata-only", "us-east-1", "final-snapshot")).jsonType());
+        assertEquals(ClusterStatus.AVAILABLE, service.getCluster("metadata-only", "us-east-1").getStatus());
+        verify(containerManager, never()).captureSnapshot(any());
+        assertEquals("SnapshotNotFoundFault", assertThrows(AwsException.class,
+                () -> service.copySnapshot("missing", "copy", null, "us-east-1")).jsonType());
+    }
+
+    @Test
+    void userAuthenticationUpdateIsObservableAndRetainsTags() {
+        User spec = passwordUser("mutable-user", "initial-password");
+        spec.setTags(Map.of("owner", "initial"));
+        User user = service.createUser(spec, "us-east-1");
+        service.updateUser(user.getName(), "on ~app:* +@read", AuthMode.IAM, List.of(), "us-east-1");
+        User updated = service.describeUsers(user.getName(), "us-east-1").iterator().next();
+        assertEquals(AuthMode.IAM, updated.getAuthMode());
+        assertTrue(updated.getPasswords().isEmpty());
+        assertEquals("on ~app:* +@read", updated.getAccessString());
+        assertEquals(Map.of("owner", "initial"), service.listTags(user.getArn(), "us-east-1"));
+        assertEquals("UserNotFoundFault", assertThrows(AwsException.class,
+                () -> service.tagResource(user.getArn(), Map.of("owner", "other"), "eu-west-1")).jsonType());
+        assertEquals(Map.of("owner", "initial"), service.listTags(user.getArn(), "us-east-1"));
+    }
+
+    @Test
+    void eventsReflectLifecycleAndFilterBySourceRegionAndTime() {
+        service.createParameterGroup("event-params", "memorydb_valkey7", null, Map.of(), "us-east-1");
+        service.updateParameterGroup("event-params", Map.of("timeout", "10"), "us-east-1");
+        service.deleteParameterGroup("event-params", "us-east-1");
+        assertEquals(3, service.describeEvents("event-params", "parametergroup", null, null, null, "us-east-1").size());
+        assertTrue(service.describeEvents(null, "parametergroup", null, null, null, "eu-west-1").isEmpty());
+        assertTrue(service.describeEvents("event-params", "parametergroup", 0.0, 1.0, null, "us-east-1").isEmpty());
+    }
+
+    private User passwordUser(String name, String password) {
+        User user = new User();
+        user.setName(name);
+        user.setAuthMode(AuthMode.PASSWORD);
+        user.setPasswords(List.of(password));
+        user.setAccessString("on ~* +@all");
+        return user;
+    }
+
+    private Acl acl(String name, String userName) {
+        Acl acl = new Acl();
+        acl.setName(name);
+        acl.setUserNames(List.of(userName));
+        return acl;
+    }
+
+    private Cluster cluster(String name, String aclName) {
+        Cluster cluster = new Cluster();
+        cluster.setName(name);
+        cluster.setAclName(aclName);
+        return cluster;
+    }
+
+    @Test
+    void createWithoutDockerDaemonStillReachesAvailable() {
+        // tryStart() returns null when no Docker daemon is reachable. The cluster record is
+        // metadata, so the create still succeeds, the cluster reaches 'available' on the first
+        // describe (what SDK/Terraform waiters poll), and no auth proxy is started.
+        when(containerManager.tryStart(anyString(), anyString())).thenReturn(null);
+
+        Cluster spec = new Cluster();
+        spec.setName("no-docker-cluster");
+        spec.setAclName("open-access");
+        Cluster created = service.createCluster(spec, "us-east-1");
+
+        assertEquals(ClusterStatus.AVAILABLE, created.getStatus());
+        assertAwsShapedEndpoint("no-docker-cluster", created);
+        assertEquals(16400, created.getProxyPort());
+        verify(proxyManager, never()).startProxy(anyString(), anyBoolean(), anyInt(), anyString(), anyInt(), any());
+
+        assertEquals("no-docker-cluster", service.getCluster("no-docker-cluster").getName());
+
+        // Delete must not reach for a container that was never created.
+        service.deleteCluster("no-docker-cluster");
+        verify(containerManager, never()).stop(any());
     }
 }

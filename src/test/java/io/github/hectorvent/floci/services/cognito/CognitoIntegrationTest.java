@@ -22,6 +22,7 @@ import java.security.Signature;
 import java.security.spec.RSAPublicKeySpec;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Spliterators;
@@ -80,7 +81,9 @@ class CognitoIntegrationTest {
         JsonNode clientResponse = cognitoJson("CreateUserPoolClient", """
                 {
                   "UserPoolId": "%s",
-                  "ClientName": "jwt-client"
+                  "ClientName": "jwt-client",
+                  "ExplicitAuthFlows": ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+                                        "ALLOW_REFRESH_TOKEN_AUTH"]
                 }
                 """.formatted(poolId));
         clientId = clientResponse.path("UserPoolClient").path("ClientId").asText();
@@ -132,6 +135,77 @@ class CognitoIntegrationTest {
                 .body("AuthenticationResult.AccessToken", org.hamcrest.Matchers.notNullValue())
                 .body("AuthenticationResult.IdToken", org.hamcrest.Matchers.notNullValue())
                 .body("AuthenticationResult.RefreshToken", org.hamcrest.Matchers.notNullValue());
+    }
+
+    @Test
+    @Order(2)
+    void initiateAuthRejectsUnrecognizedAuthFlow() {
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "UNKNOWN_FLOW",
+                  "AuthParameters": {
+                    "USERNAME": "%s"
+                  }
+                }
+                """.formatted(clientId, USERNAME))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterException"))
+                .body("AuthenticationResult", org.hamcrest.Matchers.nullValue());
+    }
+
+    @Test
+    @Order(2)
+    void adminInitiateAuthRejectsUnrecognizedAuthFlow() {
+        cognitoAction("AdminInitiateAuth", """
+                {
+                  "UserPoolId": "%s",
+                  "ClientId": "%s",
+                  "AuthFlow": "UNKNOWN_FLOW",
+                  "AuthParameters": {
+                    "USERNAME": "%s"
+                  }
+                }
+                """.formatted(poolId, clientId, USERNAME))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterException"))
+                .body("AuthenticationResult", org.hamcrest.Matchers.nullValue());
+    }
+
+    @Test
+    @Order(2)
+    void adminInitiateAuthNoSrpFlowRequiresThePassword() {
+        cognitoAction("AdminInitiateAuth", """
+                {
+                  "UserPoolId": "%s",
+                  "ClientId": "%s",
+                  "AuthFlow": "ADMIN_NO_SRP_AUTH",
+                  "AuthParameters": {
+                    "USERNAME": "%s",
+                    "PASSWORD": "wrong-password"
+                  }
+                }
+                """.formatted(poolId, clientId, USERNAME))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("NotAuthorizedException"));
+
+        cognitoAction("AdminInitiateAuth", """
+                {
+                  "UserPoolId": "%s",
+                  "ClientId": "%s",
+                  "AuthFlow": "ADMIN_NO_SRP_AUTH",
+                  "AuthParameters": {
+                    "USERNAME": "%s",
+                    "PASSWORD": "%s"
+                  }
+                }
+                """.formatted(poolId, clientId, USERNAME, PASSWORD))
+                .then()
+                .statusCode(200)
+                .body("AuthenticationResult.AccessToken", org.hamcrest.Matchers.notNullValue());
     }
 
     @Test
@@ -228,6 +302,20 @@ class CognitoIntegrationTest {
                 .orElseThrow();
         assertTrue(sub.path("Required").asBoolean(), "sub must be Required");
         assertFalse(sub.path("Mutable").asBoolean(), "sub must not be Mutable");
+    }
+
+    @Test
+    @Order(5)
+    void describeUnknownUserPoolNamesPoolInResourceNotFoundMessage() {
+        String missingPoolId = "us-east-1_000000000";
+
+        cognitoAction("DescribeUserPool", """
+                { "UserPoolId": "%s" }
+                """.formatted(missingPoolId))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("ResourceNotFoundException"))
+                .body("message", equalTo("User pool " + missingPoolId + " does not exist."));
     }
 
     @Test
@@ -340,6 +428,55 @@ class CognitoIntegrationTest {
         String destination = signUpResponse.jsonPath().getString("CodeDeliveryDetails.Destination");
         assertThat(destination, notNullValue());
         assertThat(destination, containsString("4567"));
+    }
+
+    @Test
+    void signUpEnforcesTheConfiguredPasswordPolicy() throws Exception {
+        JsonNode poolResponse = cognitoJson("CreateUserPool", """
+                {
+                  "PoolName": "StrictPasswordPolicyPool",
+                  "Policies": {
+                    "PasswordPolicy": {
+                      "MinimumLength": 12,
+                      "RequireUppercase": true,
+                      "RequireLowercase": true,
+                      "RequireNumbers": true,
+                      "RequireSymbols": true,
+                      "PasswordHistorySize": 10
+                    }
+                  }
+                }
+                """);
+        String strictPoolId = poolResponse.path("UserPool").path("Id").asText();
+
+        JsonNode clientResponse = cognitoJson("CreateUserPoolClient", """
+                {
+                  "UserPoolId": "%s",
+                  "ClientName": "strict-password-policy-client"
+                }
+                """.formatted(strictPoolId));
+        String strictClientId = clientResponse.path("UserPoolClient").path("ClientId").asText();
+
+        cognitoAction("SignUp", """
+                {
+                  "ClientId": "%s",
+                  "Username": "invalid-password-user",
+                  "Password": "Short1!"
+                }
+                """.formatted(strictClientId))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("InvalidPasswordException"));
+
+        cognitoAction("SignUp", """
+                {
+                  "ClientId": "%s",
+                  "Username": "valid-password-user",
+                  "Password": "ValidPassword1!"
+                }
+                """.formatted(strictClientId))
+                .then()
+                .statusCode(200);
     }
 
     @Test
@@ -810,7 +947,7 @@ class CognitoIntegrationTest {
                 }
                 """.formatted(poolId))
                 .then()
-                .statusCode(404);
+                .statusCode(400);
     }
 
     // ── UpdateGroup & ListUsersInGroup ────────────────────────────────
@@ -1440,7 +1577,7 @@ class CognitoIntegrationTest {
                 }
                 """.formatted(clientId, poolId))
                 .then()
-                .statusCode(404);
+                .statusCode(400);
     }
 
     @Test
@@ -1864,7 +2001,8 @@ class CognitoIntegrationTest {
         JsonNode clientResponse = cognitoJson("CreateUserPoolClient", """
                 {
                   "UserPoolId": "%s",
-                  "ClientName": "del-client"
+                  "ClientName": "del-client",
+                  "ExplicitAuthFlows": ["ALLOW_USER_PASSWORD_AUTH"]
                 }
                 """.formatted(delPoolId));
         String delClientId = clientResponse.path("UserPoolClient").path("ClientId").asText();
@@ -2349,6 +2487,432 @@ class CognitoIntegrationTest {
         assertEquals("Google", identity.path("providerType").asText());
         assertTrue(identity.path("issuer").isNull());
         assertFalse(identity.path("primary").asBoolean());
+    }
+
+    // ── Issue #2113: InitiateAuth REFRESH_TOKEN_AUTH rejects garbage tokens ─
+
+    @Test
+    @Order(101)
+    void initiateAuthRefreshTokenAuthRejectsInvalidRefreshToken() {
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "REFRESH_TOKEN_AUTH",
+                  "AuthParameters": { "REFRESH_TOKEN": "invalid-refresh-token" }
+                }
+                """.formatted(clientId))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("NotAuthorizedException"));
+    }
+
+    @Test
+    @Order(102)
+    void initiateAuthRefreshTokenAuthRejectsUnknownWellFormedRefreshToken() {
+        // Well-formed shape (poolId|username|clientId|iat|nonce) but for a user that
+        // does not exist in this pool — must still be rejected, not silently accepted.
+        String bogusToken = java.util.Base64.getEncoder().withoutPadding().encodeToString(
+                (poolId + "|nonexistent-user|" + clientId + "|" + System.currentTimeMillis() + "|"
+                        + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8));
+
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "REFRESH_TOKEN_AUTH",
+                  "AuthParameters": { "REFRESH_TOKEN": "%s" }
+                }
+                """.formatted(clientId, bogusToken))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("NotAuthorizedException"));
+    }
+
+    @Test
+    @Order(102)
+    void initiateAuthRefreshTokenAuthRejectsTokenWithNonNumericIssuedAt() {
+        // Well-formed shape (5 base64 parts), but the issued-at field is not a number.
+        // Must fail with NotAuthorizedException, not a 500 from an unguarded parseLong.
+        String bogusToken = java.util.Base64.getEncoder().withoutPadding().encodeToString(
+                (poolId + "|" + USERNAME + "|" + clientId + "|not-a-number|"
+                        + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8));
+
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "REFRESH_TOKEN_AUTH",
+                  "AuthParameters": { "REFRESH_TOKEN": "%s" }
+                }
+                """.formatted(clientId, bogusToken))
+                .then()
+                .statusCode(400)
+                .body("__type", org.hamcrest.Matchers.equalTo("NotAuthorizedException"));
+    }
+
+    /**
+     * github.com/floci-io/floci/issues/2864: found while addressing review feedback on the
+     * identity-provider version of this bug (#2858) - deleteUserPool cascaded to groups and
+     * identity providers but not users or resource servers, so a pool id pinned with the
+     * floci:override-id tag and recreated after delete inherited the deleted pool's users,
+     * password hashes included. This is the more serious of the two orphan cases.
+     */
+    @Test
+    @Order(103)
+    void deletedUserPoolDoesNotLeaveOrphanedUsersForAReusedPoolId() throws Exception {
+        String pinnedId = "us-east-1_userorph1";
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "UserOrphanPool",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("AdminCreateUser", """
+                {
+                  "UserPoolId": "%s",
+                  "Username": "orphanuser",
+                  "MessageAction": "SUPPRESS"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "UserOrphanPoolAgain",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        assertEquals(0, cognitoJson("ListUsers", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId)).path("Users").size(),
+                "a recreated pool must not inherit the deleted pool's users");
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+    }
+
+    /** Same as above, for resource servers (issue #2864's second orphan case). */
+    @Test
+    @Order(104)
+    void deletedUserPoolDoesNotLeaveOrphanedResourceServersForAReusedPoolId() throws Exception {
+        String pinnedId = "us-east-1_rsorph1";
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "ResourceServerOrphanPool",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("CreateResourceServer", """
+                {
+                  "UserPoolId": "%s",
+                  "Identifier": "https://api.example.com",
+                  "Name": "API",
+                  "Scopes": [{"ScopeName": "read", "ScopeDescription": "r"}]
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        cognitoAction("CreateUserPool", """
+                {
+                  "PoolName": "ResourceServerOrphanPoolAgain",
+                  "UserPoolTags": {"floci:override-id": "%s"}
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+
+        assertEquals(0, cognitoJson("ListResourceServers", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId)).path("ResourceServers").size(),
+                "a recreated pool must not inherit the deleted pool's resource servers");
+
+        cognitoAction("DeleteUserPool", """
+                {
+                  "UserPoolId": "%s"
+                }
+                """.formatted(pinnedId))
+                .then()
+                .statusCode(200);
+    }
+
+    // ── Issue #3926: USER_AUTH choice-based flow ────────────────────────
+    // Self-contained pool/user rather than the suite's shared USERNAME: by this point in the
+    // ordered sequence several earlier tests have changed alice's password, so PASSWORD no
+    // longer matches what AdminSetUserPassword set up in @BeforeAll.
+
+    @Test
+    @Order(105)
+    void initiateAuthWithUserAuthNoPreferredChallengeReturnsSelectChallengeOverTheWire() throws Exception {
+        String userAuthPoolId = cognitoJson("CreateUserPool", """
+                { "PoolName": "UserAuthWirePool" }
+                """).path("UserPool").path("Id").asText();
+        String userAuthClientId = cognitoJson("CreateUserPoolClient", """
+                { "UserPoolId": "%s", "ClientName": "user-auth-client", "ExplicitAuthFlows": ["ALLOW_USER_AUTH"] }
+                """.formatted(userAuthPoolId)).path("UserPoolClient").path("ClientId").asText();
+        cognitoAction("AdminCreateUser", """
+                { "UserPoolId": "%s", "Username": "dana",
+                  "UserAttributes": [{ "Name": "email", "Value": "dana@example.com" }] }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+        cognitoAction("AdminSetUserPassword", """
+                { "UserPoolId": "%s", "Username": "dana", "Password": "Dana1234!", "Permanent": true }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+
+        JsonNode result = cognitoJson("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "USER_AUTH",
+                  "AuthParameters": { "USERNAME": "dana" }
+                }
+                """.formatted(userAuthClientId));
+
+        assertEquals("SELECT_CHALLENGE", result.path("ChallengeName").asText());
+        assertFalse(result.path("Session").asText().isBlank());
+        List<String> available = new ArrayList<>();
+        result.path("AvailableChallenges").forEach(n -> available.add(n.asText()));
+        assertTrue(available.contains("PASSWORD"), "expected PASSWORD in " + available);
+    }
+
+    @Test
+    @Order(106)
+    void initiateAuthWithUserAuthPreferredChallengePasswordCompletesOverTheWire() throws Exception {
+        String userAuthPoolId = cognitoJson("CreateUserPool", """
+                { "PoolName": "UserAuthWirePasswordPool" }
+                """).path("UserPool").path("Id").asText();
+        String userAuthClientId = cognitoJson("CreateUserPoolClient", """
+                { "UserPoolId": "%s", "ClientName": "user-auth-client", "ExplicitAuthFlows": ["ALLOW_USER_AUTH"] }
+                """.formatted(userAuthPoolId)).path("UserPoolClient").path("ClientId").asText();
+        cognitoAction("AdminCreateUser", """
+                { "UserPoolId": "%s", "Username": "erin",
+                  "UserAttributes": [{ "Name": "email", "Value": "erin@example.com" }] }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+        cognitoAction("AdminSetUserPassword", """
+                { "UserPoolId": "%s", "Username": "erin", "Password": "Erin1234!", "Permanent": true }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+
+        JsonNode challenge = cognitoJson("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "USER_AUTH",
+                  "AuthParameters": { "USERNAME": "erin", "PREFERRED_CHALLENGE": "PASSWORD" }
+                }
+                """.formatted(userAuthClientId));
+        assertEquals("PASSWORD", challenge.path("ChallengeName").asText());
+        String session = challenge.path("Session").asText();
+
+        JsonNode result = cognitoJson("RespondToAuthChallenge", """
+                {
+                  "ClientId": "%s",
+                  "ChallengeName": "PASSWORD",
+                  "Session": "%s",
+                  "ChallengeResponses": { "USERNAME": "erin", "PASSWORD": "Erin1234!" }
+                }
+                """.formatted(userAuthClientId, session));
+
+        assertFalse(result.path("AuthenticationResult").path("AccessToken").asText().isBlank(),
+                "responding to the PASSWORD challenge with the right password should issue tokens");
+    }
+
+    @Test
+    @Order(107)
+    void respondToSelectChallengeOmitsAvailableChallengesOverTheWire() throws Exception {
+        // Reproduces #4003: AvailableChallenges is declared on InitiateAuthResponse only, yet the
+        // SELECT_CHALLENGE path used to copy it onto the RespondToAuthChallenge response too.
+        String userAuthPoolId = cognitoJson("CreateUserPool", """
+                { "PoolName": "UserAuthWireSelectChallengePool" }
+                """).path("UserPool").path("Id").asText();
+        String userAuthClientId = cognitoJson("CreateUserPoolClient", """
+                { "UserPoolId": "%s", "ClientName": "user-auth-client", "ExplicitAuthFlows": ["ALLOW_USER_AUTH"] }
+                """.formatted(userAuthPoolId)).path("UserPoolClient").path("ClientId").asText();
+        cognitoAction("AdminCreateUser", """
+                { "UserPoolId": "%s", "Username": "gale",
+                  "UserAttributes": [{ "Name": "email", "Value": "gale@example.com" }] }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+        cognitoAction("AdminSetUserPassword", """
+                { "UserPoolId": "%s", "Username": "gale", "Password": "Gale1234!", "Permanent": true }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+
+        JsonNode init = cognitoJson("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "USER_AUTH",
+                  "AuthParameters": { "USERNAME": "gale" }
+                }
+                """.formatted(userAuthClientId));
+        assertEquals("SELECT_CHALLENGE", init.path("ChallengeName").asText());
+        assertTrue(init.has("AvailableChallenges"), "InitiateAuth should keep advertising AvailableChallenges");
+        String session = init.path("Session").asText();
+
+        JsonNode challenge = cognitoJson("RespondToAuthChallenge", """
+                {
+                  "ClientId": "%s",
+                  "ChallengeName": "SELECT_CHALLENGE",
+                  "Session": "%s",
+                  "ChallengeResponses": { "USERNAME": "gale", "ANSWER": "PASSWORD" }
+                }
+                """.formatted(userAuthClientId, session));
+
+        assertEquals("PASSWORD", challenge.path("ChallengeName").asText());
+        assertFalse(challenge.has("AvailableChallenges"),
+                "RespondToAuthChallengeResponse does not declare AvailableChallenges: " + challenge);
+    }
+
+    @Test
+    @Order(108)
+    void initiateAuthWithUserAuthRejectsALiteTierPoolOverTheWire() throws Exception {
+        String liteTierPoolId = cognitoJson("CreateUserPool", """
+                { "PoolName": "UserAuthLiteTierPool", "UserPoolTier": "LITE" }
+                """).path("UserPool").path("Id").asText();
+        String liteTierClientId = cognitoJson("CreateUserPoolClient", """
+                { "UserPoolId": "%s", "ClientName": "user-auth-client", "ExplicitAuthFlows": ["ALLOW_USER_AUTH"] }
+                """.formatted(liteTierPoolId)).path("UserPoolClient").path("ClientId").asText();
+        cognitoAction("AdminCreateUser", """
+                { "UserPoolId": "%s", "Username": "finn",
+                  "UserAttributes": [{ "Name": "email", "Value": "finn@example.com" }] }
+                """.formatted(liteTierPoolId))
+                .then().statusCode(200);
+        cognitoAction("AdminSetUserPassword", """
+                { "UserPoolId": "%s", "Username": "finn", "Password": "Finn1234!", "Permanent": true }
+                """.formatted(liteTierPoolId))
+                .then().statusCode(200);
+
+        cognitoAction("InitiateAuth", """
+                {
+                  "ClientId": "%s",
+                  "AuthFlow": "USER_AUTH",
+                  "AuthParameters": { "USERNAME": "finn" }
+                }
+                """.formatted(liteTierClientId))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterException"));
+    }
+
+    @Test
+    @Order(109)
+    void respondToAuthChallengeRejectsPasswordWithNoSessionOverTheWire() throws Exception {
+        // Reproduces the bypass reported on #3930: without session tracking, RespondToAuthChallenge
+        // would accept a bare USERNAME/PASSWORD pair with ChallengeName=PASSWORD and sign the user
+        // in without InitiateAuth ever running, skipping the tier gate entirely.
+        String userAuthPoolId = cognitoJson("CreateUserPool", """
+                { "PoolName": "UserAuthWireNoSessionPool" }
+                """).path("UserPool").path("Id").asText();
+        String userAuthClientId = cognitoJson("CreateUserPoolClient", """
+                { "UserPoolId": "%s", "ClientName": "user-auth-client", "ExplicitAuthFlows": ["ALLOW_USER_AUTH"] }
+                """.formatted(userAuthPoolId)).path("UserPoolClient").path("ClientId").asText();
+        cognitoAction("AdminCreateUser", """
+                { "UserPoolId": "%s", "Username": "gale",
+                  "UserAttributes": [{ "Name": "email", "Value": "gale@example.com" }] }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+        cognitoAction("AdminSetUserPassword", """
+                { "UserPoolId": "%s", "Username": "gale", "Password": "Gale1234!", "Permanent": true }
+                """.formatted(userAuthPoolId))
+                .then().statusCode(200);
+
+        cognitoAction("RespondToAuthChallenge", """
+                {
+                  "ClientId": "%s",
+                  "ChallengeName": "PASSWORD",
+                  "Session": "no-such-session",
+                  "ChallengeResponses": { "USERNAME": "gale", "PASSWORD": "Gale1234!" }
+                }
+                """.formatted(userAuthClientId))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("NotAuthorizedException"));
+    }
+
+    @Test
+    @Order(110)
+    void clientWithoutExplicitAuthFlowsGetsTheAwsDefaultOverTheWire() throws Exception {
+        String defaultPoolId = cognitoJson("CreateUserPool", """
+                { "PoolName": "DefaultFlowsPool" }
+                """).path("UserPool").path("Id").asText();
+        JsonNode created = cognitoJson("CreateUserPoolClient", """
+                { "UserPoolId": "%s", "ClientName": "default-flows-client" }
+                """.formatted(defaultPoolId)).path("UserPoolClient");
+        String defaultClientId = created.path("ClientId").asText();
+
+        // As on AWS, the stored and described value is empty; only the auth-time gate applies the default.
+        assertEquals(List.of(), textValues(created.path("ExplicitAuthFlows")));
+        JsonNode described = cognitoJson("DescribeUserPoolClient", """
+                { "UserPoolId": "%s", "ClientId": "%s" }
+                """.formatted(defaultPoolId, defaultClientId)).path("UserPoolClient");
+        assertEquals(List.of(), textValues(described.path("ExplicitAuthFlows")));
+
+        cognitoAction("AdminCreateUser", """
+                { "UserPoolId": "%s", "Username": "flora",
+                  "UserAttributes": [{ "Name": "email", "Value": "flora@example.com" }] }
+                """.formatted(defaultPoolId)).then().statusCode(200);
+        cognitoAction("AdminSetUserPassword", """
+                { "UserPoolId": "%s", "Username": "flora", "Password": "Perm1234!", "Permanent": true }
+                """.formatted(defaultPoolId)).then().statusCode(200);
+
+        cognitoAction("InitiateAuth", """
+                { "ClientId": "%s", "AuthFlow": "USER_PASSWORD_AUTH",
+                  "AuthParameters": { "USERNAME": "flora", "PASSWORD": "Perm1234!" } }
+                """.formatted(defaultClientId))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterException"))
+                .body("message", equalTo("USER_PASSWORD_AUTH flow not enabled for this client"));
+        cognitoAction("AdminInitiateAuth", """
+                { "UserPoolId": "%s", "ClientId": "%s", "AuthFlow": "ADMIN_USER_PASSWORD_AUTH",
+                  "AuthParameters": { "USERNAME": "flora", "PASSWORD": "Perm1234!" } }
+                """.formatted(defaultPoolId, defaultClientId))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterException"));
+    }
+
+    private static List<String> textValues(JsonNode array) {
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : array) {
+            values.add(value.asText());
+        }
+        return values;
     }
 
     private static JsonNode decodeJwtPayload(String token) throws Exception {

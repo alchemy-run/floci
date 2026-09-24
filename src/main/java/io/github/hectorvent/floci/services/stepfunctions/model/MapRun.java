@@ -4,31 +4,33 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
- * In-memory Distributed Map Run. AWS ARN shape:
- * {@code arn:aws:states:region:account:mapRun:stateMachineName/executionName:uuid}
+ * A distributed Map run, keyed by its Map run ARN. It is kept while running and after success or
+ * failure, so the {@code mapRunArn} of a {@code MapRunStarted} event resolves through
+ * {@code DescribeMapRun}. A Map cancels the remaining items on the first failure, so a failed run
+ * reports those as aborted.
  */
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MapRun {
     private String mapRunArn;
+    private String status;
+    /** The execution of the state machine whose Map state opened this run. */
     private String executionArn;
-    private String status = "RUNNING";
     private double startDate;
-    private Double stopDate;
-    private int maxConcurrency;
-    private double toleratedFailurePercentage;
-    private long toleratedFailureCount;
-    private int pending;
-    private int running;
-    private int succeeded;
-    private int failed;
-    private int timedOut;
-    private int aborted;
-    private int total;
+    private double stopDate;
+    /** Items of the run, which is also the number of child executions it ran. */
+    private int itemCount;
+    private int succeededCount;
+    private int failedCount;
+    /** The Map's declared MaxConcurrency, with an unbounded Map held as Integer.MAX_VALUE. */
+    private int executionCount;
+    private int succeededExecutionCount;
+    private int failedExecutionCount;
 
-    public MapRun() {
-        this.startDate = System.currentTimeMillis() / 1000.0;
-    }
+    private long toleratedFailureCount;
+    private double toleratedFailurePercentage;
+
+    private int maxConcurrency;
 
     public String getMapRunArn() { return mapRunArn; }
     public void setMapRunArn(String mapRunArn) { this.mapRunArn = mapRunArn; }
@@ -36,46 +38,34 @@ public class MapRun {
     public String getExecutionArn() { return executionArn; }
     public void setExecutionArn(String executionArn) { this.executionArn = executionArn; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
     public double getStartDate() { return startDate; }
     public void setStartDate(double startDate) { this.startDate = startDate; }
 
-    public Double getStopDate() { return stopDate; }
-    public void setStopDate(Double stopDate) { this.stopDate = stopDate; }
+    public double getStopDate() { return stopDate; }
+    public void setStopDate(double stopDate) { this.stopDate = stopDate; }
+
+    public int getItemCount() { return itemCount; }
+    public void setItemCount(int itemCount) { this.itemCount = itemCount; }
+    /** A run recorded before the status was kept is one whose every item succeeded. */
+    public String getStatus() { return status == null ? "SUCCEEDED" : status; }
+    public void setStatus(String status) { this.status = status; }
+    public int getSucceededCount() { return status == null ? itemCount : succeededCount; }
+    public void setSucceededCount(int succeededCount) { this.succeededCount = succeededCount; }
+    public int getFailedCount() { return failedCount; }
+    public void setFailedCount(int failedCount) { this.failedCount = failedCount; }
+
+    public long getToleratedFailureCount() { return toleratedFailureCount; }
+    public void setToleratedFailureCount(long count) { this.toleratedFailureCount = count; }
+    public double getToleratedFailurePercentage() { return toleratedFailurePercentage; }
+    public void setToleratedFailurePercentage(double percentage) { this.toleratedFailurePercentage = percentage; }
+
+    public int getExecutionCount() { return executionCount; }
+    public void setExecutionCount(int executionCount) { this.executionCount = executionCount; }
+    public int getSucceededExecutionCount() { return status == null ? executionCount : succeededExecutionCount; }
+    public void setSucceededExecutionCount(int count) { this.succeededExecutionCount = count; }
+    public int getFailedExecutionCount() { return failedExecutionCount; }
+    public void setFailedExecutionCount(int count) { this.failedExecutionCount = count; }
 
     public int getMaxConcurrency() { return maxConcurrency; }
     public void setMaxConcurrency(int maxConcurrency) { this.maxConcurrency = maxConcurrency; }
-
-    public double getToleratedFailurePercentage() { return toleratedFailurePercentage; }
-    public void setToleratedFailurePercentage(double toleratedFailurePercentage) {
-        this.toleratedFailurePercentage = toleratedFailurePercentage;
-    }
-
-    public long getToleratedFailureCount() { return toleratedFailureCount; }
-    public void setToleratedFailureCount(long toleratedFailureCount) {
-        this.toleratedFailureCount = toleratedFailureCount;
-    }
-
-    public int getPending() { return pending; }
-    public void setPending(int pending) { this.pending = pending; }
-
-    public int getRunning() { return running; }
-    public void setRunning(int running) { this.running = running; }
-
-    public int getSucceeded() { return succeeded; }
-    public void setSucceeded(int succeeded) { this.succeeded = succeeded; }
-
-    public int getFailed() { return failed; }
-    public void setFailed(int failed) { this.failed = failed; }
-
-    public int getTimedOut() { return timedOut; }
-    public void setTimedOut(int timedOut) { this.timedOut = timedOut; }
-
-    public int getAborted() { return aborted; }
-    public void setAborted(int aborted) { this.aborted = aborted; }
-
-    public int getTotal() { return total; }
-    public void setTotal(int total) { this.total = total; }
 }

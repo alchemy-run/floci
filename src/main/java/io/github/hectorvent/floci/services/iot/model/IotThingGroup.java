@@ -5,6 +5,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.TreeMap;
 
 @RegisterForReflection
 public class IotThingGroup {
@@ -16,6 +17,7 @@ public class IotThingGroup {
     private Map<String, String> attributes = new HashMap<>();
     private long version = 1L;
     private Instant creationDate;
+    private Map<String, String> tags = new TreeMap<>();
 
     public String getThingGroupName() { return thingGroupName; }
     public void setThingGroupName(String thingGroupName) { this.thingGroupName = thingGroupName; }
@@ -37,4 +39,7 @@ public class IotThingGroup {
 
     public Instant getCreationDate() { return creationDate; }
     public void setCreationDate(Instant creationDate) { this.creationDate = creationDate; }
+
+    public Map<String, String> getTags() { return tags == null ? Map.of() : tags; }
+    public void setTags(Map<String, String> tags) { this.tags = tags == null ? new TreeMap<>() : new TreeMap<>(tags); }
 }

@@ -30,10 +30,13 @@ public class CodePipelineExecution {
     private List<Map<String, String>> variables = new ArrayList<>();
     private Map<String, String> trigger = new LinkedHashMap<>();
     private List<ActionExecution> actionExecutions = new ArrayList<>();
+    private Map<String, String> stageExecutionStatuses = new LinkedHashMap<>();
     private String currentStage;
-    private boolean stopRequested;
-    private boolean abandon;
+    private volatile boolean stopRequested;
+    private volatile boolean abandon;
     private String rollbackTargetPipelineExecutionId;
+    private String resumeStageName;
+    private boolean retryFailedActionsOnly;
 
     public String getAccountId() {
         return accountId;
@@ -163,6 +166,15 @@ public class CodePipelineExecution {
         this.actionExecutions = actionExecutions;
     }
 
+    public Map<String, String> getStageExecutionStatuses() {
+        return stageExecutionStatuses;
+    }
+
+    public void setStageExecutionStatuses(Map<String, String> stageExecutionStatuses) {
+        this.stageExecutionStatuses = stageExecutionStatuses == null
+                ? new LinkedHashMap<>() : stageExecutionStatuses;
+    }
+
     public String getCurrentStage() {
         return currentStage;
     }
@@ -193,6 +205,22 @@ public class CodePipelineExecution {
 
     public void setRollbackTargetPipelineExecutionId(String rollbackTargetPipelineExecutionId) {
         this.rollbackTargetPipelineExecutionId = rollbackTargetPipelineExecutionId;
+    }
+
+    public String getResumeStageName() {
+        return resumeStageName;
+    }
+
+    public void setResumeStageName(String resumeStageName) {
+        this.resumeStageName = resumeStageName;
+    }
+
+    public boolean isRetryFailedActionsOnly() {
+        return retryFailedActionsOnly;
+    }
+
+    public void setRetryFailedActionsOnly(boolean retryFailedActionsOnly) {
+        this.retryFailedActionsOnly = retryFailedActionsOnly;
     }
 
     @RegisterForReflection

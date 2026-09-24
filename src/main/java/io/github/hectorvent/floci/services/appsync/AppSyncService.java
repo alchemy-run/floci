@@ -3,40 +3,84 @@ package io.github.hectorvent.floci.services.appsync;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.acm.AcmService;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncGraphqlExecutor;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncJsEngine;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlContext;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlEngine;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlResult;
-import io.github.hectorvent.floci.services.acm.AcmService;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaCreationWorker;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaRegistry;
-import io.github.hectorvent.floci.services.appsync.model.*;
+import io.github.hectorvent.floci.services.appsync.model.AdditionalAuthenticationProvider;
+import io.github.hectorvent.floci.services.appsync.model.ApiAssociation;
+import io.github.hectorvent.floci.services.appsync.model.ApiCache;
+import io.github.hectorvent.floci.services.appsync.model.ApiKey;
+import io.github.hectorvent.floci.services.appsync.model.AppSyncType;
+import io.github.hectorvent.floci.services.appsync.model.AuthenticationType;
+import io.github.hectorvent.floci.services.appsync.model.ChannelNamespace;
+import io.github.hectorvent.floci.services.appsync.model.DataSource;
+import io.github.hectorvent.floci.services.appsync.model.DataSourceType;
+import io.github.hectorvent.floci.services.appsync.model.DomainName;
+import io.github.hectorvent.floci.services.appsync.model.FunctionConfiguration;
+import io.github.hectorvent.floci.services.appsync.model.GraphqlApi;
+import io.github.hectorvent.floci.services.appsync.model.Resolver;
+import io.github.hectorvent.floci.services.appsync.model.ResolverKind;
+import io.github.hectorvent.floci.services.appsync.model.ResolverRuntimeName;
+import io.github.hectorvent.floci.services.appsync.model.SchemaCreationStatus;
+import io.github.hectorvent.floci.services.appsync.model.SchemaCreationStatusType;
+import io.github.hectorvent.floci.services.appsync.model.SourceApiAssociation;
+import io.github.hectorvent.floci.services.appsync.model.SourceApiAssociationConfig;
+import io.github.hectorvent.floci.services.appsync.model.SourceApiAssociationSummary;
+import io.github.hectorvent.floci.services.appsync.model.TypeFormat;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.*;
+import java.net.URI;
+import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Base64;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class AppSyncService {
     private static final Logger LOG = Logger.getLogger(AppSyncService.class);
 
+    // AWS issues API keys as "da2-" followed by 26 lowercase alphanumerics, and ApiKey.id is
+    // that value: it is what clients send in the x-api-key header.
+    private static final String API_KEY_PREFIX = "da2-";
+    private static final String API_KEY_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+    private static final int API_KEY_RANDOM_LENGTH = 26;
+
     private final StorageBackend<String, GraphqlApi> apiStore;
-    private final StorageBackend<String, String> schemaStore;
+    private final AccountAwareStorageBackend<String> schemaStore;
     private final AccountAwareStorageBackend<SchemaCreationStatus> schemaStatusStore;
     private final StorageBackend<String, DataSource> dataSourceStore;
     private final StorageBackend<String, Resolver> resolverStore;
     private final StorageBackend<String, FunctionConfiguration> functionStore;
     private final StorageBackend<String, ApiKey> apiKeyStore;
+    // Instance field on purpose: a static SecureRandom would be captured in the native image heap.
+    private final SecureRandom apiKeyRandom = new SecureRandom();
     private final StorageBackend<String, AppSyncType> typeStore;
     private final StorageBackend<String, DomainName> domainStore;
     private final StorageBackend<String, String> associationStore;
@@ -52,17 +96,20 @@ public class AppSyncService {
     private final AppSyncJsEngine jsEngine;
     private final AppSyncGraphqlExecutor graphqlExecutor;
     private final Instance<AcmService> acmService;
+    private final Clock clock;
+    private final String baseUrl;
 
     @Inject
     public AppSyncService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
                           SchemaRegistry schemaRegistry, SchemaCreationWorker schemaCreationWorker,
                           Instance<RequestContext> requestContextInstance, ObjectMapper objectMapper,
                           AccountAwareStorageBackend<SchemaCreationStatus> schemaStatusStore,
-                          StorageBackend<String, String> schemaStore,
+                          AccountAwareStorageBackend<String> schemaStore,
                           AppSyncVtlEngine vtlEngine,
                           AppSyncJsEngine jsEngine,
                           AppSyncGraphqlExecutor graphqlExecutor,
-                          Instance<AcmService> acmService) {
+                          Instance<AcmService> acmService,
+                          Clock clock) {
         this.apiStore = storageFactory.create("appsync", "appsync-apis.json", new TypeReference<>() {});
         this.schemaStore = schemaStore;
         this.schemaStatusStore = schemaStatusStore;
@@ -85,6 +132,8 @@ public class AppSyncService {
         this.jsEngine = jsEngine;
         this.graphqlExecutor = graphqlExecutor;
         this.acmService = acmService;
+        this.clock = clock;
+        this.baseUrl = trimTrailingSlash(config.effectiveBaseUrl());
     }
 
     // ──────────────────────────── GraphQL API ────────────────────────────
@@ -139,13 +188,11 @@ public class AppSyncService {
                 additionalList, new TypeReference<List<AdditionalAuthenticationProvider>>() {});
             api.setAdditionalAuthenticationProviders(providers);
         }
+        assertUniqueAuthProviders(api);
 
         api.setArn(buildApiArn(apiId, region));
 
-        Map<String, String> uris = new HashMap<>();
-        uris.put("GRAPHQL", "https://" + apiId + ".appsync-api." + region + ".amazonaws.com/graphql");
-        uris.put("REALTIME", "wss://" + apiId + ".appsync-api." + region + ".amazonaws.com/graphql/realtime");
-        api.setUris(uris);
+        api.setUris(graphqlApiUris(apiId, region));
 
         Map<String, Object> tags = castMap(request.get("tags"));
         if (tags != null) {
@@ -161,11 +208,14 @@ public class AppSyncService {
 
     public GraphqlApi getGraphqlApi(String apiId) {
         return apiStore.get(apiId)
+                .map(this::refreshGraphqlApiUris)
                 .orElseThrow(() -> new AwsException("NotFoundException", "GraphQL API not found: " + apiId, 404));
     }
 
     public Page<GraphqlApi> listGraphqlApis(Integer maxResults, String nextToken) {
-        return paginate(apiStore.scan(k -> true), nextToken, maxResults);
+        List<GraphqlApi> apis = apiStore.scan(k -> true);
+        apis.forEach(this::refreshGraphqlApiUris);
+        return paginate(apis, nextToken, maxResults);
     }
 
     @SuppressWarnings("unchecked")
@@ -213,6 +263,7 @@ public class AppSyncService {
                     objectMapper.convertValue(additionalList, new TypeReference<List<AdditionalAuthenticationProvider>>() {}));
             }
         }
+        assertUniqueAuthProviders(existing);
         apiStore.put(apiId, existing);
         return existing;
     }
@@ -416,7 +467,7 @@ public class AppSyncService {
             return false;
         }
         return apiKeyStore.scan(k -> k.startsWith(apiId + "::")).stream()
-                .anyMatch(key -> apiKeyHeader.equals(key.getId()) || apiKeyHeader.equals(key.getApiKey()));
+                .anyMatch(key -> apiKeyHeader.equals(key.getId()) || apiKeyHeader.equals(key.getId()));
     }
 
     private boolean hasAdditionalAuth(GraphqlApi api, AuthenticationType type) {
@@ -627,6 +678,22 @@ public class AppSyncService {
 
     // ──────────────────────────── Resolvers ────────────────────────────
 
+    /**
+     * The {@code AppSyncRuntime} shape ({@code {name, runtimeVersion}}) AWS accepts on a resolver
+     * and on a pipeline function alike, or null when the request omits it. Shared so the two paths
+     * cannot drift: a pipeline whose function and resolver disagreed on the runtime would not run.
+     */
+    private Resolver.ResolverRuntime parseRuntime(Object runtimeValue) {
+        Map<String, Object> runtime = castMap(runtimeValue);
+        if (runtime == null) {
+            return null;
+        }
+        Resolver.ResolverRuntime rt = new Resolver.ResolverRuntime();
+        rt.setName(parseEnum(ResolverRuntimeName.class, runtime.get("name")));
+        rt.setRuntimeVersion((String) runtime.get("runtimeVersion"));
+        return rt;
+    }
+
     public Resolver createResolver(String apiId, Map<String, Object> request, String region) {
         assertSchemaNotBusy(apiId);
         getGraphqlApi(apiId);
@@ -635,17 +702,25 @@ public class AppSyncService {
             throw new AwsException("BadRequestException", "A resolver field name is required", 400);
         }
         String dataSourceName = (String) request.get("dataSourceName");
+        ResolverKind kind = parseEnum(ResolverKind.class, request.getOrDefault("kind", "UNIT"));
+        // Only a UNIT resolver names a data source. A PIPELINE resolver reaches its data through the
+        // functions in pipelineConfig, and AWS refuses dataSourceName on one, so requiring it here
+        // made every pipeline resolver unprovisionable: the shape the AppSync JS resolvers that
+        // Serverless and Amplify generate use throughout.
+        if (kind == ResolverKind.PIPELINE) {
+            if (dataSourceName != null && !dataSourceName.isBlank()) {
+                throw new AwsException("BadRequestException",
+                        "A PIPELINE resolver cannot specify a data source name", 400);
+            }
+        } else if (dataSourceName == null || dataSourceName.isBlank()) {
+            throw new AwsException("BadRequestException", "A data source name is required for the resolver", 400);
+        }
         String typeName = (String) request.get("typeName");
         if (typeName == null || typeName.isBlank()) {
             throw new AwsException("BadRequestException", "A type name is required for the resolver", 400);
         }
-        ResolverKind kind = parseEnum(ResolverKind.class, request.getOrDefault("kind", "UNIT"));
-        if (kind != ResolverKind.PIPELINE) {
-            if (dataSourceName == null || dataSourceName.isBlank()) {
-                throw new AwsException("BadRequestException", "A data source name is required for the resolver", 400);
-            }
-            getDataSource(apiId, dataSourceName);
-        } else if (dataSourceName != null && !dataSourceName.isBlank()) {
+        // Validate data source exists
+        if (dataSourceName != null && !dataSourceName.isBlank()) {
             getDataSource(apiId, dataSourceName);
         }
         Resolver resolver = new Resolver();
@@ -666,13 +741,7 @@ public class AppSyncService {
         resolver.setResolverArn(regionResolver.buildArn("appsync", region,
             "apis/" + apiId + "/types/" + typeName + "/resolvers/" + fieldName));
 
-        Map<String, Object> runtime = castMap(request.get("runtime"));
-        if (runtime != null) {
-            Resolver.ResolverRuntime rt = new Resolver.ResolverRuntime();
-            rt.setName(parseEnum(ResolverRuntimeName.class, runtime.get("name")));
-            rt.setRuntimeVersion((String) runtime.get("runtimeVersion"));
-            resolver.setRuntime(rt);
-        }
+        resolver.setRuntime(parseRuntime(request.get("runtime")));
 
         String key = resolverKey(apiId, resolver.getTypeName(), resolver.getFieldName());
         if (resolverStore.get(key).isPresent()) {
@@ -719,13 +788,7 @@ public class AppSyncService {
         if (request.containsKey("metricsConfig")) existing.setMetricsConfig((String) request.get("metricsConfig"));
         if (request.containsKey("pipelineConfig")) existing.setPipelineConfig((Map<String, Object>) request.get("pipelineConfig"));
         if (request.containsKey("syncConfig")) existing.setSyncConfig((Map<String, Object>) request.get("syncConfig"));
-        if (request.containsKey("runtime")) {
-            Map<String, Object> runtime = (Map<String, Object>) request.get("runtime");
-            Resolver.ResolverRuntime rt = new Resolver.ResolverRuntime();
-            rt.setName(parseEnum(ResolverRuntimeName.class, runtime.get("name")));
-            rt.setRuntimeVersion((String) runtime.get("runtimeVersion"));
-            existing.setRuntime(rt);
-        }
+        if (request.containsKey("runtime")) existing.setRuntime(parseRuntime(request.get("runtime")));
         resolverStore.put(resolverKey(apiId, typeName, fieldName), existing);
         return existing;
     }
@@ -759,7 +822,8 @@ public class AppSyncService {
         fn.setFunctionVersion((String) request.getOrDefault("functionVersion", "2018-05-29"));
         fn.setFunctionArn(buildFunctionArn(apiId, fn.getFunctionId(), region));
         fn.setCode((String) request.get("code"));
-        fn.setRuntime(castMap(request.get("runtime")));
+        fn.setRuntime(parseRuntime(request.get("runtime")));
+        fn.setMaxBatchSize(castInt(request.get("maxBatchSize")));
 
         functionStore.put(apiKey(apiId, fn.getFunctionId()), fn);
         return fn;
@@ -778,13 +842,18 @@ public class AppSyncService {
     public FunctionConfiguration updateFunction(String apiId, String functionId, Map<String, Object> request) {
         assertSchemaNotBusy(apiId);
         FunctionConfiguration existing = getFunction(apiId, functionId);
+        // UpdateFunction takes a new name on AWS, and CloudFormation drives FunctionConfiguration
+        // renames through it. Leaving the name alone let a stack complete while GetFunction still
+        // reported the old one.
+        if (request.containsKey("name")) existing.setName((String) request.get("name"));
         if (request.containsKey("description")) existing.setDescription((String) request.get("description"));
         if (request.containsKey("dataSourceName")) existing.setDataSourceName((String) request.get("dataSourceName"));
         if (request.containsKey("requestMappingTemplate")) existing.setRequestMappingTemplate((String) request.get("requestMappingTemplate"));
         if (request.containsKey("responseMappingTemplate")) existing.setResponseMappingTemplate((String) request.get("responseMappingTemplate"));
         if (request.containsKey("functionVersion")) existing.setFunctionVersion((String) request.get("functionVersion"));
         if (request.containsKey("code")) existing.setCode((String) request.get("code"));
-        if (request.containsKey("runtime")) existing.setRuntime(castMap(request.get("runtime")));
+        if (request.containsKey("runtime")) existing.setRuntime(parseRuntime(request.get("runtime")));
+        if (request.containsKey("maxBatchSize")) existing.setMaxBatchSize(castInt(request.get("maxBatchSize")));
         functionStore.put(apiKey(apiId, functionId), existing);
         return existing;
     }
@@ -860,28 +929,14 @@ public class AppSyncService {
                     "The API key exceeded a limit.", 400);
         }
         ApiKey key = new ApiKey();
-        String keyValue = "da2-" + generateShortId();
-        key.setId(keyValue);
-        key.setApiKey(keyValue);
+        key.setId(generateApiKeyId());
         key.setApiId(apiId);
         key.setDescription((String) request.get("description"));
         Object expiresValue = request.get("expires");
-        if (expiresValue instanceof Long l) {
-            key.setExpires(l);
-        } else if (expiresValue instanceof Number n) {
-            key.setExpires(n.longValue());
-        } else if (expiresValue instanceof String s) {
-            try {
-                key.setExpires(Long.parseLong(s));
-            } catch (NumberFormatException e) {
-                try {
-                    key.setExpires(java.time.Instant.parse(s).getEpochSecond());
-                } catch (java.time.format.DateTimeParseException ex) {
-                    throw new AwsException("BadRequestException",
-                        "Invalid expires value: " + s + ". Expected epoch seconds or ISO 8601.", 400);
-                }
-            }
-        }
+        long expires = expiresValue == null
+                ? clock.instant().getEpochSecond() + Duration.ofDays(7).getSeconds()
+                : parseExpires(expiresValue);
+        applyApiKeyExpires(key, expires);
 
         apiKeyStore.put(apiKey(apiId, key.getId()), key);
         return key;
@@ -896,27 +951,31 @@ public class AppSyncService {
                 .orElseThrow(() -> new AwsException("NotFoundException", "API key not found: " + keyId, 404));
     }
 
+    public Optional<ApiKey> validateApiKey(String apiId, String keyValue) {
+        if (apiId == null || keyValue == null || keyValue.isBlank()) {
+            return Optional.empty();
+        }
+        long now = clock.instant().getEpochSecond();
+        for (ApiKey key : apiKeyStore.scan(k -> k.startsWith(apiId + "::"))) {
+            // Keys persisted by earlier builds have a short id that was never a valid
+            // x-api-key value; keep them listable and deletable but never authenticate them.
+            if (key.getId() != null && key.getId().startsWith(API_KEY_PREFIX) && keyValue.equals(key.getId())) {
+                if (key.getExpires() != null && key.getExpires() <= now) {
+                    return Optional.empty();
+                }
+                return Optional.of(key);
+            }
+        }
+        return Optional.empty();
+    }
+
     public ApiKey updateApiKey(String apiId, String keyId, Map<String, Object> request) {
         ApiKey existing = getApiKey(apiId, keyId);
-        if (request.containsKey("description")) existing.setDescription((String) request.get("description"));
+        if (request.containsKey("description")) {
+            existing.setDescription((String) request.get("description"));
+        }
         if (request.containsKey("expires")) {
-            Object expiresValue = request.get("expires");
-            if (expiresValue instanceof Long l) {
-                existing.setExpires(l);
-            } else if (expiresValue instanceof Number n) {
-                existing.setExpires(n.longValue());
-            } else if (expiresValue instanceof String s) {
-                try {
-                    existing.setExpires(Long.parseLong(s));
-                } catch (NumberFormatException e) {
-                    try {
-                        existing.setExpires(java.time.Instant.parse(s).getEpochSecond());
-                    } catch (java.time.format.DateTimeParseException ex) {
-                        throw new AwsException("BadRequestException",
-                            "Invalid expires value: " + s + ". Expected epoch seconds or ISO 8601.", 400);
-                    }
-                }
-            }
+            applyApiKeyExpires(existing, parseExpires(request.get("expires")));
         }
         apiKeyStore.put(apiKey(apiId, keyId), existing);
         return existing;
@@ -1257,12 +1316,140 @@ public class AppSyncService {
 
     // ──────────────────────────── Helpers ────────────────────────────
 
+    void assertUniqueAuthProviders(GraphqlApi api) {
+        Set<AuthenticationType> singletonSeen = EnumSet.noneOf(AuthenticationType.class);
+        Set<String> cognitoPools = new HashSet<>();
+        Set<String> oidcIssuers = new HashSet<>();
+        rememberProvider(api.getAuthenticationType(), configForDefault(api), 0, singletonSeen, cognitoPools, oidcIssuers);
+        if (api.getAdditionalAuthenticationProviders() == null) {
+            return;
+        }
+        List<AdditionalAuthenticationProvider> additional = api.getAdditionalAuthenticationProviders();
+        for (int i = 0; i < additional.size(); i++) {
+            AdditionalAuthenticationProvider provider = additional.get(i);
+            if (provider == null || provider.getAuthenticationType() == null) {
+                continue;
+            }
+            rememberProvider(provider.getAuthenticationType(), configForAdditional(provider),
+                    i + 1, singletonSeen, cognitoPools, oidcIssuers);
+        }
+    }
+
+    private void rememberProvider(
+            AuthenticationType type,
+            Map<String, Object> config,
+            int additionalIndex,
+            Set<AuthenticationType> singletonSeen,
+            Set<String> cognitoPools,
+            Set<String> oidcIssuers
+    ) {
+        if (type == null) {
+            return;
+        }
+        if (type == AuthenticationType.API_KEY || type == AuthenticationType.AWS_IAM
+                || type == AuthenticationType.AWS_LAMBDA) {
+            if (!singletonSeen.add(type)) {
+                throw new AwsException("BadRequestException", duplicateProviderMessage(type, additionalIndex), 400);
+            }
+            return;
+        }
+        if (type == AuthenticationType.AMAZON_COGNITO_USER_POOLS) {
+            String poolId = config == null ? null : coerceString(config.get("userPoolId"));
+            String key = poolId == null ? UUID.randomUUID().toString() : poolId;
+            if (!cognitoPools.add(key) && poolId != null) {
+                throw new AwsException("BadRequestException",
+                        duplicateProviderMessage(AuthenticationType.AMAZON_COGNITO_USER_POOLS, additionalIndex), 400);
+            }
+            return;
+        }
+        if (type == AuthenticationType.OPENID_CONNECT) {
+            String issuer = config == null ? null : coerceString(config.get("issuer"));
+            String key = issuer == null ? UUID.randomUUID().toString() : issuer;
+            if (!oidcIssuers.add(key) && issuer != null) {
+                throw new AwsException("BadRequestException",
+                        duplicateProviderMessage(AuthenticationType.OPENID_CONNECT, additionalIndex), 400);
+            }
+        }
+    }
+
+    static String duplicateProviderMessage(AuthenticationType type, int additionalIndex) {
+        return "Authentication type " + type + " for additional authentication provider "
+                + additionalIndex + " already specified on the API. It can only be specified once.";
+    }
+
+    private static Map<String, Object> configForDefault(GraphqlApi api) {
+        if (api.getAuthenticationType() == AuthenticationType.AMAZON_COGNITO_USER_POOLS) {
+            return api.getUserPoolConfig();
+        }
+        if (api.getAuthenticationType() == AuthenticationType.OPENID_CONNECT) {
+            return api.getOpenIDConnectConfig();
+        }
+        return api.getLambdaAuthorizerConfig();
+    }
+
+    private static Map<String, Object> configForAdditional(AdditionalAuthenticationProvider provider) {
+        return switch (provider.getAuthenticationType()) {
+            case AMAZON_COGNITO_USER_POOLS -> provider.getUserPoolConfig();
+            case OPENID_CONNECT -> provider.getOpenIDConnectConfig();
+            case AWS_LAMBDA -> provider.getLambdaAuthorizerConfig();
+            default -> Map.of();
+        };
+    }
+
+    private long parseExpires(Object expiresValue) {
+        if (expiresValue instanceof Long l) {
+            return l;
+        }
+        if (expiresValue instanceof Number n) {
+            return n.longValue();
+        }
+        if (expiresValue instanceof String s) {
+            try {
+                return Long.parseLong(s);
+            } catch (NumberFormatException e) {
+                try {
+                    return java.time.Instant.parse(s).getEpochSecond();
+                } catch (java.time.format.DateTimeParseException ex) {
+                    throw new AwsException("BadRequestException",
+                        "Invalid expires value: " + s + ". Expected epoch seconds or ISO 8601.", 400);
+                }
+            }
+        }
+        throw new AwsException("BadRequestException", "Invalid expires value.", 400);
+    }
+
+    private void applyApiKeyExpires(ApiKey key, long expires) {
+        long rounded = roundDownToHour(expires);
+        long now = clock.instant().getEpochSecond();
+        long minExpires = now + Duration.ofDays(1).getSeconds();
+        long maxExpires = now + Duration.ofDays(365).getSeconds();
+        if (rounded < minExpires || rounded > maxExpires) {
+            throw new AwsException("ApiKeyValidityOutOfBoundsException",
+                    "The API key expiration must be set to a value between 1 and 365 days from creation (for CreateApiKey) or from update (for UpdateApiKey).",
+                    400);
+        }
+        key.setExpires(rounded);
+        key.setDeletes(roundDownToHour(rounded + Duration.ofDays(60).getSeconds()));
+    }
+
+    static long roundDownToHour(long epochSeconds) {
+        return Math.floorDiv(epochSeconds, 3600) * 3600;
+    }
+
     private String generateApiId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 26);
     }
 
     private String generateShortId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 7);
+    }
+
+    private String generateApiKeyId() {
+        StringBuilder sb = new StringBuilder(API_KEY_PREFIX);
+        for (int i = 0; i < API_KEY_RANDOM_LENGTH; i++) {
+            sb.append(API_KEY_ALPHABET.charAt(apiKeyRandom.nextInt(API_KEY_ALPHABET.length())));
+        }
+        return sb.toString();
     }
 
     private String apiKey(String apiId, String name) {
@@ -1281,11 +1468,36 @@ public class AppSyncService {
         return regionResolver.buildArn("appsync", region, "apis/" + apiId + "/functions/" + functionId);
     }
 
+    /**
+     * The model's own {@code ResourceArn} shape for AppSync tagging. Only an API-level ARN is
+     * taggable: the pattern is anchored to {@code apis/<26 chars>} with nothing after it, so a
+     * data source or function ARN is not a valid ResourceArn at all.
+     *
+     * <p>The partition is the one place this departs from the model, which spells it {@code aws}.
+     * This emulator mints its API ARNs with the region's own partition, so keeping the literal
+     * would mean refusing to tag an API using the exact ARN it had just returned.
+     */
+    private static final Pattern RESOURCE_ARN = Pattern.compile(
+            "^arn:" + AwsArnUtils.PARTITION_REGEX
+                    + ":appsync:[A-Za-z0-9_/.-]{0,63}:\\d{12}:apis/([0-9A-Za-z_-]{26})$");
+
+    /**
+     * API id out of a tagging ResourceArn.
+     *
+     * <p>Splitting on {@code /} and taking the last segment read the sub-resource id as the API
+     * id, so tagging {@code .../apis/<api>/datasources/<ds>} looked up an API called
+     * {@code <ds>} and answered NotFound. AWS rejects that ARN outright, so the shape is
+     * validated instead.
+     */
     private String extractApiIdFromArn(String arn) {
-        if (arn == null) throw new AwsException("BadRequestException", "Invalid ARN", 400);
-        String[] parts = arn.split("/");
-        if (parts.length < 2) throw new AwsException("BadRequestException", "Invalid ARN format", 400);
-        return parts[parts.length - 1];
+        if (arn == null) {
+            throw new AwsException("BadRequestException", "Invalid ARN", 400);
+        }
+        Matcher matcher = RESOURCE_ARN.matcher(arn);
+        if (!matcher.matches()) {
+            throw new AwsException("BadRequestException", "Invalid ARN format", 400);
+        }
+        return matcher.group(1);
     }
 
     private String coerceString(Object value) {
@@ -1297,6 +1509,42 @@ public class AppSyncService {
     private String coerceString(Object value, String defaultValue) {
         String result = coerceString(value);
         return result != null ? result : defaultValue;
+    }
+
+    private static String trimTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private static String toWebSocketBaseUrl(String value) {
+        return value.replaceFirst("^http", "ws");
+    }
+
+    private Map<String, String> graphqlApiUris(String apiId, String region) {
+        URI endpoint = URI.create(baseUrl);
+        if (List.of("localhost", "127.0.0.1", "[::1]").contains(endpoint.getHost())
+                && (endpoint.getPath().isEmpty() || "/".equals(endpoint.getPath()))) {
+            // Use Floci's wildcard DNS without assuming a TLS listener on port 443.
+            String host = apiId + ".appsync-api." + region + "." + EmbeddedDnsServer.DEFAULT_SUFFIX;
+            String port = endpoint.getPort() < 0 ? "" : ":" + endpoint.getPort();
+            String graphqlUrl = endpoint.getScheme() + "://" + host + port + "/graphql";
+            return Map.of("GRAPHQL", graphqlUrl,
+                    "REALTIME", toWebSocketBaseUrl(graphqlUrl) + "/realtime");
+        }
+        String graphqlPath = "/v1/apis/" + apiId + "/graphql";
+        Map<String, String> uris = new HashMap<>();
+        uris.put("GRAPHQL", baseUrl + graphqlPath);
+        uris.put("REALTIME", toWebSocketBaseUrl(baseUrl) + graphqlPath + "/realtime");
+        return uris;
+    }
+
+    private GraphqlApi refreshGraphqlApiUris(GraphqlApi api) {
+        String region = api.getArn() == null ? regionResolver.getDefaultRegion() : AwsArnUtils.parse(api.getArn()).region();
+        Map<String, String> expectedUris = graphqlApiUris(api.getApiId(), region);
+        if (!expectedUris.equals(api.getUris())) {
+            api.setUris(expectedUris);
+            apiStore.put(api.getApiId(), api);
+        }
+        return api;
     }
 
     private Integer castInt(Object value) {

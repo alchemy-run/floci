@@ -1,20 +1,24 @@
 package io.github.hectorvent.floci.services.ec2;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.services.ec2.model.Image;
+import io.quarkus.runtime.annotations.RegisterForReflection;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-
-import io.github.hectorvent.floci.services.ec2.model.Image;
-import io.quarkus.runtime.annotations.RegisterForReflection;
-import jakarta.enterprise.context.ApplicationScoped;
 
 @ApplicationScoped
 public class Ec2ImageCatalog {
@@ -22,15 +26,27 @@ public class Ec2ImageCatalog {
     private static final String CATALOG_RESOURCE_NAME = "ec2/image-catalog.yaml";
     private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
 
+    private final Path catalogPath;
     private volatile Loaded loaded;
 
+    @Inject
+    public Ec2ImageCatalog(EmulatorConfig config) {
+        this.catalogPath = config.services().ec2().imageCatalogPath().filter(path -> !path.isBlank()).map(Path::of).orElse(null);
+    }
+
     public Ec2ImageCatalog() {
+        this.catalogPath = null;
         // The catalog is parsed lazily on first access rather than at bean
         // construction. Mock mode never reads it, so eager loading would fail
         // EC2 bean creation needlessly when the resource is unavailable.
     }
 
+    Ec2ImageCatalog(Path catalogPath) {
+        this.catalogPath = catalogPath;
+    }
+
     Ec2ImageCatalog(Catalog catalog) {
+        this.catalogPath = null;
         this.loaded = new Loaded(catalog);
     }
 
@@ -49,13 +65,30 @@ public class Ec2ImageCatalog {
         return Optional.ofNullable(loaded().imagesByIdOrAlias.get(imageId));
     }
 
+    /**
+     * Looks up the image published under one of AWS's public SSM parameter names, such as
+     * {@code /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}.
+     */
+    public Optional<CatalogImage> findByPublicParameterName(String parameterName) {
+        if (parameterName == null || parameterName.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(loaded().imagesByPublicParameterName.get(parameterName));
+    }
+
+    /** Every public SSM parameter name the catalog answers, in catalog order. */
+    public List<String> publicParameterNames() {
+        return List.copyOf(loaded().imagesByPublicParameterName.keySet());
+    }
+
     private Loaded loaded() {
         Loaded result = loaded;
         if (result == null) {
             synchronized (this) {
                 result = loaded;
                 if (result == null) {
-                    result = new Loaded(readResource(CATALOG_RESOURCE_NAME, Catalog.class));
+                    result = new Loaded(catalogPath == null
+                            ? readResource(CATALOG_RESOURCE_NAME, Catalog.class) : readFile(catalogPath));
                     loaded = result;
                 }
             }
@@ -67,6 +100,7 @@ public class Ec2ImageCatalog {
         private final String defaultDockerImage;
         private final List<CatalogImage> images;
         private final Map<String, CatalogImage> imagesByIdOrAlias;
+        private final Map<String, CatalogImage> imagesByPublicParameterName;
 
         Loaded(Catalog catalog) {
             this.defaultDockerImage = require(catalog.defaultDockerImage, "defaultDockerImage");
@@ -75,6 +109,15 @@ public class Ec2ImageCatalog {
                 throw new IllegalStateException("EC2 image catalog has no images: " + CATALOG_RESOURCE_NAME);
             }
             this.imagesByIdOrAlias = indexImages(this.images);
+            this.imagesByPublicParameterName = indexPublicParameterNames(this.images);
+        }
+    }
+
+    private static Catalog readFile(Path path) {
+        try (InputStream input = Files.newInputStream(path)) {
+            return YAML_MAPPER.readValue(input, Catalog.class);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to load EC2 image catalog file: " + path, e);
         }
     }
 
@@ -107,6 +150,20 @@ public class Ec2ImageCatalog {
         return Map.copyOf(index);
     }
 
+    private static Map<String, CatalogImage> indexPublicParameterNames(List<CatalogImage> images) {
+        Map<String, CatalogImage> index = new LinkedHashMap<>();
+        for (CatalogImage image : images) {
+            for (String parameterName : image.publicParameterNames()) {
+                CatalogImage previous = index.putIfAbsent(parameterName, image);
+                if (previous != null) {
+                    throw new IllegalStateException(
+                            "Duplicate EC2 image catalog public parameter name: " + parameterName);
+                }
+            }
+        }
+        return Collections.unmodifiableMap(index);
+    }
+
     private static void addIndexEntry(Map<String, CatalogImage> index, String imageIdOrAlias, CatalogImage image) {
         CatalogImage previous = index.putIfAbsent(imageIdOrAlias, image);
         if (previous != null) {
@@ -133,6 +190,7 @@ public class Ec2ImageCatalog {
     public static final class CatalogImage {
         public String imageId;
         public List<String> aliases = List.of();
+        public List<String> publicParameterNames = List.of();
         public String dockerImage;
         public String name;
         public String description;
@@ -158,6 +216,14 @@ public class Ec2ImageCatalog {
 
         public List<String> aliases() {
             return aliases == null ? List.of() : List.copyOf(aliases);
+        }
+
+        /**
+         * The public SSM parameter names AWS publishes this image under. AWS seeds them in every
+         * account with no setup, so SSM answers a read of one of these names from the catalog.
+         */
+        public List<String> publicParameterNames() {
+            return publicParameterNames == null ? List.of() : List.copyOf(publicParameterNames);
         }
 
         public List<String> idsAndAliases() {

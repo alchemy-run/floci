@@ -7,7 +7,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
@@ -25,6 +27,9 @@ public class Domain {
 
     @JsonProperty("EngineVersion")
     private String engineVersion;
+
+    @JsonProperty("AccessPolicies")
+    private String accessPolicies;
 
     @JsonProperty("Processing")
     private boolean processing = false;
@@ -62,6 +67,9 @@ public class Domain {
     @JsonProperty("ContainerId")
     private String containerId;
 
+    @JsonProperty("HostPort")
+    private Integer hostPort;
+
     @JsonIgnore
     private String accountId;
 
@@ -71,6 +79,9 @@ public class Domain {
     @JsonProperty("CreatedAt")
     @JsonFormat(shape = JsonFormat.Shape.NUMBER)
     private Instant createdAt;
+
+    @JsonProperty("Maintenances")
+    private List<DomainMaintenance> maintenances = new ArrayList<>();
 
     public Domain() {}
 
@@ -104,6 +115,14 @@ public class Domain {
 
     public void setEngineVersion(String engineVersion) {
         this.engineVersion = engineVersion;
+    }
+
+    public String getAccessPolicies() {
+        return accessPolicies;
+    }
+
+    public void setAccessPolicies(String accessPolicies) {
+        this.accessPolicies = accessPolicies;
     }
 
     public boolean isProcessing() {
@@ -202,6 +221,14 @@ public class Domain {
         this.containerId = containerId;
     }
 
+    public Integer getHostPort() {
+        return hostPort;
+    }
+
+    public void setHostPort(Integer hostPort) {
+        this.hostPort = hostPort;
+    }
+
     public String getVolumeId() {
         return volumeId;
     }
@@ -224,5 +251,13 @@ public class Domain {
 
     public void setAccountId(String accountId) {
         this.accountId = accountId;
+    }
+
+    public List<DomainMaintenance> getMaintenances() {
+        return maintenances;
+    }
+
+    public void setMaintenances(List<DomainMaintenance> maintenances) {
+        this.maintenances = maintenances != null ? maintenances : new ArrayList<>();
     }
 }

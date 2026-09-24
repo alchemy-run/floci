@@ -13,7 +13,10 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * JSON 1.1 handler for AWS CUR operations.
@@ -41,14 +44,23 @@ public class CurJsonHandler {
         return switch (action) {
             case "PutReportDefinition" -> handlePutReportDefinition(request, region);
             case "ModifyReportDefinition" -> handleModifyReportDefinition(request, region);
-            case "DescribeReportDefinitions" -> handleDescribeReportDefinitions();
+            case "DescribeReportDefinitions" -> handleDescribeReportDefinitions(request);
             case "DeleteReportDefinition" -> handleDeleteReportDefinition(request, region);
-            // Tag endpoints are not yet emulated; respond with empty bodies so SDK
-            // clients that probe for them don't trip on UnknownOperationException.
-            case "TagResource", "UntagResource" -> Response.ok(objectMapper.createObjectNode()).build();
+            case "TagResource" -> {
+                service.tagResource(stringOrNull(request, "ReportName"), region, parseTags(request.path("Tags")));
+                yield Response.ok(objectMapper.createObjectNode()).build();
+            }
+            case "UntagResource" -> {
+                service.untagResource(stringOrNull(request, "ReportName"), region,
+                        parseStringList(request.path("TagKeys")));
+                yield Response.ok(objectMapper.createObjectNode()).build();
+            }
             case "ListTagsForResource" -> {
                 ObjectNode body = objectMapper.createObjectNode();
-                body.putArray("Tags");
+                ArrayNode tags = body.putArray("Tags");
+                service.listTagsForResource(stringOrNull(request, "ReportName"), region)
+                        .entrySet().stream().sorted(Map.Entry.comparingByKey())
+                        .forEach(tag -> tags.addObject().put("Key", tag.getKey()).put("Value", tag.getValue()));
                 yield Response.ok(body).build();
             }
             default -> Response.status(400)
@@ -60,6 +72,7 @@ public class CurJsonHandler {
 
     private Response handlePutReportDefinition(JsonNode request, String region) {
         ReportDefinition def = parseReportDefinition(request.path("ReportDefinition"));
+        def.setTags(parseTags(request.path("Tags")));
         ReportDefinition created = service.putReportDefinition(def, region);
         // Emission failures must not roll back the management mutation — match AWS
         // semantics where the definition is created even if the first run errors.
@@ -84,12 +97,30 @@ public class CurJsonHandler {
         return Response.ok(serialize(service.getReportDefinitionOrSelf(updated, region))).build();
     }
 
-    private Response handleDescribeReportDefinitions() {
-        List<ReportDefinition> defs = service.describeReportDefinitions();
+    private Response handleDescribeReportDefinitions(JsonNode request) {
+        List<ReportDefinition> defs = service.describeReportDefinitions().stream()
+                .sorted(Comparator.comparing(ReportDefinition::getReportName)).toList();
+        int limit = request.path("MaxResults").asInt(5);
+        int start = 0;
+        try {
+            String token = stringOrNull(request, "NextToken");
+            if (token != null) {
+                start = Integer.parseInt(token);
+            }
+        } catch (NumberFormatException e) {
+            throw new AwsException("ValidationException", "Invalid NextToken.", 400);
+        }
+        if (limit < 1 || limit > 5 || start < 0 || start > defs.size()) {
+            throw new AwsException("ValidationException", "Invalid pagination parameters.", 400);
+        }
+        int end = Math.min(defs.size(), start + limit);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode arr = response.putArray("ReportDefinitions");
-        for (ReportDefinition d : defs) {
+        for (ReportDefinition d : defs.subList(start, end)) {
             arr.add(serialize(d));
+        }
+        if (end < defs.size()) {
+            response.put("NextToken", Integer.toString(end));
         }
         return Response.ok(response).build();
     }
@@ -158,6 +189,21 @@ public class CurJsonHandler {
             status.put("LastStatus", d.getReportStatus());
         }
         return out;
+    }
+
+    private static Map<String, String> parseTags(JsonNode node) {
+        Map<String, String> tags = new LinkedHashMap<>();
+        if (node.isArray()) {
+            for (JsonNode tag : node) {
+                String key = stringOrNull(tag, "Key");
+                String value = stringOrNull(tag, "Value");
+                if (key == null || key.isEmpty() || value == null) {
+                    throw new AwsException("ValidationException", "Tags require a nonempty Key and a Value.", 400);
+                }
+                tags.put(key, value);
+            }
+        }
+        return tags;
     }
 
     private static List<String> parseStringList(JsonNode node) {

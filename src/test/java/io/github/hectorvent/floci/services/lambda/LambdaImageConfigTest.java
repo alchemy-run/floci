@@ -1,18 +1,20 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
-import io.github.hectorvent.floci.core.common.docker.ContainerReachableEndpoint;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
+import io.github.hectorvent.floci.core.common.docker.ContainerReachableEndpoint;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
-import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.lambda.launcher.ContainerLauncher;
 import io.github.hectorvent.floci.services.lambda.launcher.ImageResolver;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
@@ -20,12 +22,11 @@ import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServer;
 import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServerFactory;
 import io.github.hectorvent.floci.services.lambda.zip.CodeStore;
 import io.github.hectorvent.floci.services.lambda.zip.ZipExtractor;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -240,9 +241,6 @@ class LambdaImageConfigTest {
             when(docker.logMaxSize()).thenReturn("10m");
             when(docker.logMaxFile()).thenReturn("3");
             when(config.baseUrl()).thenReturn("http://localhost:4566");
-            EmulatorConfig.TlsConfig tls = mock(EmulatorConfig.TlsConfig.class);
-            when(config.tls()).thenReturn(tls);
-            lenient().when(tls.enabled()).thenReturn(false);
             lenient().when(config.hostname()).thenReturn(Optional.empty());
             when(embeddedDnsServer.getServerIp()).thenReturn(Optional.empty());
 
@@ -251,9 +249,9 @@ class LambdaImageConfigTest {
                     new ContainerReachableEndpoint(config, dockerHostResolver, embeddedDnsServer);
             LaunchedContainerAwsEnv awsEnv = new LaunchedContainerAwsEnv(reachableEndpoint);
             launcher = new ContainerLauncher(containerBuilder, lifecycleManager, logStreamer, imageResolver,
-                    runtimeApiServerFactory, dockerHostResolver, config, ecrRegistryManager,
+                    runtimeApiServerFactory, dockerHostResolver, mock(ContainerDetector.class), config, ecrRegistryManager,
                     mock(io.github.hectorvent.floci.services.lambda.LambdaLayerService.class), awsEnv,
-                    mock(IamService.class));
+                    mock(io.github.hectorvent.floci.services.lambda.launcher.LambdaExecutionRoleCredentials.class));
 
             when(runtimeApiServerFactory.create()).thenReturn(runtimeApiServer);
             when(runtimeApiServer.getPort()).thenReturn(9000);
@@ -351,12 +349,16 @@ class LambdaImageConfigTest {
         }
 
         @Test
-        void zipFunctionStillUsesHandlerAsCmd() throws Exception {
+        void zipFunctionStillUsesHandlerAsCmd(@TempDir Path codeDir) throws Exception {
             LambdaFunction fn = new LambdaFunction();
             fn.setFunctionName("zip-fn");
             fn.setRuntime("nodejs20.x");
             fn.setHandler("index.handler");
             fn.setPackageType("Zip");
+            // A Zip function needs a code location — launch() now rejects one without it instead
+            // of starting an empty container. This test covers cmd construction, so any real
+            // directory will do.
+            fn.setCodeLocalPath(codeDir.toString());
             when(imageResolver.resolve("nodejs20.x")).thenReturn("public.ecr.aws/lambda/nodejs:20");
 
             launcher.launch(fn);

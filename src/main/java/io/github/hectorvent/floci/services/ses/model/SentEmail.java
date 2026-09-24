@@ -21,6 +21,9 @@ public class SentEmail {
     @JsonProperty("Source")
     private String source;
 
+    @JsonProperty("ReturnPath")
+    private String returnPath;
+
     @JsonProperty("Destination")
     private List<String> toAddresses;
 
@@ -51,6 +54,14 @@ public class SentEmail {
 
     @JsonProperty("SentAt")
     private Instant sentAt;
+
+    /**
+     * Set when the content scan rejected the message after acceptance. A rejected record keeps only
+     * its sender, its envelope and this reason, since the content is by definition something no
+     * store should hold.
+     */
+    @JsonProperty("RejectReason")
+    private String rejectReason;
 
     public SentEmail() {}
 
@@ -92,6 +103,9 @@ public class SentEmail {
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }
 
+    public String getReturnPath() { return returnPath; }
+    public void setReturnPath(String returnPath) { this.returnPath = returnPath; }
+
     public List<String> getToAddresses() { return toAddresses; }
     public void setToAddresses(List<String> toAddresses) { this.toAddresses = toAddresses; }
 
@@ -123,4 +137,21 @@ public class SentEmail {
 
     public Instant getSentAt() { return sentAt; }
     public void setSentAt(Instant sentAt) { this.sentAt = sentAt; }
+
+    public String getRejectReason() { return rejectReason; }
+    public void setRejectReason(String rejectReason) { this.rejectReason = rejectReason; }
+
+    /**
+     * Drops everything but the sender, the envelope and the reason; used when the content scan
+     * rejects the message.
+     */
+    public void discardContent(String reason) {
+        this.rejectReason = reason;
+        this.replyToAddresses = null;
+        this.subject = null;
+        this.headers = null;
+        this.bodyText = null;
+        this.bodyHtml = null;
+        this.rawData = null;
+    }
 }

@@ -114,6 +114,93 @@ class IamActionRegistryTest {
     }
 
     @Test
+    void resolvesAndEnforcesEmrServerlessApplicationAndSubresourceActions() {
+        String[][] routes = {
+                {"GET", "/applications/app", "GetApplication"},
+                {"PATCH", "/applications/app", "UpdateApplication"},
+                {"POST", "/applications/app/start", "StartApplication"},
+                {"GET", "/applications/app/jobruns", "ListJobRuns"},
+                {"POST", "/applications/app/jobruns", "StartJobRun"},
+                {"GET", "/applications/app/jobruns/run", "GetJobRun"},
+                {"DELETE", "/applications/app/jobruns/run", "CancelJobRun"},
+                {"GET", "/applications/app/jobruns/run/attempts", "ListJobRunAttempts"},
+                {"GET", "/applications/app/jobruns/run/dashboard", "GetDashboardForJobRun"},
+                {"GET", "/applications/app/sessions", "ListSessions"},
+                {"POST", "/applications/app/sessions", "StartSession"},
+                {"GET", "/applications/app/sessions/session/endpoint", "GetSessionEndpoint"},
+                {"DELETE", "/applications/app/sessions/session", "TerminateSession"},
+                {"POST", "/tags/arn:aws:emr-serverless:us-east-1:000000000000:/applications/app", "TagResource"}
+        };
+        for (String[] route : routes) {
+            for (String prefix : new String[]{"", "/_emrserverless"}) {
+                String action = registry.resolve("emr-serverless", mockCtx(route[0], prefix + route[1],
+                        new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
+                assertEquals("emr-serverless:" + route[2], action);
+                assertTrue(registry.isRoleEnforcedAction(action));
+            }
+        }
+        assertFalse(registry.isRoleEnforcedAction("emr-serverless:UnknownAction"));
+    }
+
+    @Test
+    void resolvesAndEnforcesGuardDutyAndInspector2Routes() {
+        String[][] routes = {
+                {"guardduty", "GET", "/detector", "ListDetectors"},
+                {"guardduty", "POST", "/detector", "CreateDetector"},
+                {"guardduty", "POST", "/detector/d/filter", "CreateFilter"},
+                {"guardduty", "GET", "/detector/d/filter", "ListFilters"},
+                {"guardduty", "GET", "/detector/d/filter/n", "GetFilter"},
+                {"guardduty", "POST", "/detector/d/filter/n", "UpdateFilter"},
+                {"guardduty", "DELETE", "/detector/d/filter/n", "DeleteFilter"},
+                {"guardduty", "GET", "/detector/d/ipset/i", "GetIPSet"},
+                {"guardduty", "DELETE", "/detector/d/threatintelset/i", "DeleteThreatIntelSet"},
+                {"guardduty", "POST", "/detector/d/findings/create", "CreateSampleFindings"},
+                {"guardduty", "POST", "/detector/d/findings/get", "GetFindings"},
+                {"guardduty", "POST", "/detector/d/usage/statistics", "GetUsageStatistics"},
+                {"guardduty", "POST", "/detector/d/coverage", "ListCoverage"},
+                {"guardduty", "GET", "/invitation/count", "GetInvitationsCount"},
+                {"guardduty", "POST", "/detector/d/member/invite", "InviteMembers"},
+                {"guardduty", "GET", "/tags/arn:aws:guardduty:r:a:detector/d/filter/n", "ListTagsForResource"},
+                {"guardduty", "GET", "/admin", "ListOrganizationAdminAccounts"},
+                {"guardduty", "GET", "/organization/statistics", "GetOrganizationStatistics"},
+                {"guardduty", "GET", "/detector/d/administrator", "GetAdministratorAccount"},
+                {"guardduty", "GET", "/detector/d/malware-scan-settings", "GetMalwareScanSettings"},
+                {"guardduty", "POST", "/detector/d/malware-scan-settings", "UpdateMalwareScanSettings"},
+                {"guardduty", "POST", "/detector/d/investigation/list", "ListInvestigations"},
+                {"inspector2", "POST", "/filters/create", "CreateFilter"},
+                {"inspector2", "POST", "/filters/update", "UpdateFilter"},
+                {"inspector2", "POST", "/filters/delete", "DeleteFilter"},
+                {"inspector2", "POST", "/filters/list", "ListFilters"},
+                {"inspector2", "POST", "/ec2deepinspectionconfiguration/get", "GetEc2DeepInspectionConfiguration"},
+                {"inspector2", "POST", "/cis/scan-configuration/list", "ListCisScanConfigurations"},
+                {"inspector2", "POST", "/status/batch/get", "BatchGetAccountStatus"},
+                {"inspector2", "POST", "/findings/list", "ListFindings"},
+                {"inspector2", "POST", "/coverage/list", "ListCoverage"},
+                {"inspector2", "POST", "/vulnerabilities/search", "SearchVulnerabilities"},
+                {"inspector2", "POST", "/usage/list", "ListUsageTotals"},
+                {"inspector2", "POST", "/accountpermissions/list", "ListAccountPermissions"},
+                {"inspector2", "POST", "/freetrialinfo/batchget", "BatchGetFreeTrialInfo"},
+                {"inspector2", "POST", "/configuration/get", "GetConfiguration"},
+                {"inspector2", "GET", "/encryptionkey/get", "GetEncryptionKey"},
+                {"inspector2", "POST", "/cis/scan/list", "ListCisScans"},
+                {"inspector2", "POST", "/members/list", "ListMembers"},
+                {"inspector2", "POST", "/delegatedadminaccounts/get", "GetDelegatedAdminAccount"},
+                {"inspector2", "POST", "/reporting/status/get", "GetFindingsReportStatus"},
+                {"inspector2", "DELETE", "/tags/arn:aws:inspector2:r:a:owner/a/filter/f", "UntagResource"}
+        };
+        for (String[] route : routes) {
+            String action = registry.resolve(route[0], mockCtx(route[1], route[2],
+                    new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
+            assertEquals(route[0] + ":" + route[3], action);
+            assertTrue(registry.isRoleEnforcedAction(action));
+        }
+        assertFalse(registry.isRoleEnforcedAction("guardduty:UnknownAction"));
+        assertFalse(registry.isRoleEnforcedAction("inspector2:UnknownAction"));
+        assertNull(registry.resolve("inspector2", mockCtx("POST", "/detector/d/filter",
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
+    @Test
     void resolvesSesV2SendRoutes() {
         assertEquals("ses:SendEmail", registry.resolve("ses",
                 mockCtx("POST", "/v2/email/outbound-emails", new MultivaluedHashMap<>(),
@@ -168,6 +255,225 @@ class IamActionRegistryTest {
         acl.add("acl", "");
         ContainerRequestContext ctx = mockCtx("GET", "/bucket/", acl, null, "");
         assertEquals("s3:GetBucketAcl", registry.resolve("s3", ctx));
+    }
+
+    @Test
+    void s3AccelerateResolvesToItsOwnActions() {
+        // Without the override, PUT ?accelerate resolves to s3:CreateBucket — a
+        // principal allowed only to create buckets could reconfigure acceleration.
+        MultivaluedMap<String, String> accelerate = new MultivaluedHashMap<>();
+        accelerate.add("accelerate", "");
+        assertEquals("s3:PutAccelerateConfiguration",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", accelerate, null, "")));
+        assertEquals("s3:GetAccelerateConfiguration",
+                registry.resolve("s3", mockCtx("GET", "/bucket", accelerate, null, "")));
+        // AWS defines no DELETE for the subresource, so it stays on the rule table.
+        assertEquals("s3:DeleteBucket",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket", accelerate, null, "")));
+    }
+
+    @Test
+    void s3AccelerateOnAnObjectPathKeepsTheObjectActions() {
+        // The object routes ignore ?accelerate, so mapping it there would let a
+        // principal with only accelerate permissions read or write arbitrary objects.
+        MultivaluedMap<String, String> accelerate = new MultivaluedHashMap<>();
+        accelerate.add("accelerate", "");
+        assertEquals("s3:GetObject",
+                registry.resolve("s3", mockCtx("GET", "/bucket/secret.txt", accelerate, null, "")));
+        assertEquals("s3:PutObject",
+                registry.resolve("s3", mockCtx("PUT", "/bucket/key.txt", accelerate, null, "")));
+    }
+
+    @Test
+    void s3AccelerateYieldsToSubresourcesDispatchedFirst() {
+        MultivaluedMap<String, String> withRequestPayment = new MultivaluedHashMap<>();
+        withRequestPayment.add("requestPayment", "");
+        withRequestPayment.add("accelerate", "");
+        assertEquals("s3:PutBucketRequestPayment",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", withRequestPayment, null, "")));
+        MultivaluedMap<String, String> withLocation = new MultivaluedHashMap<>();
+        withLocation.add("location", "");
+        withLocation.add("accelerate", "");
+        assertEquals("s3:GetBucketLocation",
+                registry.resolve("s3", mockCtx("GET", "/bucket", withLocation, null, "")));
+        // uploads is a GET-only dispatch branch; on PUT it is inert and accelerate executes,
+        // so the mapping must still claim the request there.
+        MultivaluedMap<String, String> withUploads = new MultivaluedHashMap<>();
+        withUploads.add("uploads", "");
+        withUploads.add("accelerate", "");
+        assertEquals("s3:PutAccelerateConfiguration",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", withUploads, null, "")));
+    }
+
+    @Test
+    void s3ReplicationResolvesToItsOwnActions() {
+        // Without the override, PUT ?replication resolves to s3:CreateBucket — a
+        // principal allowed only to create buckets could rewrite the replication
+        // configuration.
+        MultivaluedMap<String, String> replication = new MultivaluedHashMap<>();
+        replication.add("replication", "");
+        assertEquals("s3:PutReplicationConfiguration",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", replication, null, "")));
+        assertEquals("s3:GetReplicationConfiguration",
+                registry.resolve("s3", mockCtx("GET", "/bucket", replication, null, "")));
+        // AWS authorizes DeleteBucketReplication with the put action.
+        assertEquals("s3:PutReplicationConfiguration",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket", replication, null, "")));
+    }
+
+    @Test
+    void s3ReplicationOnAnObjectPathKeepsTheObjectActions() {
+        // The object routes ignore ?replication, so mapping it there would let a
+        // principal with only replication permissions read or write arbitrary objects.
+        MultivaluedMap<String, String> replication = new MultivaluedHashMap<>();
+        replication.add("replication", "");
+        assertEquals("s3:GetObject",
+                registry.resolve("s3", mockCtx("GET", "/bucket/secret.txt", replication, null, "")));
+        assertEquals("s3:PutObject",
+                registry.resolve("s3", mockCtx("PUT", "/bucket/key.txt", replication, null, "")));
+        assertEquals("s3:DeleteObject",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket/key.txt", replication, null, "")));
+    }
+
+    @Test
+    void s3ReplicationYieldsToSubresourcesDispatchedFirst() {
+        // The first dispatched subresource determines the required permission.
+        MultivaluedMap<String, String> withRequestPayment = new MultivaluedHashMap<>();
+        withRequestPayment.add("requestPayment", "");
+        withRequestPayment.add("replication", "");
+        assertEquals("s3:PutBucketRequestPayment",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", withRequestPayment, null, "")));
+        MultivaluedMap<String, String> withLocation = new MultivaluedHashMap<>();
+        withLocation.add("location", "");
+        withLocation.add("replication", "");
+        assertEquals("s3:GetBucketLocation",
+                registry.resolve("s3", mockCtx("GET", "/bucket", withLocation, null, "")));
+        // The DELETE chain dispatches website ahead of replication.
+        MultivaluedMap<String, String> withWebsite = new MultivaluedHashMap<>();
+        withWebsite.add("website", "");
+        withWebsite.add("replication", "");
+        assertEquals("s3:DeleteBucketWebsite",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket", withWebsite, null, "")));
+        // requestPayment has no DELETE dispatch branch; it is inert there and
+        // replication executes, so the mapping must still claim the request.
+        MultivaluedMap<String, String> deleteWithRequestPayment = new MultivaluedHashMap<>();
+        deleteWithRequestPayment.add("requestPayment", "");
+        deleteWithRequestPayment.add("replication", "");
+        assertEquals("s3:PutReplicationConfiguration",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket", deleteWithRequestPayment, null, "")));
+        // uploads is a GET-only dispatch branch; on PUT it is inert and replication
+        // executes, so the mapping must still claim the request there.
+        MultivaluedMap<String, String> putWithUploads = new MultivaluedHashMap<>();
+        putWithUploads.add("uploads", "");
+        putWithUploads.add("replication", "");
+        assertEquals("s3:PutReplicationConfiguration",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", putWithUploads, null, "")));
+    }
+
+    @Test
+    void s3ReplicationAndAcceleratePrecedenceFollowsEachMethodsDispatchOrder() {
+        // PUT and GET dispatch accelerate ahead of replication; DELETE routes
+        // replication and never routes accelerate to an operation.
+        MultivaluedMap<String, String> both = new MultivaluedHashMap<>();
+        both.add("accelerate", "");
+        both.add("replication", "");
+        assertEquals("s3:PutAccelerateConfiguration",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", both, null, "")));
+        assertEquals("s3:GetAccelerateConfiguration",
+                registry.resolve("s3", mockCtx("GET", "/bucket", both, null, "")));
+        assertEquals("s3:PutReplicationConfiguration",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket", both, null, "")));
+    }
+
+    @Test
+    void s3ReplicationDoesNotPreemptAclOrTagging() {
+        // Appending an inert ?replication must not downgrade a stricter resolution.
+        MultivaluedMap<String, String> withAcl = new MultivaluedHashMap<>();
+        withAcl.add("replication", "");
+        withAcl.add("acl", "");
+        assertEquals("s3:PutBucketAcl",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", withAcl, null, "")));
+        MultivaluedMap<String, String> withTagging = new MultivaluedHashMap<>();
+        withTagging.add("replication", "");
+        withTagging.add("tagging", "");
+        assertEquals("s3:DeleteBucketTagging",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket", withTagging, null, "")));
+    }
+
+    @Test
+    void s3AccelerateDoesNotPreemptAclOrTagging() {
+        // Appending an inert ?accelerate must not downgrade a stricter resolution.
+        MultivaluedMap<String, String> withAcl = new MultivaluedHashMap<>();
+        withAcl.add("accelerate", "");
+        withAcl.add("acl", "");
+        assertEquals("s3:PutBucketAcl",
+                registry.resolve("s3", mockCtx("PUT", "/bucket", withAcl, null, "")));
+        MultivaluedMap<String, String> withTagging = new MultivaluedHashMap<>();
+        withTagging.add("accelerate", "");
+        withTagging.add("tagging", "");
+        assertEquals("s3:DeleteObjectTagging",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket/key.txt", withTagging, null, "")));
+    }
+
+    @Test
+    void s3BucketSubResourceWritesResolveToTheirOwnActionNotCreateBucket() {
+        // The live failure: CDK's BucketNotificationsHandler role grants s3:PutBucketNotification
+        // on "*", exactly what real AWS requires, and the deploy died on
+        // "not authorized to perform: s3:CreateBucket" because method + path alone decided.
+        assertEquals("s3:PutBucketNotification", bucketAction("PUT", "notification"));
+        assertEquals("s3:GetBucketNotification", bucketAction("GET", "notification"));
+
+        assertEquals("s3:PutBucketPolicy", bucketAction("PUT", "policy"));
+        assertEquals("s3:PutBucketVersioning", bucketAction("PUT", "versioning"));
+        assertEquals("s3:PutEncryptionConfiguration", bucketAction("PUT", "encryption"));
+        assertEquals("s3:PutLifecycleConfiguration", bucketAction("PUT", "lifecycle"));
+        assertEquals("s3:PutBucketCORS", bucketAction("PUT", "cors"));
+        assertEquals("s3:PutBucketPublicAccessBlock", bucketAction("PUT", "publicAccessBlock"));
+    }
+
+    @Test
+    void s3BucketSubResourceReadsResolveToTheirOwnActionNotListBucket() {
+        assertEquals("s3:GetBucketLocation", bucketAction("GET", "location"));
+        assertEquals("s3:GetBucketVersioning", bucketAction("GET", "versioning"));
+        assertEquals("s3:ListBucketVersions", bucketAction("GET", "versions"));
+        assertEquals("s3:ListBucketMultipartUploads", bucketAction("GET", "uploads"));
+        assertEquals("s3:GetBucketPolicy", bucketAction("GET", "policy"));
+        assertEquals("s3:GetLifecycleConfiguration", bucketAction("GET", "lifecycle"));
+        assertEquals("s3:GetEncryptionConfiguration", bucketAction("GET", "encryption"));
+    }
+
+    @Test
+    void s3BucketSubResourceDeletesDoNotDemandDeleteBucket() {
+        // Removing a CORS rule asked for permission to delete the whole bucket. AWS authorises
+        // most sub-resource removals with the same Put* action that sets them; only policy and
+        // website have their own Delete action.
+        assertEquals("s3:PutBucketCORS", bucketAction("DELETE", "cors"));
+        assertEquals("s3:PutLifecycleConfiguration", bucketAction("DELETE", "lifecycle"));
+        assertEquals("s3:PutEncryptionConfiguration", bucketAction("DELETE", "encryption"));
+        assertEquals("s3:PutReplicationConfiguration", bucketAction("DELETE", "replication"));
+        assertEquals("s3:DeleteBucketPolicy", bucketAction("DELETE", "policy"));
+        assertEquals("s3:DeleteBucketWebsite", bucketAction("DELETE", "website"));
+        // A plain DELETE with no sub-resource still deletes the bucket.
+        assertEquals("s3:DeleteBucket",
+                registry.resolve("s3", mockCtx("DELETE", "/bucket", new MultivaluedHashMap<>(), null, "")));
+    }
+
+    @Test
+    void s3BucketOnlySubResourcesStayInertOnAnObjectPath() {
+        // ?notification on an object path is ignored by the object routes, so the request really
+        // is a GetObject/PutObject and must resolve as one.
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.add("notification", "");
+        assertEquals("s3:GetObject",
+                registry.resolve("s3", mockCtx("GET", "/bucket/key.txt", params, null, "")));
+        assertEquals("s3:PutObject",
+                registry.resolve("s3", mockCtx("PUT", "/bucket/key.txt", params, null, "")));
+    }
+
+    private String bucketAction(String method, String subResource) {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.add(subResource, "");
+        return registry.resolve("s3", mockCtx(method, "/bucket", params, null, ""));
     }
 
     // -------------------------------------------------------------------------

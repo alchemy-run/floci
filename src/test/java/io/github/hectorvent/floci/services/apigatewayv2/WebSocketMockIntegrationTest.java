@@ -183,6 +183,44 @@ class WebSocketMockIntegrationTest {
         assertWebSocketConnectionFails(wsApiId, "test", 403);
     }
 
+    @Test
+    @Order(40)
+    void pathStyleUpgradeResolvesAnApiInANonDefaultRegion() throws Exception {
+        // Floci hands containerised Lambdas /ws/{apiId}/{stage} in place of the regional wss://
+        // invoke URL, and a handshake carries no Authorization header, so the path form has to
+        // find the API by id across regions.
+        String auth = "AWS4-HMAC-SHA256 Credential=test/20260101/ap-northeast-2/apigateway/aws4_request";
+        String regionalApiId = given()
+                .header("Authorization", auth)
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"name":"ws-path-cross-region","protocolType":"WEBSOCKET","routeSelectionExpression":"$request.body.action"}
+                        """)
+                .when().post("/v2/apis")
+                .then()
+                .statusCode(201)
+                .extract().path("apiId");
+        try {
+            given()
+                    .header("Authorization", auth)
+                    .contentType(ContentType.JSON)
+                    .body("""
+                            {"stageName":"test"}
+                            """)
+                    .when().post("/v2/apis/" + regionalApiId + "/stages")
+                    .then()
+                    .statusCode(201);
+
+            WebSocket ws = connectWebSocket(regionalApiId, "test");
+            assertNotNull(ws, "path-style upgrade should reach the ap-northeast-2 API");
+            ws.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
+
+            assertWebSocketConnectionFails("nosuchapi0", "test", 403);
+        } finally {
+            given().header("Authorization", auth).when().delete("/v2/apis/" + regionalApiId);
+        }
+    }
+
     // ──────────────────────────── Cleanup ────────────────────────────
 
     @Test

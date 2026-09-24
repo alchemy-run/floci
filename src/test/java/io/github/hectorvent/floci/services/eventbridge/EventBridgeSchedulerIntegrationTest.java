@@ -296,14 +296,20 @@ class EventBridgeSchedulerIntegrationTest {
             @Override
             public String defaultAccountId() { return ACCOUNT; }
             @Override
-            public int maxRequestSize() { return 512; }
-            @Override
-            public String ecrBaseUri() { return ""; }
+            public Optional<String> aiMockConfigFile() { return Optional.empty(); }
             @Override
             public StorageConfig storage() { return null; }
             @Override
+            public NetworkConfig network() { return null; }
+            @Override
             public DnsConfig dns() {
                 return new DnsConfig() {
+                    @Override
+                    public boolean sourceEnabled() { return false; }
+                    @Override
+                    public int sourcePort() { return 0; }
+                    @Override
+                    public String sourceHelperImage() { return "floci/source-network-helper:local"; }
                     @Override
                     public Optional<List<String>> extraSuffixes() { return Optional.empty(); }
                     @Override
@@ -325,6 +331,7 @@ class EventBridgeSchedulerIntegrationTest {
             @Override
             public ProtocolsConfig protocols() {
                 return new ProtocolsConfig() {
+                    @Override public int maxRequestSize() { return 512; }
                     @Override public boolean strictClaiming() { return false; }
                     @Override public boolean rejectUnknownServiceScope() { return true; }
                 };

@@ -14,6 +14,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
+import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.services.codebuild.BuildspecParser.ParsedArtifacts;
 import io.github.hectorvent.floci.services.codebuild.BuildspecParser.ParsedBuildspec;
 import io.github.hectorvent.floci.services.codebuild.model.Build;
@@ -50,6 +51,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -115,18 +117,36 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
     }
 
-    public void startBuild(String region, Build build, Project project, String buildspecOverride) {
-        AtomicBoolean stopFlag = new AtomicBoolean(false);
-        stopFlags.put(build.getId(), stopFlag);
-        Thread.ofVirtual().start(() -> runBuild(region, build, project, buildspecOverride, stopFlag));
+    public void validateExecution(Build build, Project project) {
+        String sourceType = project.getSource() != null ? project.getSource().getType() : "NO_SOURCE";
+        if (!List.of("NO_SOURCE", "S3").contains(sourceType)) {
+            throw CodeBuildService.unsupportedExecution("Source type " + sourceType);
+        }
+        String type = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
+        if (type != null && !List.of("LINUX_CONTAINER", "ARM_CONTAINER").contains(type)) {
+            throw CodeBuildService.unsupportedExecution("Environment type " + type);
+        }
+        if (project.getSecondarySources() != null && !project.getSecondarySources().isEmpty()) {
+            throw CodeBuildService.unsupportedExecution("Secondary sources");
+        }
+        if (project.getSecondaryArtifacts() != null && !project.getSecondaryArtifacts().isEmpty()) {
+            throw CodeBuildService.unsupportedExecution("Secondary artifacts");
+        }
     }
 
-    public void stopBuild(String buildId) {
-        AtomicBoolean flag = stopFlags.get(buildId);
+    public void startBuild(String region, Build build, Project project, String buildspecOverride) {
+        String executionId = build.getArn();
+        AtomicBoolean stopFlag = new AtomicBoolean(false);
+        stopFlags.put(executionId, stopFlag);
+        Thread.ofVirtual().start(() -> runBuild(region, build, project, buildspecOverride, stopFlag, executionId));
+    }
+
+    public void stopBuild(String executionId) {
+        AtomicBoolean flag = stopFlags.get(executionId);
         if (flag != null) {
             flag.set(true);
         }
-        String containerId = runningContainers.get(buildId);
+        String containerId = runningContainers.get(executionId);
         if (containerId != null) {
             try {
                 dockerClient.stopContainerCmd(containerId).withTimeout(5).exec();
@@ -136,8 +156,20 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
     }
 
-    private void runBuild(String region, Build build, Project project,
-                          String buildspecOverride, AtomicBoolean stopFlag) {
+    static String resolveBuildImage(String image) {
+        if (image == null || image.isBlank()) {
+            throw new AwsException("InvalidInputException", "environment.image is required", 400);
+        }
+        // AWS managed-image identifiers are not Docker Hub repositories.
+        if ("aws/codebuild/amazonlinux2-x86_64-standard:5.0".equals(image)) {
+            return "public.ecr.aws/codebuild/amazonlinux-x86_64-standard:5.0";
+        }
+        return image.startsWith("aws/codebuild/")
+                ? "public.ecr.aws/codebuild/" + image.substring("aws/codebuild/".length()) : image;
+    }
+
+    void runBuild(String region, Build build, Project project,
+                          String buildspecOverride, AtomicBoolean stopFlag, String executionId) {
         String buildId = build.getId();
         Path workspace = null;
         String containerId = null;
@@ -212,21 +244,41 @@ public class CodeBuildRunner implements ContainerTeardown {
 
             // Keep the container alive so each phase can be run with docker exec.
             // No bind mount needed — source and artifacts are transferred with docker cp.
-            ContainerSpec spec = containerBuilder.newContainer(image)
-                    .withCmd(List.of("sh", "-c", "tail -f /dev/null"))
+            String resolvedImage = resolveBuildImage(image);
+            LOG.infov("Provisioning CodeBuild worker for {0}: requestedImage={1}, resolvedImage={2}",
+                    buildId, image, resolvedImage);
+            ContainerSpec spec = containerBuilder.newContainer(resolvedImage)
+                    .withEntrypoint(List.of("sh", "-c"))
+                    .withCmd(List.of("exec tail -f /dev/null"))
                     .withEnv(envList)
                     .withDockerNetwork(config.services().codebuild().dockerNetwork())
                     .withEmbeddedDns()
                     .withHostDockerInternalOnLinux()
                     .withPrivileged(privileged)
                     .withLogRotation()
+                    .withLabels(ContainerStorageHelper.resourceIdentityLabels(
+                            "codebuild", buildId, regionResolver.getAccountId(), region))
                     .build();
 
-            ContainerLifecycleManager.ContainerInfo info = lifecycleManager.createAndStart(spec);
-            containerId = info.containerId();
-            runningContainers.put(buildId, containerId);
+            if (config.services().codebuild().honourEnvironmentType()) {
+                String environmentType = build.getEnvironment() != null ? build.getEnvironment().getType() : null;
+                String platform = "ARM_CONTAINER".equals(environmentType) ? "linux/arm64" : "linux/amd64";
+                containerId = lifecycleManager.create(spec, platform);
+            } else {
+                containerId = lifecycleManager.create(spec);
+            }
+            runningContainers.put(executionId, containerId);
+            if (stopFlag.get()) { finishStopped(build); return; }
+            lifecycleManager.startCreated(containerId, spec);
+            if (stopFlag.get()) { finishStopped(build); return; }
 
-            logHandle = logStreamer.attach(containerId, logGroup, logStream, region, "codebuild:" + buildId);
+            Map<String, Object> logsConfig = project.getLogsConfig();
+            boolean logsDisabled = logsConfig != null
+                    && logsConfig.get("cloudWatchLogs") instanceof Map<?, ?> cloudWatchLogs
+                    && "DISABLED".equals(cloudWatchLogs.get("status"));
+            if (!logsDisabled) {
+                logHandle = logStreamer.attach(containerId, logGroup, logStream, region, "codebuild:" + buildId);
+            }
 
             String containerSrcDir = "/codebuild/output/src/src";
             int timeoutMinutes = build.getTimeoutInMinutes() != null ? build.getTimeoutInMinutes() : 60;
@@ -325,7 +377,10 @@ public class CodeBuildRunner implements ContainerTeardown {
             } catch (Exception e) {
                 LOG.warnv("Artifact upload failed for build {0}: {1}", buildId, e.getMessage());
                 completePhaseWithError(build, "UPLOAD_ARTIFACTS", "FAILED", e.getMessage());
+                buildFailed = true;
             }
+
+            if (stopFlag.get()) { finishStopped(build); return; }
 
             // FINALIZING
             beginPhase(build, "FINALIZING");
@@ -342,7 +397,12 @@ public class CodeBuildRunner implements ContainerTeardown {
             build.setBuildStatus(buildFailed ? "FAILED" : "SUCCEEDED");
 
         } catch (Exception e) {
-            LOG.error("Unexpected error in build " + build.getId(), e);
+            LOG.errorv(e, "CodeBuild worker failed: build={0}, phase={1}, container={2}, stopped={3}: {4}",
+                    buildId, build.getCurrentPhase(), containerId, stopFlag.get(), e.getMessage());
+            if (stopFlag.get()) {
+                finishStopped(build);
+                return;
+            }
             build.setEndTime(System.currentTimeMillis() / 1000.0);
             build.setBuildComplete(true);
             build.setBuildStatus("FAULT");
@@ -368,12 +428,11 @@ public class CodeBuildRunner implements ContainerTeardown {
                 build.getPhases().add(completedPhase);
             }
         } finally {
-            stopFlags.remove(buildId);
-            if (logHandle != null) {
+            stopFlags.remove(executionId);
+            if (containerId != null && runningContainers.remove(executionId, containerId)) {
+                lifecycleManager.stopAndRemove(containerId, logHandle);
+            } else if (logHandle != null) {
                 try { logHandle.close(); } catch (Exception ignored) {}
-            }
-            if (containerId != null && runningContainers.remove(buildId, containerId)) {
-                lifecycleManager.stopAndRemove(containerId, null);
             }
             if (workspace != null) {
                 deleteDirectory(workspace);
@@ -385,21 +444,17 @@ public class CodeBuildRunner implements ContainerTeardown {
                                            String buildspecOverride, Path workspace) throws IOException {
         String sourceType = project.getSource() != null ? project.getSource().getType() : "NO_SOURCE";
 
-        if ("S3".equals(sourceType) && project.getSource().getLocation() != null) {
+        if ("S3".equals(sourceType)) {
             String location = project.getSource().getLocation();
-            int slash = location.indexOf('/');
-            if (slash > 0) {
-                String bucket = location.substring(0, slash);
-                String key = location.substring(slash + 1);
-                try {
-                    S3Object obj = s3Service.getObject(bucket, key);
-                    if (obj != null && obj.getData() != null) {
-                        extractZip(obj.getData(), workspace);
-                    }
-                } catch (Exception e) {
-                    LOG.warnv("Could not acquire S3 source {0}: {1}", location, e.getMessage());
-                }
+            int slash = location != null ? location.indexOf('/') : -1;
+            if (slash <= 0 || slash == location.length() - 1) {
+                throw new AwsException("InvalidInputException", "S3 source location must be bucket/key", 400);
             }
+            S3Object obj = s3Service.getObject(location.substring(0, slash), location.substring(slash + 1));
+            if (obj == null || obj.getData() == null) {
+                throw new AwsException("InvalidInputException", "S3 source not found: " + location, 400);
+            }
+            extractZip(obj.getData(), workspace);
         }
 
         if (buildspecOverride != null && !buildspecOverride.isBlank()) {
@@ -506,7 +561,7 @@ public class CodeBuildRunner implements ContainerTeardown {
                     .withTarInputStream(new ByteArrayInputStream(bos.toByteArray()))
                     .exec();
         } catch (Exception e) {
-            LOG.warnv("Could not copy source to container {0}: {1}", containerId, e.getMessage());
+            throw new IllegalStateException("Could not copy source to build container " + containerId, e);
         }
     }
 
@@ -550,7 +605,7 @@ public class CodeBuildRunner implements ContainerTeardown {
                 }
             }
         } catch (Exception e) {
-            LOG.warnv("Could not copy artifacts from container {0}: {1}", containerId, e.getMessage());
+            throw new IOException("Could not copy artifacts from build container " + containerId, e);
         }
     }
 
@@ -585,7 +640,7 @@ public class CodeBuildRunner implements ContainerTeardown {
         return tar;
     }
 
-    private PhaseResult runPhase(String containerId, String workDir, List<String> env,
+    PhaseResult runPhase(String containerId, String workDir, List<String> env,
                                  List<String> commands, int timeoutMinutes, AtomicBoolean stopFlag) {
         if (commands.isEmpty()) {
             return PhaseResult.ofSuccess();
@@ -609,6 +664,7 @@ public class CodeBuildRunner implements ContainerTeardown {
 
             CountDownLatch latch = new CountDownLatch(1);
             ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
+            AtomicReference<Throwable> executionError = new AtomicReference<>();
 
             dockerClient.execStartCmd(execId).exec(new ResultCallback.Adapter<Frame>() {
                 @Override
@@ -620,7 +676,10 @@ public class CodeBuildRunner implements ContainerTeardown {
                 @Override
                 public void onComplete() { latch.countDown(); }
                 @Override
-                public void onError(Throwable t) { latch.countDown(); }
+                public void onError(Throwable t) {
+                    executionError.set(t);
+                    latch.countDown();
+                }
             });
 
             boolean completed = latch.await(timeoutMinutes, TimeUnit.MINUTES);
@@ -631,13 +690,22 @@ public class CodeBuildRunner implements ContainerTeardown {
                 return PhaseResult.ofStopped();
             }
 
+            if (executionError.get() != null) {
+                LOG.errorv(executionError.get(), "CodeBuild exec stream failed: container={0}, exec={1}",
+                        containerId, execId);
+                return PhaseResult.ofFailure("Docker exec stream failed: " + executionError.get().getMessage());
+            }
             Long exitCode = dockerClient.inspectExecCmd(execId).exec().getExitCodeLong();
-            if (exitCode != null && exitCode != 0) {
+            if (exitCode == null) {
+                return PhaseResult.ofFailure("Docker exec completed without an exit code");
+            }
+            if (exitCode != 0) {
                 String output = outputCapture.toString(StandardCharsets.UTF_8);
                 String msg = "Exit code " + exitCode;
                 if (!output.isBlank()) {
-                    int start = Math.max(0, output.length() - 512);
-                    msg += ": " + output.stripTrailing().substring(start);
+                    String trimmed = output.stripTrailing();
+                    int start = Math.max(0, trimmed.length() - 512);
+                    msg += ": " + trimmed.substring(start);
                 }
                 return PhaseResult.ofFailure(msg);
             }
@@ -803,6 +871,8 @@ public class CodeBuildRunner implements ContainerTeardown {
     }
 
     private void completePhaseWithError(Build build, String phaseType, String status, String message) {
+        LOG.warnv("CodeBuild phase failed: build={0}, phase={1}, status={2}: {3}",
+                build.getId(), phaseType, status, message);
         findPhase(build, phaseType).ifPresent(p -> {
             double end = System.currentTimeMillis() / 1000.0;
             p.setPhaseStatus(status);
@@ -866,7 +936,7 @@ public class CodeBuildRunner implements ContainerTeardown {
 
     private enum PhaseStatus { SUCCEEDED, FAILED, STOPPED }
 
-    private record PhaseResult(PhaseStatus status, String errorMessage) {
+    record PhaseResult(PhaseStatus status, String errorMessage) {
         boolean succeeded() { return status == PhaseStatus.SUCCEEDED; }
         boolean failed() { return status == PhaseStatus.FAILED; }
         boolean stopped() { return status == PhaseStatus.STOPPED; }

@@ -132,6 +132,72 @@ public class RuntimeApiServer {
     private boolean stopped;
     private CompletableFuture<Void> closeFuture;
 
+    // Set by quiesce() (under lock); completes when every parked extension SHUTDOWN
+    // has flushed. close() awaits this before dropping the httpServer (see #2142).
+    // Null if quiesce() has not run.
+    private CompletableFuture<Void> extensionWritesFlushed;
+
+    /** Test-only: number of /next pollers parked in waitingContexts, for
+     * tests that want to await the parked state deterministically without sleeping. */
+    int waitingContextsSize() {
+        synchronized (lock) {
+            return waitingContexts.size();
+        }
+    }
+
+    /** Test-only: number of invocations queued waiting for a /next poller. Used by
+     * the requeue-on-write-failure test to verify the requeue actually happened. */
+    int pendingQueueSize() {
+        synchronized (lock) {
+            return pendingQueue.size();
+        }
+    }
+
+    /** Test-only: number of invocations currently in flight. Used alongside
+     * {@link #pendingQueueSize()} to verify a requeue-on-failure both offered
+     * to pendingQueue AND cleared the stale inFlight entry. */
+    int inFlightSize() {
+        return inFlight.size();
+    }
+
+    /**
+     * Test-only: called at the start of enqueue()'s deferred sendInvocation,
+     * before the guard's `stopped` re-check. A test subclass overrides this to
+     * gate the dispatch on a CountDownLatch and drive a specific interleaving
+     * with quiesce(). Empty no-op in production.
+     */
+    protected void beforeEnqueueDeferredDispatch() { }
+
+    /**
+     * Test-only: called at the start of NEXT_PATH's post-lock guard block, before
+     * the guard's `stopped` re-check. Same shape as {@link #beforeEnqueueDeferredDispatch}
+     * but for the synchronous handler-thread dispatch path.
+     */
+    protected void beforeNextPathDispatchGuard() { }
+
+    /**
+     * Test-only: called inside quiesce() immediately after the lock has been
+     * released, before any outside-lock work runs. Test subclasses override
+     * to freeze quiesce at that point and drive a dispatch through the guard
+     * against a supposedly-partially-swept state, proving atomicity holds.
+     */
+    protected void afterQuiesceStoppedFlagSet() { }
+
+    /**
+     * Test-only: called inside enqueue()'s deferred dispatch after lock release,
+     * before the send/requeue decision is acted on. Test subclasses override to
+     * mutate the parked ctx (e.g. end it) and prove the decision was committed
+     * atomically inside the lock.
+     */
+    protected void afterEnqueueDispatchLockReleased(RoutingContext waitingCtx) { }
+
+    /**
+     * Test-only: called at the top of sendInvocation so tests can observe whether
+     * a dispatch actually ran. Distinguishes "sent to a dead ctx" from "skipped,
+     * stranded" — both leave the invocation in inFlight otherwise.
+     */
+    protected void beforeSendInvocationWrite(String requestId) { }
+
     // Set once an extension reports an init/exit error. Real AWS treats both as fatal to the
     // execution environment, so the container must neither accept new work nor be reused.
     //
@@ -145,6 +211,25 @@ public class RuntimeApiServer {
     // /response call, matching AWS's treatment of the environment as condemned for future work
     // rather than aborted mid-invoke. WarmPool performs the actual teardown afterwards.
     private volatile boolean faulted;
+
+    /**
+     * The runtime's own error payload when {@code faulted} was set by {@link #handleInitError}
+     * or {@link #handleRuntimeProcessExited} - i.e. by a real runtime fault, as opposed to an
+     * extension init/exit error or an intentional {@link #quiesce()}. Written under {@code lock}
+     * in the same block that sets {@code faulted}, so the two are always consistent.
+     *
+     * <p>{@code warmPool.acquire(fn)} launches the container and only returns afterward does
+     * {@code LambdaExecutorService.executeSync()} create the {@code PendingInvocation} and call
+     * {@link #enqueue}, so a cold-start init error or an immediate crash can fault this server
+     * before any invocation exists for {@code handleInitError}/{@code handleRuntimeProcessExited}
+     * to strand. Retaining the payload here lets a later {@link #enqueue} rejection return the
+     * runtime's actual reported error instead of the generic {@link #CONTAINER_STOPPED_PAYLOAD}.
+     *
+     * <p>Left {@code null} for a fault raised by {@link #handleExtensionFatalError} and for a
+     * plain {@code quiesce()} with no fault, both of which should keep returning
+     * {@code CONTAINER_STOPPED_PAYLOAD} on a later {@code enqueue} rejection.
+     */
+    private volatile byte[] fatalRuntimeErrorPayload;
 
     // Init-readiness barrier. ContainerLauncher launches extension binaries as detached `docker
     // exec`s and returns immediately, so without this the first invocation can reach the runtime
@@ -195,6 +280,18 @@ public class RuntimeApiServer {
 
     public int getPort() {
         return port;
+    }
+
+    /**
+     * True if at least one extension has completed registration via
+     * {@code /extension/register}. Callers use this to pick the Shutdown-phase grace tier
+     * (see AWS's documented 0/500/2000ms limits): a container with a registered extension
+     * gets the 2s external-extensions budget, otherwise the runtime-only sub-budget.
+     */
+    public boolean hasRegisteredExtensions() {
+        synchronized (lock) {
+            return !extensions.isEmpty();
+        }
     }
 
     /**
@@ -280,25 +377,46 @@ public class RuntimeApiServer {
         // exhaustion when many warm containers poll concurrently.
         router.get(NEXT_PATH).handler(ctx -> {
             PendingInvocation toDispatch = null;
-            boolean send204 = false;
+            boolean faultedNow = false;
             synchronized (lock) {
-                // `faulted` alongside `stopped`: a condemned environment must not be handed work,
-                // including an invocation that was queued just before the fault was reported.
-                if (stopped || faulted) {
-                    send204 = true;
+                if (faulted) {
+                    // Faulted environment: signal the fault so the runtime exits cleanly rather
+                    // than parking forever. Distinct from `stopped` — stopped is a normal
+                    // teardown, faulted means something invariant-breaking happened upstream.
+                    faultedNow = true;
+                } else if (stopped) {
+                    // Teardown in progress. Park the poll; the container process is being
+                    // SIGTERMed and will exit before the socket closes, matching how real
+                    // AWS Lambda tears an environment down.
+                    waitingContexts.add(ctx);
                 } else {
                     toDispatch = pendingQueue.poll();
                     if (toDispatch == null) {
                         waitingContexts.add(ctx);
+                    } else {
+                        // Move to inFlight under the same lock so a concurrent quiesce()
+                        // sweep sees it — otherwise the invocation escapes both queues
+                        // and its future is never completed.
+                        inFlight.put(toDispatch.getRequestId(), toDispatch);
                     }
                 }
             }
-            if (send204) {
+            if (faultedNow) {
                 ctx.response().setStatusCode(204).end();
             } else if (toDispatch != null) {
-                sendInvocation(ctx, toDispatch);
+                beforeNextPathDispatchGuard();
+                // Re-check `stopped` under the lock: quiesce() may have run since our
+                // poll above, in which case it completed toDispatch's future with
+                // ContainerStopped and dispatching now would silently discard /response.
+                boolean alreadyHandled;
+                synchronized (lock) {
+                    alreadyHandled = stopped;
+                }
+                if (!alreadyHandled) {
+                    sendInvocation(ctx, toDispatch);
+                }
             }
-            // else: parked — enqueue() or stop() will dispatch this ctx later.
+            // else: parked — enqueue() or the httpServer close will dispatch/end this ctx.
         });
 
         // POST /runtime/invocation/{requestId}/response — success
@@ -314,25 +432,9 @@ public class RuntimeApiServer {
             sendStatusOk(ctx);
         });
 
-        // POST /runtime/invocation/{requestId}/error — failure
-        router.post(ERROR_PATH).handler(ctx -> {
-            String requestId = ctx.pathParam("requestId");
-            PendingInvocation invocation = inFlight.remove(requestId);
-            if (invocation != null) {
-                byte[] payload = ctx.body().buffer() != null ? ctx.body().buffer().getBytes() : new byte[0];
-                String errorType = ctx.request().getHeader("Lambda-Runtime-Function-Error-Type");
-                String functionError = errorType != null && errorType.contains("Runtime") ? "Unhandled" : "Handled";
-                InvokeResult result = new InvokeResult(200, functionError, payload, null, requestId);
-                invocation.getResultFuture().complete(result);
-            }
-            sendStatusOk(ctx);
-        });
+        router.post(ERROR_PATH).handler(this::handleInvocationError);
 
-        // POST /runtime/init/error — runtime initialization failure
-        router.post(INIT_ERROR_PATH).handler(ctx -> {
-            LOG.warnv("Lambda runtime reported init error on port {0}", String.valueOf(port));
-            sendStatusOk(ctx);
-        });
+        router.post(INIT_ERROR_PATH).handler(this::handleInitError);
 
         // POST /extension/register — an extension process (e.g. aws-lambda-web-adapter)
         // registers to receive lifecycle events. Real AWS requires the Lambda-Extension-Name
@@ -513,22 +615,31 @@ public class RuntimeApiServer {
         });
     }
 
-    public CompletableFuture<Void> stop() {
-        CompletableFuture<Void> closed;
-        List<RoutingContext> contextsToClose204;
-        List<Supplier<Future<Void>>> dispatches = new ArrayList<>();
+    /**
+     * Mark the server stopped and settle all bookkeeping, without closing the underlying HTTP
+     * server. Idempotent — repeated calls are no-ops.
+     *
+     * Runtime pollers already parked on {@code /invocation/next} stay parked; the caller is
+     * expected to shut the container process down (docker stop → SIGTERM) before invoking
+     * {@link #close()}, so those pollers are terminated by the container exit rather than by
+     * a server-side response. Extensions parked on {@code /event/next} get a {@code Shutdown}
+     * event (this is documented AWS behavior for the Extensions API). Pending and in-flight
+     * invocations are completed with {@code ContainerStopped}.
+     *
+     * Call {@link #close()} afterward to release the port.
+     */
+    public void quiesce() {
+        List<Supplier<Future<Void>>> extensionDispatches = new ArrayList<>();
         List<PendingInvocation> invocationsToFailContainerStopped;
+        List<PendingInvocation> inFlightToFail;
+        CompletableFuture<Void> writesFuture = new CompletableFuture<>();
 
         synchronized (lock) {
-            if (closeFuture != null) {
-                return closeFuture;
+            if (stopped) {
+                return;
             }
             stopped = true;
-            closed = new CompletableFuture<>();
-            closeFuture = closed;
-
-            contextsToClose204 = new ArrayList<>(waitingContexts);
-            waitingContexts.clear();
+            extensionWritesFlushed = writesFuture;
 
             ExtensionEvent shutdownEvent = ExtensionEvent.shutdown(System.currentTimeMillis() + 2000, "SPINDOWN");
             for (RegisteredExtension ext : extensions.values()) {
@@ -537,7 +648,7 @@ public class RuntimeApiServer {
                 }
                 RoutingContext waitingCtx = ext.takeWaitingContext();
                 if (waitingCtx != null) {
-                    dispatches.add(() -> {
+                    extensionDispatches.add(() -> {
                         if (waitingCtx.response().ended()) {
                             return Future.succeededFuture();
                         }
@@ -550,6 +661,75 @@ public class RuntimeApiServer {
 
             invocationsToFailContainerStopped = new ArrayList<>(pendingQueue);
             pendingQueue.clear();
+            // Snapshot and clear inFlight inside the lock, atomic with stopped=true.
+            // The dispatch guards in NEXT_PATH and enqueue()'s deferred callback rely on
+            // this: once quiesce releases the lock, stopped=true implies inFlight is
+            // empty, so a guard reading `stopped` cannot deliver an invocation whose
+            // future quiesce is about to complete with ContainerStopped.
+            inFlightToFail = new ArrayList<>(inFlight.values());
+            inFlight.clear();
+        }
+        afterQuiesceStoppedFlagSet();
+
+        // Extension SHUTDOWN writes go through the event loop; chain on end() rather
+        // than the scheduled handler's return, because response.end() is async and the
+        // bytes are not on the wire until its future completes. close() awaits
+        // extensionWritesFlushed before dropping the httpServer (see #2142).
+        //
+        // Runtime pollers stay parked — no 204. They are terminated either by the
+        // container process exiting on SIGTERM (the ContainerLauncher path, which
+        // interleaves docker stop between quiesce and close) or by the httpServer
+        // close itself (the stop() wrapper path); either matches real AWS Lambda's
+        // teardown better than an undocumented 204 on /invocation/next would.
+        if (extensionDispatches.isEmpty()) {
+            writesFuture.complete(null);
+        } else {
+            AtomicInteger remainingWrites = new AtomicInteger(extensionDispatches.size());
+            for (Supplier<Future<Void>> dispatch : extensionDispatches) {
+                vertx.runOnContext(v -> dispatch.get().onComplete(ar -> {
+                    if (remainingWrites.decrementAndGet() == 0) {
+                        writesFuture.complete(null);
+                    }
+                }));
+            }
+        }
+
+        // Fail queued invocations that were never consumed by /next.
+        for (PendingInvocation pending : invocationsToFailContainerStopped) {
+            pending.getResultFuture().complete(
+                    new InvokeResult(200, "Unhandled", CONTAINER_STOPPED_PAYLOAD, null, pending.getRequestId()));
+        }
+
+        // Complete any in-flight invocations with error.
+        for (PendingInvocation inv : inFlightToFail) {
+            inv.getResultFuture().complete(
+                    new InvokeResult(200, "Unhandled", CONTAINER_STOPPED_PAYLOAD, null, inv.getRequestId()));
+        }
+    }
+
+    /**
+     * Close the underlying HTTP server, releasing the bound port. Idempotent — the returned
+     * future resolves once the server has actually closed (first call) or immediately with
+     * the same future (subsequent calls). Any parked runtime pollers are terminated by the
+     * underlying channel closing.
+     *
+     * {@link #quiesce()} should be called first so that any registered extensions have the
+     * chance to receive a Shutdown event before their sockets die.
+     */
+    public CompletableFuture<Void> close() {
+        CompletableFuture<Void> closed;
+        CompletableFuture<Void> awaitWrites;
+        synchronized (lock) {
+            if (closeFuture != null) {
+                return closeFuture;
+            }
+            closed = new CompletableFuture<>();
+            closeFuture = closed;
+            // Await any extension SHUTDOWN writes quiesce() scheduled before closing
+            // the httpServer, so their responses don't race the socket teardown.
+            awaitWrites = extensionWritesFlushed != null
+                    ? extensionWritesFlushed
+                    : CompletableFuture.completedFuture(null);
         }
 
         Runnable closeServer = () -> {
@@ -567,57 +747,69 @@ public class RuntimeApiServer {
                 closed.complete(null);
             }
         };
-
-        // Wake any parked /next pollers with 204 (container shutting down — runtime will exit) and
-        // dispatch SHUTDOWN to every extension already parked on /event/next, then close the HTTP
-        // server. Each write is scheduled on the event loop via vertx.runOnContext(...), and the
-        // server is closed only once every write's response has actually been flushed — tracked by
-        // remainingWrites, decremented from each end() future's completion rather than when the
-        // scheduled handler returns (response.end() is asynchronous, so the bytes are not on the
-        // wire yet when the handler returns). So a parked extension's SHUTDOWN — or a poller's 204
-        // — is fully written before its connection is torn down, instead of racing
-        // httpServer.close() and orphaning the extension with an EOF. See issue #2142.
-        int parkedWrites = contextsToClose204.size() + dispatches.size();
-        if (parkedWrites == 0) {
-            closeServer.run();
-        } else {
-            AtomicInteger remainingWrites = new AtomicInteger(parkedWrites);
-            Runnable afterWrite = () -> {
-                if (remainingWrites.decrementAndGet() == 0) {
-                    closeServer.run();
-                }
-            };
-            for (RoutingContext ctx : contextsToClose204) {
-                vertx.runOnContext(v -> {
-                    Future<Void> written = ctx.response().ended()
-                            ? Future.succeededFuture()
-                            : ctx.response().setStatusCode(204).end();
-                    written.onComplete(ar -> afterWrite.run());
-                });
-            }
-            for (Supplier<Future<Void>> dispatch : dispatches) {
-                vertx.runOnContext(v -> dispatch.get().onComplete(ar -> afterWrite.run()));
-            }
-        }
-
-        // Fail queued invocations that were never consumed by /next.
-        for (PendingInvocation pending : invocationsToFailContainerStopped) {
-            pending.getResultFuture().complete(
-                    new InvokeResult(200, "Unhandled", CONTAINER_STOPPED_PAYLOAD, null, pending.getRequestId()));
-        }
-
-        // Complete any in-flight invocations with error.
-        inFlight.values().forEach(inv ->
-                inv.getResultFuture().complete(
-                        new InvokeResult(200, "Unhandled", CONTAINER_STOPPED_PAYLOAD, null, inv.getRequestId())));
-        inFlight.clear();
-
+        awaitWrites.whenComplete((v, err) -> closeServer.run());
         return closed;
+    }
+
+    /**
+     * Convenience wrapper: {@link #quiesce()} then {@link #close()} back-to-back, matching the
+     * pre-split single-step teardown. Callers that need to SIGTERM the container between the
+     * quiesce and close phases (which is the AWS-faithful teardown) should call the two
+     * methods directly rather than this wrapper.
+     */
+    public CompletableFuture<Void> stop() {
+        quiesce();
+        return close();
+    }
+
+    /**
+     * Fan the INVOKE event out to every subscribed extension. Called from
+     * {@link #sendInvocation(RoutingContext, PendingInvocation)}, i.e. at the moment the runtime
+     * actually receives the invocation, not at enqueue() time. Nothing in the launch path waits for
+     * an internal extension to register, so an extension registering from inside the runtime process
+     * may not be in {@code extensions} yet when enqueue() runs; dispatching there dropped the event
+     * entirely (see #2573).
+     *
+     * <p>{@code stopped} is read under the lock for the same reason sendInvocation()'s failure path
+     * reads it: quiesce() may already have swept the extensions and queued SHUTDOWN, and an INVOKE
+     * offered afterwards would be drained ahead of that SHUTDOWN by /extension/event/next.
+     */
+    private void notifyExtensionsOfInvoke(PendingInvocation invocation) {
+        List<Runnable> dispatches = new ArrayList<>();
+        synchronized (lock) {
+            if (stopped || extensions.isEmpty()) {
+                return;
+            }
+            ExtensionEvent event = ExtensionEvent.invoke(
+                    invocation.getRequestId(), invocation.getDeadlineMs(), invocation.getFunctionArn());
+            for (RegisteredExtension ext : extensions.values()) {
+                if (!ext.isSubscribedTo(ExtensionEvent.Type.INVOKE)) {
+                    continue;
+                }
+                RoutingContext waitingCtx = ext.takeWaitingContext();
+                if (waitingCtx != null) {
+                    dispatches.add(() -> {
+                        if (!waitingCtx.response().ended()) {
+                            sendExtensionEvent(waitingCtx, event);
+                        } else {
+                            synchronized (lock) {
+                                ext.getPendingEvents().offer(event);
+                            }
+                        }
+                    });
+                } else {
+                    ext.getPendingEvents().offer(event);
+                }
+            }
+        }
+        for (Runnable dispatch : dispatches) {
+            vertx.runOnContext(v -> dispatch.run());
+        }
     }
 
     public CompletableFuture<InvokeResult> enqueue(PendingInvocation invocation) {
         boolean rejected;
-        List<Runnable> dispatches = new ArrayList<>();
+        byte[] rejectionPayload = null;
         RoutingContext waitingCtxForInvocation = null;
 
         synchronized (lock) {
@@ -627,58 +819,67 @@ public class RuntimeApiServer {
             // failing fast. Read inside the lock alongside `stopped` so the accept/reject decision
             // stays a single atomic step.
             rejected = stopped || faulted;
+            if (rejected && faulted) {
+                // A genuine runtime fault (init error or process exit) beats plain `stopped`: the
+                // caller gets the runtime's actual reported error rather than the generic
+                // CONTAINER_STOPPED_PAYLOAD used for an unfaulted, intentional quiesce().
+                rejectionPayload = fatalRuntimeErrorPayload;
+            }
             if (!rejected) {
-                if (!extensions.isEmpty()) {
-                    ExtensionEvent event = ExtensionEvent.invoke(
-                            invocation.getRequestId(), invocation.getDeadlineMs(), invocation.getFunctionArn());
-                    for (RegisteredExtension ext : extensions.values()) {
-                        if (!ext.isSubscribedTo(ExtensionEvent.Type.INVOKE)) {
-                            continue;
-                        }
-                        RoutingContext waitingCtx = ext.takeWaitingContext();
-                        if (waitingCtx != null) {
-                            dispatches.add(() -> {
-                                if (!waitingCtx.response().ended()) {
-                                    sendExtensionEvent(waitingCtx, event);
-                                } else {
-                                    synchronized (lock) {
-                                        ext.getPendingEvents().offer(event);
-                                    }
-                                }
-                            });
-                        } else {
-                            ext.getPendingEvents().offer(event);
-                        }
-                    }
-                }
-
                 waitingCtxForInvocation = waitingContexts.poll();
                 if (waitingCtxForInvocation == null) {
                     pendingQueue.offer(invocation);
+                } else {
+                    // Move to inFlight under the same lock so a concurrent quiesce()
+                    // sweep sees it — otherwise the invocation escapes both queues and
+                    // the caller hangs until the function deadline.
+                    inFlight.put(invocation.getRequestId(), invocation);
                 }
             }
         }
 
         if (rejected) {
+            byte[] payload = rejectionPayload != null ? rejectionPayload : CONTAINER_STOPPED_PAYLOAD;
             invocation.getResultFuture().complete(
-                    new InvokeResult(200, "Unhandled", CONTAINER_STOPPED_PAYLOAD, null, invocation.getRequestId()));
+                    new InvokeResult(200, "Unhandled", payload, null, invocation.getRequestId()));
             return invocation.getResultFuture();
-        }
-
-        for (Runnable dispatch : dispatches) {
-            vertx.runOnContext(v -> dispatch.run());
         }
 
         if (waitingCtxForInvocation != null) {
             final RoutingContext waitingCtx = waitingCtxForInvocation;
             vertx.runOnContext(v -> {
-                if (!waitingCtx.response().ended()) {
-                    sendInvocation(waitingCtx, invocation);
-                } else {
-                    // Connection closed between park and dispatch — re-queue.
-                    synchronized (lock) {
-                        pendingQueue.offer(invocation);
+                beforeEnqueueDeferredDispatch();
+                // Two things could have changed between enqueue()'s lock release and
+                // this deferred dispatch reaching the event loop:
+                //   1. quiesce() may have run — atomic with clearing inFlight and
+                //      completing the caller's future with ContainerStopped. Skip.
+                //   2. The parked client may have disconnected — the ctx is ended and
+                //      writing to it would fail. Requeue for the next /next poller
+                //      and drop this stale inFlight entry (the next poller will re-put
+                //      the invocation into inFlight under its own lock).
+                //
+                // Read waitingCtx.response().ended() ONCE, under the lock, so the
+                // dispatch/requeue decision is committed atomically. Reading it a
+                // second time outside the lock (as the code did previously) let a
+                // disconnect between the two reads produce a stranded inFlight entry:
+                // the inside-lock read saw !ended → no requeue; the outside-lock read
+                // saw ended → no send; neither branch fired.
+                boolean shouldDispatch;
+                synchronized (lock) {
+                    if (stopped) {
+                        return;
                     }
+                    if (waitingCtx.response().ended()) {
+                        pendingQueue.offer(invocation);
+                        inFlight.remove(invocation.getRequestId());
+                        shouldDispatch = false;
+                    } else {
+                        shouldDispatch = true;
+                    }
+                }
+                afterEnqueueDispatchLockReleased(waitingCtx);
+                if (shouldDispatch) {
+                    sendInvocation(waitingCtx, invocation);
                 }
             });
         }
@@ -701,6 +902,62 @@ public class RuntimeApiServer {
             }
         }
         return false;
+    }
+
+    /**
+     * Handles {@code POST /runtime/invocation/{requestId}/error}: the runtime reports that the
+     * handler itself failed (an uncaught exception, {@code callback(err)}, a response Lambda
+     * could not marshal, ...).
+     *
+     * <p>Always completes with {@code FunctionError: Unhandled} - real AWS reports that for
+     * every one of these regardless of runtime or error shape. The {@code
+     * Lambda-Runtime-Function-Error-Type} header this used to be keyed on does not decide it
+     * (see #3314): the Python and Node.js RICs don't even send that header on this path, and
+     * the Java RIC's own vocabulary ({@code Runtime.UserException}, {@code
+     * Runtime.BadFunctionCode}) is coincidentally what an earlier, narrower
+     * {@code contains("Runtime")} heuristic here keyed on. {@code Handled} is a legacy value
+     * current runtimes never produce.
+     */
+    private void handleInvocationError(RoutingContext ctx) {
+        String requestId = ctx.pathParam("requestId");
+        PendingInvocation invocation = inFlight.remove(requestId);
+        if (invocation != null) {
+            byte[] payload = ctx.body().buffer() != null ? ctx.body().buffer().getBytes() : new byte[0];
+            invocation.getResultFuture().complete(new InvokeResult(200, "Unhandled", payload, null, requestId));
+        }
+        sendStatusOk(ctx);
+    }
+
+    /**
+     * Handles {@code POST /runtime/init/error}: the runtime reports a failed initialization
+     * (module not importable, handler missing, a syntax error, an exception raised at import
+     * time) and exits without ever calling {@code NEXT_PATH}. There is therefore no in-flight
+     * invocation to fail - the one that triggered this cold start is still sitting in {@code
+     * pendingQueue} - and the environment is condemned the same way an extension init/exit
+     * error condemns it (see {@link #faulted}'s doc): the runtime process is gone, so nothing
+     * will ever answer a {@code /next} poll on this container again.
+     */
+    private void handleInitError(RoutingContext ctx) {
+        byte[] payload = ctx.body().buffer() != null ? ctx.body().buffer().getBytes() : new byte[0];
+        LOG.warnv("Lambda runtime reported init error on port {0}", String.valueOf(port));
+
+        List<PendingInvocation> stranded;
+        synchronized (lock) {
+            faulted = true;
+            // Retained for a possible later enqueue(): the invocation that triggered this cold
+            // start may not exist yet (see fatalRuntimeErrorPayload's doc), in which case
+            // `stranded` below is empty and this is the only place the real error survives.
+            fatalRuntimeErrorPayload = payload;
+            stranded = new ArrayList<>(pendingQueue);
+            pendingQueue.clear();
+            stranded.addAll(inFlight.values());
+            inFlight.clear();
+        }
+        for (PendingInvocation invocation : stranded) {
+            invocation.getResultFuture().complete(
+                    new InvokeResult(200, "Unhandled", payload, null, invocation.getRequestId()));
+        }
+        sendStatusOk(ctx);
     }
 
     private void sendStatusOk(RoutingContext ctx) {
@@ -761,20 +1018,47 @@ public class RuntimeApiServer {
     }
 
     private void sendInvocation(RoutingContext ctx, PendingInvocation invocation) {
-        invocation.markDispatched();
-        inFlight.put(invocation.getRequestId(), invocation);
-
+        beforeSendInvocationWrite(invocation.getRequestId());
+        invocation.prepareForDispatch();
+        // Invariant: callers put the invocation in inFlight under the lock before
+        // dispatching, so no inFlight.put here.
         byte[] payload = invocation.getPayload();
         String body = (payload != null && payload.length > 0)
               ? new String(payload)
               : "{}";
-        ctx.response()
-                .setStatusCode(200)
-                .putHeader("Content-Type", "application/json")
-                .putHeader("Lambda-Runtime-Aws-Request-Id", invocation.getRequestId())
-                .putHeader("Lambda-Runtime-Invoked-Function-Arn", invocation.getFunctionArn())
-                .putHeader("Lambda-Runtime-Deadline-Ms", String.valueOf(invocation.getDeadlineMs()))
-                .end(body);
+        // Vert.x reports a client-side disconnect two ways: setStatusCode/putHeader
+        // throw synchronously if the response is already ended, .end() returns a
+        // failed Future if the socket dies mid-flush. Funnel both into one handler.
+        Future<Void> write;
+        try {
+            write = ctx.response()
+                    .setStatusCode(200)
+                    .putHeader("Content-Type", "application/json")
+                    .putHeader("Lambda-Runtime-Aws-Request-Id", invocation.getRequestId())
+                    .putHeader("Lambda-Runtime-Invoked-Function-Arn", invocation.getFunctionArn())
+                    .putHeader("Lambda-Runtime-Deadline-Ms", String.valueOf(invocation.getDeadlineMs()))
+                    .end(body);
+        } catch (IllegalStateException alreadyEnded) {
+            write = Future.failedFuture(alreadyEnded);
+        }
+        // Gated on the successful write: onFailure below requeues the invocation, and a fan-out
+        // before the write would emit a second INVOKE for the same requestId on redelivery.
+        write.onSuccess(v -> {
+            invocation.markDispatched();
+            notifyExtensionsOfInvoke(invocation);
+        });
+        write.onFailure(err -> {
+            // Requeue for the next /next poller; mirrors enqueue()'s ctx-ended branch.
+            // Skip if quiesce() beat us — it already swept inFlight and settled the
+            // future with ContainerStopped.
+            synchronized (lock) {
+                if (stopped) {
+                    return;
+                }
+                pendingQueue.offer(invocation);
+                inFlight.remove(invocation.getRequestId());
+            }
+        });
     }
 
     private Future<Void> sendExtensionEvent(RoutingContext ctx, ExtensionEvent event) {
@@ -807,6 +1091,61 @@ public class RuntimeApiServer {
                 .end("{\"errorType\":\"Extension.SandboxFaulted\","
                         + "\"errorMessage\":\"Execution environment condemned by an extension "
                         + "init/exit error\"}");
+    }
+
+    /**
+     * Called by {@code ContainerLauncher}'s Docker exit watcher when the container's main
+     * process has died - a stray {@code sys.exit}/{@code process.exit}/{@code System.exit} in
+     * the handler, or any other crash - detected from outside the runtime, since a dead
+     * process obviously cannot report anything itself through {@code /runtime/invocation/
+     * {id}/error}. Without this, a crash left every pending/in-flight invocation waiting out
+     * the full function timeout to be told {@code Function.TimedOut}, instead of the real
+     * {@code Runtime.ExitError} AWS reports immediately (see #3314).
+     *
+     * <p>Condemns the environment like an extension init/exit error or a runtime init error
+     * does: this container must never be pooled or reused, its main process is gone.
+     *
+     * <p>A no-op when {@code stopped} or already {@code faulted}: an intentional teardown
+     * calls {@code quiesce()} (which sets {@code stopped}) before the container is actually
+     * stopped/removed, so the exit event this same teardown causes must not be reinterpreted
+     * as a crash.
+     */
+    public void handleRuntimeProcessExited(int exitCode) {
+        List<PendingInvocation> stranded;
+        synchronized (lock) {
+            if (stopped || faulted) {
+                return;
+            }
+            faulted = true;
+            // Retained for a possible later enqueue(): the invocation that would have hit this
+            // container may not exist yet (see fatalRuntimeErrorPayload's doc), so this generic,
+            // requestId-free payload is built here rather than only per-stranded-invocation below.
+            fatalRuntimeErrorPayload = buildRuntimeExitErrorPayload(
+                    "Runtime exited with error: exit status " + exitCode);
+            stranded = new ArrayList<>(pendingQueue);
+            pendingQueue.clear();
+            stranded.addAll(inFlight.values());
+            inFlight.clear();
+        }
+        if (!stranded.isEmpty()) {
+            LOG.warnv("Lambda runtime process on port {0} exited unexpectedly (status {1}) "
+                            + "with {2} invocation(s) pending",
+                    String.valueOf(port), String.valueOf(exitCode), String.valueOf(stranded.size()));
+        }
+        for (PendingInvocation invocation : stranded) {
+            String message = "RequestId: " + invocation.getRequestId()
+                    + " Error: Runtime exited with error: exit status " + exitCode;
+            invocation.getResultFuture().complete(new InvokeResult(
+                    200, "Unhandled", buildRuntimeExitErrorPayload(message), null, invocation.getRequestId()));
+        }
+    }
+
+    private static byte[] buildRuntimeExitErrorPayload(String message) {
+        return new JsonObject()
+                .put("errorType", "Runtime.ExitError")
+                .put("errorMessage", message)
+                .encode()
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private void handleExtensionFatalError(RoutingContext ctx, String phase) {

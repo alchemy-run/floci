@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.cognito;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.cognito.model.ManagedLoginBranding;
@@ -11,15 +10,12 @@ import jakarta.inject.Inject;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Managed login branding styles (CreateManagedLoginBranding / DescribeManagedLoginBranding /
  * DescribeManagedLoginBrandingByClient / UpdateManagedLoginBranding / DeleteManagedLoginBranding).
  *
- * <p>Styles are keyed by {@code <userPoolId>::<managedLoginBrandingId>} and are unique per app
- * client: creating a second style for a client that already has one raises
- * {@code ManagedLoginBrandingExistsException}, matching AWS.</p>
+ * <p>Styles are stored on their app client. The legacy standalone store is migrated on access.</p>
  */
 @ApplicationScoped
 public class CognitoManagedLoginBrandingService {
@@ -41,65 +37,42 @@ public class CognitoManagedLoginBrandingService {
 
     public ManagedLoginBranding create(String userPoolId, String clientId, Boolean useCognitoProvidedValues,
                                        Map<String, Object> settings, List<Map<String, Object>> assets) {
-        requireUserPoolId(userPoolId);
-        if (clientId == null || clientId.isBlank()) {
-            throw new AwsException("InvalidParameterException", "ClientId is required", 400);
-        }
-        cognitoService.describeUserPool(userPoolId);
-        cognitoService.describeUserPoolClient(userPoolId, clientId);
-        if (findByClient(userPoolId, clientId) != null) {
-            throw new AwsException("ManagedLoginBrandingExistsException",
-                    "Managed login branding already exists for client " + clientId, 400);
-        }
-
-        ManagedLoginBranding branding = new ManagedLoginBranding();
-        branding.setUserPoolId(userPoolId);
-        branding.setManagedLoginBrandingId(UUID.randomUUID().toString());
-        branding.setClientId(clientId);
-        applyStyle(branding, useCognitoProvidedValues, settings, assets);
-        store.put(key(userPoolId, branding.getManagedLoginBrandingId()), branding);
-        return branding;
+        migratePool(userPoolId);
+        return cognitoService.createManagedLoginBranding(userPoolId, clientId, useCognitoProvidedValues,
+                settings, assets);
     }
 
     public ManagedLoginBranding describe(String userPoolId, String managedLoginBrandingId) {
-        requireUserPoolId(userPoolId);
-        if (managedLoginBrandingId == null || managedLoginBrandingId.isBlank()) {
-            throw new AwsException("InvalidParameterException", "ManagedLoginBrandingId is required", 400);
-        }
-        cognitoService.describeUserPool(userPoolId);
-        return store.get(key(userPoolId, managedLoginBrandingId))
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Managed login branding not found", 404));
+        migratePool(userPoolId);
+        return cognitoService.describeManagedLoginBranding(userPoolId, managedLoginBrandingId);
     }
 
     public ManagedLoginBranding describeByClient(String userPoolId, String clientId) {
-        requireUserPoolId(userPoolId);
-        if (clientId == null || clientId.isBlank()) {
-            throw new AwsException("InvalidParameterException", "ClientId is required", 400);
-        }
-        cognitoService.describeUserPool(userPoolId);
-        cognitoService.describeUserPoolClient(userPoolId, clientId);
-        ManagedLoginBranding branding = findByClient(userPoolId, clientId);
-        if (branding == null) {
-            throw new AwsException("ResourceNotFoundException",
-                    "Managed login branding not found for client " + clientId, 404);
-        }
-        return branding;
+        migratePool(userPoolId);
+        return cognitoService.describeManagedLoginBrandingByClient(userPoolId, clientId);
     }
 
     public ManagedLoginBranding update(String userPoolId, String managedLoginBrandingId,
                                        Boolean useCognitoProvidedValues,
                                        Map<String, Object> settings, List<Map<String, Object>> assets) {
-        ManagedLoginBranding branding = describe(userPoolId, managedLoginBrandingId);
-        applyStyle(branding, useCognitoProvidedValues, settings, assets);
-        branding.setLastModifiedDate(System.currentTimeMillis() / 1000L);
-        store.put(key(userPoolId, managedLoginBrandingId), branding);
-        return branding;
+        migratePool(userPoolId);
+        return cognitoService.updateManagedLoginBranding(userPoolId, managedLoginBrandingId,
+                useCognitoProvidedValues, settings, assets);
     }
 
     public void delete(String userPoolId, String managedLoginBrandingId) {
-        describe(userPoolId, managedLoginBrandingId);
-        store.delete(key(userPoolId, managedLoginBrandingId));
+        migratePool(userPoolId);
+        cognitoService.deleteManagedLoginBranding(userPoolId, managedLoginBrandingId);
+    }
+
+    private void migratePool(String userPoolId) {
+        if (userPoolId == null || userPoolId.isBlank()) {
+            return;
+        }
+        for (ManagedLoginBranding branding : store.scan(k -> k.startsWith(userPoolId + "::"))) {
+            cognitoService.restoreManagedLoginBranding(branding);
+            store.delete(key(userPoolId, branding.getManagedLoginBrandingId()));
+        }
     }
 
     /** Cascade for DeleteUserPool: styles cannot outlive their pool. */
@@ -134,26 +107,6 @@ public class CognitoManagedLoginBrandingService {
                 .filter(b -> clientId.equals(b.getClientId()))
                 .findFirst()
                 .orElse(null);
-    }
-
-    private static void applyStyle(ManagedLoginBranding branding, Boolean useCognitoProvidedValues,
-                                   Map<String, Object> settings, List<Map<String, Object>> assets) {
-        boolean hasCustomStyle = (settings != null && !settings.isEmpty()) || (assets != null && !assets.isEmpty());
-        // AWS: UseCognitoProvidedValues=true is exclusive with Settings/Assets.
-        if (Boolean.TRUE.equals(useCognitoProvidedValues) && hasCustomStyle) {
-            throw new AwsException("InvalidParameterException",
-                    "UseCognitoProvidedValues cannot be combined with Settings or Assets", 400);
-        }
-        boolean useProvided = useCognitoProvidedValues != null ? useCognitoProvidedValues : !hasCustomStyle;
-        branding.setUseCognitoProvidedValues(useProvided);
-        branding.setSettings(useProvided ? null : settings);
-        branding.setAssets(useProvided ? List.of() : assets);
-    }
-
-    private static void requireUserPoolId(String userPoolId) {
-        if (userPoolId == null || userPoolId.isBlank()) {
-            throw new AwsException("InvalidParameterException", "UserPoolId is required", 400);
-        }
     }
 
     private static String key(String userPoolId, String managedLoginBrandingId) {

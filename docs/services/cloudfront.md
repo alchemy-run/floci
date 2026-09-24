@@ -1,12 +1,15 @@
 # CloudFront
 
-CloudFront emulation: distribution lifecycle, cache policies, origin request policies, response headers policies, origin access controls, origin access identities, CloudFront Functions, invalidations, and tagging — plus an emulated edge that serves requests addressed to a distribution's domain name or to its own local port.
+CloudFront management-plane and local content-delivery emulation. Supports distribution lifecycle,
+cache policies, origin request policies, response headers policies, origin access controls, origin
+access identities, public keys, trusted key groups, CloudFront Functions, invalidations, tagging, and
+GET/HEAD/OPTIONS delivery from S3 or custom origins. Requests can also reach the fork's emulated edge through per-distribution local ports and execute CloudFront Functions.
 
 **Protocol:** REST XML  
 **API version:** `2020-05-31`  
 **Endpoint prefix:** `cloudfront`  
 **Namespace:** `http://cloudfront.amazonaws.com/doc/2020-05-31/`  
-**Global service** — ARNs contain no region segment.
+**Global service** : ARNs contain no region segment.
 
 ## Supported Operations
 
@@ -75,7 +78,7 @@ CloudFront emulation: distribution lifecycle, cache policies, origin request pol
 | `DeleteOriginAccessControl` | DELETE | `/2020-05-31/origin-access-control/{Id}` |
 | `ListOriginAccessControls` | GET | `/2020-05-31/origin-access-control` |
 
-### Origin Access Identity (OAI — legacy)
+### Origin Access Identity (OAI : legacy)
 
 | Operation | Method | Path |
 |---|---|---|
@@ -204,22 +207,75 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
 
 - All distributions are immediately set to `Deployed` state (no async `InProgress` delay).
 - Distribution IDs are 14 uppercase alphanumeric characters starting with `E` (e.g. `E1Z2X3C4V5B6N7`).
-- Distribution domain names follow the pattern `{id}.cloudfront.net`.
-- ARNs are global — no region segment: `arn:aws:cloudfront::{accountId}:distribution/{id}`.
+- Distribution domain names follow the pattern `{id}.cloudfront.net`, with the id lower-cased as AWS
+  writes it in a host name.
+- Public key IDs are `K` followed by 13 uppercase alphanumeric characters (e.g. `K2JCJMDEHXQW5F`),
+  the value a signed URL carries as `Key-Pair-Id`. Key group, cache policy, origin request policy and
+  response headers policy IDs are UUIDs, as they are on AWS.
+- ARNs are global: no region segment: `arn:aws:cloudfront::{accountId}:distribution/{id}`.
 - Invalidations are immediately marked `Completed`.
 - `DeleteDistribution` returns `DistributionNotDisabled` (409) if `Enabled` is `true` in the config.
-- All mutating operations (`PUT`, `DELETE`) require an `If-Match` header containing the current `ETag`. A missing or incorrect `ETag` returns `InvalidIfMatchVersion` (400).
+- All mutating operations (`PUT`, `DELETE`) require an `If-Match` header containing the current
+  `ETag`. Response headers policies, public keys, and key groups distinguish a missing header
+  (`InvalidIfMatchVersion`, 400) from a stale `ETag` (`PreconditionFailed`, 412). Other CloudFront
+  resources currently return `InvalidIfMatchVersion` (400) for either case.
 - All `GET` and `POST` (create) responses include an `ETag` response header.
-- List operations emit the list envelope as the XML root (`CachePolicyList`, `FunctionList`, `KeyGroupList`, …) because distilled marks those structs as the HTTP payload — not a `List*Result` wrapper.
+- List operations emit the list envelope as the XML root (`CachePolicyList`, `FunctionList`, `KeyGroupList`, …) because distilled marks those structs as the HTTP payload : not a `List*Result` wrapper.
 - Nested CloudFront collections (origins, behaviors, KVS associations) use `<Quantity>` + `<Items>`. Exceptions that distilled models as flat arrays: `KeyGroupConfig.Items` is `<Items><PublicKey>…</PublicKey></Items>` (no Quantity), and `RealtimeLogConfig` `Fields` / `EndPoints` are flat `<Field>` / `<EndPoint>` children.
 - Publishing a CloudFront Function copies DEVELOPMENT to LIVE and leaves DEVELOPMENT in place so `DescribeFunction(Stage=DEVELOPMENT)` and delete-by-development-ETag keep working.
-- OAI `CallerReference` uniqueness is enforced — duplicate `CallerReference` values return `CloudFrontOriginAccessIdentityAlreadyExists` (409).
-- `AssociateAlias` attaches a CNAME alias to the target distribution's config.
 - VPC origins are immediately `Deployed`. `CreateVpcOrigin` rejects an ELB ARN that does not resolve to a load balancer in Floci's ELBv2 store with `InvalidArgument` (400).
 - Key value stores are immediately `READY`. ARNs use `arn:aws:cloudfront::{account}:key-value-store/{id}`.
 - `FunctionConfig.KeyValueStoreAssociations` is stored and returned on create/describe/list.
 - `DescribeFunction` is `GET /function/{Name}/describe` (AWS path). `GET /function/{Name}` remains `GetFunction`.
-- Cache / origin-request / response-headers policy configs are stored as the submitted XML subtree and echoed on get/list so TTL, CORS, and header settings round-trip.
+- OAI `CallerReference` uniqueness is enforced : duplicate `CallerReference` values return `CloudFrontOriginAccessIdentityAlreadyExists` (409).
+- CNAME aliases are globally unique. `AssociateAlias` atomically transfers an alias from its current
+  owner to the target distribution. Exact aliases take precedence over the most-specific matching
+  wildcard alias.
+- Viewer GET/HEAD requests, and OPTIONS requests allowed by the matched cache behavior, addressed to
+  an enabled distribution's generated domain or alias are routed to the matching S3 or custom
+  origin. Origin forwarding preserves the raw path; custom-origin redirects are not followed.
+- Every distribution is also served as `{id}.cloudfront.{host}` for each endpoint host Floci
+  resolves: `localhost`, `localhost.floci.io`, `localhost.localstack.cloud`, `FLOCI_HOSTNAME` and
+  every `FLOCI_DNS_EXTRA_SUFFIXES` entry. `{id}.cloudfront.localhost.floci.io` and
+  `{id}.cloudfront.localhost` reach loopback with no host-file edit and are covered by the generated
+  HTTPS certificate, so a signed URL for either can be downloaded over `https://`. See
+  [Downloading over HTTPS](#downloading-over-https).
+- Origin custom headers are persisted through the CloudFront API and CloudFormation. They replace
+  same-named viewer headers on custom-origin GET/HEAD/OPTIONS requests. For in-process S3 origins, a
+  configured `Origin` header is used for S3 CORS evaluation. AWS-prohibited names, malformed
+  values, inconsistent quantities, duplicates, and quota violations are rejected with modeled
+  CloudFront errors when the distribution is created or updated.
+- Cache behaviors with enabled `TrustedKeyGroups` require a valid CloudFront signed URL or signed
+  cookie before the origin is contacted. Signed URL parameters take precedence over signed cookies.
+  Canned and custom policies support SHA-1 or SHA-256 signatures with RSA-2048 or ECDSA P-256 public
+  keys. Custom policies enforce resource wildcards, expiration, optional activation time, and
+  IPv4 CIDR restrictions. Canned resources compare literally, including query strings. Exact custom
+  resources can include one raw query delimiter. As a conservative limitation, other custom
+  resources containing a raw `?` fail closed because the character is ambiguous with CloudFront's
+  one-character wildcard; custom query-string wildcards are therefore not supported. Invalid or
+  expired signatures return 403.
+- A key group must contain one to five existing public keys. Public keys that belong to a key group
+  and key groups referenced by a cache behavior cannot be deleted until those references are removed.
+- Application query parameters are retained when constructing the resource covered by a signature.
+  CloudFront signing parameters are excluded from that resource and are never sent to the origin.
+- S3-origin reads honor anonymous access, OAI bucket-policy or object-ACL grants, and OAC
+  service-principal bucket-policy grants (including the distribution `AWS:SourceArn`) when strict S3
+  authentication is enabled. OAC `always`, `never`, and unsigned `no-override` requests follow their
+  documented signing behavior; signed `no-override` viewer requests retain their authorization.
+- Cache-policy, origin-request-policy, and legacy `ForwardedValues` data-plane evaluation is not
+  implemented yet. Viewer query strings therefore follow CloudFront's default behavior and are not
+  forwarded to origins.
+- Custom origins that resolve to loopback, private, link-local, carrier-grade NAT, or other non-routable addresses are rejected by default. Development-only private origins must be explicitly allowlisted by exact hostname.
+- Response headers policies validate the AWS configuration shape and are applied after the origin
+  response, including CORS preflight fields, origin override behavior, custom headers, security
+  headers, allowed header removals, and sampled `Server-Timing` metrics. `Pragma: server-timing`
+  forces those metrics for enabled policies. Distribution writes reject unknown policy IDs, and
+  policies attached to a cache behavior cannot be deleted.
+- Up to 20 custom response headers policies can be created, and one policy can be associated with
+  up to 100 distributions.
+- The five AWS managed response headers policy IDs are available and can be selected with
+  `ListResponseHeadersPolicies?Type=managed`; `Type` uses the AWS lowercase `managed` or `custom`
+  values.
 
 ## Configuration
 
@@ -227,6 +283,7 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
 |---|---|---|---|
 | `floci.services.cloudfront.enabled` | `FLOCI_SERVICES_CLOUDFRONT_ENABLED` | `true` | Enable or disable the service |
 | `floci.services.cloudfront.domain-suffix` | `FLOCI_SERVICES_CLOUDFRONT_DOMAIN_SUFFIX` | `cloudfront.net` | Domain suffix for generated distribution domain names |
+| `floci.services.cloudfront.allowed-private-origin-hosts` | `FLOCI_SERVICES_CLOUDFRONT_ALLOWED_PRIVATE_ORIGIN_HOSTS` | `[]` | Exact custom-origin hosts permitted to resolve to private/non-routable addresses (comma-separated in the environment variable) |
 
 ## CLI Examples
 
@@ -316,17 +373,53 @@ ETAG=$(aws cloudfront get-distribution --id E1Z2X3C4V5B6N7 \
 aws cloudfront delete-distribution --id E1Z2X3C4V5B6N7 --if-match "$ETAG"
 ```
 
+## Downloading over HTTPS
+
+A distribution's own domain name (`{id}.cloudfront.net` by default) resolves to nothing local, so
+address the distribution by one of its local delivery hostnames instead. `*.cloudfront.localhost.floci.io`
+resolves to `127.0.0.1` through public DNS and works on Linux, macOS and in containers.
+`*.cloudfront.localhost` needs no DNS at all but only resolves where the runtime handles `.localhost`
+itself, which macOS and browsers do and Debian-based images do not.
+
+Start Floci with [TLS](../configuration/tls.md) enabled and trust its CA once:
+
+```bash
+docker run -e FLOCI_TLS_ENABLED=true -p 4566:4566 floci/floci:latest
+curl -s http://localhost:4566/_floci/ca.pem -o floci-root-ca.pem
+```
+
+Sign the URL of the hostname you download from, including its port, and fetch it:
+
+```bash
+HOST=e1z2x3c4v5b6n7.cloudfront.localhost.floci.io:4566
+
+SIGNED=$(aws cloudfront sign \
+  --url "https://$HOST/hello.txt" \
+  --key-pair-id K2JCJMDEHXQW5F \
+  --private-key file://private_key.pem \
+  --date-less-than 2026-12-31T00:00:00Z)
+
+curl --cacert floci-root-ca.pem "$SIGNED"
+```
+
+To drop the `:4566`, publish the HTTPS port Floci also binds when TLS is on (`-p 443:443`, see
+`FLOCI_TLS_AWS_HTTPS_PORT`) and sign `https://e1z2x3c4v5b6n7.cloudfront.localhost.floci.io/hello.txt`.
+
+Set `FLOCI_SERVICES_CLOUDFRONT_DOMAIN_SUFFIX=cloudfront.localhost.floci.io` to have
+`CreateDistribution` return that hostname as the `DomainName`, so test code can sign the API response
+as it is.
+
 ## The Emulated Edge
 
 A request whose `Host` is a distribution's domain name (`{Id}.cloudfront.net`)
-or one of its alternate domain names — or a request to the distribution's own
-[local port](#per-distribution-ports) — is served by the emulated edge:
+or one of its alternate domain names : or a request to the distribution's own
+[local port](#per-distribution-ports) : is served by the emulated edge:
 
 1. the cache behavior whose path pattern matches is selected;
 2. a CloudFront event object is built from the request;
 3. the behavior's `viewer-request` function runs;
 4. the function's response is returned, or the (possibly rewritten) request is
-   forwarded to the resolved origin — including an origin the function chose
+   forwarded to the resolved origin : including an origin the function chose
    with `cf.updateRequestOrigin()`;
 5. the behavior's `viewer-response` function, if any, runs over the result.
 
@@ -358,8 +451,8 @@ the request actually arrived on.
 
 The emulator assigns ports from a range. A containerized emulator is only
 reachable on ports the container publishes, so narrow the range to those with
-`FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS` — a comma-separated list of ports and/or
-`from-to` ranges — and publish them (`docker run -p 9500-9519:9500-9519 …`).
+`FLOCI_SERVICES_CLOUDFRONT_EDGE_PORTS` : a comma-separated list of ports and/or
+`from-to` ranges : and publish them (`docker run -p 9500-9519:9500-9519 …`).
 
 | Setting | Env | Default |
 |---|---|---|
@@ -394,12 +487,18 @@ When the emulator runs in a container, an origin pointing at `localhost` means
 the developer's machine, so it resolves to `host.docker.internal` (or the
 docker bridge). Run the container with
 `--add-host=host.docker.internal:host-gateway` on native Linux Docker.
+Custom-origin delivery rejects private/non-routable destinations by default;
+explicitly allowlist development origin hostnames with
+`FLOCI_SERVICES_CLOUDFRONT_ALLOWED_PRIVATE_ORIGIN_HOSTS` when using that path.
 
 ## Not Supported
 
-- Caching, compression and the viewer protocol policy — every request reaches
+- Caching, compression and the viewer protocol policy : every request reaches
   the origin on the scheme it arrived on
 - `ComputeUtilization` is derived from the emulator's own JS engine and is not
   comparable to the value AWS reports
 - Lambda@Edge associations
 - Anycast IP lists, distribution tenants, connection groups, trust stores
+- CloudFormation provisioning of custom `AWS::CloudFront::ResponseHeadersPolicy` resources
+  (literal custom or managed policy IDs are supported on distributions)
+- Global CDN propagation

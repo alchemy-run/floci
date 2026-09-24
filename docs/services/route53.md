@@ -1,44 +1,46 @@
 # Route53
 
-Route53 management-plane emulation. Supports hosted zones, resource record sets, health checks, change tracking, and tagging. Actual DNS resolution is not provided — this is a management-plane-only implementation.
+Route53 management-plane emulation. Supports hosted zones, resource record sets, health checks, change tracking, and tagging. Actual DNS resolution is not provided : this is a management-plane-only implementation.
 
 ## Supported Operations
 
-| Operation | Method | Path |
-|---|---|---|
-| CreateHostedZone | POST | `/2013-04-01/hostedzone` |
-| GetHostedZone | GET | `/2013-04-01/hostedzone/{Id}` |
-| UpdateHostedZoneComment | POST | `/2013-04-01/hostedzone/{Id}` |
-| DeleteHostedZone | DELETE | `/2013-04-01/hostedzone/{Id}` |
-| ListHostedZones | GET | `/2013-04-01/hostedzone` |
-| ListHostedZonesByName | GET | `/2013-04-01/hostedzonesbyname` |
-| GetHostedZoneCount | GET | `/2013-04-01/hostedzonecount` |
-| ChangeResourceRecordSets | POST | `/2013-04-01/hostedzone/{Id}/rrset` |
-| ListResourceRecordSets | GET | `/2013-04-01/hostedzone/{Id}/rrset` |
-| GetChange | GET | `/2013-04-01/change/{Id}` |
-| CreateHealthCheck | POST | `/2013-04-01/healthcheck` |
-| GetHealthCheck | GET | `/2013-04-01/healthcheck/{HealthCheckId}` |
-| DeleteHealthCheck | DELETE | `/2013-04-01/healthcheck/{HealthCheckId}` |
-| ListHealthChecks | GET | `/2013-04-01/healthcheck` |
-| UpdateHealthCheck | POST | `/2013-04-01/healthcheck/{HealthCheckId}` |
-| ListTagsForResource | GET | `/2013-04-01/tags/{ResourceType}/{ResourceId}` |
-| ChangeTagsForResource | POST | `/2013-04-01/tags/{ResourceType}/{ResourceId}` |
-| GetAccountLimit | GET | `/2013-04-01/accountlimit/{Type}` |
-| GetDNSSEC | GET | `/2013-04-01/hostedzone/{Id}/dnssec` |
-| GetHostedZoneLimit | GET | `/2013-04-01/hostedzonelimit/{HostedZoneId}/{Type}` |
-| AssociateVPCWithHostedZone | POST | `/2013-04-01/hostedzone/{Id}/associatevpc` |
-| DisassociateVPCFromHostedZone | POST | `/2013-04-01/hostedzone/{Id}/disassociatevpc` |
-| CreateVPCAssociationAuthorization | POST | `/2013-04-01/hostedzone/{Id}/authorizevpcassociation` |
-| DeleteVPCAssociationAuthorization | POST | `/2013-04-01/hostedzone/{Id}/deauthorizevpcassociation` |
-| ListVPCAssociationAuthorizations | GET | `/2013-04-01/hostedzone/{Id}/authorizevpcassociation` |
-| ListHostedZonesByVPC | GET | `/2013-04-01/hostedzonesbyvpc` |
-| CreateQueryLoggingConfig | POST | `/2013-04-01/queryloggingconfig` |
-| GetQueryLoggingConfig | GET | `/2013-04-01/queryloggingconfig/{Id}` |
-| DeleteQueryLoggingConfig | DELETE | `/2013-04-01/queryloggingconfig/{Id}` |
-| ListQueryLoggingConfigs | GET | `/2013-04-01/queryloggingconfig` |
-| TestDNSAnswer | GET | `/2013-04-01/testdnsanswer` |
-| GetHealthCheckStatus | GET | `/2013-04-01/healthcheck/{HealthCheckId}/status` |
-| GetHealthCheckLastFailureReason | GET | `/2013-04-01/healthcheck/{HealthCheckId}/lastfailurereason` |
+<!-- floci:actions:start -->
+| Action | Description |
+| --- | --- |
+| `CreateHostedZone` | `POST /2013-04-01/hostedzone`. A `<VPC>` element in the request creates a private zone and records the first VPC association. |
+| `GetHostedZone` | `GET /2013-04-01/hostedzone/{Id}`. Private zones include their `<VPCs>` list. |
+| `UpdateHostedZoneComment` | `POST /2013-04-01/hostedzone/{Id}` |
+| `DeleteHostedZone` | `DELETE /2013-04-01/hostedzone/{Id}` |
+| `ListHostedZones` | `GET /2013-04-01/hostedzone` |
+| `ListHostedZonesByName` | `GET /2013-04-01/hostedzonesbyname` |
+| `AssociateVPCWithHostedZone` | `POST /2013-04-01/hostedzone/{Id}/associatevpc`. Private zones only; cross-account associations require prior authorization. |
+| `DisassociateVPCFromHostedZone` | `POST /2013-04-01/hostedzone/{Id}/disassociatevpc`. Refuses to remove the last association (`LastVPCAssociation`). |
+| `CreateVPCAssociationAuthorization` | `POST /2013-04-01/hostedzone/{Id}/authorizevpcassociation`. Must be called by the hosted-zone owner. |
+| `DeleteVPCAssociationAuthorization` | `POST /2013-04-01/hostedzone/{Id}/deauthorizevpcassociation`. Must be called by the hosted-zone owner; success has an empty response body. |
+| `ListVPCAssociationAuthorizations` | `GET /2013-04-01/hostedzone/{Id}/authorizevpcassociation`. Paginates with `maxresults` / `nexttoken`. |
+| `ListHostedZonesByVPC` | `GET /2013-04-01/hostedzonesbyvpc?vpcid=…&vpcregion=…`. Paginates with `maxitems` / `nexttoken`. |
+| `GetHostedZoneCount` | `GET /2013-04-01/hostedzonecount` |
+| `ChangeResourceRecordSets` | `POST /2013-04-01/hostedzone/{Id}/rrset` |
+| `ListResourceRecordSets` | `GET /2013-04-01/hostedzone/{Id}/rrset` |
+| `GetChange` | `GET /2013-04-01/change/{Id}` |
+| `CreateHealthCheck` | `POST /2013-04-01/healthcheck` |
+| `GetHealthCheck` | `GET /2013-04-01/healthcheck/{HealthCheckId}` |
+| `DeleteHealthCheck` | `DELETE /2013-04-01/healthcheck/{HealthCheckId}` |
+| `ListHealthChecks` | `GET /2013-04-01/healthcheck` |
+| `UpdateHealthCheck` | `POST /2013-04-01/healthcheck/{HealthCheckId}` |
+| `ListTagsForResource` | `GET /2013-04-01/tags/{ResourceType}/{ResourceId}` |
+| `ChangeTagsForResource` | `POST /2013-04-01/tags/{ResourceType}/{ResourceId}` |
+| `GetAccountLimit` | `GET /2013-04-01/accountlimit/{Type}` |
+| `GetHealthCheckStatus` | `GET /2013-04-01/healthcheck/{HealthCheckId}/status` |
+| `GetDNSSEC` | `GET /2013-04-01/hostedzone/{Id}/dnssec`. Always reports signing as `NOT_SIGNING`. |
+| `CreateQueryLoggingConfig` | `POST /2013-04-01/queryloggingconfig` |
+| `GetQueryLoggingConfig` | `GET /2013-04-01/queryloggingconfig/{Id}` |
+| `DeleteQueryLoggingConfig` | `DELETE /2013-04-01/queryloggingconfig/{Id}` |
+| `ListQueryLoggingConfigs` | `GET /2013-04-01/queryloggingconfig` |
+| `TestDNSAnswer` | `GET /2013-04-01/testdnsanswer`. Resolve against stored record sets without external DNS. |
+| `GetHealthCheckLastFailureReason` | `GET /2013-04-01/healthcheck/{HealthCheckId}/lastfailurereason` |
+| `GetHostedZoneLimit` | `GET /2013-04-01/hostedzonelimit/{HostedZoneId}/{Type}` |
+<!-- floci:actions:end -->
 
 ## Behavior
 
@@ -50,10 +52,17 @@ Route53 management-plane emulation. Supports hosted zones, resource record sets,
 - Hosted zone IDs are returned with the `/hostedzone/` prefix in XML responses (e.g. `/hostedzone/Z1PA6795UKMFR9`). The AWS SDK strips this prefix client-side.
 - Health check IDs are plain UUIDs without a prefix.
 - Tags are supported for both `hostedzone` and `healthcheck` resource types.
-- Private hosted zones store associated VPCs. `CreateHostedZone` with a `VPC` block marks the zone private and attaches that VPC. Same-account `AssociateVPCWithHostedZone` is allowed without a prior authorization.
-- `TestDNSAnswer` resolves against stored record sets (management-plane only — no real DNS).
+- A hosted zone is private when `CreateHostedZone` carries a `<VPC>` element; `HostedZoneConfig.PrivateZone` is response-only.
+- `AssociateVPCWithHostedZone` rejects public zones with `PublicZoneVPCAssociation`, and `DisassociateVPCFromHostedZone` rejects removing the last VPC with `LastVPCAssociation`.
+- Associating a VPC that is already attached to another zone with the same name fails with `ConflictingDomainExists`.
+- Cross-account association follows the Route 53 authorization lifecycle: the hosted-zone owner authorizes the VPC, the VPC account associates it, and the hosted-zone owner can then delete the authorization without removing the association.
+- A cross-account association without a matching authorization fails with `NotAuthorizedException`.
+- Private hosted zones support up to 300 VPC associations and up to 1000 outstanding cross-account VPC association authorizations, matching the documented Route 53 default quotas.
+- Set `FLOCI_SERVICES_ROUTE53_VPC_ASSOCIATION_CONTROL_PLANE_DELAY_MS` above `0` to emulate a short in-flight control-plane window for retry testing. During that window, a subsequent `AssociateVPCWithHostedZone` for the same hosted zone returns `PriorRequestNotComplete`; overlapping create/delete authorization requests return `ConcurrentModification`. These are the retryable overlap errors documented by Route 53 for those operations.
+- Same-account VPC associations do not require prior authorization.
+- `TestDNSAnswer` resolves against stored record sets (management-plane only : no real DNS).
 - Routing records persist `Weight`, `Failover`, `Region`, alias targets, `GeoLocation`, `GeoProximityLocation`, and `CidrRoutingConfig`. `DELETE` matches `SetIdentifier` so weighted/failover pairs can be removed independently.
-- `ListHostedZonesByName` uses AWS DNS order (reversed labels), starts at `dnsname` (case-insensitive query param), and sorts public zones before private for the same name. `MaxItems=1` exact-name lookups therefore return the zone that was just created — required by Alchemy ECS `domain:` hosted-zone discovery.
+- `ListHostedZonesByName` uses AWS DNS order (reversed labels), starts at `dnsname` (case-insensitive query param), and sorts public zones before private for the same name. `MaxItems=1` exact-name lookups therefore return the zone that was just created : required by Alchemy ECS `domain:` hosted-zone discovery.
 - `CreateQueryLoggingConfig` rejects a second config on the same zone with `QueryLoggingConfigAlreadyExists` (409). `HostedZoneId` is stored/returned as the bare zone id.
 - `GetChange` accepts both `C…` and `/change/C…` ids.
 - `GetHealthCheckLastFailureReason` returns one well-formed `HealthCheckObservation` (never-failed checks have no failure text). An empty wrapper does not decode as `[]` in distilled.
@@ -78,6 +87,7 @@ ns-4.awsdns-04.co.uk
 | `FLOCI_SERVICES_ROUTE53_DEFAULT_NAMESERVER2` | `ns-2.awsdns-02.net` | Second default nameserver |
 | `FLOCI_SERVICES_ROUTE53_DEFAULT_NAMESERVER3` | `ns-3.awsdns-03.com` | Third default nameserver |
 | `FLOCI_SERVICES_ROUTE53_DEFAULT_NAMESERVER4` | `ns-4.awsdns-04.co.uk` | Fourth default nameserver |
+| `FLOCI_SERVICES_ROUTE53_VPC_ASSOCIATION_CONTROL_PLANE_DELAY_MS` | `0` | Optional VPC association/auth processing window used to reproduce documented retryable overlap errors |
 
 ## CLI Examples
 
@@ -122,6 +132,26 @@ aws route53 create-health-check \
     "Port": 443,
     "ResourcePath": "/health"
   }'
+
+# Create a private hosted zone attached to a VPC
+aws route53 create-hosted-zone \
+  --name internal.example.com \
+  --caller-reference "$(date +%s)" \
+  --vpc VPCRegion=us-east-1,VPCId=vpc-0123456789abcdef0
+
+# Attach a second VPC to the private zone
+aws route53 associate-vpc-with-hosted-zone \
+  --hosted-zone-id Z1PA6795UKMFR9 \
+  --vpc VPCRegion=us-east-1,VPCId=vpc-0fedcba9876543210
+
+# List the private zones attached to a VPC
+aws route53 list-hosted-zones-by-vpc \
+  --vpc-id vpc-0fedcba9876543210 --vpc-region us-east-1
+
+# Detach a VPC (the last association cannot be removed)
+aws route53 disassociate-vpc-from-hosted-zone \
+  --hosted-zone-id Z1PA6795UKMFR9 \
+  --vpc VPCRegion=us-east-1,VPCId=vpc-0fedcba9876543210
 
 # Delete a hosted zone
 aws route53 delete-hosted-zone --id Z1PA6795UKMFR9

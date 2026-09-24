@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.ecs.model;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A deployment of an ECS service, as reported in {@code DescribeServices}'
@@ -23,8 +25,18 @@ public class Deployment {
     private String rolloutState;
     private String rolloutStateReason;
     private LaunchType launchType;
+    private List<CapacityProviderStrategyItem> capacityProviderStrategy;
+    private String platformVersion;
+    private String platformFamily;
+    private NetworkConfiguration networkConfiguration;
     private Instant createdAt;
     private Instant updatedAt;
+    /**
+     * Raw passthrough of the service's Service Connect configuration. AWS's own {@code Service}
+     * shape carries no {@code serviceConnectConfiguration} member, only {@code Deployment} does,
+     * so this is the single place a generated client can read it back from.
+     */
+    private Map<String, Object> serviceConnectConfiguration;
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -46,8 +58,24 @@ public class Deployment {
     public void setRolloutStateReason(String rolloutStateReason) { this.rolloutStateReason = rolloutStateReason; }
     public LaunchType getLaunchType() { return launchType; }
     public void setLaunchType(LaunchType launchType) { this.launchType = launchType; }
+    public List<CapacityProviderStrategyItem> getCapacityProviderStrategy() { return capacityProviderStrategy; }
+    public void setCapacityProviderStrategy(List<CapacityProviderStrategyItem> capacityProviderStrategy) {
+        this.capacityProviderStrategy = capacityProviderStrategy;
+    }
+    public String getPlatformVersion() { return platformVersion; }
+    public void setPlatformVersion(String platformVersion) { this.platformVersion = platformVersion; }
+    public String getPlatformFamily() { return platformFamily; }
+    public void setPlatformFamily(String platformFamily) { this.platformFamily = platformFamily; }
+    public NetworkConfiguration getNetworkConfiguration() { return networkConfiguration; }
+    public void setNetworkConfiguration(NetworkConfiguration networkConfiguration) {
+        this.networkConfiguration = networkConfiguration;
+    }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public Map<String, Object> getServiceConnectConfiguration() { return serviceConnectConfiguration; }
+    public void setServiceConnectConfiguration(Map<String, Object> serviceConnectConfiguration) {
+        this.serviceConnectConfiguration = serviceConnectConfiguration;
+    }
 }

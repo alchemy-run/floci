@@ -37,6 +37,12 @@ class SesConfigurationSetSuppressionOptionsV2IntegrationTest {
     @Inject
     SesService sesService;
 
+    @Inject
+    SesSuppressionService suppressionService;
+
+    @Inject
+    SesConfigurationSetService configSetService;
+
     @Test
     @Order(1)
     void createConfigurationSet() {
@@ -213,7 +219,9 @@ class SesConfigurationSetSuppressionOptionsV2IntegrationTest {
 
         List<String> effective = sesService.getEffectiveSuppressedReasons(csNoOverride, REGION);
         // Account defaults to [BOUNCE, COMPLAINT]; matches account state when no per-CS override.
-        assertEquals(sesService.getAccountSuppressionAttributes(REGION).getSuppressedReasons(), effective);
+        assertEquals(
+                suppressionService.getAccountSuppressionAttributes(REGION).getSuppressedReasons(),
+                effective);
     }
 
     @Test
@@ -229,7 +237,7 @@ class SesConfigurationSetSuppressionOptionsV2IntegrationTest {
         .then()
                 .statusCode(200);
 
-        sesService.putConfigurationSetSuppressionOptions(csBounceOnly, List.of("BOUNCE"), REGION);
+        configSetService.putSuppressionOptions(csBounceOnly, List.of("BOUNCE"), REGION);
 
         List<String> effective = sesService.getEffectiveSuppressedReasons(csBounceOnly, REGION);
         assertEquals(List.of("BOUNCE"), effective);
@@ -248,7 +256,7 @@ class SesConfigurationSetSuppressionOptionsV2IntegrationTest {
         .then()
                 .statusCode(200);
 
-        sesService.putConfigurationSetSuppressionOptions(csEmpty, List.of(), REGION);
+        configSetService.putSuppressionOptions(csEmpty, List.of(), REGION);
 
         List<String> effective = sesService.getEffectiveSuppressedReasons(csEmpty, REGION);
         assertTrue(effective.isEmpty(),
@@ -261,14 +269,18 @@ class SesConfigurationSetSuppressionOptionsV2IntegrationTest {
     @Order(23)
     void effectiveReasons_nullConfigSetName_returnsAccountLevel() {
         List<String> effective = sesService.getEffectiveSuppressedReasons(null, REGION);
-        assertEquals(sesService.getAccountSuppressionAttributes(REGION).getSuppressedReasons(), effective);
+        assertEquals(
+                suppressionService.getAccountSuppressionAttributes(REGION).getSuppressedReasons(),
+                effective);
     }
 
     @Test
     @Order(24)
     void effectiveReasons_blankConfigSetName_returnsAccountLevel() {
         List<String> effective = sesService.getEffectiveSuppressedReasons("   ", REGION);
-        assertEquals(sesService.getAccountSuppressionAttributes(REGION).getSuppressedReasons(), effective);
+        assertEquals(
+                suppressionService.getAccountSuppressionAttributes(REGION).getSuppressedReasons(),
+                effective);
     }
 
     @Test

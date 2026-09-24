@@ -3,10 +3,12 @@ package io.github.hectorvent.floci.services.eks.model;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
@@ -38,11 +40,21 @@ public class Cluster {
     @JsonProperty("kubernetesNetworkConfig")
     private KubernetesNetworkConfig kubernetesNetworkConfig;
 
+    @JsonProperty("logging")
+    private Logging logging;
+
+    @JsonProperty("encryptionConfig")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<EncryptionConfig> encryptionConfig;
+
     @JsonProperty("status")
     private ClusterStatus status;
 
     @JsonProperty("certificateAuthority")
     private CertificateAuthority certificateAuthority;
+
+    @JsonProperty("identity")
+    private ClusterIdentity identity;
 
     @JsonProperty("platformVersion")
     private String platformVersion;
@@ -61,6 +73,33 @@ public class Cluster {
 
     @JsonIgnore
     private int hostPort;
+
+    @JsonIgnore
+    private String podCidr;
+
+    /**
+     * Internal flag indicating whether the Kubernetes version was explicitly requested by
+     * the caller (true) or defaulted (false). Persisted to storage so that clusters explicitly
+     * pinned to the default version (e.g. 1.29) resolve to their pinned image across restarts
+     * rather than falling back to the unversioned default image. Omitted from AWS API responses
+     * by toClusterResponse in EksController.
+     */
+    @JsonProperty("explicitVersion")
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    private boolean explicitVersion;
+
+    /**
+     * Resolved Docker container/volume name for this cluster's k3s resources. In-memory only
+     * (never part of the AWS response shape): assigned when the container is started, or
+     * re-resolved deterministically from surviving Docker resources on restore.
+     */
+    @JsonIgnore
+    private String dockerName;
+
+    private AccessConfig accessConfig;
+
+    public AccessConfig getAccessConfig() { return accessConfig; }
+    public void setAccessConfig(AccessConfig accessConfig) { this.accessConfig = accessConfig; }
 
     public Cluster() {}
 
@@ -94,6 +133,9 @@ public class Cluster {
     public CertificateAuthority getCertificateAuthority() { return certificateAuthority; }
     public void setCertificateAuthority(CertificateAuthority certificateAuthority) { this.certificateAuthority = certificateAuthority; }
 
+    public ClusterIdentity getIdentity() { return identity; }
+    public void setIdentity(ClusterIdentity identity) { this.identity = identity; }
+
     public String getPlatformVersion() { return platformVersion; }
     public void setPlatformVersion(String platformVersion) { this.platformVersion = platformVersion; }
 
@@ -111,4 +153,47 @@ public class Cluster {
 
     public int getHostPort() { return hostPort; }
     public void setHostPort(int hostPort) { this.hostPort = hostPort; }
+
+    public Logging getLogging() { return logging; }
+    public void setLogging(Logging logging) { this.logging = logging; }
+
+    public List<EncryptionConfig> getEncryptionConfig() { return encryptionConfig; }
+    public void setEncryptionConfig(List<EncryptionConfig> encryptionConfig) { this.encryptionConfig = encryptionConfig; }
+
+    public String getDockerName() { return dockerName; }
+    public void setDockerName(String dockerName) { this.dockerName = dockerName; }
+
+    public String getPodCidr() { return podCidr; }
+    public void setPodCidr(String podCidr) { this.podCidr = podCidr; }
+
+    public boolean isExplicitVersion() { return explicitVersion; }
+    public void setExplicitVersion(boolean explicitVersion) { this.explicitVersion = explicitVersion; }
+
+    public Cluster copy() {
+        Cluster c = new Cluster();
+        c.name = this.name;
+        c.arn = this.arn;
+        c.createdAt = this.createdAt;
+        c.version = this.version;
+        c.endpoint = this.endpoint;
+        c.roleArn = this.roleArn;
+        c.resourcesVpcConfig = this.resourcesVpcConfig;
+        c.kubernetesNetworkConfig = this.kubernetesNetworkConfig;
+        c.logging = this.logging;
+        c.encryptionConfig = this.encryptionConfig;
+        c.status = this.status;
+        c.certificateAuthority = this.certificateAuthority;
+        c.identity = this.identity;
+        c.platformVersion = this.platformVersion;
+        c.tags = this.tags;
+        c.containerId = this.containerId;
+        c.accountId = this.accountId;
+        c.internalEndpoint = this.internalEndpoint;
+        c.hostPort = this.hostPort;
+        c.podCidr = this.podCidr;
+        c.explicitVersion = this.explicitVersion;
+        c.dockerName = this.dockerName;
+        c.accessConfig = this.accessConfig;
+        return c;
+    }
 }

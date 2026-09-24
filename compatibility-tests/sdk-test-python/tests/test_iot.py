@@ -4,6 +4,22 @@ import socket
 import struct
 
 
+def _csr_pem(common_name):
+    """A real PKCS#10 request: the device keeps its key, Floci signs its public key as AWS does."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]))
+        .sign(key, hashes.SHA256())
+    )
+    return csr.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
 def test_describe_endpoint(iot_client):
     response = iot_client.describe_endpoint(endpointType="iot:Data-ATS")
 
@@ -181,10 +197,11 @@ def test_certificate_delete_csr_policy_versions_and_attachment_reads(iot_client,
         assert exc.response["Error"]["Code"] == "ResourceNotFoundException"
 
     csr_cert = iot_client.create_certificate_from_csr(
-        certificateSigningRequest="-----BEGIN CERTIFICATE REQUEST-----\nfloci\n-----END CERTIFICATE REQUEST-----",
+        certificateSigningRequest=_csr_pem("device-from-csr"),
         setAsActive=False,
     )
     assert "BEGIN CERTIFICATE" in csr_cert["certificatePem"]
+    assert "keyPair" not in csr_cert
 
     policy_name = f"{unique_name}-versioned-policy"
     policy_document = json.dumps({"Version": "2012-10-17", "Statement": []})
@@ -451,7 +468,12 @@ def test_thing_types_groups_and_jobs(iot_client, iot_jobs_data_client, unique_na
     iot_client.delete_thing_group(thingGroupName=group_name)
     iot_client.delete_thing(thingName=thing_name)
     iot_client.deprecate_thing_type(thingTypeName=thing_type)
-    iot_client.delete_thing_type(thingTypeName=thing_type)
+    # A deprecated thing type can only be deleted five minutes after its deprecation.
+    try:
+        iot_client.delete_thing_type(thingTypeName=thing_type)
+        raise AssertionError("expected DeleteThingType inside the deprecation window to fail")
+    except ClientError as exc:
+        assert exc.response["Error"]["Code"] == "InvalidRequestException"
 
 
 def test_mqtt_connect_publish_subscribe(unique_name):

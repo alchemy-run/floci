@@ -10,7 +10,7 @@ import static org.hamcrest.Matchers.equalTo;
 class S3CopyReplaceContentTypeIntegrationTest {
 
     @Test
-    void copyReplaceApplicationOctetStreamBecomesBinaryOctetStream() {
+    void copyReplaceKeepsExplicitApplicationOctetStream() {
         String bucket = "copy-replace-ct-bucket";
         given().when().put("/" + bucket).then().statusCode(200);
         given()
@@ -35,7 +35,7 @@ class S3CopyReplaceContentTypeIntegrationTest {
             .head("/" + bucket + "/destination.txt")
         .then()
             .statusCode(200)
-            .header("Content-Type", equalTo("binary/octet-stream"));
+            .header("Content-Type", equalTo("application/octet-stream"));
 
         given().when().delete("/" + bucket + "/source.txt").then().statusCode(204);
         given().when().delete("/" + bucket + "/destination.txt").then().statusCode(204);

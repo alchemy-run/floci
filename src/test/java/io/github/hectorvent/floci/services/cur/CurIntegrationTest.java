@@ -4,9 +4,12 @@ import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.quarkus.test.junit.QuarkusTestProfile;
+import io.restassured.response.ValidatableResponse;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
@@ -30,13 +33,27 @@ class CurIntegrationTest {
     public static final class IsolatedProfile implements QuarkusTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.storage.mode", "memory");
+            return Map.of("floci.storage.mode", "memory", "floci.services.cur.emit-mode", "off");
         }
     }
 
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    @AfterEach
+    void deleteReports() {
+        List<String> names = given().contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.DescribeReportDefinitions")
+                .header("Authorization", AUTH).body("{}")
+                .when().post("/").then().statusCode(200).extract().path("ReportDefinitions.ReportName");
+        for (String name : names) {
+            given().contentType(CONTENT_TYPE)
+                    .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.DeleteReportDefinition")
+                    .header("Authorization", AUTH).body(Map.of("ReportName", name))
+                    .when().post("/").then().statusCode(200);
+        }
     }
 
     private static String validReportBody(String name) {
@@ -265,9 +282,7 @@ class CurIntegrationTest {
     }
 
     @Test
-    void putReportDefinition_textCsvFormat_returnsValidation() {
-        // Floci only emits Parquet today; accepting textORcsv would let a
-        // report persist that the emitter can't actually fulfill.
+    void putReportDefinition_textCsvFormat_persistsAndUpdates() {
         String body = "{\"ReportDefinition\":{" +
                 "\"ReportName\":\"csv-attempt\"," +
                 "\"TimeUnit\":\"DAILY\",\"Format\":\"textORcsv\",\"Compression\":\"GZIP\"," +
@@ -276,9 +291,73 @@ class CurIntegrationTest {
         given().contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.PutReportDefinition")
             .header("Authorization", AUTH).body(body)
-            .when().post("/").then()
-            .statusCode(400)
-            .body("__type", equalTo("ValidationException"));
+            .when().post("/").then().statusCode(200);
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.DescribeReportDefinitions")
+            .header("Authorization", AUTH).body("{}")
+            .when().post("/").then().statusCode(200)
+            .body("ReportDefinitions.find { it.ReportName == 'csv-attempt' }.Format", equalTo("textORcsv"))
+            .body("ReportDefinitions.find { it.ReportName == 'csv-attempt' }.Compression", equalTo("GZIP"))
+            .body("ReportDefinitions.find { it.ReportName == 'csv-attempt' }.ReportStatus.LastStatus", equalTo("PENDING"));
+        String updated = "{\"ReportName\":\"csv-attempt\"," + body.substring(1)
+                .replace("GZIP", "ZIP").replace("DAILY", "HOURLY");
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.ModifyReportDefinition")
+            .header("Authorization", AUTH).body(updated)
+            .when().post("/").then().statusCode(200);
+        given().contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AWSOrigamiServiceGatewayService.DescribeReportDefinitions")
+            .header("Authorization", AUTH).body("{}")
+            .when().post("/").then().statusCode(200)
+            .body("ReportDefinitions.find { it.ReportName == 'csv-attempt' }.Compression", equalTo("ZIP"))
+            .body("ReportDefinitions.find { it.ReportName == 'csv-attempt' }.TimeUnit", equalTo("HOURLY"));
+    }
+
+    @Test
+    void tags_persistAcrossModificationAndAreDeletedWithReport() {
+        String definition = validReportBody("tagged-report");
+        String tagged = definition.substring(0, definition.length() - 1)
+                + ",\"Tags\":[{\"Key\":\"fixture\",\"Value\":\"cur\"},{\"Key\":\"remove\",\"Value\":\"yes\"}]}";
+        request("PutReportDefinition", tagged).statusCode(200);
+        request("TagResource", "{\"ReportName\":\"tagged-report\",\"Tags\":[{\"Key\":\"fixture\",\"Value\":\"updated\"}]}")
+                .statusCode(200);
+        request("UntagResource", "{\"ReportName\":\"tagged-report\",\"TagKeys\":[\"remove\",\"absent\"]}")
+                .statusCode(200);
+        request("ModifyReportDefinition", "{\"ReportName\":\"tagged-report\"," + definition.substring(1))
+                .statusCode(200);
+        request("ListTagsForResource", "{\"ReportName\":\"tagged-report\"}").statusCode(200)
+                .body("Tags", hasSize(1)).body("Tags[0].Key", equalTo("fixture"))
+                .body("Tags[0].Value", equalTo("updated"));
+        request("DeleteReportDefinition", "{\"ReportName\":\"tagged-report\"}").statusCode(200);
+        for (String action : List.of("ListTagsForResource", "TagResource", "UntagResource")) {
+            request(action, "{\"ReportName\":\"tagged-report\",\"Tags\":[],\"TagKeys\":[]}")
+                    .statusCode(400).body("__type", equalTo("ResourceNotFoundException"));
+        }
+    }
+
+    @Test
+    void describeReportDefinitions_paginatesAndRejectsInvalidTokens() {
+        request("PutReportDefinition", validReportBody("page-a")).statusCode(200);
+        request("PutReportDefinition", validReportBody("page-b")).statusCode(200);
+        String token = request("DescribeReportDefinitions", "{\"MaxResults\":1}").statusCode(200)
+                .body("ReportDefinitions.ReportName", contains("page-a")).extract().path("NextToken");
+        request("DescribeReportDefinitions", "{\"MaxResults\":1,\"NextToken\":\"" + token + "\"}")
+                .statusCode(200).body("ReportDefinitions.ReportName", contains("page-b"))
+                .body("NextToken", nullValue());
+        request("DescribeReportDefinitions", "{\"NextToken\":\"bad\"}").statusCode(400)
+                .body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void putReportDefinition_rejectsMismatchedCompression() {
+        request("PutReportDefinition", validReportBody("bad-compression").replace("\"Compression\":\"Parquet\"",
+                "\"Compression\":\"GZIP\"")).statusCode(400).body("__type", equalTo("ValidationException"));
+    }
+
+    private static ValidatableResponse request(String action, String body) {
+        return given().contentType(CONTENT_TYPE)
+                .header("X-Amz-Target", "AWSOrigamiServiceGatewayService." + action)
+                .header("Authorization", AUTH).body(body).when().post("/").then();
     }
 
     @Test

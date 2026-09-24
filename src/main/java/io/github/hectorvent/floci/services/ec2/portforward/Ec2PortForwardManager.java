@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.model.ContainerNetwork;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -79,6 +80,11 @@ public class Ec2PortForwardManager {
         this.httpPortMux = httpPortMux;
     }
 
+    @PreDestroy
+    void stop() {
+        executor.shutdownNow();
+    }
+
     /**
      * Reconciles the instance's live forwards against the desired port set: publishes ports
      * that are newly opened and unpublishes ports that no longer have an ingress rule. Runs
@@ -130,7 +136,9 @@ public class Ec2PortForwardManager {
     }
 
     boolean enabled() {
-        return config.services().ec2().publishSecurityGroupPorts() && !config.services().ec2().mock();
+        return config.services().ec2().publishSecurityGroupPorts() && !config.services().ec2().mock()
+                && (config.network() == null || config.network().securityGroupEnforcement() == null
+                || !config.network().securityGroupEnforcement().enabled());
     }
 
     /** Sets the callback used to persist an instance after its forwards change. */
@@ -295,13 +303,30 @@ public class Ec2PortForwardManager {
         return "floci-ec2-fwd-" + instanceId + "-" + appPort;
     }
 
-    private NetworkTarget resolveInstanceTarget(Instance instance) {
+    NetworkTarget resolveInstanceTarget(Instance instance) {
+        boolean managed = instance.getLogicalPrivateIpAddress() != null;
         String containerId = instance.getDockerContainerId();
         if (containerId != null) {
             try {
                 InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+                String mode = inspect.getHostConfig() == null ? null : inspect.getHostConfig().getNetworkMode();
+                if (mode != null && mode.startsWith("container:")) {
+                    managed = true;
+                    inspect = dockerClient.inspectContainerCmd(mode.substring("container:".length())).exec();
+                }
                 if (inspect.getNetworkSettings() != null) {
                     Map<String, ContainerNetwork> networks = inspect.getNetworkSettings().getNetworks();
+                    String retained = instance.getContainerBridgeIp();
+                    if (managed && retained != null && !retained.isBlank()) {
+                        if (networks != null) {
+                            for (Map.Entry<String, ContainerNetwork> entry : networks.entrySet()) {
+                                if (entry.getValue() != null && retained.equals(entry.getValue().getIpAddress())) {
+                                    return new NetworkTarget("bridge".equals(entry.getKey()) ? null : entry.getKey(), retained);
+                                }
+                            }
+                        }
+                        return null;
+                    }
                     NetworkTarget target = pickTarget(networks);
                     if (target != null) {
                         return target;
@@ -317,7 +342,7 @@ public class Ec2PortForwardManager {
             }
         }
         String stored = instance.getContainerBridgeIp();
-        if (stored != null && !stored.isBlank()) {
+        if (!managed && stored != null && !stored.isBlank()) {
             return new NetworkTarget(null, stored);
         }
         return null;

@@ -1,0 +1,944 @@
+package io.github.hectorvent.floci.services.redshift;
+
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.redshift.model.Cluster;
+import io.github.hectorvent.floci.services.redshift.model.ClusterParameterGroup;
+import io.github.hectorvent.floci.services.redshift.model.ClusterSubnetGroup;
+import io.github.hectorvent.floci.services.redshift.model.Endpoint;
+import io.github.hectorvent.floci.services.redshift.model.Parameter;
+import io.github.hectorvent.floci.services.redshift.model.Snapshot;
+import io.github.hectorvent.floci.services.redshift.model.SnapshotCopyGrant;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.*;
+
+class RedshiftQueryHandlerTest {
+
+    private RedshiftQueryHandler handler;
+    private RedshiftService service;
+    private RedshiftCredentialBroker credentialBroker;
+    private EmulatorConfig config;
+    private RedshiftIamDbUserResolver iamDbUserResolver;
+    private RegionResolver regionResolver;
+
+    @BeforeEach
+    void setUp() {
+        service = mock(RedshiftService.class);
+        credentialBroker = new RedshiftCredentialBroker();
+        config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.services().redshift().defaultCredentialDurationSeconds()).thenReturn(900);
+        iamDbUserResolver = mock(RedshiftIamDbUserResolver.class);
+        regionResolver = mock(RegionResolver.class);
+        when(regionResolver.getAccountId()).thenReturn("acc");
+        when(regionResolver.resolveRegionFromAuth(anyString())).thenReturn("us-east-1");
+        handler = new RedshiftQueryHandler(service, credentialBroker, config, iamDbUserResolver, regionResolver);
+    }
+
+    private Cluster availableCluster(String id) {
+        Cluster c = new Cluster();
+        c.setClusterIdentifier(id);
+        c.setMasterUsername("admin");
+        c.setMasterPassword("SecretPass1");
+        c.setClusterStatus("available");
+        return c;
+    }
+
+    @Test
+    void resizeDistinguishesMissingClustersFromAbsentResizeOperations() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "existing");
+        when(service.describeClusters("existing")).thenReturn(List.of(availableCluster("existing")));
+        assertEquals("ResizeNotFound", assertThrows(AwsException.class,
+                () -> handler.handle("DescribeResize", params)).getErrorCode());
+        params.putSingle("ClusterIdentifier", "missing");
+        when(service.describeClusters("missing")).thenThrow(new AwsException("ClusterNotFound", "Missing cluster", 404));
+        assertEquals("ClusterNotFound", assertThrows(AwsException.class,
+                () -> handler.handle("DescribeResize", params)).getErrorCode());
+    }
+
+    @Test
+    void databaseRevisionXmlOmitsUnobservedAwsRevisionAndTerminalMarker() {
+        when(service.describeClusterDbRevisions(null, null, null))
+                .thenReturn(new RedshiftService.Page<>(List.of(availableCluster("existing")), null));
+        String xml = (String) handler.handle("DescribeClusterDbRevisions", new MultivaluedHashMap<>()).getEntity();
+        assertTrue(xml.contains("<ClusterDbRevisions><ClusterDbRevision><ClusterIdentifier>existing</ClusterIdentifier>"));
+        assertFalse(xml.contains("<CurrentDatabaseRevision>"));
+        assertFalse(xml.contains("<DatabaseRevisionReleaseDate>"));
+        assertFalse(xml.contains("<Marker>"));
+    }
+
+    @Test
+    void testCreateClusterAction() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+        params.putSingle("NodeType", "dc2.large");
+        params.putSingle("MasterUsername", "admin");
+        params.putSingle("MasterUserPassword", "password123");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("available");
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+
+        Response response = handler.handle("CreateCluster", params);
+
+        assertEquals(200, response.getStatus());
+        assertNotNull(response.getEntity());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterIdentifier>test-cluster</ClusterIdentifier>"));
+        assertTrue(xml.contains("<ClusterStatus>available</ClusterStatus>"));
+        assertTrue(xml.contains("<RequestId>test-req-id</RequestId>"));
+    }
+
+    @Test
+    void createClusterWithManagedMasterPasswordUsesSecretsManagerSecret() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "managed-cluster");
+        params.putSingle("NodeType", "dc2.large");
+        params.putSingle("MasterUsername", "admin");
+        params.putSingle("ManageMasterPassword", "true");
+        params.putSingle("MasterPasswordSecretKmsKeyId", "arn:aws:kms:us-east-1:acc:key/key-1");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("managed-cluster");
+        cluster.setClusterStatus("available");
+        cluster.setMasterPasswordSecretArn("arn:aws:secretsmanager:us-east-1:acc:secret:redshift-managed");
+        cluster.setMasterPasswordSecretKmsKeyId("arn:aws:kms:us-east-1:acc:key/key-1");
+        when(service.createClusterWithManagedMasterPassword(any(), any(), any(), any(), any(), any(), any(), any(),
+                any())).thenReturn(cluster);
+
+        Response response = handler.handle("CreateCluster", params,
+                "AWS4-HMAC-SHA256 Credential=test/20260918/us-east-1/redshift/aws4_request");
+
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<MasterPasswordSecretArn>arn:aws:secretsmanager:us-east-1:acc:secret:redshift-managed</MasterPasswordSecretArn>"));
+        assertTrue(xml.contains("<MasterPasswordSecretKmsKeyId>arn:aws:kms:us-east-1:acc:key/key-1</MasterPasswordSecretKmsKeyId>"));
+        assertFalse(xml.contains("<MasterUserSecret>"));
+        verify(service).createClusterWithManagedMasterPassword(eq("managed-cluster"), eq("dc2.large"),
+                eq("admin"), isNull(), eq(List.of()), eq(List.of()),
+                eq("arn:aws:kms:us-east-1:acc:key/key-1"), eq("us-east-1"), any());
+    }
+
+    @Test
+    void createClusterParsesIamRoleArnLocationName() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+        params.putSingle("NodeType", "dc2.large");
+        params.putSingle("MasterUsername", "admin");
+        params.putSingle("MasterUserPassword", "password123");
+        params.putSingle("IamRoles.IamRoleArn.2", "arn:aws:iam::000000000000:role/second");
+        params.putSingle("IamRoles.IamRoleArn.1", "arn:aws:iam::000000000000:role/first");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("available");
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+
+        handler.handle("CreateCluster", params);
+
+        verify(service).createCluster(eq("test-cluster"), eq("dc2.large"), eq("admin"), eq("password123"),
+                isNull(), eq(List.of()), eq(List.of("arn:aws:iam::000000000000:role/first",
+                        "arn:aws:iam::000000000000:role/second")), any());
+    }
+
+    @Test
+    void createClusterPassesDatabaseNetworkAndEncryptionSettingsAndReportsThem() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "warehouse");
+        params.putSingle("NodeType", "ra3.large");
+        params.putSingle("ClusterType", "single-node");
+        params.putSingle("MasterUsername", "admin");
+        params.putSingle("MasterUserPassword", "Password123");
+        params.putSingle("DBName", "analytics");
+        params.putSingle("PubliclyAccessible", "false");
+        params.putSingle("Encrypted", "true");
+
+        Cluster cluster = availableCluster("warehouse");
+        cluster.setDbName("analytics");
+        cluster.setEncrypted(true);
+        cluster.setEndpoint(new Endpoint("warehouse.0123456789ab.us-east-1.redshift.localhost.floci.io", 5439));
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+
+        String xml = (String) handler.handle("CreateCluster", params).getEntity();
+
+        ArgumentCaptor<RedshiftService.ClusterOptions> options =
+                ArgumentCaptor.forClass(RedshiftService.ClusterOptions.class);
+        verify(service).createCluster(eq("warehouse"), eq("ra3.large"), eq("admin"), eq("Password123"),
+                isNull(), eq(List.of()), eq(List.of()), options.capture());
+        assertEquals(new RedshiftService.ClusterOptions("analytics", 1, false, true, null), options.getValue());
+        assertTrue(xml.contains("<DBName>analytics</DBName>"));
+        assertTrue(xml.contains("<NumberOfNodes>1</NumberOfNodes>"));
+        assertTrue(xml.contains("<PubliclyAccessible>false</PubliclyAccessible>"));
+        assertTrue(xml.contains("<Encrypted>true</Encrypted>"));
+        assertTrue(xml.contains("<Port>5439</Port>"));
+    }
+
+    @Test
+    void createClusterDefaultsToEncryptedPrivateSingleNode() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "defaults");
+        params.putSingle("MasterUsername", "admin");
+        params.putSingle("MasterUserPassword", "Password123");
+        params.putSingle("Port", "5440");
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(availableCluster("defaults"));
+
+        handler.handle("CreateCluster", params);
+
+        verify(service).createCluster(eq("defaults"), any(), eq("admin"), eq("Password123"), isNull(),
+                eq(List.of()), eq(List.of()), eq(new RedshiftService.ClusterOptions(null, 1, false, true, 5440)));
+    }
+
+    @Test
+    void createClusterRejectsMultiNodeWithFewerThanTwoNodes() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "multi");
+        params.putSingle("ClusterType", "multi-node");
+        params.putSingle("NumberOfNodes", "1");
+
+        AwsException error = assertThrows(AwsException.class, () -> handler.handle("CreateCluster", params));
+
+        assertEquals("InvalidParameterValue", error.getErrorCode());
+        verify(service, never()).createCluster(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void describeClustersReportsTheDefaultDatabaseForLegacyClusters() {
+        when(service.describeClusters(any())).thenReturn(List.of(availableCluster("legacy")));
+
+        String xml = (String) handler.handle("DescribeClusters", new MultivaluedHashMap<>()).getEntity();
+
+        assertTrue(xml.contains("<DBName>dev</DBName>"));
+    }
+    
+    @Test
+    void testDescribeClusters() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("available");
+        when(service.describeClusters(any())).thenReturn(List.of(cluster));
+
+        Response response = handler.handle("DescribeClusters", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterIdentifier>test-cluster</ClusterIdentifier>"));
+    }
+
+    @Test
+    void testDescribeClustersIncludesAvailabilityStatuses() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("available");
+        when(service.describeClusters(any())).thenReturn(List.of(cluster));
+
+        Response response = handler.handle("DescribeClusters", params);
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterAvailabilityStatus>Available</ClusterAvailabilityStatus>"));
+        assertTrue(xml.contains("<AvailabilityZoneRelocationStatus>disabled</AvailabilityZoneRelocationStatus>"));
+    }
+
+    @Test
+    void testClusterAvailabilityStatusMapsTransientStatesToModifying() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("creating");
+        when(service.createCluster(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(cluster);
+
+        Response response = handler.handle("CreateCluster", params);
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterAvailabilityStatus>Modifying</ClusterAvailabilityStatus>"));
+    }
+
+    @Test
+    void testClusterAvailabilityStatusMapsFailed() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("failed");
+        when(service.describeClusters(any())).thenReturn(List.of(cluster));
+
+        Response response = handler.handle("DescribeClusters", params);
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterAvailabilityStatus>Failed</ClusterAvailabilityStatus>"));
+    }
+
+    @Test
+    void testDeleteCluster() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("deleting");
+        when(service.deleteCluster(any())).thenReturn(cluster);
+
+        Response response = handler.handle("DeleteCluster", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterIdentifier>test-cluster</ClusterIdentifier>"));
+        assertTrue(xml.contains("<ClusterStatus>deleting</ClusterStatus>"));
+    }
+
+    @Test
+    void testCreateClusterSnapshot() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("SnapshotIdentifier", "test-snapshot");
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Snapshot snapshot = new Snapshot("test-snapshot", "test-cluster", "available", 5439, "admin");
+        when(service.createSnapshot("test-snapshot", "test-cluster")).thenReturn(snapshot);
+
+        Response response = handler.handle("CreateClusterSnapshot", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<SnapshotIdentifier>test-snapshot</SnapshotIdentifier>"));
+        assertTrue(xml.contains("<ClusterIdentifier>test-cluster</ClusterIdentifier>"));
+        assertTrue(xml.contains("<Status>available</Status>"));
+        assertTrue(xml.contains("<Port>5439</Port>"));
+        assertTrue(xml.contains("<MasterUsername>admin</MasterUsername>"));
+        assertTrue(xml.contains("<RequestId>test-req-id</RequestId>"));
+    }
+
+    @Test
+    void testDescribeClusterSnapshots() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("SnapshotIdentifier", "test-snapshot");
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Snapshot snapshot = new Snapshot("test-snapshot", "test-cluster", "available", 5439, "admin");
+        when(service.describeSnapshots("test-snapshot", "test-cluster")).thenReturn(List.of(snapshot));
+
+        Response response = handler.handle("DescribeClusterSnapshots", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<Snapshots>"));
+        assertTrue(xml.contains("<SnapshotIdentifier>test-snapshot</SnapshotIdentifier>"));
+        assertTrue(xml.contains("</Snapshots>"));
+    }
+
+    @Test
+    void testDeleteClusterSnapshot() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("SnapshotIdentifier", "test-snapshot");
+
+        Snapshot snapshot = new Snapshot("test-snapshot", "test-cluster", "deleted", 5439, "admin");
+        when(service.deleteSnapshot("test-snapshot")).thenReturn(snapshot);
+
+        Response response = handler.handle("DeleteClusterSnapshot", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<SnapshotIdentifier>test-snapshot</SnapshotIdentifier>"));
+        assertTrue(xml.contains("<Status>deleted</Status>"));
+    }
+
+    @Test
+    void testRestoreFromClusterSnapshot() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "restored-cluster");
+        params.putSingle("SnapshotIdentifier", "test-snapshot");
+        params.putSingle("NodeType", "dc2.large");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("restored-cluster");
+        cluster.setNodeType("dc2.large");
+        cluster.setMasterUsername("admin");
+        cluster.setClusterStatus("available");
+        cluster.setEndpoint(new Endpoint("localhost", 5439));
+        when(service.restoreFromClusterSnapshot("restored-cluster", "test-snapshot", "dc2.large")).thenReturn(cluster);
+
+        Response response = handler.handle("RestoreFromClusterSnapshot", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterIdentifier>restored-cluster</ClusterIdentifier>"));
+        assertTrue(xml.contains("<ClusterStatus>available</ClusterStatus>"));
+        assertTrue(xml.contains("<Address>localhost</Address>"));
+        assertTrue(xml.contains("<Port>5439</Port>"));
+    }
+
+    @Test
+    void testCreateClusterParameterGroup() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ParameterGroupName", "test-pg");
+        params.putSingle("ParameterGroupFamily", "redshift-1.0");
+        params.putSingle("Description", "custom redshift param group");
+
+        ClusterParameterGroup group = new ClusterParameterGroup("test-pg", "redshift-1.0", "custom redshift param group");
+        when(service.createClusterParameterGroup("test-pg", "redshift-1.0", "custom redshift param group")).thenReturn(group);
+
+        Response response = handler.handle("CreateClusterParameterGroup", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ParameterGroupName>test-pg</ParameterGroupName>"));
+        assertTrue(xml.contains("<ParameterGroupFamily>redshift-1.0</ParameterGroupFamily>"));
+        assertTrue(xml.contains("<Description>custom redshift param group</Description>"));
+    }
+
+    @Test
+    void testDescribeClusterParameterGroups() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ParameterGroupName", "test-pg");
+
+        ClusterParameterGroup group = new ClusterParameterGroup("test-pg", "redshift-1.0", "custom redshift param group");
+        when(service.describeClusterParameterGroups("test-pg")).thenReturn(List.of(group));
+
+        Response response = handler.handle("DescribeClusterParameterGroups", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ParameterGroups>"));
+        assertTrue(xml.contains("<ParameterGroupName>test-pg</ParameterGroupName>"));
+        assertTrue(xml.contains("</ParameterGroups>"));
+    }
+
+    @Test
+    void testDescribeClusterParameters() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ParameterGroupName", "test-pg");
+
+        ClusterParameterGroup group = new ClusterParameterGroup("test-pg", "redshift-1.0", "custom redshift param group");
+        when(service.describeClusterParameterGroups("test-pg")).thenReturn(List.of(group));
+
+        Response response = handler.handle("DescribeClusterParameters", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<Parameters>"));
+        assertTrue(xml.contains("</Parameters>"));
+    }
+
+    @Test
+    void testDeleteClusterParameterGroup() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ParameterGroupName", "test-pg");
+
+        ClusterParameterGroup group = new ClusterParameterGroup("test-pg", "redshift-1.0", "custom redshift param group");
+        when(service.deleteClusterParameterGroup("test-pg")).thenReturn(group);
+
+        Response response = handler.handle("DeleteClusterParameterGroup", params);
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DeleteClusterParameterGroupResponse>"));
+    }
+
+    @Test
+    void testCreateTagsAcceptsNamedMemberForm() {
+        // Real Redshift SDK sends "Tags.Tag.N.Key/.Value", không phải "Tags.member.N...".
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ResourceName", "arn:aws:redshift:us-east-1:000000000000:cluster:test-cluster");
+        params.putSingle("Tags.Tag.1.Key", "env");
+        params.putSingle("Tags.Tag.1.Value", "prod");
+
+        Response response = handler.handle("CreateTags", params);
+        assertEquals(200, response.getStatus());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(service).createTags(eq("arn:aws:redshift:us-east-1:000000000000:cluster:test-cluster"), captor.capture());
+        assertEquals(Map.of("env", "prod"), captor.getValue());
+    }
+
+    @Test
+    void testCreateClusterSubnetGroupAcceptsNamedMemberForm() {
+        // Real Redshift SDK sends "SubnetIds.SubnetIdentifier.N", không phải "SubnetIds.member.N".
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterSubnetGroupName", "test-sng");
+        params.putSingle("Description", "desc");
+        params.putSingle("SubnetIds.SubnetIdentifier.1", "subnet-aaa");
+        params.putSingle("SubnetIds.SubnetIdentifier.2", "subnet-bbb");
+
+        ClusterSubnetGroup group = new ClusterSubnetGroup("test-sng", "desc", null, List.of("subnet-aaa", "subnet-bbb"));
+        when(service.createClusterSubnetGroup(any(), any(), any(), any())).thenReturn(group);
+
+        Response response = handler.handle("CreateClusterSubnetGroup", params);
+        assertEquals(200, response.getStatus());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
+        verify(service).createClusterSubnetGroup(eq("test-sng"), eq("desc"), any(), captor.capture());
+        assertEquals(List.of("subnet-aaa", "subnet-bbb"), captor.getValue());
+    }
+
+    @Test
+    void testModifyClusterParameterGroupAcceptsNamedMemberForm() {
+        // Real Redshift SDK sends "Parameters.Parameter.N.ParameterName/.ParameterValue".
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ParameterGroupName", "test-pg");
+        params.putSingle("Parameters.Parameter.1.ParameterName", "statement_timeout");
+        params.putSingle("Parameters.Parameter.1.ParameterValue", "5000");
+
+        Response response = handler.handle("ModifyClusterParameterGroup", params);
+        assertEquals(200, response.getStatus());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Parameter>> captor = ArgumentCaptor.forClass(List.class);
+        verify(service).modifyClusterParameterGroup(eq("test-pg"), captor.capture());
+        assertEquals(1, captor.getValue().size());
+        assertEquals("statement_timeout", captor.getValue().get(0).getParameterName());
+        assertEquals("5000", captor.getValue().get(0).getParameterValue());
+    }
+
+    @Test
+    void testCreateClusterSubnetGroupRequiresName() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("Description", "desc");
+
+        AwsException ex = assertThrows(
+                AwsException.class,
+                () -> handler.handle("CreateClusterSubnetGroup", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void testModifyClusterRequiresClusterIdentifier() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("NodeType", "dc2.large");
+
+        AwsException ex = assertThrows(
+                AwsException.class,
+                () -> handler.handle("ModifyCluster", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void createsSnapshotCopyGrant() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("SnapshotCopyGrantName", "grant-1");
+        params.putSingle("KmsKeyId", "key-abc");
+
+        when(service.createSnapshotCopyGrant(eq("grant-1"), eq("key-abc"), any()))
+                .thenReturn(new SnapshotCopyGrant("grant-1", "key-abc"));
+
+        Response response = handler.handle("CreateSnapshotCopyGrant", params);
+
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<CreateSnapshotCopyGrantResult>"));
+        assertTrue(xml.contains("<SnapshotCopyGrantName>grant-1</SnapshotCopyGrantName>"));
+        assertTrue(xml.contains("<KmsKeyId>key-abc</KmsKeyId>"));
+        assertTrue(xml.contains("<RequestId>test-req-id</RequestId>"));
+    }
+
+    @Test
+    void createSnapshotCopyGrantAcceptsNamedMemberTags() {
+        // Real Redshift SDK sends "Tags.Tag.N.Key/.Value" on CreateSnapshotCopyGrant.
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("SnapshotCopyGrantName", "grant-1");
+        params.putSingle("Tags.Tag.1.Key", "env");
+        params.putSingle("Tags.Tag.1.Value", "prod");
+
+        SnapshotCopyGrant grant = new SnapshotCopyGrant("grant-1", "key-abc");
+        grant.setTags(Map.of("env", "prod"));
+        when(service.createSnapshotCopyGrant(any(), any(), any())).thenReturn(grant);
+
+        Response response = handler.handle("CreateSnapshotCopyGrant", params);
+        assertEquals(200, response.getStatus());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(service).createSnapshotCopyGrant(eq("grant-1"), isNull(), captor.capture());
+        assertEquals(Map.of("env", "prod"), captor.getValue());
+
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<Key>env</Key>"));
+        assertTrue(xml.contains("<Value>prod</Value>"));
+    }
+
+    @Test
+    void createSnapshotCopyGrantRequiresName() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("KmsKeyId", "key-abc");
+
+        AwsException ex = assertThrows(
+                AwsException.class,
+                () -> handler.handle("CreateSnapshotCopyGrant", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void modifyClusterIamRolesAcceptsNamedMemberForm() {
+        // Real Redshift SDK sends "AddIamRoles.IamRoleArn.N" and "RemoveIamRoles.IamRoleArn.N".
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("AddIamRoles.IamRoleArn.1", "arn:aws:iam::111111111111:role/a");
+        params.putSingle("RemoveIamRoles.IamRoleArn.1", "arn:aws:iam::111111111111:role/b");
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("c1");
+        cluster.setIamRoleArns(List.of("arn:aws:iam::111111111111:role/a"));
+        when(service.modifyClusterIamRoles(eq("c1"), any(), any())).thenReturn(cluster);
+
+        Response response = handler.handle("ModifyClusterIamRoles", params);
+
+        assertEquals(200, response.getStatus());
+        verify(service).modifyClusterIamRoles("c1",
+                List.of("arn:aws:iam::111111111111:role/a"), List.of("arn:aws:iam::111111111111:role/b"));
+        String body = response.getEntity().toString();
+        assertTrue(body.contains("<ModifyClusterIamRolesResult>"));
+        assertTrue(body.contains("<IamRoleArn>arn:aws:iam::111111111111:role/a</IamRoleArn>"));
+        assertTrue(body.contains("<ApplyStatus>in-sync</ApplyStatus>"));
+    }
+
+    @Test
+    void describeClusterVersionsListsTheEmulatedVersion() {
+        Response response = handler.handle("DescribeClusterVersions", new MultivaluedHashMap<>());
+
+        assertEquals(200, response.getStatus());
+        String body = response.getEntity().toString();
+        assertTrue(body.contains("<DescribeClusterVersionsResult>"));
+        assertTrue(body.contains("<ClusterVersion>1.0</ClusterVersion>"));
+        assertTrue(body.contains("<ClusterParameterGroupFamily>redshift-1.0</ClusterParameterGroupFamily>"));
+    }
+
+    @Test
+    void describeClusterVersionsFiltersByVersion() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterVersion", "9.9");
+
+        String body = handler.handle("DescribeClusterVersions", params).getEntity().toString();
+
+        assertFalse(body.contains("<ClusterVersion>1.0</ClusterVersion>"));
+    }
+
+    @Test
+    void describeOrderableClusterOptionsFiltersByNodeType() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("NodeType", "ra3.xlplus");
+        when(regionResolver.resolveRegionFromAuth("auth")).thenReturn("eu-west-1");
+
+        Response response = handler.handle("DescribeOrderableClusterOptions", params, "auth");
+
+        assertEquals(200, response.getStatus());
+        String body = response.getEntity().toString();
+        assertTrue(body.contains("<Name>eu-west-1a</Name>"));
+        assertTrue(body.contains("<DescribeOrderableClusterOptionsResult>"));
+        assertTrue(body.contains("<NodeType>ra3.xlplus</NodeType>"));
+        assertFalse(body.contains("<NodeType>dc2.large</NodeType>"));
+        assertTrue(body.contains("<ClusterType>multi-node</ClusterType>"));
+    }
+
+    @Test
+    void modifyClusterIamRolesRequiresClusterIdentifier() {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("ModifyClusterIamRoles", new MultivaluedHashMap<>()));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void describesSnapshotCopyGrants() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("SnapshotCopyGrantName", "grant-1");
+
+        when(service.describeSnapshotCopyGrants(eq("grant-1"), isNull(), isNull()))
+                .thenReturn(new PaginatedResult<>(List.of(new SnapshotCopyGrant("grant-1", "key-abc")), null));
+
+        Response response = handler.handle("DescribeSnapshotCopyGrants", params);
+
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<SnapshotCopyGrants>"));
+        assertTrue(xml.contains("<SnapshotCopyGrantName>grant-1</SnapshotCopyGrantName>"));
+        assertTrue(xml.contains("</SnapshotCopyGrants>"));
+        assertFalse(xml.contains("<Marker>"), "a single full page must not advertise a marker");
+    }
+
+    @Test
+    void describeSnapshotCopyGrantsWithoutNameListsAll() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+
+        when(service.describeSnapshotCopyGrants(isNull(), isNull(), isNull()))
+                .thenReturn(new PaginatedResult<>(List.of(
+                        new SnapshotCopyGrant("grant-a", "key-a"),
+                        new SnapshotCopyGrant("grant-b", "key-b")), null));
+
+        Response response = handler.handle("DescribeSnapshotCopyGrants", params);
+
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<SnapshotCopyGrantName>grant-a</SnapshotCopyGrantName>"));
+        assertTrue(xml.contains("<SnapshotCopyGrantName>grant-b</SnapshotCopyGrantName>"));
+    }
+
+    @Test
+    void describeSnapshotCopyGrantsForwardsMaxRecordsAndMarker() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("MaxRecords", "20");
+        params.putSingle("Marker", "Z3JhbnQtMjA");
+
+        when(service.describeSnapshotCopyGrants(isNull(), eq(20), eq("Z3JhbnQtMjA")))
+                .thenReturn(new PaginatedResult<>(List.of(new SnapshotCopyGrant("grant-21", "key-a")), null));
+
+        Response response = handler.handle("DescribeSnapshotCopyGrants", params);
+
+        assertEquals(200, response.getStatus());
+        verify(service).describeSnapshotCopyGrants(isNull(), eq(20), eq("Z3JhbnQtMjA"));
+    }
+
+    @Test
+    void describeSnapshotCopyGrantsEmitsMarkerWhenMorePagesRemain() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("MaxRecords", "20");
+
+        when(service.describeSnapshotCopyGrants(isNull(), eq(20), isNull()))
+                .thenReturn(new PaginatedResult<>(
+                        List.of(new SnapshotCopyGrant("grant-01", "key-a")), "Z3JhbnQtMjA"));
+
+        Response response = handler.handle("DescribeSnapshotCopyGrants", params);
+
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<Marker>Z3JhbnQtMjA</Marker>"));
+    }
+
+    @Test
+    void describeSnapshotCopyGrantsRejectsNonNumericMaxRecords() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("MaxRecords", "many");
+
+        AwsException ex = assertThrows(
+                AwsException.class,
+                () -> handler.handle("DescribeSnapshotCopyGrants", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void deletesSnapshotCopyGrant() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("SnapshotCopyGrantName", "grant-1");
+
+        when(service.deleteSnapshotCopyGrant("grant-1"))
+                .thenReturn(new SnapshotCopyGrant("grant-1", "key-abc"));
+
+        Response response = handler.handle("DeleteSnapshotCopyGrant", params);
+
+        assertEquals(200, response.getStatus());
+        verify(service).deleteSnapshotCopyGrant("grant-1");
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DeleteSnapshotCopyGrantResponse>"));
+    }
+
+    @Test
+    void deleteSnapshotCopyGrantRequiresName() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+
+        AwsException ex = assertThrows(
+                AwsException.class,
+                () -> handler.handle("DeleteSnapshotCopyGrant", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        verify(service, never()).deleteSnapshotCopyGrant(any());
+    }
+
+    @Test
+    void testBuildClusterXmlIncludesParameterGroupAndTags() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "test-cluster");
+
+        Cluster cluster = new Cluster();
+        cluster.setClusterIdentifier("test-cluster");
+        cluster.setClusterStatus("available");
+        cluster.setClusterParameterGroupName("test-pg");
+        cluster.setTags(Map.of("env", "prod"));
+        when(service.describeClusters(any())).thenReturn(List.of(cluster));
+
+        Response response = handler.handle("DescribeClusters", params);
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<ClusterParameterGroups>"));
+        assertTrue(xml.contains("<ParameterGroupName>test-pg</ParameterGroupName>"));
+        assertTrue(xml.contains("<ParameterApplyStatus>in-sync</ParameterApplyStatus>"));
+        assertTrue(xml.contains("<Tags>"));
+        assertTrue(xml.contains("<Key>env</Key>"));
+        assertTrue(xml.contains("<Value>prod</Value>"));
+    }
+
+    // ── GetClusterCredentials ────────────────────────────────────────────────
+
+    @Test
+    void getClusterCredentialsReturnsUserPasswordAndExpiration() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+
+        Response response = handler.handle("GetClusterCredentials", params);
+
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DbUser>IAM:analyst</DbUser>"));
+        assertTrue(xml.contains("<DbPassword>"));
+        assertTrue(xml.contains("<Expiration>"));
+        assertTrue(xml.contains("<GetClusterCredentialsResult>"));
+    }
+
+    @Test
+    void getClusterCredentialsStoresCredentialInBroker() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+
+        handler.handle("GetClusterCredentials", params);
+
+        assertTrue(credentialBroker.resolve("acc", "c1", "IAM:analyst").isPresent());
+    }
+
+    @Test
+    void getClusterCredentialsRejectsMissingDbUser() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("GetClusterCredentials", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void getClusterCredentialsClampsAnOutOfRangeConfigDefault() {
+        when(config.services().redshift().defaultCredentialDurationSeconds()).thenReturn(5);
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+
+        handler.handle("GetClusterCredentials", params);
+
+        java.time.Instant expiresAt = credentialBroker.resolve("acc", "c1", "IAM:analyst").orElseThrow().expiresAt();
+        assertTrue(expiresAt.isAfter(java.time.Instant.now().plusSeconds(800)),
+                "an out-of-range config default must fall back to the AWS minimum, not be used as-is");
+    }
+
+    @Test
+    void getClusterCredentialsRejectsDurationBelowMinimum() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+        params.putSingle("DurationSeconds", "899");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("GetClusterCredentials", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void getClusterCredentialsRejectsDurationAboveMaximum() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+        params.putSingle("DurationSeconds", "3601");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("GetClusterCredentials", params));
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+    }
+
+    @Test
+    void getClusterCredentialsAutoCreateTruePrefixesIamaOnDbUser() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+        params.putSingle("AutoCreate", "true");
+
+        Response response = handler.handle("GetClusterCredentials", params);
+
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DbUser>IAMA:analyst</DbUser>"));
+    }
+
+    @Test
+    void getClusterCredentialsAutoCreateFalsePrefixesIamOnDbUser() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+
+        Response response = handler.handle("GetClusterCredentials", params);
+
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DbUser>IAM:analyst</DbUser>"));
+    }
+
+    @Test
+    void getClusterCredentialsEchoesDbGroups() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "analyst");
+        params.putSingle("DbGroups.member.1", "etl");
+        params.putSingle("DbGroups.member.2", "readonly");
+
+        Response response = handler.handle("GetClusterCredentials", params);
+
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DbGroup>etl</DbGroup>"));
+        assertTrue(xml.contains("<DbGroup>readonly</DbGroup>"));
+    }
+
+    @Test
+    void getClusterCredentialsPropagatesClusterNotFound() {
+        when(service.describeClusters("missing"))
+                .thenThrow(new AwsException("ClusterNotFound", "Cluster missing not found", 404));
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "missing");
+        params.putSingle("DbUser", "analyst");
+
+        AwsException ex = assertThrows(AwsException.class,
+                () -> handler.handle("GetClusterCredentials", params));
+        assertEquals("ClusterNotFound", ex.getErrorCode());
+    }
+
+    // ── GetClusterCredentialsWithIAM ─────────────────────────────────────────
+
+    @Test
+    void getClusterCredentialsWithIamDerivesDbUserFromCaller() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        when(iamDbUserResolver.resolveDbUser(any())).thenReturn("IAMR:Deployer");
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+
+        Response response = handler.handle("GetClusterCredentialsWithIAM", params);
+
+        assertEquals(200, response.getStatus());
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DbUser>IAMR:Deployer</DbUser>"));
+        assertTrue(xml.contains("<GetClusterCredentialsWithIAMResult>"));
+    }
+
+    @Test
+    void getClusterCredentialsWithIamIgnoresDbUserParam() {
+        when(service.describeClusters("c1")).thenReturn(List.of(availableCluster("c1")));
+        when(iamDbUserResolver.resolveDbUser(any())).thenReturn("IAM:alice");
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("ClusterIdentifier", "c1");
+        params.putSingle("DbUser", "ignored");
+
+        Response response = handler.handle("GetClusterCredentialsWithIAM", params);
+
+        String xml = (String) response.getEntity();
+        assertTrue(xml.contains("<DbUser>IAM:alice</DbUser>"));
+    }
+}

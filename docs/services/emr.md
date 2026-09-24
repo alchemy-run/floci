@@ -29,10 +29,27 @@ Floci emulates the Amazon EMR (Elastic MapReduce) management API. Clusters (job 
 | `AddInstanceFleet` | Adds an instance fleet to a cluster |
 | `ListInstanceFleets` | Lists the instance fleets of a cluster |
 | `ListInstances` | Lists the EC2 instances of a cluster |
+| `ModifyInstanceGroups` | Resizes instance groups of a cluster |
+| `ModifyInstanceFleet` | Changes the target capacity of an instance fleet |
+| `ListBootstrapActions` | Lists the bootstrap actions a cluster ran at launch |
+| `PutAutoTerminationPolicy` | Attaches or updates a cluster's auto-termination policy |
+| `GetAutoTerminationPolicy` | Returns a cluster's auto-termination policy |
+| `RemoveAutoTerminationPolicy` | Detaches a cluster's auto-termination policy |
+| `PutManagedScalingPolicy` | Attaches or updates a cluster's managed scaling policy |
+| `GetManagedScalingPolicy` | Returns a cluster's managed scaling policy |
+| `RemoveManagedScalingPolicy` | Detaches a cluster's managed scaling policy |
 | `CreateSecurityConfiguration` | Creates a named security configuration |
 | `DescribeSecurityConfiguration` | Returns a security configuration |
 | `DeleteSecurityConfiguration` | Deletes a security configuration |
 | `ListSecurityConfigurations` | Lists all security configurations |
+| `ListReleaseLabels` | - |
+| `DescribeReleaseLabel` | - |
+| `ListSupportedInstanceTypes` | - |
+| `CreateStudio` | - |
+| `DescribeStudio` | - |
+| `ListStudios` | - |
+| `UpdateStudio` | - |
+| `DeleteStudio` | - |
 | `AddTags` | Adds tags to a cluster |
 | `RemoveTags` | Removes tags from a cluster |
 <!-- floci:actions:end -->

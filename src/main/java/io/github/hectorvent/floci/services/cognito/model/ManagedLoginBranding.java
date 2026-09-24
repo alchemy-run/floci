@@ -4,24 +4,19 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * A managed login branding style: the per-app-client visual configuration of the
- * Cognito managed login (hosted UI v2) pages. Exactly one style may be assigned to
- * an app client.
- */
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ManagedLoginBranding {
-    private String userPoolId;
     private String managedLoginBrandingId;
+    private String userPoolId;
     private String clientId;
     private boolean useCognitoProvidedValues;
-    /** The designer settings document, as sent by the caller (null when using provided values). */
+    /** Null when the caller supplied none; AWS omits Settings from the response in that case. */
     private Map<String, Object> settings;
-    /** Asset entries as sent by the caller: Category, ColorMode, Extension, Bytes (base64), ResourceId. */
     private List<Map<String, Object>> assets = new ArrayList<>();
     private long creationDate;
     private long lastModifiedDate;
@@ -32,23 +27,31 @@ public class ManagedLoginBranding {
         this.lastModifiedDate = now;
     }
 
+    public String getManagedLoginBrandingId() { return managedLoginBrandingId; }
+    public void setManagedLoginBrandingId(String managedLoginBrandingId) {
+        this.managedLoginBrandingId = managedLoginBrandingId;
+    }
+
     public String getUserPoolId() { return userPoolId; }
     public void setUserPoolId(String userPoolId) { this.userPoolId = userPoolId; }
 
-    public String getManagedLoginBrandingId() { return managedLoginBrandingId; }
-    public void setManagedLoginBrandingId(String managedLoginBrandingId) { this.managedLoginBrandingId = managedLoginBrandingId; }
+    public boolean isUseCognitoProvidedValues() { return useCognitoProvidedValues; }
+    public void setUseCognitoProvidedValues(boolean useCognitoProvidedValues) {
+        this.useCognitoProvidedValues = useCognitoProvidedValues;
+    }
+
+    public Map<String, Object> getSettings() { return settings; }
+    public void setSettings(Map<String, Object> settings) {
+        this.settings = settings == null ? null : new LinkedHashMap<>(settings);
+    }
+
+    public List<Map<String, Object>> getAssets() { return assets; }
+    public void setAssets(List<Map<String, Object>> assets) {
+        this.assets = assets == null ? new ArrayList<>() : new ArrayList<>(assets);
+    }
 
     public String getClientId() { return clientId; }
     public void setClientId(String clientId) { this.clientId = clientId; }
-
-    public boolean isUseCognitoProvidedValues() { return useCognitoProvidedValues; }
-    public void setUseCognitoProvidedValues(boolean useCognitoProvidedValues) { this.useCognitoProvidedValues = useCognitoProvidedValues; }
-
-    public Map<String, Object> getSettings() { return settings; }
-    public void setSettings(Map<String, Object> settings) { this.settings = settings; }
-
-    public List<Map<String, Object>> getAssets() { return assets; }
-    public void setAssets(List<Map<String, Object>> assets) { this.assets = assets != null ? assets : new ArrayList<>(); }
 
     public long getCreationDate() { return creationDate; }
     public void setCreationDate(long creationDate) { this.creationDate = creationDate; }

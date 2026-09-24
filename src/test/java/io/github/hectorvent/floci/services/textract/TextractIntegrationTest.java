@@ -37,6 +37,21 @@ class TextractIntegrationTest {
             .body("Blocks.BlockType", hasItems("PAGE", "LINE", "WORD"));
     }
     @Test
+    void detectDocumentText_matchingMockConfig_returnsConfiguredResponse() {
+        // src/test/resources/fixtures/ai-mock-config.json maps mock-bucket/invoice.pdf.
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.DetectDocumentText")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"Document\":{\"S3Object\":{\"Bucket\":\"mock-bucket\",\"Name\":\"invoice.pdf\"}}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Blocks", hasSize(1))
+            .body("Blocks[0].Text", equalTo("Invoice Total: $42.00"));
+    }
+    @Test
     void detectDocumentText_blockShapesAreAwsCompatible() {
         given()
             .contentType(CONTENT_TYPE)
@@ -97,6 +112,40 @@ class TextractIntegrationTest {
             .body("DocumentMetadata.Pages", equalTo(1))
             .body("DetectDocumentTextModelVersion", equalTo("1.0"))
             .body("Blocks", hasSize(3));
+    }
+    @Test
+    void asyncResultCanBeReadMoreThanOnceWithStableBlocks() {
+        String jobId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.StartDocumentTextDetection")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("JobId");
+        String firstBlockId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetDocumentTextDetection")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"JobId\":\"" + jobId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("Blocks[0].Id");
+        String secondBlockId = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "Textract.GetDocumentTextDetection")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"JobId\":\"" + jobId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("Blocks[0].Id");
+        assertThat(secondBlockId, equalTo(firstBlockId));
     }
     @Test
     void getDocumentTextDetection_unknownJobId_returns400() {

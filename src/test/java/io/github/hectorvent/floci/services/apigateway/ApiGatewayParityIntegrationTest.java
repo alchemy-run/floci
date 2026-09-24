@@ -128,7 +128,7 @@ class ApiGatewayParityIntegrationTest {
                 .body("{\"statusCode\":\"404\",\"responseTemplates\":{\"application/json\":\"{\\\"message\\\":\\\"gone\\\"}\"}}")
                 .when().put("/restapis/" + apiId + "/gatewayresponses/DEFAULT_4XX")
                 .then()
-                .statusCode(200)
+                .statusCode(201)
                 .body("responseType", equalTo("DEFAULT_4XX"))
                 .body("statusCode", equalTo("404"))
                 .body("defaultResponse", equalTo(false));
@@ -149,7 +149,7 @@ class ApiGatewayParityIntegrationTest {
                 .body("{\"name\":\"parity-link\",\"description\":\"first\",\"targetArns\":[\"arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/demo/abc\"]}")
                 .when().post("/vpclinks")
                 .then()
-                .statusCode(201)
+                .statusCode(202)
                 .body("status", equalTo("AVAILABLE"))
                 .body("targetArns", hasItem("arn:aws:elasticloadbalancing:us-east-1:000000000000:loadbalancer/net/demo/abc"))
                 .extract().path("id");

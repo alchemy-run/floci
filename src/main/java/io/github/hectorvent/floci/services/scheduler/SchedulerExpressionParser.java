@@ -1,10 +1,9 @@
 package io.github.hectorvent.floci.services.scheduler;
 
 import com.cronutils.model.Cron;
-import com.cronutils.model.definition.CronDefinition;
-import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.model.time.ExecutionTime;
 import com.cronutils.parser.CronParser;
+import io.github.hectorvent.floci.core.common.AwsCronDefinitions;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -43,20 +42,7 @@ public final class SchedulerExpressionParser {
     private static final DateTimeFormatter AT_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
-    private static final CronParser CRON_PARSER;
-
-    static {
-        CronDefinition definition = CronDefinitionBuilder.defineCron()
-                .withSeconds().and()
-                .withMinutes().and()
-                .withHours().and()
-                .withDayOfMonth().supportsHash().supportsL().supportsW().supportsQuestionMark().and()
-                .withMonth().and()
-                .withDayOfWeek().supportsHash().supportsL().supportsW().supportsQuestionMark().and()
-                .withYear().optional().and()
-                .instance();
-        CRON_PARSER = new CronParser(definition);
-    }
+    private static final CronParser CRON_PARSER = AwsCronDefinitions.newParser();
 
     public enum Kind { AT, RATE, CRON }
 

@@ -104,9 +104,85 @@ class IotThingOrganizationIntegrationTest {
         .then()
             .statusCode(200);
 
+        // AWS keeps a deprecated thing type for five minutes before it can be deleted.
         given()
         .when()
             .delete("/thing-types/mvp2-sensor")
+        .then()
+            .statusCode(400);
+
+        given()
+            .contentType("application/json")
+            .body("{\"undoDeprecate\": true}")
+        .when()
+            .post("/thing-types/mvp2-sensor/deprecate")
+        .then()
+            .statusCode(200);
+
+        given()
+        .when()
+            .get("/thing-types/mvp2-sensor")
+        .then()
+            .statusCode(200)
+            .body("thingTypeMetadata.deprecated", equalTo(false));
+    }
+
+    @Test
+    void thingTypeAndThingGroupArnsAreTaggable() {
+        String thingTypeArn = given()
+            .contentType("application/json")
+            .body("{}")
+        .when()
+            .post("/thing-types/tagged-sensor-type")
+        .then()
+            .statusCode(200)
+            .extract().path("thingTypeArn");
+        String thingGroupArn = given()
+            .contentType("application/json")
+            .body("{}")
+        .when()
+            .post("/thing-groups/tagged-sensor-group")
+        .then()
+            .statusCode(200)
+            .extract().path("thingGroupArn");
+
+        for (String arn : new String[] {thingTypeArn, thingGroupArn}) {
+            given()
+                .contentType("application/json")
+                .body("{\"resourceArn\": \"" + arn + "\", \"tags\": [{\"Key\": \"purpose\", \"Value\": \"test\"}]}")
+            .when()
+                .post("/tags")
+            .then()
+                .statusCode(200);
+
+            given()
+                .queryParam("resourceArn", arn)
+            .when()
+                .get("/tags")
+            .then()
+                .statusCode(200)
+                .body("tags.find { it.Key == 'purpose' }.Value", equalTo("test"));
+
+            given()
+                .contentType("application/json")
+                .body("{\"resourceArn\": \"" + arn + "\", \"tagKeys\": [\"purpose\"]}")
+            .when()
+                .post("/untag")
+            .then()
+                .statusCode(200);
+
+            given()
+                .queryParam("resourceArn", arn)
+            .when()
+                .get("/tags")
+            .then()
+                .statusCode(200)
+                .body("tags.Key", not(hasItem("purpose")));
+        }
+
+        given()
+        .when()
+            .delete("/thing-groups/tagged-sensor-group")
         .then()
             .statusCode(200);
     }

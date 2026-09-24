@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.s3.model.CopyObjectOptions;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
@@ -67,6 +68,23 @@ class S3VersioningServiceTest {
         S3Object obj = s3Service.putObject("versioned-bucket", "test.txt",
                 "data".getBytes(StandardCharsets.UTF_8), "text/plain", null);
         assertNull(obj.getVersionId());
+    }
+
+    @Test
+    void deletePreVersioningObjectByNullVersionIdRemovesObjectPermanently() {
+        s3Service.putObject("versioned-bucket", "pre-version.txt",
+                "data".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+        s3Service.putBucketVersioning("versioned-bucket", "Enabled");
+
+        assertEquals("data", new String(s3Service.getObject("versioned-bucket", "pre-version.txt", "null").getData(),
+                StandardCharsets.UTF_8));
+        assertNotNull(s3Service.headObject("versioned-bucket", "pre-version.txt", "null"));
+
+        s3Service.deleteObject("versioned-bucket", "pre-version.txt", "null");
+
+        assertThrows(AwsException.class,
+                () -> s3Service.getObject("versioned-bucket", "pre-version.txt"));
+        assertDoesNotThrow(() -> s3Service.deleteBucket("versioned-bucket"));
     }
 
     @Test
@@ -161,6 +179,133 @@ class S3VersioningServiceTest {
     }
 
     @Test
+    void deleteExplicitNullVersionRemovesMemoryObject() {
+        assertExplicitNullVersionCleanup(true);
+    }
+
+    @Test
+    void deleteExplicitNullVersionRemovesDiskObject() {
+        assertExplicitNullVersionCleanup(false);
+    }
+
+    private void assertExplicitNullVersionCleanup(boolean inMemory) {
+        S3Service service = new S3Service(new InMemoryStorage<>(), new InMemoryStorage<>(), tempDir, inMemory);
+        for (String status : List.of("Unversioned", "Enabled", "Suspended")) {
+            String bucket = "null-version-" + status.toLowerCase();
+            service.createBucket(bucket, "us-east-1");
+            service.putObject(bucket, "nested/file.txt", "body".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+            if (!"Unversioned".equals(status)) {
+                service.putBucketVersioning(bucket, status);
+            }
+
+            S3Service.ListVersionsResult before = service.listObjectVersions(bucket, null, 100, null);
+            assertEquals(1, before.versions().size());
+            assertNull(before.versions().getFirst().getVersionId());
+            AwsException notEmpty = assertThrows(AwsException.class, () -> service.deleteBucket(bucket));
+            assertEquals("BucketNotEmpty", notEmpty.getErrorCode());
+
+            S3Service.DeleteObjectsResult deleted = service.deleteObjects(bucket,
+                    List.of(new XmlParser.KeyVersion("nested/file.txt", "null")));
+            assertTrue(deleted.errors().isEmpty());
+            assertEquals("null", deleted.deleted().getFirst().versionId());
+            assertTrue(service.listObjectVersions(bucket, null, 100, null).versions().isEmpty());
+            assertTrue(service.listObjects(bucket, null, null, 100).isEmpty());
+            assertThrows(AwsException.class, () -> service.getObject(bucket, "nested/file.txt"));
+            if (!inMemory) {
+                assertFalse(Files.exists(tempDir.resolve(".accounts/000000000000")
+                        .resolve(bucket).resolve("nested/file.txt.s3data")));
+            }
+            assertTrue(service.deleteObjects(bucket,
+                    List.of(new XmlParser.KeyVersion("nested/file.txt", "null"))).errors().isEmpty());
+            service.deleteBucket(bucket);
+            assertThrows(AwsException.class, () -> service.headBucket(bucket));
+        }
+    }
+
+    @Test
+    void deleteMissingNullVersionDoesNotDeleteNumberedVersion() {
+        s3Service.putBucketVersioning("versioned-bucket", "Enabled");
+        S3Object version = s3Service.putObject("versioned-bucket", "file.txt",
+                "body".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+
+        s3Service.deleteObject("versioned-bucket", "file.txt", "null");
+
+        assertEquals(version.getVersionId(), s3Service.getObject("versioned-bucket", "file.txt").getVersionId());
+        assertEquals(1, s3Service.listObjectVersions("versioned-bucket", null, 100, null).versions().size());
+    }
+
+    @Test
+    void deleteNullVersionPromotesRemainingNumberedVersion() {
+        s3Service.putBucketVersioning("versioned-bucket", "Enabled");
+        S3Object numbered = s3Service.putObject("versioned-bucket", "file.txt",
+                "numbered".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+        s3Service.putBucketVersioning("versioned-bucket", "Suspended");
+        s3Service.putObject("versioned-bucket", "file.txt",
+                "unversioned".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+
+        s3Service.deleteObject("versioned-bucket", "file.txt", "null");
+
+        S3Object latest = s3Service.getObject("versioned-bucket", "file.txt");
+        assertEquals(numbered.getVersionId(), latest.getVersionId());
+        assertEquals("numbered", new String(latest.getData(), StandardCharsets.UTF_8));
+        assertEquals(1, s3Service.listObjectVersions("versioned-bucket", null, 100, null).versions().size());
+        s3Service.deleteObject("versioned-bucket", "file.txt", numbered.getVersionId());
+        s3Service.deleteBucket("versioned-bucket");
+    }
+
+    @Test
+    void deleteBucketRejectsNoncurrentVersionsAndDeleteMarkers() {
+        s3Service.putBucketVersioning("versioned-bucket", "Enabled");
+        S3Object version = s3Service.putObject("versioned-bucket", "file.txt",
+                "body".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+        S3Object marker = s3Service.deleteObject("versioned-bucket", "file.txt");
+        assertTrue(s3Service.listObjects("versioned-bucket", null, null, 100).isEmpty());
+        assertEquals("BucketNotEmpty", assertThrows(AwsException.class,
+                () -> s3Service.deleteBucket("versioned-bucket")).getErrorCode());
+
+        s3Service.deleteObject("versioned-bucket", "file.txt", version.getVersionId());
+        assertEquals("BucketNotEmpty", assertThrows(AwsException.class,
+                () -> s3Service.deleteBucket("versioned-bucket")).getErrorCode());
+
+        s3Service.deleteObject("versioned-bucket", "file.txt", marker.getVersionId());
+        s3Service.deleteBucket("versioned-bucket");
+        assertThrows(AwsException.class, () -> s3Service.headBucket("versioned-bucket"));
+    }
+
+    @Test
+    void listObjectVersionsResumesAfterDeletedPageMarker() {
+        s3Service.putBucketVersioning("versioned-bucket", "Enabled");
+        for (int i = 0; i < 5; i++) {
+            s3Service.putObject("versioned-bucket", "same-key",
+                    ("body-" + i).getBytes(StandardCharsets.UTF_8), "text/plain", null);
+        }
+        s3Service.deleteObject("versioned-bucket", "same-key");
+        s3Service.putObject("versioned-bucket", "z-key",
+                "last".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+
+        String keyMarker = null;
+        String versionMarker = null;
+        int deletedCount = 0;
+        boolean truncated = true;
+        for (int pageNumber = 0; pageNumber < 4 && truncated; pageNumber++) {
+            S3Service.ListVersionsResult page = s3Service.listObjectVersions(
+                    "versioned-bucket", null, null, 2, keyMarker, versionMarker);
+            S3Service.DeleteObjectsResult deleted = s3Service.deleteObjects("versioned-bucket",
+                    page.versions().stream()
+                            .map(v -> new XmlParser.KeyVersion(v.getKey(), v.getVersionId())).toList());
+            assertTrue(deleted.errors().isEmpty());
+            deletedCount += deleted.deleted().size();
+            truncated = page.isTruncated();
+            keyMarker = page.nextKeyMarker();
+            versionMarker = page.nextVersionIdMarker();
+        }
+        assertFalse(truncated);
+        assertEquals(7, deletedCount);
+        assertTrue(s3Service.listObjectVersions("versioned-bucket", null, 100, null).versions().isEmpty());
+        s3Service.deleteBucket("versioned-bucket");
+    }
+
+    @Test
     void getObjectWithNonExistentVersionIdThrowsNoSuchVersion() {
         s3Service.putBucketVersioning("versioned-bucket", "Enabled");
         s3Service.putObject("versioned-bucket", "test.txt",
@@ -195,7 +340,9 @@ class S3VersioningServiceTest {
         S3Object v1 = diskService.putObject("versioned-bucket", "test.txt",
                 "v1".getBytes(StandardCharsets.UTF_8), "text/plain", null);
 
-        Path versionedPath = tempDir.resolve(".versions")
+        Path versionedPath = tempDir.resolve(".accounts")
+                .resolve("000000000000")
+                .resolve(".versions")
                 .resolve("versioned-bucket")
                 .resolve("test.txt")
                 .resolve(v1.getVersionId() + ".s3data");
@@ -348,6 +495,37 @@ class S3VersioningServiceTest {
         S3Object result = s3Service.getObject("versioned-bucket", "key");
         assertEquals("v1", new String(result.getData(), StandardCharsets.UTF_8),
                 "getObject should return the promoted version's content after deleting the latest");
+    }
+
+    @Test
+    void deleteObjectsWithExplicitVersionIdsPermanentlyDeletesVersions() {
+        s3Service.putBucketVersioning("versioned-bucket", "Enabled");
+
+        S3Object v1 = s3Service.putObject("versioned-bucket", "key",
+                "v1".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+        S3Object v2 = s3Service.putObject("versioned-bucket", "key",
+                "v2".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+
+        s3Service.deleteObjects("versioned-bucket", List.of(
+                new XmlParser.KeyVersion("key", v1.getVersionId()),
+                new XmlParser.KeyVersion("key", v2.getVersionId())));
+
+        S3Service.ListVersionsResult result = s3Service.listObjectVersions("versioned-bucket", null, 100, null);
+        assertTrue(result.versions().isEmpty(),
+                "batch delete with explicit VersionIds should permanently remove those versions, not place a delete marker");
+    }
+
+    @Test
+    void deleteObjectsWithNullVersionIdPermanentlyDeletesPreVersioningObject() {
+        s3Service.putObject("versioned-bucket", "key",
+                "data".getBytes(StandardCharsets.UTF_8), "text/plain", null);
+        s3Service.putBucketVersioning("versioned-bucket", "Enabled");
+
+        s3Service.deleteObjects("versioned-bucket", List.of(
+                new XmlParser.KeyVersion("key", "null")));
+
+        assertThrows(AwsException.class, () -> s3Service.getObject("versioned-bucket", "key"));
+        assertDoesNotThrow(() -> s3Service.deleteBucket("versioned-bucket"));
     }
 
 }

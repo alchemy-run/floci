@@ -1,10 +1,10 @@
 # RDS
 
-**Protocol:** Query (XML) for management API + PostgreSQL / MySQL wire protocol for data plane
+**Protocol:** Query (XML) for management API + PostgreSQL / MySQL / SQL Server wire protocol for data plane
 **Management Endpoint:** `POST http://localhost:4566/`
 **Data Endpoint:** `localhost:<proxy-port>` (TCP)
 
-Floci manages real PostgreSQL, MySQL, and MariaDB Docker containers and proxies TCP connections to them, including IAM authentication support.
+Floci manages real PostgreSQL, MySQL, MariaDB, and SQL Server Docker containers and proxies TCP connections to them, including IAM authentication support where the protocol supports it. SQL Server uses a transparent TCP relay for its native TDS protocol.
 
 RDS Data API (`rds-data`) is documented separately because it uses REST JSON routes instead of the RDS Query protocol. See [RDS Data API](rds-data.md).
 
@@ -14,56 +14,138 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 | Action | Description |
 | --- | --- |
 | `CreateDBInstance` | Start a new database instance |
-| `DescribeDBInstances` | List instances and their connection info |
+| `DescribeDBInstances` | List instances and their connection info : the list form includes DocumentDB and Neptune instances and takes an `engine` filter |
+| `DescribeDBEngineVersions` | - |
 | `DeleteDBInstance` | Stop and remove an instance |
 | `ModifyDBInstance` | Update instance settings |
 | `RebootDBInstance` | Restart a database instance |
+| `StopDBInstance` | Stop a standalone instance temporarily: an optional `DBSnapshotIdentifier` first, then its container goes away while the record, endpoint and volume stay |
+| `StartDBInstance` | Start a stopped instance on the volume it kept, same endpoint |
+| `StopDBCluster` | Stop a cluster and its member instances |
+| `StartDBCluster` | Start a stopped cluster and its members |
+| `RebootDBCluster` | Restart a cluster's database and its members' proxies |
+| `CreateDBInstanceReadReplica` | Create a read replica of a PostgreSQL instance, initialised from a copy of the source; see [Read replicas](#read-replicas) |
+| `PromoteReadReplica` | Detach a read replica into a standalone instance and turn automated backups on |
+| `SwitchoverReadReplica` | Refused with `InvalidDBInstanceState`: AWS supports switchover only for Oracle and SQL Server replicas, neither of which is emulated |
+| `PromoteReadReplicaDBCluster` | Refused with `InvalidDBClusterStateFault`: no cluster is created as a replica of an instance |
 | `DescribeOrderableDBInstanceOptions` | List deterministic instance class options |
-| `CreateDBSubnetGroup` | Create a DB subnet group |
+| `DescribeEvents` | List recorded RDS lifecycle events |
+| `CreateDBSubnetGroup` | Create a DB subnet group; tags given here are readable through `ListTagsForResource` |
 | `DescribeDBSubnetGroups` | List DB subnet groups |
 | `ModifyDBSubnetGroup` | Update DB subnet group description and subnet list |
 | `DeleteDBSubnetGroup` | Delete a DB subnet group |
 | `CreateDBCluster` | Create an Aurora-compatible cluster |
-| `DescribeDBClusters` | List clusters |
+| `DescribeDBClusters` | List clusters : the list form covers the RDS family, DocumentDB and Neptune clusters included, and takes an `engine` filter |
 | `DeleteDBCluster` | Delete a cluster |
 | `ModifyDBCluster` | Update cluster settings |
 | `CreateDBParameterGroup` | Create a parameter group |
 | `DescribeDBParameterGroups` | List parameter groups |
 | `DeleteDBParameterGroup` | Delete a parameter group |
 | `ModifyDBParameterGroup` | Update parameter group settings |
-| `DescribeDBParameters` | List parameters in a group |
-| `CreateDBClusterParameterGroup` | - |
-| `DescribeDBClusterParameterGroups` | - |
-| `DeleteDBClusterParameterGroup` | - |
-| `ModifyDBClusterParameterGroup` | - |
-| `DescribeDBClusterParameters` | - |
-| `DescribeDBSnapshots` | List instance snapshots |
-| `CreateDBSnapshot` | Create a manual instance snapshot |
-| `DeleteDBSnapshot` | Delete a manual instance snapshot |
-| `CopyDBSnapshot` | Copy an instance snapshot |
-| `DescribeDBProxies` | List DB proxies (empty until proxies are modeled) |
-| `DescribeDBClusterSnapshots` | List cluster snapshots |
-| `CreateDBClusterSnapshot` | Create a manual cluster snapshot |
-| `DeleteDBClusterSnapshot` | Delete a manual cluster snapshot |
-| `CopyDBClusterSnapshot` | Copy a cluster snapshot |
-| `DescribeDBClusterEndpoints` | List custom cluster endpoints |
-| `CreateDBClusterEndpoint` | Create a custom cluster endpoint |
-| `ModifyDBClusterEndpoint` | Update a custom cluster endpoint |
-| `DeleteDBClusterEndpoint` | Delete a custom cluster endpoint |
+| `CopyDBParameterGroup` | Copy a parameter group (by name or ARN) with its family and parameter overrides into a new group |
 | `ResetDBParameterGroup` | Reset user parameters on a DB parameter group |
+| `DescribeDBParameters` | List parameters in a group |
+| `CreateDBClusterParameterGroup` | Create an Aurora-compatible cluster parameter group |
+| `DescribeDBClusterParameterGroups` | List cluster parameter groups |
+| `DeleteDBClusterParameterGroup` | Delete a cluster parameter group |
+| `ModifyDBClusterParameterGroup` | Update cluster parameter group settings |
+| `CopyDBClusterParameterGroup` | Copy a cluster parameter group into a new group; a managed `default.*` group cannot be copied, as on AWS |
 | `ResetDBClusterParameterGroup` | Reset user parameters on a cluster parameter group |
-| `DescribeEvents` | List RDS events (empty locally) |
-| `DescribePendingMaintenanceActions` | List pending maintenance (empty locally) |
-| `ApplyPendingMaintenanceAction` | Opt in to pending maintenance; missing ARN is `ResourceNotFoundFault` |
-| `StartDBInstance` | Return the instance unchanged |
-| `StopDBInstance` | Return the instance unchanged |
-| `StartDBCluster` | Return the cluster unchanged |
-| `StopDBCluster` | Return the cluster unchanged |
+| `DescribeDBClusterParameters` | List parameters in a cluster group |
+| `CreateOptionGroup` | Create an option group |
+| `CopyOptionGroup` | Copy an option group with its engine, major version and options into a new group |
+| `DescribeOptionGroups` | List option groups, including the implicit `default:` groups |
+| `ModifyOptionGroup` | Add, update, or remove options in an option group |
+| `DeleteOptionGroup` | Delete an option group |
+| `CreateDBSnapshot` | Create a snapshot of a DB instance |
+| `DeleteDBSnapshot` | Delete an available manual DB snapshot and its saved data |
+| `CopyDBSnapshot` | Copy an available DB snapshot, optionally copying tags or overriding the option group and KMS key |
+| `ModifyDBSnapshot` | Change the engine version or option group of an available manual DB snapshot |
+| `RestoreDBInstanceFromDBSnapshot` | Create a new DB instance from a snapshot |
+| `DescribeDBSnapshots` | List instance snapshots |
+| `DescribeDBSnapshotAttributes` | Return a snapshot's `restore` attribute (accounts authorized to copy/restore it) |
+| `ModifyDBSnapshotAttribute` | Add or remove accounts authorized to copy/restore a snapshot |
+| `DescribeDBProxies` | List DB proxies |
+| `CreateDBProxy` | Create a DB proxy |
+| `ModifyDBProxy` | Update mutable DB proxy authentication, logging, timeout, TLS, role, and security-group settings |
+| `DeleteDBProxy` | Delete a DB proxy |
+| `CreateDBProxyEndpoint` | Create a custom endpoint for a DB proxy |
+| `DescribeDBProxyEndpoints` | List default and custom proxy endpoints |
+| `ModifyDBProxyEndpoint` | Update a custom proxy endpoint's name or security groups |
+| `DeleteDBProxyEndpoint` | Delete a custom proxy endpoint; the default endpoint cannot be deleted |
+| `RegisterDBProxyTargets` | Register a cluster or instance as a proxy target |
+| `DeregisterDBProxyTargets` | Remove a cluster or instance from a proxy target group |
+| `DescribeDBProxyTargetGroups` | List a proxy's target groups |
+| `ModifyDBProxyTargetGroup` | Update target-group connection-pool configuration |
+| `DescribeDBProxyTargets` | List a proxy target group's registered targets |
+| `DescribeDBClusterSnapshots` | List cluster snapshots, filtered by `DBClusterSnapshotIdentifier`, `DBClusterIdentifier` and `SnapshotType` |
+| `CreateDBClusterSnapshot` | Take a manual snapshot of an available cluster, with its data and `Tags` |
+| `DeleteDBClusterSnapshot` | Delete an available cluster snapshot and its data; the response carries `Status` `deleted` |
+| `CopyDBClusterSnapshot` | Copy an available cluster snapshot (by identifier or same-region ARN) to a new manual one with its data; `CopyTags` and `Tags`; the copy reports `SourceDBClusterSnapshotArn` |
+| `RestoreDBClusterFromSnapshot` | Create a cluster from a cluster snapshot's settings and data; `Engine` must match the snapshot's |
+| `DescribeDBClusterSnapshotAttributes` | Return the `restore` attribute of a cluster snapshot |
+| `ModifyDBClusterSnapshotAttribute` | Add or remove `restore` values (account ids or `all`) on a cluster snapshot |
+| `DescribeGlobalClusters` | List the account's global clusters with their primary and secondary members; see [Global clusters](#global-clusters) |
+| `CreateGlobalCluster` | Create an Aurora global database, empty or with an existing Aurora cluster as its primary |
+| `ModifyGlobalCluster` | Rename a global cluster, set deletion protection, or upgrade its engine version (members follow) |
+| `DeleteGlobalCluster` | Delete a global cluster once every member has been removed and deletion protection is off |
+| `RemoveFromGlobalCluster` | Detach a member into a standalone cluster; the primary goes last |
+| `FailoverGlobalCluster` | Promote a secondary to primary (failover with `AllowDataLoss`, or switchover) |
+| `SwitchoverGlobalCluster` | Promote a secondary to primary and demote the current primary to a secondary |
 | `FailoverDBCluster` | Return the cluster unchanged |
 | `AddTagsToResource` | Add tags to a DB resource |
 | `ListTagsForResource` | List tags for a DB resource |
 | `RemoveTagsFromResource` | Remove tags from a DB resource |
+| `DescribeDBClusterEndpoints` | List custom cluster endpoints |
+| `CreateDBClusterEndpoint` | Create a custom cluster endpoint |
+| `ModifyDBClusterEndpoint` | Update a custom cluster endpoint |
+| `DeleteDBClusterEndpoint` | Delete a custom cluster endpoint |
+| `DescribePendingMaintenanceActions` | List pending maintenance (empty locally) |
+| `ApplyPendingMaintenanceAction` | Opt in to pending maintenance; missing ARN is `ResourceNotFoundFault` |
 <!-- floci:actions:end -->
+
+`CreateDBInstance` stores `StorageEncrypted`, `KmsKeyId`, `BackupRetentionPeriod`,
+`PreferredBackupWindow`, `PreferredMaintenanceWindow` and `CopyTagsToSnapshot`, and
+`DescribeDBInstances` returns them; `ModifyDBInstance` changes the backup settings and
+the windows. The same checks as on AWS apply (`KmsKeyId` needs `StorageEncrypted`,
+windows are at least 30 minutes and may not overlap). `KmsKeyId` is accepted as a key ARN,
+key id, alias ARN or alias name, resolved against the KMS store in the request's region and
+returned as the key ARN; a key that does not exist or is not enabled is
+`KMSKeyNotAccessibleFault`. Where AWS picks a random window,
+Floci uses `04:00-06:00` and `mon:00:00-mon:03:00` (or, when the window given on create overlaps the
+usual default, a 30-minute window starting where the given one ends); a window given on modify is
+checked against the instance's other window. Modifications apply immediately :
+`PendingModifiedValues` is not modeled.
+
+!!! note "Stopping and starting"
+
+    `StopDBInstance` and `StopDBCluster` follow the user guide: the response reports `stopping`
+    (`StopDBCluster` for the cluster and its members), the stored status settles to `stopped`,
+    and `StartDBInstance` / `StartDBCluster` report `starting` and settle to `available`. While
+    stopped, the identifier, endpoint (same port), parameter and option groups and the Docker
+    volume all stay, so the data comes back on start; the container itself is removed and the
+    endpoint refuses connections. `StopDBInstance` refuses a cluster member (use `StopDBCluster`),
+    a read replica or an instance that has one, and anything not `available`, with
+    `InvalidDBInstanceState`; `ModifyDBInstance` on a stopped instance is refused the same way.
+    `DeleteDBInstance` works on a stopped instance. A stopped instance or cluster stays stopped
+    across an emulator restart. Not modeled: the automatic restart after seven days, and the
+    Multi-AZ SQL Server restriction.
+
+!!! note "DB snapshot tagging and lifecycle"
+
+    `CreateDBSnapshot` accepts `Tags`, and `TagResource`/`UntagResource`/`ListTagsForResource`
+    work against a snapshot's ARN like they do for other tagged resource types.
+    `DescribeDBSnapshotAttributes`/`ModifyDBSnapshotAttribute` are modeled as stored metadata
+    (no real cross-account sharing). Available manual snapshots can be deleted, copied by
+    identifier or ARN, and modified. Copies retain the source data and can copy source tags or add
+    request tags. Snapshots are region-scoped like DB instances and clusters: `DBSnapshotArn` reflects
+    the request's signed region, and a snapshot is only visible to `Describe`/`Tag` calls signed
+    for that same region. Cluster snapshots follow the same lifecycle: `CreateDBClusterSnapshot`
+    dumps the cluster's database, `RestoreDBClusterFromSnapshot` loads it into a new cluster, and
+    `Copy`, `Delete` and the `restore` attribute behave as they do for instance snapshots, under
+    `arn:aws:rds:<region>:<account>:cluster-snapshot:<name>`. RDS reserved instances aren't
+    modeled (there's no reserved-instance API), so tagging doesn't apply to them.
+    Snapshot dumps are local PostgreSQL backups, not AWS physical backups or cross-account restores.
 
 ## Configuration
 
@@ -71,15 +153,25 @@ RDS Data API (`rds-data`) is documented separately because it uses REST JSON rou
 |---|---|---|
 | `FLOCI_SERVICES_RDS_ENABLED` | `true` | Enable or disable the service |
 | `FLOCI_SERVICES_RDS_MOCK` | `false` | `true` = metadata only (no Docker container or auth proxy) |
-| `FLOCI_SERVICES_RDS_PROXY_BASE_PORT` | `7000` | First host port in the RDS proxy range |
+| `FLOCI_SERVICES_RDS_PROXY_BASE_PORT` | `7001` | First host port in the RDS proxy range |
 | `FLOCI_SERVICES_RDS_PROXY_MAX_PORT` | `7099` | Last host port in the RDS proxy range |
+| `FLOCI_SERVICES_RDS_ENDPOINT_HOST` | _(auto-detected)_ | Hostname advertised in RDS endpoints; when set in Docker, Floci advertises each proxy's published host port |
 | `FLOCI_SERVICES_RDS_DEFAULT_POSTGRES_IMAGE` | `postgres:16-alpine` | Docker image for PostgreSQL instances |
 | `FLOCI_SERVICES_RDS_DEFAULT_MYSQL_IMAGE` | `mysql:8.0` | Docker image for MySQL instances |
 | `FLOCI_SERVICES_RDS_DEFAULT_MARIADB_IMAGE` | `mariadb:11` | Docker image for MariaDB instances |
+| `FLOCI_SERVICES_RDS_DEFAULT_SQL_SERVER_IMAGE` | `mcr.microsoft.com/mssql/server:2022-latest` | Docker image for SQL Server instances |
+| `FLOCI_SERVICES_RDS_PROXY_HANDSHAKE_TIMEOUT_MILLIS` | `10000` | Max time a client has to complete the startup/auth handshake before the proxy drops it |
+| `FLOCI_SERVICES_RDS_PROXY_BACKEND_CONNECT_TIMEOUT_MILLIS` | `5000` | Max time the proxy waits for the backend TCP connect |
+| `FLOCI_SERVICES_RDS_PROXY_MAX_CONNECTIONS` | `100` | Max concurrent connections per proxy before new ones are refused |
 
 ### Docker Compose
 
 RDS requires the Docker socket and port range exposure. For private registry authentication and other Docker settings see [Docker Configuration](../configuration/docker.md).
+
+When Docker publishes RDS proxy ports dynamically, set `FLOCI_SERVICES_RDS_ENDPOINT_HOST` to the
+hostname used by clients. Floci inspects its own container through the Docker socket and returns the
+corresponding published port from `DescribeDBInstances` and `DescribeDBClusters`. Leave the setting
+unset to retain the auto-detected endpoint host and configured proxy port.
 
 ```yaml
 services:
@@ -95,6 +187,21 @@ services:
       FLOCI_SERVICES_RDS_PROXY_BASE_PORT: "7001"
 ```
 
+### Without a reachable Docker daemon
+
+A DB instance or cluster record is metadata. Its identifier, ARN, endpoint address and tags come
+from Floci's configuration, not from Docker. When no daemon is reachable, because Floci runs inside
+Docker with no socket mounted or the daemon on the host is stopped, `CreateDBInstance` and
+`CreateDBCluster` still succeed and the resource reaches `available`. `DescribeDBInstances`,
+`ModifyDBInstance`, the tagging APIs and `DeleteDBInstance` all work on that record, and Floci logs
+a warning naming the missing daemon.
+
+Nothing listens behind the endpoint in that state. The backing container is retried by every
+operation that needs the live database, so it starts as soon as a daemon becomes reachable. Until
+then, RDS Data API calls fail with a modelled `InternalServerErrorException` that names the missing
+daemon. A daemon that is reachable but cannot start the container still fails `CreateDBInstance`
+outright, since that is a real error rather than a degraded mode.
+
 ### Mock mode (CI / tests)
 
 Set `FLOCI_SERVICES_RDS_MOCK=true` when you only need the management API shape: clusters and
@@ -102,7 +209,7 @@ instances are registered as `available` immediately, with no Docker container or
 them. Each resource still gets a unique endpoint port, but nothing listens on it.
 
 ```yaml
-# docker-compose.yml — CI / test environment
+# docker-compose.yml : CI / test environment
 services:
   floci:
     image: floci/floci:latest
@@ -115,6 +222,55 @@ services:
     best-effort, as with the other mock-capable services: resources created in real mode and
     deleted under mock leave their containers and volumes behind, and resources created in mock
     mode are restored with fresh, empty containers when loaded in real mode.
+
+!!! warning "DB proxy endpoint routing"
+
+    DB proxy control-plane resources and target registration are modeled, but Floci's current
+    single-host TCP relay cannot expose multiple same-engine DB proxies as distinct AWS-style bare
+    hostnames on the same engine-default port. The standard Docker Compose mapping also exposes
+    only the `7001-7099` instance/cluster proxy range, not `1433`, `3306`, or `5432`. Use mock mode
+    for DB proxy provisioning workflows until a dedicated endpoint-routing design is implemented.
+
+!!! note "DB proxy control-plane settings"
+
+    Proxy and target-group settings are persisted and round-trip through the RDS Query API and
+    CloudFormation. Pool sizing, borrow timeout, idle timeout, TLS, init-query, and session-pinning
+    settings are currently control-plane metadata; the TCP relay does not yet implement those data-plane
+    behaviors. `DefaultAuthScheme=IAM_AUTH` is supported for control-plane workflows, but a real-mode
+    proxy using that scheme cannot register a target until backend IAM authentication is implemented.
+    Requests to `RegisterDBProxyTargets`, `DeregisterDBProxyTargets`, and
+    `DescribeDBProxyTargets` use the `default` target group when `TargetGroupName` is omitted,
+    matching the RDS API contract.
+    `CreateDBProxy`/`AWS::RDS::DBProxy` accept `EndpointNetworkType` (`IPV4`, `IPV6`, or `DUAL`) and
+    `TargetConnectionNetworkType` (`IPV4` or `IPV6`) and round-trip them like the other proxy
+    settings above; the TCP relay itself still only listens on IPv4, so a non-`IPV4` value is
+    accepted as control-plane metadata rather than making the relay dual-stack. A non-`IPV4` value
+    is rejected with `InvalidParameterValue` unless the proxy's VPC and every subnet in
+    `VpcSubnetIds` already carry an associated IPv6 CIDR block, matching AWS's own network
+    prerequisites for RDS Proxy.
+
+## Aurora Serverless v2 scaling
+
+`CreateDBCluster`, `ModifyDBCluster`, and `DescribeDBClusters` support the AWS
+`ServerlessV2ScalingConfiguration` Query shape for `aurora-mysql` and `aurora-postgresql`
+clusters. Requests that apply this configuration to another engine fail with
+`InvalidParameterCombination`.
+
+The minimum and maximum capacities use half-ACU increments; the maximum must be at least 1 ACU and
+no greater than 256 ACUs. AWS's actual maximum depends on the Aurora engine and platform version,
+while Floci currently applies the 256-ACU ceiling uniformly.
+
+When `MinCapacity` is zero, `SecondsUntilAutoPause` accepts 300–86,400 seconds and defaults to 300.
+Changing the minimum to a nonzero value removes the auto-pause interval, matching the AWS response
+shape. AWS limits zero-capacity auto-pause to compatible Aurora versions; Floci does not currently
+enforce that version matrix. `ModifyDBCluster` accepts partial scaling updates and preserves omitted
+values. `AWS::RDS::DBCluster` creation also maps the equivalent CloudFormation property.
+
+If a persisted cluster record does not contain its original AWS engine identifier, Floci rejects a
+new scaling configuration instead of assuming that the cluster is Aurora.
+
+This is control-plane compatibility: Floci persists and returns the scaling configuration, but it
+does not resize or automatically pause the backing Docker container.
 
 ## Examples
 
@@ -163,6 +319,115 @@ mysql -h 127.0.0.1 -P 7002 -u root -psecret123
 | `mariadb` | `mariadb:11` |
 
 Override the image per-instance with the `--engine-version` flag or globally via environment variables.
+Aurora MySQL versions such as `8.0.mysql_aurora.3.08.0` use the MySQL version in front, so that example runs `mysql:8.0`.
+
+## Option Groups
+
+Option groups are metadata: Floci stores the options you add, returns them on the wire, and
+attaches a group to a DB instance, but it does not install the underlying engine feature in the
+container.
+
+As on AWS, every engine has an implicit `default:<engine>-<major version>` group that
+`DescribeOptionGroups` returns even when you have created none. Floci ships the defaults for the
+engines it can run (`postgres 13`–`18`, `mysql 8.0`/`8.4`, `mariadb 10.11`/`11.2`/`11.4`), so an
+instance created without `--option-group-name` reports the matching default. Default groups can't
+be modified, deleted, or tagged.
+
+`CreateOptionGroup` accepts any `EngineName` AWS accepts : including `oracle-*`, `sqlserver-*`,
+and `db2-*` : so a Terraform `aws_db_option_group` for an engine Floci cannot start still applies.
+Attaching one to a DB instance requires the group's engine and major engine version to match the
+instance, as on AWS: a `mysql 8.0` group can't be attached to a `mysql 8.4` instance. A mismatch
+fails with `InvalidParameterCombination`.
+
+```bash
+aws rds create-option-group \
+  --option-group-name my-og \
+  --engine-name mysql \
+  --major-engine-version 8.0 \
+  --option-group-description "MySQL options" \
+  --endpoint-url $AWS_ENDPOINT_URL
+
+aws rds modify-option-group \
+  --option-group-name my-og \
+  --options OptionName=MEMCACHED,Port=11211 \
+  --apply-immediately \
+  --endpoint-url $AWS_ENDPOINT_URL
+
+aws rds describe-option-groups \
+  --engine-name mysql \
+  --endpoint-url $AWS_ENDPOINT_URL
+```
+
+Deleting a group that is still attached to a DB instance fails with
+`InvalidOptionGroupStateFault`, matching AWS.
+
+Known gaps, all deliberate:
+
+| Behavior | Status |
+|---|---|
+| `DescribeOptionGroupOptions` | Not implemented: the per-engine option catalog is not modeled |
+| `OptionGroupQuotaExceededFault` (AWS caps an account at 20 groups) | Not enforced : capping a local emulator would only get in a test's way |
+| `OptionSetting` metadata (`DataType`, `ApplyType`, `AllowedValues`, `DefaultValue`, `Description`) | Omitted : it would require the per-engine option catalog `DescribeOptionGroupOptions` serves |
+| `MaxRecords` / `Marker` pagination | Every group is returned in one page, as with every other RDS list action |
+
+## Read replicas
+
+`CreateDBInstanceReadReplica` creates a standalone instance with its own container and endpoint.
+As on AWS it inherits the source's engine, version, credentials and database name and, unless the
+request overrides them, the instance class, storage and minor version upgrade setting. A replica
+in the source's region also inherits the source's parameter group, option group, subnet group and
+security groups; a replica in another region (source given by ARN, `--region` set to the
+destination) gets that region's defaults. IAM authentication and `CopyTagsToSnapshot` are off
+unless requested. The replica starts with `BackupRetentionPeriod` 0. Both ends report the link
+the way `DescribeDBInstances` does: the replica carries `ReadReplicaSourceDBInstanceIdentifier`
+and a `StatusInfos` entry of type `read replication`, the source lists it under
+`ReadReplicaDBInstanceIdentifiers`; within a region the link is the identifier, across regions
+it is the ARN. A `DBSubnetGroupName` with a source given by plain identifier is refused with
+`DBSubnetGroupNotAllowedFault`, as on AWS.
+
+The replica's database is initialised from a `pg_dumpall` of the source taken when the replica is
+created, the same mechanism `RestoreDBInstanceFromDBSnapshot` uses, so it holds the source's data
+as of that moment. Writes made to the source afterwards are not streamed to the replica. Because
+the copy is dump based, only PostgreSQL sources are accepted; MySQL and MariaDB sources are refused
+with `InvalidDBInstanceState`, as `CreateDBSnapshot` refuses them. A source with automated backups
+off (`BackupRetentionPeriod` 0) is refused with the same error AWS uses.
+
+`PromoteReadReplica` clears the link on both ends, sets the requested `BackupRetentionPeriod`
+(one day when omitted) and `PreferredBackupWindow`, and reboots the instance as AWS does, so open
+connections drop while the container, endpoint and data stay. Deleting a source promotes its
+same-region replicas; a cross-region replica keeps its link with the replication status
+`terminated` until it is promoted or deleted, which is what AWS does for PostgreSQL. Deleting a
+replica drops it from its source's list.
+
+## Global clusters
+
+`CreateGlobalCluster` creates an Aurora global database (`aurora-mysql` or `aurora-postgresql`),
+either empty or with an existing Aurora cluster as its primary through `SourceDBClusterIdentifier`
+(an ARN, or an identifier in the request's region), in which case engine, version, database name
+and encryption come from that cluster and may not be given, as on AWS. The record is account wide:
+its ARN has no region and `DescribeGlobalClusters` lists it from any region.
+
+`CreateDBCluster` with `GlobalClusterIdentifier` joins a cluster: the first one becomes the
+primary, every later one a secondary. A secondary must be in a region that holds neither the
+primary nor another secondary, may not carry its own master credentials or database name (it takes
+the primary's), and its database is initialised from a `pg_dumpall` of the primary the way a read
+replica is, so only `aurora-postgresql` primaries accept secondaries; writes after that are not
+streamed. `DescribeGlobalClusters` reports every member with `IsWriter` and, on the primary, the
+secondaries under `Readers`; `DescribeDBClusters` reports `GlobalClusterIdentifier` on members.
+
+`SwitchoverGlobalCluster`, and `FailoverGlobalCluster` with or without `AllowDataLoss`, promote
+the named secondary and demote the current primary to a secondary, the topology AWS keeps for a
+switchover and restores after a managed failover once the old primary region is healthy again.
+The response is the completed state; AWS answers with a pending `FailoverState` because the
+operation runs asynchronously there. `RemoveFromGlobalCluster` detaches a member into a standalone
+cluster; the primary can only be removed once every secondary is gone, and deleting the primary
+cluster while secondaries remain is refused the same way. `DeleteGlobalCluster` needs an empty
+global cluster with deletion protection off.
+
+`FailoverDBCluster` moves the writer role inside a DB cluster to the named reader instance, or to
+the first reader when none is named; a cluster with no reader has nothing to fail over to and is
+refused. `DescribeDBClusters` reports the role as `IsClusterWriter`, and deleting the writer
+promotes a remaining member, as Aurora does on its own.
 
 ## Persistence
 
@@ -172,16 +437,16 @@ automatically. No configuration is required.
 | Scenario | Volume behavior |
 |---|---|
 | `memory` mode (default) | Volume is removed automatically when the instance is deleted |
-| `persistent` / `hybrid` / `wal` | Volume is retained after delete — data survives for manual recovery |
+| `persistent` / `hybrid` / `wal` | Volume is retained after delete : data survives for manual recovery |
 
 ```bash
-# CI — ephemeral, volumes cleaned up on each delete
+# CI : ephemeral, volumes cleaned up on each delete
 FLOCI_STORAGE_MODE=memory
 
-# Local dev — retain DB data across Floci restarts
+# Local dev : retain DB data across Floci restarts
 FLOCI_STORAGE_MODE=hybrid
 
-# Local dev — also remove volumes immediately on delete
+# Local dev : also remove volumes immediately on delete
 FLOCI_STORAGE_MODE=hybrid
 FLOCI_STORAGE_PRUNE_VOLUMES_ON_DELETE=true
 ```
@@ -193,10 +458,60 @@ FLOCI_STORAGE_HOST_PERSISTENT_PATH=/absolute/host/path/data
 ```
 
 !!! note "Docker Desktop on macOS"
-    Named volumes work correctly on Docker Desktop for macOS. Bind mounts to paths inside the Floci container are not supported — use named volumes (the default).
+    Named volumes work correctly on Docker Desktop for macOS. Bind mounts to paths inside the Floci container are not supported : use named volumes (the default).
 
 ## Authentication
 
-The RDS auth proxy validates the master username and password at the proxy layer. All other database users are passed through directly to the backend engine — create them with standard SQL (`CREATE USER`) and connect as normal.
+The RDS auth proxy validates the master username and password at the proxy layer. All other database users are passed through directly to the backend engine : create them with standard SQL (`CREATE USER`) and connect as normal.
 
 IAM database authentication is also supported. Set `--enable-iam-database-authentication` at instance creation time and use `aws rds generate-db-auth-token` to obtain a token.
+
+On PostgreSQL, the token names a database role (`DBUser`) and the session runs as that role: `current_user` and `session_user` both report it, objects it creates are owned by it, and a token naming a role the database does not have is refused with `FATAL: role "..." does not exist`. Create the role first with `CREATE ROLE <name> WITH LOGIN` as the master user, and grant it whatever the application needs.
+
+Underneath, the proxy reaches the container as the master user and hands the session over to the token's role, so an IAM session that talks its way back to the master role, via `RESET SESSION AUTHORIZATION` and its variants, is terminated with `FATAL: permission denied to set session authorization` rather than being allowed to regain superuser. `SET ROLE` is untouched: PostgreSQL still permission-checks it against the token's role, exactly as on RDS. One difference from RDS: the proxy learns of the switch from PostgreSQL's own report, so when several statements are batched into a single query after the switch, their results are returned before the session is closed.
+
+On MySQL, `AWSAuthenticationPlugin` is proprietary to RDS and ships in no public MySQL build, so
+`CREATE USER ... IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'` would fail against the container
+with `ERROR 1524 (HY000): Plugin 'AWSAuthenticationPlugin' is not loaded`. The proxy rewrites that
+clause to `IDENTIFIED WITH mysql_native_password AS '*000...0'`, an authentication string no
+password hashes to. The account is therefore created, can be granted to and can be dropped, but
+holds no password of its own, which is what an IAM DB user is: an account whose credentials come
+from IAM rather than from MySQL. This is the MySQL counterpart of the empty `rds_iam` role Floci
+pre-creates for PostgreSQL.
+
+Two limits follow from that. `SHOW CREATE USER` reports the substituted plugin rather than
+`AWSAuthenticationPlugin`, so a Terraform or Pulumi refresh sees drift on `auth_plugin`. And
+connecting with a token is not yet emulated for MySQL: unlike PostgreSQL, which receives the
+password in cleartext, MySQL sends a scramble, so the proxy would have to drive the
+`mysql_clear_password` auth switch that real RDS triggers before it could see a token to validate.
+
+## TLS / SSL
+
+The RDS auth proxy terminates TLS itself (the backend container stays plaintext) using a
+self-signed CA whose Subject Alternative Names cover every advertised host Floci has handed
+out for a DB instance, cluster, or RDS Proxy : the Docker bridge IP, `host.docker.internal`,
+`localhost`, or whatever `rds.endpointHost` resolves to. The CA is persisted at
+`{storage.persistent-path}/tls/rds-ca.crt` and grows its SAN list as new hosts appear, so the
+same root survives restarts and works for every local database, not just the one that
+generated it.
+
+Floci logs the certificate path (and the `PGSSLROOTCERT` hint) the first time it generates or
+loads it:
+
+```
+RDS proxy TLS: CA cert at ./data/tls/rds-ca.crt
+RDS proxy TLS: for sslmode=verify-full set PGSSLROOTCERT=./data/tls/rds-ca.crt
+```
+
+Because the SAN matches the address you actually connect to, `verify-full` (the same level
+Aurora enforces in AWS) works locally too : no need to fall back to `sslmode=disable` just to
+exercise the same connection-string settings you use in production:
+
+```bash
+# PostgreSQL
+PGSSLROOTCERT=./data/tls/rds-ca.crt psql "host=localhost port=7001 user=admin sslmode=verify-full"
+
+# MySQL / MariaDB
+mysql -h 127.0.0.1 -P 7002 -u root -psecret123 \
+  --ssl-mode=VERIFY_IDENTITY --ssl-ca=./data/tls/rds-ca.crt
+```

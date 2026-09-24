@@ -7,6 +7,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -29,9 +30,10 @@ public class AssumeRolePolicyEvaluator {
 
     private static final Logger LOG = Logger.getLogger(AssumeRolePolicyEvaluator.class);
     private static final String ASSUME_ROLE_ACTION = "sts:AssumeRole";
-    private static final Pattern ACCOUNT_ROOT_ARN = Pattern.compile("^arn:aws:iam::(\\d{12}):root$");
-    private static final Pattern ASSUMED_ROLE_ARN =
-            Pattern.compile("^arn:aws:sts::(\\d{12}):assumed-role/([^/]+)/.*$");
+    private static final Pattern ACCOUNT_ROOT_ARN =
+            Pattern.compile("^arn:" + AwsArnUtils.PARTITION_REGEX + ":iam::(\\d{12}):root$");
+    private static final Pattern ASSUMED_ROLE_ARN = Pattern.compile(
+            "^arn:(" + AwsArnUtils.PARTITION_REGEX + "):sts::(\\d{12}):assumed-role/([^/]+)/.*$");
 
     private final ObjectMapper objectMapper;
 
@@ -73,6 +75,35 @@ public class AssumeRolePolicyEvaluator {
         return allow;
     }
 
+    /**
+     * Returns true if the trust policy allows the named AWS service principal to assume the role.
+     */
+    public boolean allowsService(String trustPolicyDocument, String servicePrincipal) {
+        if (trustPolicyDocument == null || trustPolicyDocument.isBlank()) {
+            return false;
+        }
+        JsonNode statements;
+        try {
+            statements = objectMapper.readTree(trustPolicyDocument).path("Statement");
+        } catch (Exception e) {
+            LOG.warnv("Failed to parse trust policy: {0}", e.getMessage());
+            return false;
+        }
+        boolean allow = false;
+        if (statements.isArray()) {
+            for (JsonNode statement : statements) {
+                switch (evaluateServiceStatement(statement, servicePrincipal)) {
+                    case DENY -> { return false; }
+                    case ALLOW -> allow = true;
+                    case NO_MATCH -> { }
+                }
+            }
+        } else if (statements.isObject()) {
+            return evaluateServiceStatement(statements, servicePrincipal) == Match.ALLOW;
+        }
+        return allow;
+    }
+
     private enum Match { ALLOW, DENY, NO_MATCH }
 
     private Match evaluateStatement(JsonNode stmt, String callerArn, String callerAccount) {
@@ -83,6 +114,34 @@ public class AssumeRolePolicyEvaluator {
             return Match.NO_MATCH;
         }
         return "Deny".equalsIgnoreCase(stmt.path("Effect").asText("Allow")) ? Match.DENY : Match.ALLOW;
+    }
+
+    private Match evaluateServiceStatement(JsonNode stmt, String servicePrincipal) {
+        if (!actionApplies(stmt) || !matchesServicePrincipal(stmt.get("Principal"), servicePrincipal)) {
+            return Match.NO_MATCH;
+        }
+        return "Deny".equalsIgnoreCase(stmt.path("Effect").asText("Allow")) ? Match.DENY : Match.ALLOW;
+    }
+
+    private boolean matchesServicePrincipal(JsonNode principalNode, String servicePrincipal) {
+        if (principalNode == null || servicePrincipal == null) {
+            return false;
+        }
+        JsonNode service = principalNode.isObject() ? principalNode.get("Service") : null;
+        if (service == null) {
+            return false;
+        }
+        if (service.isTextual()) {
+            return IamPolicyEvaluator.globMatches(service.asText(), servicePrincipal);
+        }
+        if (service.isArray()) {
+            for (JsonNode entry : service) {
+                if (entry.isTextual() && IamPolicyEvaluator.globMatches(entry.asText(), servicePrincipal)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -160,7 +219,7 @@ public class AssumeRolePolicyEvaluator {
         if (principal.matches("\\d{12}")) {
             return principal.equals(callerAccount);
         }
-        var rootMatcher = ACCOUNT_ROOT_ARN.matcher(principal);
+        Matcher rootMatcher = ACCOUNT_ROOT_ARN.matcher(principal);
         if (rootMatcher.matches()) {
             return rootMatcher.group(1).equals(callerAccount);
         }
@@ -183,9 +242,17 @@ public class AssumeRolePolicyEvaluator {
      * Maps an STS assumed-role ARN ({@code arn:aws:sts::ACCT:assumed-role/Role/session}) to the
      * underlying IAM role ARN ({@code arn:aws:iam::ACCT:role/Role}), or {@code null} if {@code arn}
      * is not an assumed-role ARN.
+     *
+     * <p>The caller's partition is carried across rather than assumed. IAM ARNs are regionless, so
+     * {@code Arn.of} cannot derive it, and hardcoding {@code aws} here would rewrite a GovCloud
+     * caller into a commercial role ARN that no GovCloud trust policy can match: the caller would
+     * be denied a role they are entitled to, with nothing in the response saying why.
      */
     private static String assumedRoleToRoleArn(String arn) {
-        var m = ASSUMED_ROLE_ARN.matcher(arn);
-        return m.matches() ? AwsArnUtils.Arn.of("iam", "", m.group(1), "role/" + m.group(2)).toString() : null;
+        Matcher m = ASSUMED_ROLE_ARN.matcher(arn);
+        if (!m.matches()) {
+            return null;
+        }
+        return new AwsArnUtils.Arn(m.group(1), "iam", "", m.group(2), "role/" + m.group(3)).toString();
     }
 }

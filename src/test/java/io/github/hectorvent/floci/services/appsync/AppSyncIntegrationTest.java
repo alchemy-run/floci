@@ -229,8 +229,8 @@ class AppSyncIntegrationTest {
             .post("/v1/apis/" + apiId + "/apikeys")
         .then()
             .statusCode(200)
-            .body("apiKey.id", startsWith("da2-"))
-            .body("apiKey.apiKey", startsWith("da2-"))
+            .body("apiKey.id", matchesPattern("da2-[a-z0-9]{26}"))
+            .body("apiKey", not(hasKey("apiKey")))
             .body("apiKey.description", equalTo("test-key"))
             .extract().path("apiKey.id");
     }
@@ -2569,7 +2569,6 @@ class AppSyncIntegrationTest {
     @Order(250)
     void executeGraphql_fieldErrorAndUnauthorized() {
         given()
-            .header("Authorization", AUTH)
             .header("x-api-key", keyId)
             .contentType("application/json")
             .body("""
@@ -2582,7 +2581,6 @@ class AppSyncIntegrationTest {
             .body("errors", hasSize(greaterThanOrEqualTo(1)));
 
         given()
-            .header("Authorization", AUTH)
             .contentType("application/json")
             .body("""
                 {"query": "query { hello }"}
@@ -2591,7 +2589,7 @@ class AppSyncIntegrationTest {
             .post("/v1/apis/" + apiId + "/graphql")
         .then()
             .statusCode(401)
-            .body("__type", equalTo("UnauthorizedException"));
+            .body("errors[0].errorType", equalTo("UnauthorizedException"));
     }
 
     @Test
@@ -2599,7 +2597,6 @@ class AppSyncIntegrationTest {
     void executeGraphql_hostHeaderRoutesToDataPlane() {
         given()
             .header("Host", apiId + ".appsync-api.us-east-1.amazonaws.com")
-            .header("Authorization", AUTH)
             .header("x-api-key", keyId)
             .contentType("application/json")
             .body("""

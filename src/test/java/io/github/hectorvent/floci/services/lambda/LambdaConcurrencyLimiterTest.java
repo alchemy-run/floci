@@ -67,6 +67,22 @@ class LambdaConcurrencyLimiterTest {
     }
 
     @Test
+    void publishedVersion_sharesTheFunctionReservation() {
+        LambdaConcurrencyLimiter limiter = new LambdaConcurrencyLimiter();
+        limiter.setReserved(ARN, 0);
+        // A version snapshot's own record carries no reservation; AWS still throttles it.
+        AwsException ex = assertThrows(AwsException.class, () -> limiter.acquire(fn(ARN + ":1", null)));
+        assertEquals("TooManyRequestsException", ex.getErrorCode());
+
+        limiter.setReserved(ARN, 1);
+        try (LambdaConcurrencyLimiter.Permit held = limiter.acquire(fn(ARN + ":1", null))) {
+            assertEquals(1, limiter.inflightCount(ARN));
+            assertThrows(AwsException.class, () -> limiter.acquire(fn(ARN, 1)));
+        }
+        assertEquals(0, limiter.inflightCount(ARN));
+    }
+
+    @Test
     void reservedPool_doesNotConsumeUnreserved() {
         LambdaConcurrencyLimiter limiter = new LambdaConcurrencyLimiter(3, 0);
         limiter.setReserved(ARN, 2);

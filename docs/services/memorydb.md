@@ -2,13 +2,13 @@
 
 **Protocol:** JSON 1.1 (`X-Amz-Target: AmazonMemoryDB.*`) for management API + Redis RESP protocol for data plane
 **Management Endpoint:** `POST http://localhost:4566/`
-**Data Endpoint:** `localhost:<proxy-port>` (TCP)
+**Data Endpoint:** `clustercfg.<cluster>.<id>.memorydb.<region>.localhost.floci.io:<proxy-port>` (TCP)
 
 Floci manages real Valkey/Redis Docker containers and proxies TCP connections to them, so any Redis client works — including IAM-style authentication. MemoryDB is Redis wire-compatible, so it reuses Floci's ElastiCache RESP proxy and SigV4 validator.
 
 ## Mock Mode
 
-Set `FLOCI_SERVICES_MEMORYDB_MOCK=true` to manage clusters as control-plane-only resources — no Redis container is started. The management API (`CreateCluster`, `DescribeClusters`, tagging, etc.) behaves normally and returns a `ClusterEndpoint` of `<hostname>:6379` (defaults to `localhost:6379`, controlled by `FLOCI_HOSTNAME`), but there is no live data plane to connect to. This is intended for Infrastructure-as-Code tools like Terraform and OpenTofu running in environments without a Docker socket, where you only need the AWS resources to exist and return consistent attributes.
+Set `FLOCI_SERVICES_MEMORYDB_MOCK=true` to manage clusters as control-plane-only resources — no Redis container is started. The management API (`CreateCluster`, `DescribeClusters`, tagging, etc.) behaves normally and returns a `ClusterEndpoint` of `clustercfg.<cluster>.<id>.memorydb.<region>.<domain>:6379`, where `<domain>` is `localhost.floci.io` unless `FLOCI_HOSTNAME` sets another name, but there is no live data plane to connect to. This is intended for Infrastructure-as-Code tools like Terraform and OpenTofu running in environments without a Docker socket, where you only need the AWS resources to exist and return consistent attributes.
 
 ## Supported Management Actions
 
@@ -20,10 +20,30 @@ Set `FLOCI_SERVICES_MEMORYDB_MOCK=true` to manage clusters as control-plane-only
 | `UpdateCluster` | Update mutable cluster attributes (e.g. description) |
 | `DeleteCluster` | Stop and remove a cluster |
 | `CreateUser` | - |
+| `UpdateUser` | - |
+| `CreateParameterGroup` | - |
+| `DescribeParameterGroups` | - |
+| `DescribeParameters` | - |
+| `UpdateParameterGroup` | - |
+| `ResetParameterGroup` | - |
+| `DeleteParameterGroup` | - |
+| `CreateSubnetGroup` | - |
+| `DescribeSubnetGroups` | - |
+| `UpdateSubnetGroup` | - |
+| `DeleteSubnetGroup` | - |
+| `CreateSnapshot` | - |
+| `DescribeSnapshots` | - |
+| `CopySnapshot` | - |
+| `DeleteSnapshot` | - |
+| `DescribeEvents` | - |
+| `DescribeEngineVersions` | - |
+| `DescribeServiceUpdates` | - |
+| `BatchUpdateCluster` | - |
 | `DescribeUsers` | - |
 | `DeleteUser` | - |
 | `CreateACL` | - |
 | `DescribeACLs` | - |
+| `UpdateACL` | - |
 | `DeleteACL` | - |
 | `ListTags` | List tags for a cluster |
 | `TagResource` | Add tags to a cluster |

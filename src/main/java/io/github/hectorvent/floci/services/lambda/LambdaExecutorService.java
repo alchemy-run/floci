@@ -3,8 +3,8 @@ package io.github.hectorvent.floci.services.lambda;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.services.lambda.launcher.ContainerHandle;
-import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.model.PendingInvocation;
 import jakarta.annotation.PreDestroy;
@@ -13,6 +13,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -27,8 +29,8 @@ import java.util.concurrent.TimeoutException;
 public class LambdaExecutorService {
 
     private static final Logger LOG = Logger.getLogger(LambdaExecutorService.class);
-    /** Grace period beyond the configured function timeout to allow the runtime to report back. */
-    private static final int TIMEOUT_GRACE_SECONDS = 2;
+    /** Extra time for a newly started runtime to request its first invocation. */
+    private static final int RUNTIME_DISPATCH_GRACE_SECONDS = 2;
 
     private final WarmPool warmPool;
     private final ObjectMapper objectMapper;
@@ -94,34 +96,35 @@ public class LambdaExecutorService {
         try {
             PendingInvocation invocation = PendingInvocation.withExecutionTimeout(
                     requestId, payload, fn.getTimeout(), fn.getFunctionArn(),
-                    new java.util.concurrent.CompletableFuture<>());
+                    new CompletableFuture<>());
 
             handle.getRuntimeApiServer().enqueue(invocation);
 
-            // Queue wait is not part of the function timeout (AWS starts the
-            // clock when /runtime/invocation/next dequeues the event). Bound
-            // the waiter so a stuck runtime cannot hang the HTTP front door.
             int queueBudgetSeconds = Math.max(60, fn.getTimeout() * 8);
-            InvokeResult result = invocation.getResultFuture()
-                    .get(queueBudgetSeconds + TIMEOUT_GRACE_SECONDS, TimeUnit.SECONDS);
+            CompletableFuture.anyOf(invocation.getDispatchedFuture(), invocation.getResultFuture())
+                    .get(queueBudgetSeconds + RUNTIME_DISPATCH_GRACE_SECONDS, TimeUnit.SECONDS);
+            InvokeResult result = invocation.getResultFuture().get();
 
             warmPool.release(handle);
             return result;
 
-        } catch (TimeoutException e) {
-            LOG.warnv("Function {0} timed out after {1}s", fn.getFunctionName(), fn.getTimeout());
-            warmPool.destroyHandle(handle);
-            return new InvokeResult(200, "Unhandled",
-                    buildErrorPayload("Task timed out after " + fn.getTimeout() + " seconds", "Function.TimedOut"),
-                    null, requestId);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             warmPool.destroyHandle(handle);
             return new InvokeResult(200, "Unhandled", buildErrorPayload("Invocation interrupted", "Interrupted"), null, requestId);
         } catch (Exception e) {
-            LOG.warnv("Invocation error for function {0}: {1}", fn.getFunctionName(), e.getMessage());
+            Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+            if (cause instanceof TimeoutException) {
+                LOG.warnv("Function {0} timed out after {1}s", fn.getFunctionName(), fn.getTimeout());
+                warmPool.destroyHandle(handle);
+                return new InvokeResult(200, "Unhandled",
+                        buildErrorPayload("Task timed out after " + fn.getTimeout() + " seconds", "Function.TimedOut"),
+                        null, requestId);
+            }
+            LOG.warnv("Invocation error for function {0}: {1}", fn.getFunctionName(), cause.getMessage());
             warmPool.destroyHandle(handle);
-            return new InvokeResult(200, "Unhandled", buildErrorPayload(e.getMessage(), "InvocationError"), null, requestId);
+            return new InvokeResult(200, "Unhandled",
+                    buildErrorPayload(cause.getMessage(), "InvocationError"), null, requestId);
         }
     }
 

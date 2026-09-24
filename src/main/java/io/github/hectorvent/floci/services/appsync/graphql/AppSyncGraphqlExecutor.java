@@ -9,6 +9,7 @@ import graphql.schema.DataFetcher;
 import graphql.schema.DataFetchingEnvironment;
 import graphql.schema.GraphQLNamedType;
 import graphql.schema.GraphQLSchema;
+import graphql.schema.PropertyDataFetcher;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -30,6 +31,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
 
 @ApplicationScoped
 public class AppSyncGraphqlExecutor {
@@ -83,12 +85,17 @@ public class AppSyncGraphqlExecutor {
         return result.toSpecification();
     }
 
-    private Object resolveField(GraphqlApi api, DataFetchingEnvironment env) {
+    public DataFetcher<Object> dataFetcher(String apiId) {
+        return env -> resolveField(apiStore.get(apiId)
+                .orElseThrow(() -> new AwsException("NotFoundException", "GraphQL API not found: " + apiId, 404)), env);
+    }
+
+    private Object resolveField(GraphqlApi api, DataFetchingEnvironment env) throws Exception {
         String typeName = ((GraphQLNamedType) env.getParentType()).getName();
         String fieldName = env.getField().getName();
         Resolver resolver = resolverStore.get(api.getApiId() + "::" + typeName + "::" + fieldName).orElse(null);
         if (resolver == null) {
-            return null;
+            return PropertyDataFetcher.fetching(fieldName).get(env);
         }
         Map<String, Object> stash = new LinkedHashMap<>();
         Map<String, Object> ctx = baseContext(api, env, stash, null, null);
@@ -170,8 +177,7 @@ public class AppSyncGraphqlExecutor {
             byte[] body = objectMapper.writeValueAsBytes(payload == null ? Map.of() : payload);
             String[] parts = functionArn.split(":");
             String region = parts.length > 3 ? parts[3] : "us-east-1";
-            String functionName = parts.length > 6 ? parts[6] : functionArn;
-            InvokeResult result = lambdaService.get().invoke(region, functionName, body, InvocationType.RequestResponse);
+            InvokeResult result = lambdaService.get().invoke(region, functionArn, body, InvocationType.RequestResponse);
             if (result.getFunctionError() != null) {
                 throw new AwsException("InternalFailureException",
                         "Lambda invocation failed: " + result.getFunctionError(), 500);
@@ -247,8 +253,10 @@ public class AppSyncGraphqlExecutor {
         ctx.put("prev", prevMap);
         ctx.put("result", result);
         ctx.put("env", api.getEnvironmentVariables() != null ? api.getEnvironmentVariables() : Map.of());
-        ctx.put("identity", Map.of());
-        ctx.put("request", Map.of("headers", Map.of()));
+        Object identity = env.getGraphQlContext().get("identity");
+        Object request = env.getGraphQlContext().get("request");
+        ctx.put("identity", identity != null ? identity : Map.of());
+        ctx.put("request", request != null ? request : Map.of("headers", Map.of()));
         return ctx;
     }
 

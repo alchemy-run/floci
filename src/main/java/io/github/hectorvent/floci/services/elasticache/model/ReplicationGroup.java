@@ -4,9 +4,9 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -20,21 +20,35 @@ public class ReplicationGroup {
     private Endpoint configurationEndpoint;
     private Instant createdAt;
     private int proxyPort;
+    /**
+     * The port the engine accepts connections on, which is the group's AWS {@code Port}. Zero on
+     * records written before it was tracked, when the engine listened on the proxy port.
+     */
+    private int enginePort;
     private String authToken; // stored plain-text for PASSWORD auth validation in the proxy
     private Set<String> associatedUserIds = new HashSet<>();
-    private String engine = "valkey";
-    private String engineVersion = "8.0";
-    private String cacheNodeType = "cache.t4g.small";
-    private int nodeGroupCount = 1;
-    private int replicasPerNodeGroup;
-    private boolean transitEncryptionEnabled;
-    private boolean automaticFailoverEnabled;
-    private boolean multiAzEnabled;
-    private List<String> securityGroupIds = new ArrayList<>();
+    private String arn;
+    private String region;
+    private boolean atRestEncryptionEnabled;
+    private String kmsKeyId;
     private int snapshotRetentionLimit;
     private String snapshotWindow;
-    private String maintenanceWindow;
     private Map<String, String> tags = new LinkedHashMap<>();
+    private boolean clusterEnabled;
+    private int numNodeGroups = 1;
+    private int replicasPerNodeGroup;
+    private int numCacheClusters = 1;
+    private String engine;
+    private String engineVersion;
+    private String cacheNodeType;
+    private String cacheParameterGroupName;
+    private String cacheSubnetGroupName;
+    private boolean automaticFailoverEnabled;
+    private boolean multiAzEnabled;
+    private List<ClusterNode> clusterNodes = new ArrayList<>();
+    private boolean transitEncryptionEnabled;
+    private List<String> securityGroupIds = new ArrayList<>();
+    private String maintenanceWindow;
 
     // Transient fields — not persisted, restored on container restart
     private transient String containerId;
@@ -76,6 +90,9 @@ public class ReplicationGroup {
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
 
+    public int getEnginePort() { return enginePort; }
+    public void setEnginePort(int enginePort) { this.enginePort = enginePort; }
+
     public String getAuthToken() { return authToken; }
     public void setAuthToken(String authToken) { this.authToken = authToken; }
 
@@ -93,11 +110,16 @@ public class ReplicationGroup {
     public String getCacheNodeType() { return cacheNodeType; }
     public void setCacheNodeType(String cacheNodeType) { this.cacheNodeType = cacheNodeType; }
 
-    public int getNodeGroupCount() { return nodeGroupCount; }
-    public void setNodeGroupCount(int nodeGroupCount) { this.nodeGroupCount = nodeGroupCount; }
+    public int getNodeGroupCount() { return numNodeGroups; }
+    public void setNodeGroupCount(int nodeGroupCount) { this.numNodeGroups = nodeGroupCount; }
 
     public int getReplicasPerNodeGroup() { return replicasPerNodeGroup; }
-    public void setReplicasPerNodeGroup(int replicasPerNodeGroup) { this.replicasPerNodeGroup = replicasPerNodeGroup; }
+    public void setReplicasPerNodeGroup(int replicasPerNodeGroup) {
+        this.replicasPerNodeGroup = replicasPerNodeGroup;
+        if (!clusterEnabled) {
+            numCacheClusters = replicasPerNodeGroup + 1;
+        }
+    }
 
     public boolean isTransitEncryptionEnabled() { return transitEncryptionEnabled; }
     public void setTransitEncryptionEnabled(boolean transitEncryptionEnabled) { this.transitEncryptionEnabled = transitEncryptionEnabled; }
@@ -133,4 +155,45 @@ public class ReplicationGroup {
 
     public int getContainerPort() { return containerPort; }
     public void setContainerPort(int containerPort) { this.containerPort = containerPort; }
+
+    public boolean isAtRestEncryptionEnabled() { return atRestEncryptionEnabled; }
+    public void setAtRestEncryptionEnabled(boolean atRestEncryptionEnabled) { this.atRestEncryptionEnabled = atRestEncryptionEnabled; }
+
+    public String getKmsKeyId() { return kmsKeyId; }
+    public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }
+
+
+
+
+    public String getArn() { return arn; }
+    public void setArn(String arn) { this.arn = arn; }
+
+    public String getRegion() { return region; }
+    public void setRegion(String region) { this.region = region; }
+
+    public boolean isClusterEnabled() { return clusterEnabled; }
+    public void setClusterEnabled(boolean clusterEnabled) { this.clusterEnabled = clusterEnabled; }
+
+    public int getNumNodeGroups() { return numNodeGroups; }
+    public void setNumNodeGroups(int numNodeGroups) { this.numNodeGroups = numNodeGroups; }
+
+
+    public int getNumCacheClusters() { return numCacheClusters; }
+    public void setNumCacheClusters(int numCacheClusters) { this.numCacheClusters = numCacheClusters; }
+
+
+
+
+    public String getCacheParameterGroupName() { return cacheParameterGroupName; }
+    public void setCacheParameterGroupName(String cacheParameterGroupName) { this.cacheParameterGroupName = cacheParameterGroupName; }
+
+    public String getCacheSubnetGroupName() { return cacheSubnetGroupName; }
+    public void setCacheSubnetGroupName(String cacheSubnetGroupName) { this.cacheSubnetGroupName = cacheSubnetGroupName; }
+
+
+
+    public List<ClusterNode> getClusterNodes() { return clusterNodes; }
+    public void setClusterNodes(List<ClusterNode> clusterNodes) {
+        this.clusterNodes = clusterNodes != null ? clusterNodes : new ArrayList<>();
+    }
 }
