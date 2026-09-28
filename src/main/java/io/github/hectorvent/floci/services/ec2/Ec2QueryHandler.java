@@ -1585,7 +1585,11 @@ public class Ec2QueryHandler {
             if (ruleId == null) break;
             Map<String, String> update = new LinkedHashMap<>();
             update.put("SecurityGroupRuleId", ruleId);
-            String desc = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest.Description");
+            // AWS wire name: SecurityGroupRuleUpdate.SecurityGroupRule (a SecurityGroupRuleRequest)
+            String desc = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRule.Description");
+            if (desc == null) {
+                desc = p.getFirst("SecurityGroupRule." + i + ".SecurityGroupRuleRequest.Description");
+            }
             if (desc != null) update.put("Description", desc);
             updates.add(update);
         }
