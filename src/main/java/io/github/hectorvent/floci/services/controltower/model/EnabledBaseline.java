@@ -4,6 +4,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * A Control Tower enabled baseline (a baseline applied to an OU or the landing zone itself).
  * Serialized with AWS's lowerCamelCase member names (Jackson's default naming).
@@ -20,6 +23,7 @@ public class EnabledBaseline {
     private String parentIdentifier;
     private String driftStatus;
     private String lastOperationIdentifier;
+    private Map<String, String> tags;
 
     public EnabledBaseline() {
     }
@@ -109,6 +113,14 @@ public class EnabledBaseline {
 
     public void setLastOperationIdentifier(String lastOperationIdentifier) {
         this.lastOperationIdentifier = lastOperationIdentifier;
+    }
+
+    public Map<String, String> getTags() {
+        return tags;
+    }
+
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags == null ? null : new LinkedHashMap<>(tags);
     }
 
     private static JsonNode copy(JsonNode value) {

@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.eks;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.exception.ConflictException;
 import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.quarkus.test.junit.QuarkusTest;
@@ -330,11 +332,18 @@ class EksIrsaDockerIntegrationTest {
     record ExecResult(long exitCode, String stdout, String stderr) {}
 
     private ExecResult execInContainerWithExitCode(String containerId, String[] cmd) throws Exception {
-        ExecCreateCmdResponse exec = dockerClient.execCreateCmd(containerId)
-                .withCmd(cmd)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec();
+        ExecCreateCmdResponse exec;
+        try {
+            exec = dockerClient.execCreateCmd(containerId)
+                    .withCmd(cmd)
+                    .withAttachStdout(true)
+                    .withAttachStderr(true)
+                    .exec();
+        } catch (ConflictException e) {
+            // Teardown removes the container, so its exit state and logs are only readable now.
+            throw new IllegalStateException("k3s container " + containerId + " is no longer running: "
+                    + describeExit(containerId), e);
+        }
 
         StringBuilder stdout = new StringBuilder();
         StringBuilder stderr = new StringBuilder();
@@ -359,6 +368,45 @@ class EksIrsaDockerIntegrationTest {
         }
         Long exitCode = dockerClient.inspectExecCmd(exec.getId()).exec().getExitCodeLong();
         return new ExecResult(exitCode != null ? exitCode : -1L, stdout.toString(), stderr.toString());
+    }
+
+    /** The container's exit state and last log lines. */
+    private String describeExit(String containerId) {
+        StringBuilder description = new StringBuilder();
+        try {
+            InspectContainerResponse.ContainerState state =
+                    dockerClient.inspectContainerCmd(containerId).exec().getState();
+            description.append("status=").append(state.getStatus())
+                    .append(" exitCode=").append(state.getExitCodeLong())
+                    .append(" oomKilled=").append(state.getOOMKilled())
+                    .append(" error=").append(state.getError())
+                    .append(" startedAt=").append(state.getStartedAt())
+                    .append(" finishedAt=").append(state.getFinishedAt());
+        } catch (Exception e) {
+            description.append("state unavailable: ").append(e.getMessage());
+        }
+        StringBuilder logs = new StringBuilder();
+        try {
+            dockerClient.logContainerCmd(containerId)
+                    .withStdOut(true)
+                    .withStdErr(true)
+                    .withTail(80)
+                    .exec(new ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame frame) {
+                            if (frame != null && frame.getPayload() != null) {
+                                logs.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+                            }
+                        }
+                    })
+                    .awaitCompletion(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            logs.append("logs unavailable: ").append(e.getMessage());
+        }
+        return description + "\n--- last k3s log lines ---\n" + logs;
     }
 
     private String execInContainer(String containerId, String[] cmd) throws Exception {

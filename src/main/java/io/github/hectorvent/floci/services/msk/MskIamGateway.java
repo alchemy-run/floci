@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.msk;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import io.github.hectorvent.floci.services.iam.IamService;
@@ -81,19 +82,31 @@ public class MskIamGateway {
     private volatile BackendResolver resolver = host -> Optional.empty();
     private volatile boolean running;
     private SSLServerSocket serverSocket;
+    private final ContainerEndpoints containerEndpoints;
+    private int publishedPort;
 
+    /**
+     * The listener is published to the containers Floci launches, whose DNS resolves every broker
+     * hostname to Floci, so a VPC Lambda bootstrapping from the SASL/IAM endpoint reaches it.
+     */
     @Inject
     public MskIamGateway(FlociCertificateAuthority certificateAuthority, IamService iamService,
-                         ObjectMapper objectMapper) {
+                         ObjectMapper objectMapper, ContainerEndpoints containerEndpoints) {
         this(certificateAuthority,
                 new MskIamAuthenticator(secretLookup(iamService), objectMapper, Clock.systemUTC()),
-                SASL_IAM_PORT);
+                SASL_IAM_PORT, containerEndpoints);
     }
 
     MskIamGateway(FlociCertificateAuthority certificateAuthority, MskIamAuthenticator authenticator, int port) {
+        this(certificateAuthority, authenticator, port, null);
+    }
+
+    MskIamGateway(FlociCertificateAuthority certificateAuthority, MskIamAuthenticator authenticator, int port,
+                  ContainerEndpoints containerEndpoints) {
         this.certificateAuthority = certificateAuthority;
         this.saslServer = new KafkaSaslServer(authenticator);
         this.port = port;
+        this.containerEndpoints = containerEndpoints;
     }
 
     static MskIamAuthenticator.SecretLookup secretLookup(IamService iamService) {
@@ -120,6 +133,10 @@ public class MskIamGateway {
             running = true;
             Thread.ofVirtual().name("msk-iam-accept").start(this::acceptLoop);
             LOG.infov("MSK SASL/IAM listener started on port {0}", Integer.toString(serverSocket.getLocalPort()));
+            if (containerEndpoints != null) {
+                publishedPort = serverSocket.getLocalPort();
+                containerEndpoints.publishHostPort(publishedPort);
+            }
             return true;
         } catch (Exception e) {
             LOG.warnv("MSK SASL/IAM listener could not start on port {0}: {1}", Integer.toString(port), e.getMessage());
@@ -142,6 +159,10 @@ public class MskIamGateway {
                 LOG.debugv("Error closing the MSK SASL/IAM listener: {0}", e.getMessage());
             }
             serverSocket = null;
+        }
+        if (publishedPort > 0) {
+            containerEndpoints.withdrawHostPort(publishedPort);
+            publishedPort = 0;
         }
     }
 

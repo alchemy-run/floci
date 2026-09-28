@@ -10,7 +10,6 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 
@@ -276,13 +275,102 @@ class Inspector2IntegrationTest {
                 .body("message", equalTo("Invoking account is not enabled."));
         enableAndConverge(account, "ECR");
         given().contentType("application/json").header("Authorization", auth(account)).body("{}")
-                .post("/cis/scan-configuration/list").then().statusCode(501)
-                .body("__type", equalTo("NotImplementedException"))
-                .body("message", notNullValue());
+                .post("/cis/scan-configuration/list").then().statusCode(200)
+                .body("scanConfigurations", hasSize(0));
         given().contentType("application/json")
                 .header("Authorization", auth(account).replace("us-east-1", "us-west-2")).body("{}")
                 .post("/cis/scan-configuration/list").then().statusCode(403)
                 .body("__type", equalTo("AccessDeniedException"));
+    }
+
+    @Test
+    void cisScanConfigurationLifecycleUsesAwsWireShapeAndTags() {
+        String account = "940000000112";
+        enableAndConverge(account, "EC2");
+        String arn = given().contentType("application/json").header("Authorization", auth(account))
+                .body("""
+                        {"scanName":"nightly","securityLevel":"LEVEL_1",
+                         "schedule":{"daily":{"startTime":{"timeOfDay":"02:00","timezone":"UTC"}}},
+                         "targets":{"accountIds":["SELF"],"targetResourceTags":{"AlchemyCisTest":["true"]}},
+                         "tags":{"env":"test"}}
+                        """)
+                .post("/cis/scan-configuration/create").then().statusCode(200)
+                .body("scanConfigurationArn", startsWith("arn:aws:inspector2:us-east-1:" + account + ":owner/"
+                        + account + "/cis-configuration/"))
+                .extract().path("scanConfigurationArn");
+        String byArn = "{\"filterCriteria\":{\"scanConfigurationArnFilters\":[{\"comparison\":\"EQUALS\","
+                + "\"value\":\"" + arn + "\"}]}}";
+        given().contentType("application/json").header("Authorization", auth(account)).body(byArn)
+                .post("/cis/scan-configuration/list").then().statusCode(200)
+                .body("scanConfigurations", hasSize(1))
+                .body("scanConfigurations[0].scanConfigurationArn", equalTo(arn))
+                .body("scanConfigurations[0].ownerId", equalTo(account))
+                .body("scanConfigurations[0].scanName", equalTo("nightly"))
+                .body("scanConfigurations[0].securityLevel", equalTo("LEVEL_1"))
+                .body("scanConfigurations[0].schedule.daily.startTime.timeOfDay", equalTo("02:00"))
+                .body("scanConfigurations[0].schedule.daily.startTime.timezone", equalTo("UTC"))
+                .body("scanConfigurations[0].targets.accountIds[0]", equalTo("SELF"))
+                .body("scanConfigurations[0].targets.targetResourceTags.AlchemyCisTest[0]", equalTo("true"))
+                .body("scanConfigurations[0].tags.env", equalTo("test"));
+
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"scanConfigurationArn\":\"" + arn + "\",\"securityLevel\":\"LEVEL_2\","
+                        + "\"schedule\":{\"daily\":{\"startTime\":{\"timeOfDay\":\"03:30\",\"timezone\":\"UTC\"}}}}")
+                .post("/cis/scan-configuration/update").then().statusCode(200)
+                .body("scanConfigurationArn", equalTo(arn));
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"tags\":{\"alchemy::id\":\"NightlyCis\"}}")
+                .post("/tags/{arn}", arn).then().statusCode(200);
+        given().header("Authorization", auth(account)).get("/tags/{arn}", arn).then().statusCode(200)
+                .body("tags.env", equalTo("test"))
+                .body("tags.'alchemy::id'", equalTo("NightlyCis"));
+        given().contentType("application/json").header("Authorization", auth(account)).body(byArn)
+                .post("/cis/scan-configuration/list").then().statusCode(200)
+                .body("scanConfigurations[0].securityLevel", equalTo("LEVEL_2"))
+                .body("scanConfigurations[0].schedule.daily.startTime.timeOfDay", equalTo("03:30"));
+
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"scanConfigurationArn\":\"" + arn + "\"}")
+                .post("/cis/scan-configuration/delete").then().statusCode(200)
+                .body("scanConfigurationArn", equalTo(arn));
+        given().contentType("application/json").header("Authorization", auth(account)).body(byArn)
+                .post("/cis/scan-configuration/list").then().statusCode(200)
+                .body("scanConfigurations", hasSize(0));
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"scanConfigurationArn\":\"" + arn + "\"}")
+                .post("/cis/scan-configuration/delete").then().statusCode(404)
+                .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
+    void disableTransitionsResourceTypesThroughDisabling() {
+        String account = "940000000113";
+        enableAndConverge(account, "EC2");
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"resourceTypes\":[\"EC2\"]}")
+                .post("/disable").then().statusCode(200)
+                .body("accounts[0].accountId", equalTo(account))
+                .body("accounts[0].status", equalTo("DISABLING"))
+                .body("accounts[0].resourceStatus.ec2", equalTo("DISABLING"))
+                .body("failedAccounts", hasSize(0));
+        given().contentType("application/json").header("Authorization", auth(account)).body("{}")
+                .post("/status/batch/get").then().statusCode(200)
+                .body("accounts[0].state.status", equalTo("DISABLING"))
+                .body("accounts[0].resourceState.ec2.status", equalTo("DISABLING"));
+        given().contentType("application/json").header("Authorization", auth(account)).body("{}")
+                .post("/status/batch/get").then().statusCode(200)
+                .body("accounts[0].state.status", equalTo("DISABLED"))
+                .body("accounts[0].resourceState.ec2.status", equalTo("DISABLED"));
+
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"resourceTypes\":[\"ECR\"]}").post("/enable").then().statusCode(200);
+        given().contentType("application/json").header("Authorization", auth(account))
+                .body("{\"resourceTypes\":[\"ECR\"]}")
+                .post("/disable").then().statusCode(200)
+                .body("accounts", hasSize(0))
+                .body("failedAccounts[0].accountId", equalTo(account))
+                .body("failedAccounts[0].errorCode", equalTo("ENABLE_IN_PROGRESS"))
+                .body("failedAccounts[0].resourceStatus.ecr", equalTo("ENABLING"));
     }
 
     @Test

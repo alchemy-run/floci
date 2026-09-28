@@ -42,6 +42,12 @@ public class ControlTowerControlController {
                 .put("operationIdentifier", result.operationIdentifier())).build();
     }
 
+    @POST @Path("/disable-control")
+    public Response disable(@Context HttpHeaders headers, String body) {
+        String operationId = service.disable(account(), region(headers), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("operationIdentifier", operationId)).build();
+    }
+
     @POST @Path("/list-enabled-controls")
     public Response list(@Context HttpHeaders headers, String body) {
         var result = service.list(region(headers), parse(body));

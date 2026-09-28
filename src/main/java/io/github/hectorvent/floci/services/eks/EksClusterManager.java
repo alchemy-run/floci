@@ -73,6 +73,10 @@ public class EksClusterManager {
 
     private static final Logger LOG = Logger.getLogger(EksClusterManager.class);
     private static final int K3S_API_SERVER_PORT = 6443;
+    /** Authenticated with the in-container admin kubeconfig; see {@link #isReady(Cluster)}. */
+    static final String[] CONTROL_PLANE_READY_COMMAND = {"sh", "-c",
+            "kubectl get --raw=/readyz >/dev/null && kubectl get serviceaccount default -n default -o name"};
+    private static final int CONTROL_PLANE_READY_TIMEOUT_SECONDS = 10;
 
     private static final String WEBHOOK_CONFIG_DIR = "/etc";
     private static final String WEBHOOK_CONFIG_FILE = "token-webhook.yaml";
@@ -505,9 +509,38 @@ public class EksClusterManager {
     }
 
     /**
-     * Checks whether the k3s API server is ready by polling its /readyz endpoint.
+     * Whether the cluster can take workloads, which is what ACTIVE means on EKS: the API server
+     * is ready (every post-start hook has run) and the {@code default} namespace has its
+     * {@code default} service account, so a pod can be created right away.
+     *
+     * <p>k3s runs with anonymous auth off, so an unauthenticated probe is answered 401 as soon as
+     * the listener is up, long before the control plane has bootstrapped. The unauthenticated
+     * probe therefore only gates the authenticated in-container check that decides.
      */
     public boolean isReady(Cluster cluster) {
+        return isApiServerListening(cluster) && isControlPlaneBootstrapped(cluster.getContainerId());
+    }
+
+    private boolean isControlPlaneBootstrapped(String containerId) {
+        try {
+            ContainerExecResult result = execInContainerForResult(containerId,
+                    CONTROL_PLANE_READY_COMMAND, CONTROL_PLANE_READY_TIMEOUT_SECONDS);
+            if (result.exitCode() != 0) {
+                LOG.debugv("k3s control plane in container {0} is not ready yet: {1}",
+                        containerId, result.summary());
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            LOG.debugv("Could not check the k3s control plane in container {0}: {1}", containerId, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean isApiServerListening(Cluster cluster) {
         // Prefer internalEndpoint (IP-based) for connectivity — works on both user-defined
         // networks and the default bridge where container-name DNS is unavailable.
         String endpoint = cluster.getInternalEndpoint() != null
@@ -517,7 +550,7 @@ public class EksClusterManager {
             return false;
         }
 
-        // /livez endpoint on the k3s API server (usually unauthenticated)
+        // Any HTTP answer, 401 included, only proves the TLS listener is up.
         String livezUrl = endpoint + "/livez";
         try {
             HttpURLConnection conn = (HttpURLConnection) URI.create(livezUrl).toURL().openConnection();
@@ -559,6 +592,39 @@ public class EksClusterManager {
         } catch (Exception e) {
             LOG.warnv("Could not extract kubeconfig for cluster {0}: {1}",
                     cluster.getName(), e.getMessage());
+        }
+    }
+
+    /**
+     * Returns the {@code apiserver_requested_deprecated_apis} samples from the cluster's k3s API
+     * server metrics, or empty when the cluster has no running API server or the scrape fails.
+     * Only the matching lines are returned, so the multi-megabyte metrics page never leaves the
+     * container; a failed {@code kubectl} exits non-zero and is reported as unavailable rather than
+     * as "no deprecated API usage".
+     */
+    public Optional<String> readDeprecatedApiMetrics(Cluster cluster) {
+        String containerId = cluster.getContainerId();
+        if (containerId == null) {
+            return Optional.empty();
+        }
+        String script = "metrics=$(kubectl get --raw /metrics) || exit 3; "
+                + "printf '%s\\n' \"$metrics\" | grep '^apiserver_requested_deprecated_apis{'; exit 0";
+        try {
+            ContainerExecResult result = execInContainerForResult(containerId,
+                    new String[]{"sh", "-c", script}, 20);
+            if (result.exitCode() != 0) {
+                LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
+                        cluster.getName(), result.summary());
+                return Optional.empty();
+            }
+            return Optional.of(result.output());
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            LOG.debugv("Could not read API server metrics for EKS cluster {0}: {1}",
+                    cluster.getName(), e.getMessage());
+            return Optional.empty();
         }
     }
 

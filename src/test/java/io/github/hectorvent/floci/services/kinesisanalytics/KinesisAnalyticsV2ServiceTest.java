@@ -197,12 +197,40 @@ class KinesisAnalyticsV2ServiceTest {
     }
 
     @Test
-    void deleteApplicationRejectedWhileRunning() {
+    void deleteApplicationHaltsARunningApplication() {
         FlinkApplication app = create("demo");
         service.startApplication("demo"); // mock mode → RUNNING
-        // AWS rejects delete of a running application; it must be stopped first.
-        assertThrows(AwsException.class,
-                () -> service.deleteApplication("demo", app.getCreateTimestamp()));
+        // AWS halts the running application's execution and deletes it.
+        service.deleteApplication("demo", app.getCreateTimestamp());
+        assertTrue(service.listApplications().isEmpty());
+    }
+
+    @Test
+    void deleteApplicationStopsTheFlinkClusterOfAStartingApplication() {
+        FlinkContainerManager manager = Mockito.mock(FlinkContainerManager.class);
+        KinesisAnalyticsV2Service realMode = buildService(false, manager);
+        FlinkApplication app = realMode.createApplication("demo", "FLINK-1_18", ROLE, null, null,
+                "bucket", "app.jar", null, 1);
+        realMode.startApplication("demo"); // real mode → STARTING until the poller sees the cluster
+        assertEquals(ApplicationStatus.STARTING, realMode.describeApplication("demo").getApplicationStatus());
+
+        realMode.deleteApplication("demo", app.getCreateTimestamp());
+
+        Mockito.verify(manager).stopCluster(Mockito.argThat(stopped -> "demo".equals(stopped.getApplicationName())));
+        Mockito.verify(manager).removeSavepointsVolume(Mockito.any());
+        assertTrue(realMode.listApplications().isEmpty());
+    }
+
+    @Test
+    void deleteApplicationRejectedWhileMidTransition() {
+        FlinkApplication app = create("demo");
+        for (ApplicationStatus status : List.of(ApplicationStatus.STOPPING, ApplicationStatus.UPDATING,
+                ApplicationStatus.DELETING)) {
+            service.describeApplication("demo").setApplicationStatus(status);
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> service.deleteApplication("demo", app.getCreateTimestamp()));
+            assertEquals("ResourceInUseException", ex.getErrorCode());
+        }
     }
 
     @Test

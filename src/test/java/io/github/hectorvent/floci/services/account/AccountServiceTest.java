@@ -175,26 +175,35 @@ class AccountServiceTest {
     }
 
     @Test
-    void listsOnlyAdvertisedRegionsWithFilteringPaginationAndValidation() {
+    void listsDefaultAndOptInRegionsWithFilteringPaginationAndValidation() {
+        List<String> catalog = java.util.stream.Stream.concat(AwsRegions.ENABLED_BY_DEFAULT.stream(),
+                AwsRegions.OPT_IN.stream()).sorted().toList();
+        assertTrue(catalog.stream().allMatch(AwsRegions::isRegionId));
         List<String> names = new ArrayList<>();
         ObjectNode request = mapper.createObjectNode().put("MaxResults", 4);
-        for (int page = 0; page < AwsRegions.ALL.size(); page++) {
+        for (int page = 0; page < catalog.size(); page++) {
             JsonNode response = mapper.valueToTree(service.listRegions(ACCOUNT_ID, request));
             for (JsonNode region : response.get("Regions")) {
-                names.add(region.get("RegionName").textValue());
-                assertEquals("ENABLED_BY_DEFAULT", region.get("RegionOptStatus").textValue());
+                String name = region.get("RegionName").textValue();
+                names.add(name);
+                assertEquals(AwsRegions.OPT_IN.contains(name) ? "DISABLED" : "ENABLED_BY_DEFAULT",
+                        region.get("RegionOptStatus").textValue(), name);
             }
             if (!response.has("NextToken")) {
                 break;
             }
             request.put("NextToken", response.get("NextToken").textValue());
         }
-        assertEquals(AwsRegions.ALL.stream().sorted().toList(), names);
+        assertEquals(catalog, names);
         ObjectNode filter = mapper.createObjectNode();
-        filter.putArray("RegionOptStatusContains").add("DISABLED");
+        filter.putArray("RegionOptStatusContains").add("ENABLED");
         assertEquals(List.of(), service.listRegions(ACCOUNT_ID, filter).get("Regions"));
+        filter.withArray("RegionOptStatusContains").add("DISABLED");
+        assertEquals(AwsRegions.OPT_IN.size(), mapper.valueToTree(service.listRegions(ACCOUNT_ID, filter))
+                .get("Regions").size());
         filter.withArray("RegionOptStatusContains").add("ENABLED_BY_DEFAULT");
-        assertEquals(AwsRegions.ALL.size(), mapper.valueToTree(service.listRegions(ACCOUNT_ID, filter)).get("Regions").size());
+        assertEquals(catalog.size(), mapper.valueToTree(service.listRegions(ACCOUNT_ID,
+                filter.deepCopy().put("MaxResults", 50))).get("Regions").size());
         for (int size : List.of(0, -1, 51)) {
             assertError("ValidationException", () -> service.listRegions(ACCOUNT_ID,
                     mapper.createObjectNode().put("MaxResults", size)));
@@ -206,14 +215,52 @@ class AccountServiceTest {
         ObjectNode invalidFilter = mapper.createObjectNode();
         invalidFilter.putArray("RegionOptStatusContains").add("UNKNOWN");
         assertError("ValidationException", () -> service.listRegions(ACCOUNT_ID, invalidFilter));
-        for (String region : List.of("us-east-1", "ap-east-1", "not-a-region")) {
-            assertError("ValidationException", () -> service.rejectRegionChange(ACCOUNT_ID,
+        for (String region : List.of("us-east-1", "eu-north-1", "not-a-region")) {
+            assertError("ValidationException", () -> service.enableRegion(ACCOUNT_ID,
+                    mapper.createObjectNode().put("RegionName", region)));
+            assertError("ValidationException", () -> service.disableRegion(ACCOUNT_ID,
                     mapper.createObjectNode().put("RegionName", region)));
         }
         assertError("ValidationException", () -> service.getRegionOptStatus(ACCOUNT_ID,
-                mapper.createObjectNode().put("RegionName", "ap-east-1")));
+                mapper.createObjectNode().put("RegionName", "not-a-region")));
+        assertEquals("DISABLED", service.getRegionOptStatus(ACCOUNT_ID,
+                mapper.createObjectNode().put("RegionName", "ap-east-1")).get("RegionOptStatus"));
         assertEquals("ENABLED_BY_DEFAULT", service.getRegionOptStatus(ACCOUNT_ID,
                 mapper.createObjectNode().put("RegionName", "us-east-1")).get("RegionOptStatus"));
+    }
+
+    @Test
+    void optInRegionsTransitionThroughEnablingAndDisablingPerAccount() {
+        ObjectNode hongKong = mapper.createObjectNode().put("RegionName", "ap-east-1");
+        service.enableRegion(ACCOUNT_ID, hongKong);
+        // Re-enabling while the opt-in is in flight is accepted without restarting it.
+        service.enableRegion(ACCOUNT_ID, hongKong);
+        assertError("ConflictException", () -> service.disableRegion(ACCOUNT_ID, hongKong));
+        assertEquals("ENABLING", service.getRegionOptStatus(ACCOUNT_ID, hongKong).get("RegionOptStatus"));
+        assertEquals("ENABLED", service.getRegionOptStatus(ACCOUNT_ID, hongKong).get("RegionOptStatus"));
+        assertEquals("ENABLED", service.getRegionOptStatus(ACCOUNT_ID, hongKong).get("RegionOptStatus"));
+        // Other accounts keep their own, still-disabled, view of the region.
+        assertEquals("DISABLED", service.getRegionOptStatus("210987654321", hongKong).get("RegionOptStatus"));
+
+        ObjectNode enabledFilter = mapper.createObjectNode();
+        enabledFilter.putArray("RegionOptStatusContains").add("ENABLED");
+        assertEquals(List.of(Map.of("RegionName", "ap-east-1", "RegionOptStatus", "ENABLED")),
+                service.listRegions(ACCOUNT_ID, enabledFilter).get("Regions"));
+
+        service.enableRegion(ACCOUNT_ID, hongKong);
+        service.disableRegion(ACCOUNT_ID, hongKong);
+        assertError("ConflictException", () -> service.enableRegion(ACCOUNT_ID, hongKong));
+        ObjectNode disablingFilter = mapper.createObjectNode();
+        disablingFilter.putArray("RegionOptStatusContains").add("DISABLING");
+        assertEquals(List.of(Map.of("RegionName", "ap-east-1", "RegionOptStatus", "DISABLING")),
+                service.listRegions(ACCOUNT_ID, disablingFilter).get("Regions"));
+        assertEquals("DISABLED", service.getRegionOptStatus(ACCOUNT_ID, hongKong).get("RegionOptStatus"));
+        service.disableRegion(ACCOUNT_ID, hongKong);
+        assertEquals("DISABLED", service.getRegionOptStatus(ACCOUNT_ID, hongKong).get("RegionOptStatus"));
+
+        service.enableRegion(ACCOUNT_ID, hongKong);
+        service.clear();
+        assertEquals("DISABLED", service.getRegionOptStatus(ACCOUNT_ID, hongKong).get("RegionOptStatus"));
     }
 
     private static void assertError(String code, Runnable action) {

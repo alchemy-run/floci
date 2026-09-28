@@ -5,6 +5,7 @@ import com.github.dockerjava.api.command.BuildImageCmd;
 import com.github.dockerjava.api.command.BuildImageResultCallback;
 import com.github.dockerjava.api.command.ExecCreateCmd;
 import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.command.ExecStartCmd;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.Frame;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -367,6 +369,90 @@ class SourceNetworkHelperTest {
         assertEquals("remove failed", failure.getSuppressed()[0].getMessage());
         helper.stop();
         verify(lifecycle, times(2)).stopAndRemoveStrict("owned-helper", null);
+    }
+
+    @Test
+    void forwarderScriptRelaysOnlyTheAdvertisedPortToTheSameHostPort() {
+        String script = SourceNetworkHelper.forwarderScript(27017);
+        assertTrue(script.contains("socat TCP4-LISTEN:27017,reuseaddr,fork TCP4:host.docker.internal:27017"));
+        assertTrue(script.contains("</dev/null >/dev/null 2>&1 &"), "the relay must not hold the exec streams open");
+        assertTrue(script.contains("ss -H -ltn 'sport = :27017'"));
+        assertTrue(script.contains("echo \"$pid\""));
+        assertThrows(IllegalArgumentException.class, () -> SourceNetworkHelper.forwarderScript(0));
+    }
+
+    @Test
+    void anAdvertisedPortIsRelayedOnceWhileAnyListenerHoldsItAndStoppedWithTheLast() {
+        List<String> scripts = stubHelperCommands("4242\n");
+        helper.start(1053);
+
+        helper.forwardPort(27017);
+        helper.forwardPort(27017);
+        assertEquals(1, scripts.stream().filter(script -> script.contains("TCP4-LISTEN:27017")).count());
+        assertEquals(Set.of(27017), helper.forwardedPorts());
+
+        helper.releaseForwardedPort(27017);
+        assertTrue(scripts.stream().noneMatch(script -> script.startsWith("kill 4242")));
+        helper.releaseForwardedPort(27017);
+        assertTrue(scripts.stream().anyMatch(script -> script.startsWith("kill 4242")));
+        assertEquals(Set.of(), helper.forwardedPorts());
+        helper.stop();
+    }
+
+    @Test
+    void aPortAskedForBeforeTheHelperStartsIsRelayedOnceItHas() {
+        List<String> scripts = stubHelperCommands("4242\n");
+        helper.forwardPort(9098);
+        assertTrue(scripts.isEmpty(), "nothing runs before the helper container exists");
+
+        helper.start(1053);
+
+        assertTrue(scripts.stream().anyMatch(script -> script.contains("TCP4-LISTEN:9098,reuseaddr,fork TCP4:host.docker.internal:9098")));
+        helper.stop();
+    }
+
+    @Test
+    void portsTheHelperAlreadyServesAreNotRelayedTwice() {
+        List<String> scripts = stubHelperCommands("4242\n");
+        helper.start(1053);
+
+        helper.forwardPort(443);
+        helper.forwardPort(4566);
+
+        assertTrue(scripts.stream().noneMatch(script -> script.contains("TCP4-LISTEN:443,reuseaddr,fork TCP4:host.docker.internal:443")));
+        assertEquals(Set.of(), helper.forwardedPorts());
+        helper.stop();
+    }
+
+    @Test
+    void aRelayThatDoesNotStartIsLoggedWithoutFailingTheCaller() {
+        List<String> scripts = stubHelperCommands("");
+        helper.start(1053);
+        when(docker.inspectExecCmd("readiness").exec().getExitCodeLong()).thenReturn(1L);
+
+        assertDoesNotThrow(() -> helper.forwardPort(6379));
+        helper.releaseForwardedPort(6379);
+
+        assertTrue(scripts.stream().noneMatch(script -> script.startsWith("kill ")),
+                "a relay that never started has no process to stop");
+        helper.stop();
+    }
+
+    /** Records every helper command script and answers each exec with {@code stdout}. */
+    private List<String> stubHelperCommands(String stdout) {
+        List<String> scripts = new CopyOnWriteArrayList<>();
+        ExecCreateCmd command = docker.execCreateCmd("owned-helper");
+        when(command.withCmd(eq("sh"), eq("-c"), anyString())).thenAnswer(invocation -> {
+            scripts.add(invocation.getArgument(2));
+            return command;
+        });
+        ExecStartCmd start = docker.execStartCmd("readiness");
+        doAnswer(invocation -> {
+            ExecStartResultCallback callback = invocation.getArgument(0);
+            callback.onNext(new Frame(StreamType.STDOUT, stdout.getBytes(StandardCharsets.US_ASCII)));
+            return readiness;
+        }).when(start).exec(any(ExecStartResultCallback.class));
+        return scripts;
     }
 
     private void stubDnsProbe(Function<byte[], String> response) {

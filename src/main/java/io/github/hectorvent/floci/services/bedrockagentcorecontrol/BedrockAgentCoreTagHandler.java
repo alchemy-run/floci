@@ -96,7 +96,7 @@ public class BedrockAgentCoreTagHandler implements TagHandler {
         }
         ResourceKind kind = switch (parsed.resource().substring(0, parsed.resource().indexOf('/'))) {
             case "gateway" -> ResourceKind.GATEWAY;
-            case "agent" -> ResourceKind.RUNTIME;
+            case "runtime" -> ResourceKind.RUNTIME;
             case "memory" -> ResourceKind.MEMORY;
             case "browser-custom", "browser-profile", "code-interpreter-custom" -> ResourceKind.TOOL;
             default -> throw new AwsException("ValidationException",

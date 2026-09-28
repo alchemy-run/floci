@@ -31,6 +31,7 @@ import io.github.hectorvent.floci.services.batch.model.BatchNodeRangeProperty;
 import io.github.hectorvent.floci.services.batch.model.BatchResourceRequirement;
 import io.github.hectorvent.floci.services.batch.model.BatchRetryStrategy;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
+import io.github.hectorvent.floci.services.batch.model.BatchRuntimePlatform;
 import io.github.hectorvent.floci.services.batch.model.BatchStatus;
 import io.github.hectorvent.floci.services.batch.model.BatchTimeout;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -382,6 +383,7 @@ public class BatchService {
                 throw client("containerProperties is required for container job definitions");
             }
             validateEnvironment(container.getEnvironment());
+            validateRuntimePlatform(container.getRuntimePlatform());
             def.setContainerProperties(container);
         }
         def.setParameters(stringMap(request.path("parameters")));
@@ -666,6 +668,7 @@ public class BatchService {
             execution.setNodeIndex(nodeIndex);
             execution.setMainNode(nodeIndex == mainNode);
             execution.setContainerImage(nodeContainer.getImage());
+            execution.setRuntimePlatform(nodeContainer.getRuntimePlatform());
             execution.setResolvedCommand(resolveCommand(command, parameters));
             execution.setResolvedEnvironment(resolveEnvironment(nodeContainer.getEnvironment(),
                     nodeOverride != null ? nodeOverride.getEnvironment() : null));
@@ -714,6 +717,7 @@ public class BatchService {
         job.setRegion(region);
         job.setAccountId(regionResolver.getAccountId());
         job.setContainerImage(container.getImage());
+        job.setRuntimePlatform(container.getRuntimePlatform());
         return job;
     }
 
@@ -1581,6 +1585,16 @@ public class BatchService {
         }
     }
 
+    private void validateRuntimePlatform(BatchRuntimePlatform platform) {
+        if (platform == null || platform.getCpuArchitecture() == null) {
+            return;
+        }
+        String architecture = platform.getCpuArchitecture();
+        if (!BatchRuntimePlatform.X86_64.equals(architecture) && !BatchRuntimePlatform.ARM64.equals(architecture)) {
+            throw client("runtimePlatform.cpuArchitecture must be one of [X86_64, ARM64]");
+        }
+    }
+
     private void validateTimeout(BatchTimeout timeout) {
         if (timeout != null && timeout.getAttemptDurationSeconds() != null
                 && timeout.getAttemptDurationSeconds() < 60) {
@@ -1623,6 +1637,7 @@ public class BatchService {
                         + " must specify a container image");
             }
             validateEnvironment(range.getContainer().getEnvironment());
+            validateRuntimePlatform(range.getContainer().getRuntimePlatform());
         }
         for (int i = 0; i < numNodes; i++) {
             if (!covered[i]) {
@@ -1998,6 +2013,9 @@ public class BatchService {
             }
             container.set("command", objectMapper.valueToTree(job.getResolvedCommand()));
             container.set("environment", objectMapper.valueToTree(job.getResolvedEnvironment()));
+            if (job.getRuntimePlatform() != null) {
+                container.set("runtimePlatform", objectMapper.valueToTree(job.getRuntimePlatform()));
+            }
             if (job.getContainer() != null) {
                 if (job.getContainer().getExitCode() != null) {
                     container.put("exitCode", job.getContainer().getExitCode());

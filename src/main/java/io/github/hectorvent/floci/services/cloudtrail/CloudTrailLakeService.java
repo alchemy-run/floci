@@ -3,23 +3,42 @@ package io.github.hectorvent.floci.services.cloudtrail;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.floci.duck.FlociDuckClient;
+import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 
 @ApplicationScoped
 public class CloudTrailLakeService {
+    private static final Logger LOG = Logger.getLogger(CloudTrailLakeService.class);
+    private static final int MAX_CONCURRENT_QUERIES = 10;
+    private static final int MAX_QUERY_RESULTS = 1000;
+    private static final int MAX_STORED_RESULT_ROWS = 100_000;
+    private static final long QUERY_RETENTION_MILLIS = 7L * 86400000;
+    private static final Set<String> QUERY_STATUSES = Set.of("QUEUED", "RUNNING", "FINISHED", "FAILED",
+            "CANCELLED", "TIMED_OUT");
+    private static final String DUCK_ERROR_PREFIX = "floci-duck query error: ";
     private static final Set<String> MUTABLE = Set.of("Name", "AdvancedEventSelectors", "MultiRegionEnabled",
             "OrganizationEnabled", "RetentionPeriod", "TerminationProtectionEnabled", "BillingMode", "KmsKeyId");
     private static final Set<String> FIELDS = Set.of("eventCategory", "eventSource", "eventName", "readOnly",
@@ -28,21 +47,49 @@ public class CloudTrailLakeService {
             "EndsWith", "NotEndsWith");
     private final StorageBackend<String, ObjectNode> stores;
     private final StorageBackend<String, ObjectNode> events;
+    private final AccountAwareStorageBackend<ObjectNode> queries;
+    private final AccountAwareStorageBackend<ObjectNode> generatedQueries;
     private final RegionResolver regions;
     private final ObjectMapper mapper;
+    private final SqlEngine engine;
+    private final Executor executor;
+    private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+
+    /** Executes one translated DuckDB statement and returns its rows as ordered column maps. */
+    @FunctionalInterface
+    interface SqlEngine {
+        List<Map<String, Object>> query(String sql);
+    }
 
     @Inject
-    public CloudTrailLakeService(StorageFactory factory, RegionResolver regions, ObjectMapper mapper) {
+    public CloudTrailLakeService(StorageFactory factory, RegionResolver regions, ObjectMapper mapper,
+                                 FlociDuckClient duck, Vertx vertx) {
+        this(factory, regions, mapper, sql -> duck.query(sql, null),
+                task -> vertx.executeBlocking(() -> {
+                    task.run();
+                    return null;
+                }));
+    }
+
+    CloudTrailLakeService(StorageFactory factory, RegionResolver regions, ObjectMapper mapper,
+                          SqlEngine engine, Executor executor) {
         this.stores = factory.create("cloudtrail", "cloudtrail-event-data-stores.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.events = factory.create("cloudtrail", "cloudtrail-lake-events.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
+        this.queries = factory.create("cloudtrail", "cloudtrail-lake-queries.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
+        this.generatedQueries = factory.create("cloudtrail", "cloudtrail-lake-generated-queries.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.regions = regions;
         this.mapper = mapper;
+        this.engine = engine;
+        this.executor = executor;
     }
 
     public synchronized ObjectNode handle(String action, JsonNode request, String region) {
         purgeExpired();
+        purgeQueries();
         return switch (action) {
             case "CreateEventDataStore" -> create(request, region);
             case "ListEventDataStores" -> CloudTrailPages.page(mapper, request,
@@ -54,8 +101,12 @@ public class CloudTrailLakeService {
             case "UpdateEventDataStore" -> update(request, region);
             case "DeleteEventDataStore", "RestoreEventDataStore", "StartEventDataStoreIngestion",
                  "StopEventDataStoreIngestion" -> transition(action, request, region);
-            case "StartQuery", "DescribeQuery", "GetQueryResults", "ListQueries", "CancelQuery", "GenerateQuery" ->
-                    throw unsupported("CloudTrail Lake SQL query execution is not implemented.");
+            case "StartQuery" -> startQuery(request, region);
+            case "DescribeQuery" -> describeQuery(request, region);
+            case "GetQueryResults" -> getQueryResults(request, region);
+            case "ListQueries" -> listQueries(request, region);
+            case "CancelQuery" -> cancelQuery(request, region);
+            case "GenerateQuery" -> generateQuery(request, region);
             default -> throw unsupported("CloudTrail Lake operation is not implemented: " + action);
         };
     }
@@ -332,6 +383,405 @@ public class CloudTrailLakeService {
             }
             if (deleted) stores.delete(key);
         }
+    }
+
+    private ObjectNode startQuery(JsonNode request, String region) {
+        if (request.hasNonNull("DeliveryS3Uri")) {
+            throw unsupported("Delivering CloudTrail Lake query results to S3 is not implemented.");
+        }
+        String statement = optionalText(request, "QueryStatement");
+        String alias = optionalText(request, "QueryAlias");
+        String prompt = null;
+        if (statement != null && alias != null) {
+            throw invalid("Specify either QueryStatement or QueryAlias, not both.");
+        }
+        if (statement == null) {
+            if (alias == null) {
+                throw invalid("QueryStatement or QueryAlias is required.");
+            }
+            ObjectNode generated = generatedQueries.get(region + ":" + alias)
+                    .orElseThrow(() -> invalid("No query exists for QueryAlias " + alias + "."));
+            statement = generated.path("QueryStatement").asText();
+            prompt = generated.path("Prompt").asText(null);
+        }
+        List<String> parameters = queryParameters(request.get("QueryParameters"));
+        long active = 0;
+        for (ObjectNode query : queries.scan(k -> k.startsWith(region + ":"))) {
+            if (isActive(current(region, query))) {
+                active++;
+            }
+        }
+        if (active >= MAX_CONCURRENT_QUERIES) {
+            throw new AwsException("MaxConcurrentQueriesException",
+                    "You are already running the maximum number of concurrent queries.", 429);
+        }
+
+        Map<String, ObjectNode> referenced = new LinkedHashMap<>();
+        String translated = CloudTrailLakeSql.translate(statement, parameters, storeId -> {
+            ObjectNode store = find(storeId, region);
+            requireActive(store);
+            referenced.put(storeId, store);
+            return tableName(storeId);
+        });
+        if (referenced.isEmpty()) {
+            throw CloudTrailLakeSql.invalidStatement(
+                    "The query must reference an event data store ID in its FROM clause.");
+        }
+        Map<String, String> tables = new LinkedHashMap<>();
+        ArrayNode arns = mapper.createArrayNode();
+        long scanned = 0;
+        long bytes = 0;
+        for (Map.Entry<String, ObjectNode> entry : referenced.entrySet()) {
+            String arn = entry.getValue().path("EventDataStoreArn").asText();
+            arns.add(arn);
+            List<ObjectNode> collected = events.scan(k -> k.startsWith(arn + "/"));
+            scanned += collected.size();
+            for (ObjectNode event : collected) {
+                bytes += event.toString().getBytes(StandardCharsets.UTF_8).length;
+            }
+            tables.put(tableName(entry.getKey()), CloudTrailLakeSql.eventTable(collected, mapper));
+        }
+        String sql = CloudTrailLakeSql.withEventTables(translated, tables);
+
+        String queryId = UUID.randomUUID().toString();
+        long now = System.currentTimeMillis();
+        ObjectNode query = mapper.createObjectNode();
+        query.put("QueryId", queryId).put("QueryString", statement).put("QueryStatus", "QUEUED")
+                .put("CreationTime", now / 1000.0).put("EventsScanned", scanned).put("BytesScanned", bytes)
+                .put("_createdMillis", now);
+        query.set("EventDataStoreArns", arns);
+        if (alias != null) {
+            query.put("QueryAlias", alias);
+        }
+        if (prompt != null) {
+            query.put("Prompt", prompt);
+        }
+        String account = queries.accountId();
+        String queryKey = region + ":" + queryId;
+        queries.put(queryKey, query);
+        inFlight.add(account + "/" + queryKey);
+        executor.execute(() -> run(account, queryKey, sql));
+        return mapper.createObjectNode().put("QueryId", queryId);
+    }
+
+    private void run(String account, String queryKey, String sql) {
+        long started = System.nanoTime();
+        try {
+            if (!markRunning(account, queryKey)) {
+                return;
+            }
+            List<Map<String, Object>> rows = engine.query(sql);
+            finish(account, queryKey, rows, (System.nanoTime() - started) / 1_000_000);
+        } catch (RuntimeException e) {
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            if (message.startsWith(DUCK_ERROR_PREFIX)) {
+                message = message.substring(DUCK_ERROR_PREFIX.length());
+            }
+            LOG.debugv("CloudTrail Lake query {0} failed: {1}", queryKey, message);
+            fail(account, queryKey, message, (System.nanoTime() - started) / 1_000_000);
+        } finally {
+            inFlight.remove(account + "/" + queryKey);
+        }
+    }
+
+    private synchronized boolean markRunning(String account, String queryKey) {
+        ObjectNode query = queries.getForAccount(account, queryKey).orElse(null);
+        if (query == null || !"QUEUED".equals(query.path("QueryStatus").asText())) {
+            return false;
+        }
+        ObjectNode updated = query.deepCopy().put("QueryStatus", "RUNNING");
+        queries.putForAccount(account, queryKey, updated);
+        return true;
+    }
+
+    private synchronized void finish(String account, String queryKey, List<Map<String, Object>> rows,
+                                      long elapsedMillis) {
+        ObjectNode query = queries.getForAccount(account, queryKey).orElse(null);
+        if (query == null || !"RUNNING".equals(query.path("QueryStatus").asText())) {
+            return;
+        }
+        if (rows.size() > MAX_STORED_RESULT_ROWS) {
+            throw new IllegalStateException("The query returned more than " + MAX_STORED_RESULT_ROWS
+                    + " rows, which exceeds the emulator result limit. Add a LIMIT clause.");
+        }
+        ArrayNode resultRows = mapper.createArrayNode();
+        for (Map<String, Object> row : rows) {
+            ArrayNode columns = resultRows.addArray();
+            for (Map.Entry<String, Object> column : row.entrySet()) {
+                ObjectNode cell = columns.addObject();
+                if (column.getValue() != null) {
+                    cell.put(column.getKey(), CloudTrailLakeSql.render(column.getValue()));
+                }
+            }
+        }
+        ObjectNode updated = query.deepCopy();
+        updated.put("QueryStatus", "FINISHED").put("ExecutionTimeInMillis", elapsedMillis)
+                .put("TotalResultsCount", rows.size());
+        updated.set("QueryResultRows", resultRows);
+        queries.putForAccount(account, queryKey, updated);
+    }
+
+    private synchronized void fail(String account, String queryKey, String message, long elapsedMillis) {
+        ObjectNode query = queries.getForAccount(account, queryKey).orElse(null);
+        if (query == null || !isActive(query)) {
+            return;
+        }
+        ObjectNode updated = query.deepCopy();
+        updated.put("QueryStatus", "FAILED").put("ErrorMessage", message).put("ExecutionTimeInMillis", elapsedMillis);
+        queries.putForAccount(account, queryKey, updated);
+    }
+
+    private ObjectNode describeQuery(JsonNode request, String region) {
+        ObjectNode query = requestedQuery(request, region, true);
+        ObjectNode response = mapper.createObjectNode();
+        response.put("QueryId", query.path("QueryId").asText())
+                .put("QueryString", query.path("QueryString").asText())
+                .put("QueryStatus", query.path("QueryStatus").asText());
+        ObjectNode statistics = response.putObject("QueryStatistics");
+        statistics.put("EventsScanned", query.path("EventsScanned").asLong())
+                .put("BytesScanned", query.path("BytesScanned").asLong())
+                .put("CreationTime", query.path("CreationTime").asDouble());
+        if (query.has("ExecutionTimeInMillis")) {
+            statistics.put("ExecutionTimeInMillis", query.path("ExecutionTimeInMillis").asLong());
+        }
+        if (query.has("ErrorMessage")) {
+            response.put("ErrorMessage", query.path("ErrorMessage").asText());
+        }
+        if (query.has("Prompt")) {
+            response.put("Prompt", query.path("Prompt").asText());
+        }
+        return response;
+    }
+
+    private ObjectNode getQueryResults(JsonNode request, String region) {
+        ObjectNode query = requestedQuery(request, region, false);
+        int maximum = MAX_QUERY_RESULTS;
+        if (request.has("MaxQueryResults")) {
+            JsonNode value = request.path("MaxQueryResults");
+            if (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 1
+                    || value.asInt() > MAX_QUERY_RESULTS) {
+                throw new AwsException("InvalidMaxResultsException",
+                        "MaxQueryResults must be between 1 and " + MAX_QUERY_RESULTS + ".", 400);
+            }
+            maximum = value.asInt();
+        }
+        String queryId = query.path("QueryId").asText();
+        JsonNode rows = query.path("QueryResultRows");
+        int total = rows.isArray() ? rows.size() : 0;
+        int start = 0;
+        if (request.hasNonNull("NextToken")) {
+            start = resultOffset(request.path("NextToken").asText(), queryId, total);
+        }
+        int end = Math.min(start + maximum, total);
+        ObjectNode response = mapper.createObjectNode();
+        response.put("QueryStatus", query.path("QueryStatus").asText());
+        ObjectNode statistics = response.putObject("QueryStatistics");
+        statistics.put("ResultsCount", end - start).put("TotalResultsCount", total)
+                .put("BytesScanned", query.path("BytesScanned").asLong());
+        ArrayNode page = response.putArray("QueryResultRows");
+        for (int i = start; i < end; i++) {
+            page.add(rows.get(i).deepCopy());
+        }
+        if (end < total) {
+            response.put("NextToken", Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString((queryId + ":" + end).getBytes(StandardCharsets.UTF_8)));
+        }
+        if (query.has("ErrorMessage")) {
+            response.put("ErrorMessage", query.path("ErrorMessage").asText());
+        }
+        return response;
+    }
+
+    private static int resultOffset(String token, String queryId, int total) {
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+            int separator = decoded.lastIndexOf(':');
+            int offset = Integer.parseInt(decoded.substring(separator + 1));
+            if (separator < 0 || !queryId.equals(decoded.substring(0, separator)) || offset <= 0 || offset >= total) {
+                throw new IllegalArgumentException("Token does not address a page of this query.");
+            }
+            return offset;
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("InvalidNextTokenException", "Invalid NextToken for this query.", 400);
+        }
+    }
+
+    private ObjectNode listQueries(JsonNode request, String region) {
+        ObjectNode store = find(request.path("EventDataStore").asText(null), region);
+        requireActive(store);
+        String arn = store.path("EventDataStoreArn").asText();
+        double from = timeBound(request, "StartTime", Double.NEGATIVE_INFINITY);
+        double to = timeBound(request, "EndTime", Double.POSITIVE_INFINITY);
+        if (from > to) {
+            throw new AwsException("InvalidDateRangeException", "StartTime must not be after EndTime.", 400);
+        }
+        String status = optionalText(request, "QueryStatus");
+        if (status != null && !QUERY_STATUSES.contains(status)) {
+            throw new AwsException("InvalidQueryStatusException", "Invalid QueryStatus: " + status, 400);
+        }
+        List<ObjectNode> matching = new ArrayList<>();
+        for (ObjectNode stored : queries.scan(k -> k.startsWith(region + ":"))) {
+            ObjectNode query = current(region, stored);
+            double created = query.path("CreationTime").asDouble();
+            if (!queriesStore(query, arn) || created < from || created > to
+                    || (status != null && !status.equals(query.path("QueryStatus").asText()))) {
+                continue;
+            }
+            matching.add(mapper.createObjectNode().put("QueryId", query.path("QueryId").asText())
+                    .put("QueryStatus", query.path("QueryStatus").asText()).put("CreationTime", created));
+        }
+        matching.sort(Comparator.<ObjectNode>comparingDouble(q -> q.path("CreationTime").asDouble()).reversed()
+                .thenComparing(q -> q.path("QueryId").asText()));
+        return CloudTrailPages.page(mapper, request, queries.accountId() + ":" + region + ":queries:" + arn,
+                "Queries", matching, MAX_QUERY_RESULTS, MAX_QUERY_RESULTS, "InvalidMaxResultsException");
+    }
+
+    private ObjectNode cancelQuery(JsonNode request, String region) {
+        ObjectNode query = requestedQuery(request, region, false);
+        String queryId = query.path("QueryId").asText();
+        if (!isActive(query)) {
+            throw new AwsException("InactiveQueryException",
+                    "Query " + queryId + " is " + query.path("QueryStatus").asText() + " and cannot be cancelled.", 400);
+        }
+        ObjectNode updated = query.deepCopy().put("QueryStatus", "CANCELLED");
+        queries.put(region + ":" + queryId, updated);
+        return mapper.createObjectNode().put("QueryId", queryId).put("QueryStatus", "CANCELLED");
+    }
+
+    private ObjectNode generateQuery(JsonNode request, String region) {
+        JsonNode requested = request.path("EventDataStores");
+        if (!requested.isArray() || requested.size() != 1 || !requested.get(0).isTextual()) {
+            throw invalid("EventDataStores must contain exactly one event data store.");
+        }
+        String prompt = optionalText(request, "Prompt");
+        if (prompt == null || prompt.length() < 3 || prompt.length() > 500) {
+            throw invalid("Prompt must be between 3 and 500 characters.");
+        }
+        ObjectNode store = find(requested.get(0).asText(), region);
+        requireActive(store);
+        String arn = store.path("EventDataStoreArn").asText();
+        String statement = CloudTrailLakeQueryGenerator.generate(prompt, id(arn))
+                .orElseThrow(() -> new AwsException("GenerateResponseException",
+                        "A query could not be generated for the prompt. Rephrase it as a question about the"
+                                + " events recorded in the event data store.", 400));
+        String alias = "query-" + UUID.randomUUID();
+        ObjectNode generated = mapper.createObjectNode().put("QueryStatement", statement).put("Prompt", prompt)
+                .put("EventDataStoreArn", arn).put("_createdMillis", System.currentTimeMillis());
+        generatedQueries.put(region + ":" + alias, generated);
+        return mapper.createObjectNode().put("QueryStatement", statement).put("QueryAlias", alias);
+    }
+
+    private ObjectNode requestedQuery(JsonNode request, String region, boolean allowAlias) {
+        String queryId = optionalText(request, "QueryId");
+        ObjectNode query;
+        if (queryId == null) {
+            String alias = allowAlias ? optionalText(request, "QueryAlias") : null;
+            if (alias == null) {
+                throw invalid("QueryId is required.");
+            }
+            query = queries.scan(k -> k.startsWith(region + ":")).stream()
+                    .filter(q -> alias.equals(q.path("QueryAlias").asText(null)))
+                    .max(Comparator.comparingDouble(q -> q.path("CreationTime").asDouble()))
+                    .orElseThrow(() -> queryNotFound(alias));
+        } else {
+            query = queries.get(region + ":" + queryId).orElseThrow(() -> queryNotFound(queryId));
+        }
+        if (request.hasNonNull("EventDataStore")) {
+            ObjectNode store = find(request.path("EventDataStore").asText(), region);
+            if (!queriesStore(query, store.path("EventDataStoreArn").asText())) {
+                throw queryNotFound(query.path("QueryId").asText());
+            }
+        }
+        return current(region, query);
+    }
+
+    // A query persisted as active but not executing in this process was cut off by a restart.
+    private ObjectNode current(String region, ObjectNode query) {
+        String queryKey = region + ":" + query.path("QueryId").asText();
+        if (isActive(query) && !inFlight.contains(queries.accountId() + "/" + queryKey)) {
+            ObjectNode updated = query.deepCopy();
+            updated.put("QueryStatus", "FAILED")
+                    .put("ErrorMessage", "The query was interrupted because the emulator restarted before it completed.");
+            queries.put(queryKey, updated);
+            return updated;
+        }
+        return query;
+    }
+
+    private void purgeQueries() {
+        long cutoff = System.currentTimeMillis() - QUERY_RETENTION_MILLIS;
+        for (AccountAwareStorageBackend<ObjectNode> backend : List.of(queries, generatedQueries)) {
+            for (String key : backend.keys()) {
+                ObjectNode value = backend.get(key).orElse(null);
+                if (value != null && value.path("_createdMillis").asLong() < cutoff && !isActive(value)) {
+                    backend.delete(key);
+                }
+            }
+        }
+    }
+
+    private static boolean isActive(ObjectNode query) {
+        String status = query.path("QueryStatus").asText();
+        return "QUEUED".equals(status) || "RUNNING".equals(status);
+    }
+
+    private static boolean queriesStore(ObjectNode query, String arn) {
+        for (JsonNode referenced : query.path("EventDataStoreArns")) {
+            if (arn.equals(referenced.asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> queryParameters(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray() || node.isEmpty() || node.size() > CloudTrailLakeSql.MAX_PARAMETERS) {
+            throw invalid("QueryParameters must contain between 1 and " + CloudTrailLakeSql.MAX_PARAMETERS
+                    + " values.");
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : node) {
+            if (!value.isTextual() || value.asText().isEmpty()
+                    || value.asText().length() > CloudTrailLakeSql.MAX_PARAMETER_LENGTH) {
+                throw invalid("Each QueryParameters value must be a string of 1 to "
+                        + CloudTrailLakeSql.MAX_PARAMETER_LENGTH + " characters.");
+            }
+            values.add(value.asText());
+        }
+        return values;
+    }
+
+    private static double timeBound(JsonNode request, String field, double fallback) {
+        if (!request.has(field)) {
+            return fallback;
+        }
+        JsonNode value = request.path(field);
+        if (!value.isNumber() || !Double.isFinite(value.asDouble())) {
+            throw invalid(field + " must be an epoch timestamp.");
+        }
+        return value.asDouble();
+    }
+
+    private static String optionalText(JsonNode request, String field) {
+        JsonNode value = request.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isTextual() || value.asText().isBlank()) {
+            throw invalid(field + " must be a non-empty string.");
+        }
+        return value.asText();
+    }
+
+    private static String tableName(String storeId) {
+        return CloudTrailLakeSql.quoteIdentifier("eds_" + storeId.replace("-", ""));
+    }
+
+    private static AwsException queryNotFound(String queryId) {
+        return new AwsException("QueryIdNotFoundException", "Query not found: " + queryId, 404);
     }
 
     private ObjectNode publicStore(ObjectNode store) {

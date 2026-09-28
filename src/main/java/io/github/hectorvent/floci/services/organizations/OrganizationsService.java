@@ -82,7 +82,12 @@ public class OrganizationsService implements ScpProvider {
             "AISERVICES_OPT_OUT_POLICY",
             "CHATBOT_POLICY",
             "DECLARATIVE_POLICY_EC2",
-            "SECURITYHUB_POLICY");
+            "SECURITYHUB_POLICY",
+            "INSPECTOR_POLICY",
+            "UPGRADE_ROLLOUT_POLICY",
+            "BEDROCK_POLICY",
+            "S3_POLICY",
+            "NETWORK_SECURITY_DIRECTOR_POLICY");
 
     private static final Set<String> POLICY_TYPE_SET = Set.copyOf(POLICY_TYPES);
 
@@ -242,6 +247,15 @@ public class OrganizationsService implements ScpProvider {
     /** The merged inheritance chain as returned by {@code DescribeEffectivePolicy}. */
     public record EffectivePolicy(String policyContent, String policyType, String targetId,
                                   Instant lastUpdatedTimestamp) {}
+
+    /** One {@code EffectivePolicyValidationError}. */
+    public record EffectivePolicyValidationError(String errorCode, String errorMessage, String pathToError,
+                                                 List<String> contributingPolicies) {}
+
+    /** The evaluation returned by {@code ListEffectivePolicyValidationErrors}. */
+    public record EffectivePolicyValidation(String accountId, String policyType, String path,
+                                            Instant evaluationTimestamp,
+                                            List<EffectivePolicyValidationError> errors) {}
 
     // ──────────────────────────── Organization lifecycle ────────────────────────────
 
@@ -570,7 +584,13 @@ public class OrganizationsService implements ScpProvider {
                             String destinationParentId) {
         Organization organization = requireManagementAccount(callerAccountId);
         OrganizationAccount account = requireAccount(organization, accountId);
-        requireParent(organization, sourceParentId);
+        if (sourceParentId == null || sourceParentId.isEmpty()) {
+            throw invalidInput("SourceParentId is required.");
+        }
+        if (!accountParentExists(organization, sourceParentId)) {
+            throw new AwsException("SourceParentNotFoundException",
+                    "We can't find the source parent " + sourceParentId + ".", 400);
+        }
         if (!accountParentExists(organization, destinationParentId)) {
             throw new AwsException("DestinationParentNotFoundException",
                     "We can't find the destination parent " + destinationParentId + ".", 400);
@@ -626,8 +646,9 @@ public class OrganizationsService implements ScpProvider {
     public OrganizationPolicy createPolicy(String callerAccountId, String content, String description,
                                            String name, String type, Map<String, String> tags) {
         Organization organization = requireManagementAccount(callerAccountId);
+        // AWS lets a policy of any type be created before the type is enabled on the root;
+        // only AttachPolicy requires it to be enabled.
         validatePolicyType(type);
-        requirePolicyTypeEnabled(organization, type);
         validateName(name, "Name", MAX_POLICY_NAME_LENGTH);
         if (content == null || content.isBlank()) {
             throw invalidInput("Content must not be empty.");
@@ -844,6 +865,33 @@ public class OrganizationsService implements ScpProvider {
     }
 
     /**
+     * {@code ListEffectivePolicyValidationErrors} for one account. AWS answers
+     * {@code EffectivePolicyNotFoundException} when the policy type is not enabled on the root;
+     * otherwise it reports the account's organization path and the validation errors of its
+     * effective policy. Floci does not validate policy contents against the per-type schemas, so
+     * an evaluated account never carries errors. Management-only for the same reason as
+     * {@link #listAccountsWithInvalidEffectivePolicy}.
+     */
+    public EffectivePolicyValidation listEffectivePolicyValidationErrors(String callerAccountId, String accountId,
+                                                                          String policyType) {
+        Organization organization = requireManagementAccount(callerAccountId);
+        validateEffectivePolicyType(policyType);
+        if (accountId == null || accountId.isEmpty()) {
+            throw invalidInput("AccountId is required.");
+        }
+        requireAccount(organization, accountId);
+        boolean enabled = findPolicyType(organization.getRoot(), policyType)
+                .map(entry -> "ENABLED".equals(entry.getStatus()))
+                .orElse(false);
+        if (!enabled) {
+            throw new AwsException("EffectivePolicyNotFoundException",
+                    "The policy type " + policyType + " is not enabled for this organization.", 400);
+        }
+        String path = organization.getId() + "/" + String.join("/", ancestryOf(organization, accountId)) + "/";
+        return new EffectivePolicyValidation(accountId, policyType, path, Instant.now(), List.of());
+    }
+
+    /**
      * Merges every policy of {@code policyType} down the inheritance chain root → OU(s) → target,
      * with the closest ancestor taking precedence on conflicting keys.
      */
@@ -890,7 +938,13 @@ public class OrganizationsService implements ScpProvider {
         } catch (AwsException e) {
             return;
         }
-        Set<String> targetIds = new java.util.LinkedHashSet<>(registeredOuIds);
+        // Baselines can outlive their OU (Organizations lets the OU be deleted underneath Control
+        // Tower), so only OUs that still exist are reconciled.
+        Set<String> existingOuIds = organizationalUnitsIn(organization).stream()
+                .map(OrganizationalUnit::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> targetIds = new java.util.LinkedHashSet<>();
+        registeredOuIds.stream().filter(existingOuIds::contains).forEach(targetIds::add);
         organizationalUnitsIn(organization).stream()
                 .filter(ou -> "Security".equals(ou.getName()))
                 .map(OrganizationalUnit::getId)
@@ -898,7 +952,6 @@ public class OrganizationsService implements ScpProvider {
         if (targetIds.isEmpty()) {
             return;
         }
-        targetIds.forEach(targetId -> requireOrganizationalUnit(organization, targetId));
 
         OrganizationPolicy guardrail = policiesIn(organization).stream()
                 .filter(policy -> SERVICE_CONTROL_POLICY.equals(policy.getType()))
@@ -1491,12 +1544,13 @@ public class OrganizationsService implements ScpProvider {
         if (parentId == null || parentId.isEmpty()) {
             throw invalidInput("ParentId is required.");
         }
-        if (ROOT_ID_PATTERN.matcher(parentId).matches()) {
-            requireRoot(organization, parentId);
+        // A well-formed but unknown root or OU is still reported as a missing *parent*.
+        if (ROOT_ID_PATTERN.matcher(parentId).matches()
+                && organization.getRoot().getId().equals(parentId)) {
             return;
         }
-        if (OU_ID_PATTERN.matcher(parentId).matches()) {
-            requireOrganizationalUnit(organization, parentId);
+        if (OU_ID_PATTERN.matcher(parentId).matches()
+                && organizationalUnitsIn(organization).stream().anyMatch(ou -> parentId.equals(ou.getId()))) {
             return;
         }
         throw new AwsException("ParentNotFoundException",

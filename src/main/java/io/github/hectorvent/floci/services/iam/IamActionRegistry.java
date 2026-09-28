@@ -163,6 +163,10 @@ public class IamActionRegistry {
         rule("inspector2", "POST", "^/filters/list$", "inspector2:ListFilters"),
         rule("inspector2", "POST", "^/ec2deepinspectionconfiguration/get$", "inspector2:GetEc2DeepInspectionConfiguration"),
         rule("inspector2", "POST", "^/cis/scan-configuration/list$", "inspector2:ListCisScanConfigurations"),
+        rule("inspector2", "POST", "^/cis/scan-configuration/create$", "inspector2:CreateCisScanConfiguration"),
+        rule("inspector2", "POST", "^/cis/scan-configuration/update$", "inspector2:UpdateCisScanConfiguration"),
+        rule("inspector2", "POST", "^/cis/scan-configuration/delete$", "inspector2:DeleteCisScanConfiguration"),
+        rule("inspector2", "POST", "^/disable$", "inspector2:Disable"),
         rule("inspector2", "POST", "^/delegatedadminaccounts/list$", "inspector2:ListDelegatedAdminAccounts"),
         rule("inspector2", "POST", "^/delegatedadminaccounts/enable$", "inspector2:EnableDelegatedAdminAccount"),
         rule("inspector2", "POST", "^/delegatedadminaccounts/disable$", "inspector2:DisableDelegatedAdminAccount"),
@@ -207,6 +211,13 @@ public class IamActionRegistry {
             "ses:SendBulkEmail",
             "kms:GetKeyRotationStatus"
     );
+
+    /**
+     * Every Secrets Manager operation: requests name a secret (or {@code *}) that
+     * {@link ResourceArnBuilder} resolves to the stored secret's ARN, so a least-privilege
+     * execution role is denied the operations its policy does not grant, as on AWS.
+     */
+    private static final String ROLE_ENFORCED_SECRETS_MANAGER_PREFIX = "secretsmanager:";
 
     private static ActionRule rule(String service, String method, String path, String action) {
         return new ActionRule(service, method, Pattern.compile(path, Pattern.CASE_INSENSITIVE), action);
@@ -343,6 +354,7 @@ public class IamActionRegistry {
      */
     public boolean isRoleEnforcedAction(String action) {
         return action != null && (ROLE_ENFORCED_ACTIONS.contains(action)
+                || action.startsWith(ROLE_ENFORCED_SECRETS_MANAGER_PREFIX)
                 || RULES.stream().anyMatch(rule -> Set.of("emr-serverless", "guardduty", "inspector2")
                         .contains(rule.service()) && rule.action().equals(action)));
     }

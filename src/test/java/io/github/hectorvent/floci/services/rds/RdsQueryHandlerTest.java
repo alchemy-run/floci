@@ -10,6 +10,8 @@ import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
 import io.github.hectorvent.floci.services.docdb.DocDbQueryHandler;
 import io.github.hectorvent.floci.services.neptune.NeptuneQueryHandler;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
+import io.github.hectorvent.floci.services.rds.model.DbInstanceModification;
+import io.github.hectorvent.floci.services.rds.model.DbInstancePendingModifiedValues;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceSettings;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceStatus;
 import io.github.hectorvent.floci.services.rds.model.DbParameterGroup;
@@ -28,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -233,7 +236,8 @@ class RdsQueryHandlerTest {
     @Test
     void modifyDbInstance_forwardsPubliclyAccessible() {
         when(service.modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), any(), isNull(), any(),
-                isNull(), any(DbInstanceSettings.class), eq(true))).thenReturn(makeInstance("mydb"));
+                isNull(), any(DbInstanceSettings.class), eq(true), any(DbInstanceModification.class)))
+                .thenReturn(makeInstance("mydb"));
         MultivaluedMap<String, String> p = params();
         p.putSingle("DBInstanceIdentifier", "mydb");
         p.putSingle("PubliclyAccessible", "true");
@@ -241,7 +245,7 @@ class RdsQueryHandlerTest {
         handler.handle("ModifyDBInstance", p);
 
         verify(service).modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), any(), isNull(), any(),
-                isNull(), any(DbInstanceSettings.class), eq(true));
+                isNull(), any(DbInstanceSettings.class), eq(true), any(DbInstanceModification.class));
     }
 
     @Test
@@ -254,7 +258,8 @@ class RdsQueryHandlerTest {
 
         assertEquals(400, response.getStatus());
         assertTrue(((String) response.getEntity()).contains("<Code>InvalidParameterValue</Code>"));
-        verify(service, never()).modifyDbInstance(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(service, never()).modifyDbInstance(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any());
     }
 
     @Test
@@ -449,7 +454,8 @@ class RdsQueryHandlerTest {
         when(service.listDbInstances(null, "us-west-2")).thenReturn(List.of());
         when(service.getDbInstance("mydb", "us-west-2")).thenReturn(instance);
         when(service.modifyDbInstance(
-                eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(), eq("us-west-2"), isNull(), any(DbInstanceSettings.class), isNull()))
+                eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(), eq("us-west-2"), isNull(), any(DbInstanceSettings.class), isNull(),
+                any(DbInstanceModification.class)))
                 .thenReturn(instance);
         when(service.rebootDbInstance("mydb", "us-west-2")).thenReturn(instance);
         when(service.listDbClusters(null, "us-west-2")).thenReturn(List.of());
@@ -475,7 +481,8 @@ class RdsQueryHandlerTest {
         verify(service).getDbInstance("mydb", "us-west-2");
         verify(service).deleteDbInstance("mydb", "us-west-2");
         verify(service).modifyDbInstance(
-                eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(), eq("us-west-2"), isNull(), any(DbInstanceSettings.class), isNull());
+                eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(), eq("us-west-2"), isNull(), any(DbInstanceSettings.class), isNull(),
+                any(DbInstanceModification.class));
         verify(service).rebootDbInstance("mydb", "us-west-2");
         verify(service).listDbClusters(null, "us-west-2");
         verify(service).getDbCluster("mycluster", "us-west-2");
@@ -632,7 +639,8 @@ class RdsQueryHandlerTest {
         DbInstance moved = makeInstance("mydb");
         moved.setEndpoint(new io.github.hectorvent.floci.services.rds.model.DbEndpoint("mydb.host", 6432));
         when(service.modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(), any(),
-                isNull(), any(DbInstanceSettings.class), isNull())).thenReturn(instance);
+                isNull(), any(DbInstanceSettings.class), isNull(), any(DbInstanceModification.class)))
+                .thenReturn(instance);
         when(service.modifyDbInstancePort("mydb", 6432, null)).thenReturn(moved);
 
         MultivaluedMap<String, String> p = params();
@@ -643,7 +651,7 @@ class RdsQueryHandlerTest {
         org.mockito.InOrder order = inOrder(service);
         order.verify(service).validateDbInstancePortChange("mydb", 6432, null);
         order.verify(service).modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(),
-                any(), isNull(), any(DbInstanceSettings.class), isNull());
+                any(), isNull(), any(DbInstanceSettings.class), isNull(), any(DbInstanceModification.class));
         order.verify(service).modifyDbInstancePort("mydb", 6432, null);
         assertTrue(((String) response.getEntity()).contains("<Port>6432</Port>"));
     }
@@ -880,7 +888,7 @@ class RdsQueryHandlerTest {
         assertEquals(400, response.getStatus());
         assertTrue(((String) response.getEntity()).contains("InvalidParameterValue"));
         verify(service, never()).modifyDbInstance(
-                any(), any(), any(), any(), any(), any(), any());
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -3311,7 +3319,8 @@ class RdsQueryHandlerTest {
     void modifyDbInstance_passesBackupSettingsToService() {
         DbInstance instance = makeInstance("mydb");
         when(service.modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(),
-                isNull(), isNull(), any(DbInstanceSettings.class), isNull())).thenReturn(instance);
+                isNull(), isNull(), any(DbInstanceSettings.class), isNull(), any(DbInstanceModification.class)))
+                .thenReturn(instance);
 
         MultivaluedMap<String, String> p = params();
         p.add("DBInstanceIdentifier", "mydb");
@@ -3325,7 +3334,7 @@ class RdsQueryHandlerTest {
 
         ArgumentCaptor<DbInstanceSettings> captor = ArgumentCaptor.forClass(DbInstanceSettings.class);
         verify(service).modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(),
-                isNull(), isNull(), captor.capture(), isNull());
+                isNull(), isNull(), captor.capture(), isNull(), eq(DbInstanceModification.none()));
         assertEquals(new DbInstanceSettings(null, null, 3, "01:00-01:30", null, true), captor.getValue());
     }
 
@@ -3350,5 +3359,128 @@ class RdsQueryHandlerTest {
         assertTrue(body.contains("<Type>Receiver</Type>"), body);
         assertTrue(body.contains("<Code>InternalFailure</Code>"), body);
         assertTrue(body.contains("<Message>Unexpected error: Docker daemon connection failed</Message>"), body);
+    }
+
+    // The members the Alchemy DBInstance lifecycle suites read back from a live account.
+    @Test
+    void describeDbInstancesReportsStorageProtectionNetworkAndPendingValues() {
+        DbInstance instance = makeInstance("mydb");
+        instance.setStorageType("gp3");
+        instance.setIops(12000);
+        instance.setStorageThroughput(500);
+        instance.setDeletionProtection(true);
+        instance.setNetworkType("DUAL");
+        instance.setParameterApplyStatus("pending-reboot");
+        DbInstancePendingModifiedValues pending = new DbInstancePendingModifiedValues();
+        pending.setBackupRetentionPeriod(1);
+        pending.setIamDatabaseAuthenticationEnabled(true);
+        instance.setPendingModifiedValues(pending);
+        instance.setTransitionalStatus("creating");
+        instance.setTransitionalStatusUntil(Instant.now().plusSeconds(60));
+        when(service.listDbInstances(null, null)).thenReturn(List.of(instance));
+
+        String body = (String) handler.handle("DescribeDBInstances", params()).getEntity();
+
+        assertTrue(body.contains("<DBInstanceStatus>creating</DBInstanceStatus>"), body);
+        assertTrue(body.contains("<StorageType>gp3</StorageType>"), body);
+        assertTrue(body.contains("<Iops>12000</Iops>"), body);
+        assertTrue(body.contains("<StorageThroughput>500</StorageThroughput>"), body);
+        assertTrue(body.contains("<DeletionProtection>true</DeletionProtection>"), body);
+        assertTrue(body.contains("<NetworkType>DUAL</NetworkType>"), body);
+        assertTrue(body.contains("<DbInstancePort>0</DbInstancePort>"), body);
+        assertTrue(body.contains("<ParameterApplyStatus>pending-reboot</ParameterApplyStatus>"), body);
+        assertTrue(body.contains("<PendingModifiedValues>"), body);
+        assertTrue(body.contains("<BackupRetentionPeriod>1</BackupRetentionPeriod>"), body);
+        assertTrue(body.contains("<IAMDatabaseAuthenticationEnabled>true</IAMDatabaseAuthenticationEnabled>"), body);
+    }
+
+    @Test
+    void describeDbInstancesReportsLegacyRecordsAsGp2WithoutPendingValues() {
+        when(service.listDbInstances(null, null)).thenReturn(List.of(makeInstance("mydb")));
+
+        String body = (String) handler.handle("DescribeDBInstances", params()).getEntity();
+
+        assertTrue(body.contains("<DBInstanceStatus>available</DBInstanceStatus>"), body);
+        assertTrue(body.contains("<StorageType>gp2</StorageType>"), body);
+        assertFalse(body.contains("<Iops>"), body);
+        assertFalse(body.contains("<StorageThroughput>"), body);
+        assertFalse(body.contains("<PendingModifiedValues>"), body);
+        assertTrue(body.contains("<NetworkType>IPV4</NetworkType>"), body);
+        assertTrue(body.contains("<ParameterApplyStatus>in-sync</ParameterApplyStatus>"), body);
+    }
+
+    @Test
+    void modifyDbInstancePassesApplyImmediatelyAndTheModifyOnlyMembers() {
+        when(service.modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(),
+                isNull(), isNull(), any(DbInstanceSettings.class), isNull(), any(DbInstanceModification.class)))
+                .thenReturn(makeInstance("mydb"));
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "mydb");
+        p.add("ApplyImmediately", "true");
+        p.add("AllocatedStorage", "400");
+        p.add("StorageType", "gp3");
+        p.add("Iops", "12000");
+        p.add("StorageThroughput", "500");
+        p.add("DBInstanceClass", "db.t3.small");
+        p.add("MultiAZ", "false");
+        p.add("DBParameterGroupName", "custom");
+        p.add("ManageMasterUserPassword", "true");
+        p.add("MasterUserSecretKmsKeyId", "alias/secrets");
+        p.add("DeletionProtection", "true");
+        p.add("NetworkType", "DUAL");
+
+        assertEquals(200, handler.handle("ModifyDBInstance", p).getStatus());
+
+        ArgumentCaptor<DbInstanceSettings> settings = ArgumentCaptor.forClass(DbInstanceSettings.class);
+        ArgumentCaptor<DbInstanceModification> modification = ArgumentCaptor.forClass(DbInstanceModification.class);
+        verify(service).modifyDbInstance(eq("mydb"), isNull(), isNull(), isNull(), anyList(), isNull(),
+                isNull(), isNull(), settings.capture(), isNull(), modification.capture());
+        assertEquals(new DbInstanceModification(true, 400, "db.t3.small", false, "custom", true, "alias/secrets"),
+                modification.getValue());
+        assertEquals("gp3", settings.getValue().storageType());
+        assertEquals(12000, settings.getValue().iops());
+        assertEquals(500, settings.getValue().storageThroughput());
+        assertEquals(true, settings.getValue().deletionProtection());
+        assertEquals("DUAL", settings.getValue().networkType());
+    }
+
+    @Test
+    void modifyDbInstanceRejectsAMalformedApplyImmediately() {
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "mydb");
+        p.add("ApplyImmediately", "soon");
+
+        Response response = handler.handle("ModifyDBInstance", p);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(((String) response.getEntity()).contains("<Code>InvalidParameterValue</Code>"));
+        verify(service, never()).modifyDbInstance(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any());
+    }
+
+    @Test
+    void createDbInstancePassesStorageProtectionAndNetworkTypeInItsSettings() {
+        when(service.createDbInstance(any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(),
+                any(), any(), any(), any(), anyBoolean(), any(DbInstanceSettings.class), any()))
+                .thenReturn(makeInstance("mydb"));
+        MultivaluedMap<String, String> p = params();
+        p.add("DBInstanceIdentifier", "mydb");
+        p.add("Engine", "postgres");
+        p.add("StorageType", "io1");
+        p.add("Iops", "1000");
+        p.add("DeletionProtection", "false");
+        p.add("NetworkType", "IPV4");
+        handler.handle("CreateDBInstance", p);
+
+        ArgumentCaptor<DbInstanceSettings> settings = ArgumentCaptor.forClass(DbInstanceSettings.class);
+        verify(service).createDbInstance(any(), any(), any(), any(), any(), any(), any(),
+                anyInt(), anyBoolean(), any(), any(), any(), any(), anyBoolean(), anyBoolean(), any(),
+                any(), any(), any(), any(), anyBoolean(), settings.capture(), any());
+        assertEquals("io1", settings.getValue().storageType());
+        assertEquals(1000, settings.getValue().iops());
+        assertNull(settings.getValue().storageThroughput());
+        assertEquals(false, settings.getValue().deletionProtection());
+        assertEquals("IPV4", settings.getValue().networkType());
     }
 }

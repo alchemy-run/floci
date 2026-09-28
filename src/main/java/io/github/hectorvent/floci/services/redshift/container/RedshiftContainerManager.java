@@ -62,9 +62,17 @@ public class RedshiftContainerManager {
         this.config = config;
     }
 
+    /**
+     * Starts a fresh container for the cluster. Every caller is creating a cluster or replacing
+     * its container, so a container still holding this cluster's name belongs to no live cluster:
+     * one left behind by an earlier Floci process whose state was not kept (in-memory storage), or
+     * by a create that failed half way. It is removed first; creating over it would fail on the
+     * name.
+     */
     public RedshiftContainerHandle start(String accountId, String clusterIdentifier, String masterUsername, String masterPassword) {
         String image = config.services().redshift().imageVersion();
         String containerName = containerName(accountId, clusterIdentifier);
+        lifecycleManager.removeIfExistsStrict(containerName);
 
         List<String> envVars = List.of(
                 "POSTGRES_USER=" + masterUsername,

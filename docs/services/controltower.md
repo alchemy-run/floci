@@ -19,7 +19,7 @@ Landing-zone versions must match the AWS version shape `digit.digit`, with one o
 
 `EnableBaseline` validates the baseline ARN, version, and target ARN. When Organizations state is available, an OU target must refer to a real OU in the caller's organization. Enabling a baseline that is already enabled for the same target returns `ConflictException`; callers must use `UpdateEnabledBaseline` to change an existing enablement.
 
-Enabled-baseline operations are recorded with AWS operation names such as `ENABLE_BASELINE`, `RESET_ENABLED_BASELINE`, and `UPDATE_ENABLED_BASELINE`. `GetBaselineOperation` returns `ResourceNotFoundException` for an unknown operation identifier.
+Enabled-baseline operations are recorded with AWS operation names such as `ENABLE_BASELINE`, `DISABLE_BASELINE`, `RESET_ENABLED_BASELINE`, and `UPDATE_ENABLED_BASELINE`. After `DisableBaseline`, the enabled baseline is gone and `GetEnabledBaseline` returns `ResourceNotFoundException`. The Identity Center baseline is derived from the landing zone's access-management setting, so it is turned off with `UpdateLandingZone` instead. `GetBaselineOperation` returns `ResourceNotFoundException` for an unknown operation identifier.
 
 ## Supported operations
 
@@ -39,12 +39,17 @@ Enabled-baseline operations are recorded with AWS operation names such as `ENABL
 | `EnableBaseline` | `POST /enable-baseline` | Enables a baseline on a supported target |
 | `ResetEnabledBaseline` | `POST /reset-enabled-baseline` | Records a reset for an enabled baseline |
 | `UpdateEnabledBaseline` | `POST /update-enabled-baseline` | Updates version and parameters |
+| `DisableBaseline` | `POST /disable-baseline` | Removes an enabled baseline and records a disable operation |
 | `GetBaselineOperation` | `POST /get-baseline-operation` | Reads a previously issued baseline operation |
 | `EnableControl` | `POST /enable-control` | Enables a control on a target and returns an enabled-control ARN plus operation ID |
 | `ListEnabledControls` | `POST /list-enabled-controls` | Lists enabled controls with target/filter pagination |
 | `GetEnabledControl` | `POST /get-enabled-control` | Returns enabled-control details and parameters |
 | `UpdateEnabledControl` | `POST /update-enabled-control` | Updates parameters when they differ from the current configuration |
 | `ResetEnabledControl` | `POST /reset-enabled-control` | Repairs non-SCP enabled controls and records a reset operation |
+| `DisableControl` | `POST /disable-control` | Removes an enabled control, by enabled-control ARN or by control and target, and records a disable operation |
+| `TagResource` | `POST /tags/{resourceArn}` | Adds tags to an enabled control, enabled baseline, or landing zone |
+| `UntagResource` | `DELETE /tags/{resourceArn}` | Removes tags from an enabled control, enabled baseline, or landing zone |
+| `ListTagsForResource` | `GET /tags/{resourceArn}` | Lists the tags of an enabled control, enabled baseline, or landing zone |
 | `GetControlOperation` | `POST /get-control-operation` | Reads a previously issued control operation |
 | `ListControlOperations` | `POST /list-control-operations` | Lists recorded control operations with filtering and pagination |
 

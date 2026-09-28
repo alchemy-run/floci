@@ -627,6 +627,94 @@ class EcsFargateEdgeCaseIntegrationTest {
     }
 
     @Test
+    void aFamilyNeverReusesTheRevisionNumbersOfDeletedRevisions() {
+        registerSize("edge-reuse-td", "256", "512", 200);
+        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-reuse-td:1\"}", 200);
+        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"edge-reuse-td:1\"]}", 200);
+
+        Response registered = call("RegisterTaskDefinition", "{\"family\":\"edge-reuse-td\","
+                + "\"requiresCompatibilities\":[\"FARGATE\"],\"networkMode\":\"awsvpc\","
+                + "\"cpu\":\"256\",\"memory\":\"512\","
+                + "\"containerDefinitions\":[{\"name\":\"app\",\"image\":\"nginx:latest\"}]}", 200);
+        registered.then().body("taskDefinition.revision", equalTo(2))
+                .body("taskDefinition.status", equalTo("ACTIVE"));
+
+        // The deleted revision keeps its own status rather than being replaced by the new one.
+        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-reuse-td:1\"}", 200)
+                .then().body("taskDefinition.status", equalTo("DELETE_IN_PROGRESS"));
+        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-reuse-td\"}", 200)
+                .then().body("taskDefinition.revision", equalTo(2));
+    }
+
+    @Test
+    void aBareFamilyNamesItsLatestActiveRevision() {
+        registerSize("edge-latest-active", "256", "512", 200);
+        registerSize("edge-latest-active", "256", "512", 200);
+        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-latest-active:2\"}", 200);
+
+        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-latest-active\"}", 200)
+                .then().body("taskDefinition.revision", equalTo(1))
+                .body("taskDefinition.status", equalTo("ACTIVE"));
+
+        // Once nothing in the family is ACTIVE, the family alone resolves to nothing.
+        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-latest-active:1\"}", 200);
+        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-latest-active\"}", 400)
+                .then().body("__type", containsString("ClientException"));
+        // A named revision is still describable in whatever status it is in.
+        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-latest-active:2\"}", 200)
+                .then().body("taskDefinition.status", equalTo("INACTIVE"));
+    }
+
+    @Test
+    void anInactiveRevisionCannotStartTasksOrServices() {
+        String family = seed("edge-inactive-launch");
+        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"" + family + ":1\"}", 200);
+
+        call("RunTask", "{\"cluster\":\"" + CLUSTER + "\",\"taskDefinition\":\"" + family + ":1\","
+                + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 400)
+                .then().body("__type", containsString("ClientException"))
+                .body("message", containsString("inactive"));
+        call("CreateService", "{\"cluster\":\"" + CLUSTER + "\",\"serviceName\":\"edge-inactive-svc\","
+                + "\"taskDefinition\":\"" + family + ":1\",\"desiredCount\":0,"
+                + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 400)
+                .then().body("__type", containsString("ClientException"))
+                .body("message", containsString("inactive"));
+    }
+
+    @Test
+    void aServiceCannotMoveOntoARevisionThatLeftActive() {
+        String family = seed("edge-update-onto-gone");
+        registerSize(family, "256", "512", 200);
+        call("CreateService", "{\"cluster\":\"" + CLUSTER + "\",\"serviceName\":\"edge-update-gone-svc\","
+                + "\"taskDefinition\":\"" + family + ":2\",\"desiredCount\":0,"
+                + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 200);
+        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"" + family + ":1\"}", 200);
+        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"" + family + ":1\"]}", 200);
+
+        call("UpdateService", "{\"cluster\":\"" + CLUSTER + "\",\"service\":\"edge-update-gone-svc\","
+                + "\"taskDefinition\":\"" + family + ":1\"}", 400)
+                .then().body("message", containsString("being deleted"));
+        call("DescribeServices", "{\"cluster\":\"" + CLUSTER
+                + "\",\"services\":[\"edge-update-gone-svc\"]}", 200)
+                .then().body("services[0].taskDefinition", containsString(family + ":2"));
+    }
+
+    @Test
+    void deregisteringOrDeletingARevisionAgainChangesNothing() {
+        registerSize("edge-delete-again", "256", "512", 200);
+        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-delete-again:1\"}", 200);
+        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"edge-delete-again:1\"]}", 200);
+
+        // A revision being deleted never returns to INACTIVE.
+        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-delete-again:1\"}", 200)
+                .then().body("taskDefinition.status", equalTo("DELETE_IN_PROGRESS"));
+        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"edge-delete-again:1\"]}", 200)
+                .then().body("taskDefinitions[0].status", equalTo("DELETE_IN_PROGRESS"));
+        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-delete-again:1\"}", 200)
+                .then().body("taskDefinition.status", equalTo("DELETE_IN_PROGRESS"));
+    }
+
+    @Test
     void listTaskDefinitionsDefaultsToActiveAndOrdersByRevision() {
         for (int i = 0; i < 11; i++) {
             registerSize("edge-list-td", "256", "512", 200);

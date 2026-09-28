@@ -99,6 +99,8 @@ public class OrganizationsJsonHandler {
                 case "EnablePolicyType" -> enablePolicyType(request, callerAccountId);
                 case "DisablePolicyType" -> disablePolicyType(request, callerAccountId);
                 case "DescribeEffectivePolicy" -> describeEffectivePolicy(request, callerAccountId);
+                case "ListEffectivePolicyValidationErrors" ->
+                        listEffectivePolicyValidationErrors(request, callerAccountId);
                 case "TagResource" -> tagResource(request, callerAccountId);
                 case "UntagResource" -> untagResource(request, callerAccountId);
                 case "ListTagsForResource" -> listTagsForResource(request, callerAccountId);
@@ -438,6 +440,37 @@ public class OrganizationsJsonHandler {
         node.put("PolicyType", effective.policyType());
         node.put("TargetId", effective.targetId());
         putTimestamp(node, "LastUpdatedTimestamp", effective.lastUpdatedTimestamp());
+        return Response.ok(response).build();
+    }
+
+    private Response listEffectivePolicyValidationErrors(JsonNode request, String caller) {
+        if (request.hasNonNull("MaxResults")) {
+            int maxResults = request.get("MaxResults").asInt();
+            if (maxResults < 1 || maxResults > 20) {
+                throw new AwsException("InvalidInputException", "MaxResults must be between 1 and 20.", 400);
+            }
+        }
+        OrganizationsService.EffectivePolicyValidation validation = service.listEffectivePolicyValidationErrors(
+                caller, text(request, "AccountId"), text(request, "PolicyType"));
+        List<OrganizationsService.EffectivePolicyValidationError> errors = validation.errors();
+        List<Integer> indexes = java.util.stream.IntStream.range(0, errors.size()).boxed().toList();
+        PaginatedResult<Integer> page = page(indexes, index -> String.format("%08d", index), request);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("AccountId", validation.accountId());
+        response.put("PolicyType", validation.policyType());
+        response.put("Path", validation.path());
+        putTimestamp(response, "EvaluationTimestamp", validation.evaluationTimestamp());
+        ArrayNode errorsNode = response.putArray("EffectivePolicyValidationErrors");
+        for (int index : page.items()) {
+            OrganizationsService.EffectivePolicyValidationError error = errors.get(index);
+            ObjectNode node = errorsNode.addObject();
+            node.put("ErrorCode", error.errorCode());
+            node.put("ErrorMessage", error.errorMessage());
+            node.put("PathToError", error.pathToError());
+            ArrayNode contributing = node.putArray("ContributingPolicies");
+            error.contributingPolicies().forEach(contributing::add);
+        }
+        putNextToken(response, page.nextToken());
         return Response.ok(response).build();
     }
 

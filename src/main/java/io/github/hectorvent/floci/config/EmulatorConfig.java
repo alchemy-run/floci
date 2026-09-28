@@ -1218,6 +1218,13 @@ public interface EmulatorConfig {
 
         Optional<String> dockerNetwork();
 
+        /**
+         * Image a HyperPod node runs its lifecycle scripts in. HyperPod's own AMIs are Ubuntu
+         * based, so scripts written for them expect bash and apt.
+         */
+        @WithDefault("public.ecr.aws/docker/library/ubuntu:22.04")
+        String hyperpodNodeImage();
+
         GpuConfig gpu();
 
         /**
@@ -1604,6 +1611,16 @@ public interface EmulatorConfig {
         int proxyBackendConnectTimeoutMillis();
         @WithDefault("100")
         int proxyMaxConnections();
+
+        // How long a DB instance reports each transitional status after Floci completes the
+        // operation (AWS takes minutes to hours). 0 skips the status.
+        @WithDefault("1000")
+        long creatingStatusMillis();
+        @WithDefault("1000")
+        long modifyingStatusMillis();
+        /** Also the cooldown during which RDS refuses another storage change. */
+        @WithDefault("2000")
+        long storageOptimizationStatusMillis();
     }
 
     interface RdsDataServiceConfig {

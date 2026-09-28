@@ -72,6 +72,29 @@ Both success and `AwsException` paths emit; the latter populates
 If `floci.iam.enforcement-enabled` is set, IAM-deny responses also emit
 records with `errorCode: "AccessDenied"` for the same op set.
 
+## CloudTrail Lake Queries
+
+Event data stores collect the management events Floci records for the API
+calls it serves. `StartQuery` runs the Lake SQL statement asynchronously on
+DuckDB through the floci-duck sidecar, which Floci starts on first use:
+
+- The store is referenced by ID (or ARN) in the `FROM` clause, bare or quoted.
+  It exposes the Lake event schema: camelCase columns such as `eventTime`,
+  `eventName`, `requestParameters` (a string map), and `userIdentity` /
+  `resources` with lowercase fields (`userIdentity.arn`).
+- Only single `SELECT` / `WITH` statements are accepted. `?` placeholders are
+  bound from `QueryParameters`. `approx_distinct` and `json_extract_scalar`
+  map onto their DuckDB equivalents; other functions use DuckDB semantics.
+- `DescribeQuery`, `GetQueryResults` (paginated `QueryResultRows`),
+  `ListQueries`, and `CancelQuery` follow the AWS status model
+  (`QUEUED`, `RUNNING`, `FINISHED`, `FAILED`, `CANCELLED`). At most 10 queries
+  run concurrently per account and Region, and query history is kept 7 days.
+- `GenerateQuery` translates prompts about recorded events (counts, top-N
+  groupings, recent-event listings with time-window, event-source, and error
+  filters) into SQL and returns a `QueryAlias` usable with `StartQuery`. Other
+  prompts fail with `GenerateResponseException`.
+- `DeliveryS3Uri` is not supported.
+
 ## Configuration
 
 | Variable | Default | Description |

@@ -2,7 +2,7 @@
 
 **Protocol:** Query (XML) for management API + Redis RESP protocol for data plane
 **Management Endpoint:** `POST http://localhost:4566/`
-**Data Endpoint:** `localhost:<proxy-port>` (TCP)
+**Data Endpoint:** the group's AWS-shaped hostname and `Port` (TCP), see [Ports](#ports)
 
 Floci manages real Valkey/Redis Docker containers and proxies TCP connections to them. This means any Redis client works : including IAM authentication.
 
@@ -39,11 +39,15 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `AddTagsToResource` | Add resource tags |
 | `RemoveTagsFromResource` | Remove resource tags |
 | `DescribeCacheParameterGroups` | List parameter groups, including the AWS defaults |
-| `DescribeServerlessCaches` | Empty list; named lookups raise `ServerlessCacheNotFoundFault` (serverless caches are not emulated) |
-| `DescribeServerlessCacheSnapshots` | Empty list; named lookups raise `ServerlessCacheSnapshotNotFoundFault` |
-| `DeleteServerlessCacheSnapshot` | Always `ServerlessCacheSnapshotNotFoundFault` |
-| `CopyServerlessCacheSnapshot` | Always `ServerlessCacheSnapshotNotFoundFault` |
-| `ExportServerlessCacheSnapshot` | Always `ServerlessCacheSnapshotNotFoundFault` |
+| `CreateServerlessCache` | Create a Valkey, Redis OSS or Memcached serverless cache backed by a real engine container; answers `creating` and turns `available` once the engine is ready. `SubnetIds` and `SecurityGroupIds` must exist in EC2 (defaults: the default VPC's subnets and its `default` group), `KmsKeyId` must name a usable key, and `UserGroupId` raises `UserGroupNotFound` (user groups are not emulated) |
+| `DescribeServerlessCaches` | List serverless caches with `NextToken` paging; `Endpoint` and `ReaderEndpoint` are `<name>-<6 chars>.serverless.<region code>.cache.amazonaws.com` on 6379/6380 (Memcached: 11211/11212), TLS only |
+| `ModifyServerlessCache` | Update description, usage limits, security groups, snapshot settings and the redis-to-valkey engine upgrade; answers `modifying` |
+| `DeleteServerlessCache` | Answers `deleting`, optionally takes `FinalSnapshotName`, then removes the cache and its container |
+| `CreateServerlessCacheSnapshot` | Capture the cache's keyspace; answers `creating`, then `available` |
+| `DescribeServerlessCacheSnapshots` | List snapshots, filtered by cache, name or `SnapshotType` |
+| `DeleteServerlessCacheSnapshot` | Delete an `available` snapshot; a `creating` one raises `InvalidServerlessCacheSnapshotStateFault` |
+| `CopyServerlessCacheSnapshot` | Copy a snapshot, keys included |
+| `ExportServerlessCacheSnapshot` | Validates the snapshot, then refuses: snapshots are not kept as RDB files that could be written to S3 |
 | `DescribeEvents` | Empty list (events are not recorded) |
 | `CreateCacheParameterGroup` | Create a cache parameter group |
 | `ModifyCacheParameterGroup` | Set parameters on a group |
@@ -94,10 +98,8 @@ keeps its `available` status with nothing behind the endpoint, so the control pl
 while every connection fails, and the proxy port it still advertises is free for the next create to
 take: the old endpoint then reaches an unrelated cache rather than failing cleanly.
 
-A Memcached cluster's endpoint follows its new container. Outside Docker, Floci publishes the
-backend on a host port Docker picks per run, so a restored cluster's `ConfigurationEndpoint` port
-can differ from the one it had before the restart. Replication groups keep their port: it is a
-proxy port Floci owns and re-reserves.
+Restored groups and Memcached clusters keep their hostname and `Port`; only the host proxy is
+re-bound to the new container.
 
 A delete that arrives while a record is still `creating` wins. The restore takes the same
 per-record monitor `DeleteReplicationGroup` and `DeleteCacheCluster` take, and skips its write-back
@@ -123,13 +125,36 @@ stopped. `ReshardingConfiguration` slot hints are not applied; slots are always 
 
 ### Ports
 
-When Floci runs in Docker, every cluster-mode-disabled replication group is served by its own
-container on the Docker network, so its endpoint is that container's address on the group's
-`Port` (6379 unless the request names another). Any number of groups can use the same `Port` at
-once, as on AWS where every group has its own hostname, and VPC workloads such as Lambda functions
-connect to it directly. Host access goes through the group's proxy, which takes a free port from
-the proxy range. When Floci runs on the host, the endpoint is the proxy itself, so a requested
-`Port` must be free in the proxy range.
+Every cluster-mode-disabled replication group and every Memcached cluster has an AWS-shaped
+hostname of its own under Floci's DNS suffix (`master.<group>.<hash>.use1.cache.localhost.floci.io`,
+`<cluster>.<hash>.cfg.use1.cache.localhost.floci.io`).
+
+Each group reports the `Port` the request named, or AWS's default (6379 for Redis/Valkey, 11211
+for Memcached), whether Floci runs in Docker or on the host. The cache container listens on that
+`Port` at its own address, so any number of groups use the same `Port` at once, as on AWS, and a
+`Port` is never reserved by one group. Any `Port` from 1 to 65535 is accepted.
+
+Containers Floci launches (VPC Lambda functions, ECS tasks) resolve a group's hostname through
+Floci's embedded DNS (from source, with `FLOCI_DNS_SOURCE_ENABLED`) and reach the group on its
+`Port`:
+
+- A group without authentication, and every Memcached cluster, resolves to its own cache
+  container.
+- A group with an auth token or IAM authentication is reached through its auth proxy, so the
+  authentication is enforced for container clients too. When the proxy holds the group's `Port` on
+  Floci's address, the hostname resolves to Floci (from source, the source network helper relays
+  the port to the host). Otherwise the group gets a relay container of its own on the container
+  network, which listens on the `Port` and relays to the group's proxy, and the hostname resolves
+  to that relay.
+
+Host clients reach a group through its auth proxy on Floci's address (from source, 127.0.0.1,
+which `*.localhost.floci.io` resolves to for every group). A replication group's proxy takes the
+group's `Port` when it lies in the proxy range and no other group's proxy holds it, otherwise a
+free port of the range; a Memcached cluster's relay takes the cluster's `Port` when no other relay
+holds it. So on the host, `<hostname>:<Port>` reaches the first group created on that `Port`;
+the others are served on their proxy port, which Floci logs when it creates the group. Host
+clients cannot be told apart by hostname: the proxies speak plaintext RESP, so there is no TLS
+server name to route on.
 
 ```bash
 aws elasticache create-replication-group \

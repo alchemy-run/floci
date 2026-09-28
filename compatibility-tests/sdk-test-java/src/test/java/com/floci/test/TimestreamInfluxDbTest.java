@@ -46,8 +46,8 @@ class TimestreamInfluxDbTest {
                     .dbInstanceType("db.influx.medium")
                     .allocatedStorage(20)
                     .dbParameterGroupIdentifier(group.id())
-                    .vpcSubnetIds("subnet-abc123")
-                    .vpcSecurityGroupIds("sg-abc123")
+                    .vpcSubnetIds("subnet-default-us-east-1-a")
+                    .vpcSecurityGroupIds("sg-default-us-east-1")
                     .tags(Map.of("env", "compat"))
                     .build());
             assertNotNull(created.id());
@@ -78,8 +78,8 @@ class TimestreamInfluxDbTest {
                     .password("password123")
                     .dbInstanceType("db.influx.medium")
                     .allocatedStorage(19)
-                    .vpcSubnetIds("subnet-abc123")
-                    .vpcSecurityGroupIds("sg-abc123")
+                    .vpcSubnetIds("subnet-default-us-east-1-a")
+                    .vpcSecurityGroupIds("sg-default-us-east-1")
                     .build()));
         }
     }

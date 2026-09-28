@@ -101,14 +101,14 @@ public class AccountController {
     @POST
     @Path("/enableRegion")
     public Response enableRegion(String body) {
-        accountService.rejectRegionChange(requestContext.getAccountId(), readObject(body));
+        accountService.enableRegion(requestContext.getAccountId(), readObject(body));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     @POST
     @Path("/disableRegion")
     public Response disableRegion(String body) {
-        accountService.rejectRegionChange(requestContext.getAccountId(), readObject(body));
+        accountService.disableRegion(requestContext.getAccountId(), readObject(body));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 

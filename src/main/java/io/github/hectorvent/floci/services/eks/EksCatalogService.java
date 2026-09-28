@@ -21,7 +21,7 @@ import java.util.Map;
 public class EksCatalogService {
     private static final String INVALID = "InvalidParameterException";
     private static final String VPC_CNI_VERSION = "v1.12.0-eksbuild.1";
-    private static final List<String> ACCESS_POLICIES = List.of(
+    static final List<String> ACCESS_POLICIES = List.of(
             "AmazonEKSAdminPolicy", "AmazonEKSClusterAdminPolicy", "AmazonEKSEditPolicy", "AmazonEKSViewPolicy");
     private static final List<String> VERSION_STATUSES = List.of("STANDARD_SUPPORT", "EXTENDED_SUPPORT", "UNSUPPORTED");
 

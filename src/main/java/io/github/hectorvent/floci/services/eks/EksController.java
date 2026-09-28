@@ -1,7 +1,10 @@
 package io.github.hectorvent.floci.services.eks;
 
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.eks.model.Addon;
+import io.github.hectorvent.floci.services.eks.model.AssociateAccessPolicyRequest;
+import io.github.hectorvent.floci.services.eks.model.AssociatedAccessPolicy;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.CreateAccessEntryRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateAddonRequest;
@@ -9,11 +12,17 @@ import io.github.hectorvent.floci.services.eks.model.CreateClusterRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateFargateProfileRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateNodeGroupRequest;
 import io.github.hectorvent.floci.services.eks.model.CreatePodIdentityAssociationRequest;
+import io.github.hectorvent.floci.services.eks.model.DescribeIdentityProviderConfigRequest;
 import io.github.hectorvent.floci.services.eks.model.FargateProfile;
+import io.github.hectorvent.floci.services.eks.model.InsightSummary;
+import io.github.hectorvent.floci.services.eks.model.ListInsightsRequest;
 import io.github.hectorvent.floci.services.eks.model.Nodegroup;
 import io.github.hectorvent.floci.services.eks.model.PodIdentityAssociation;
 import io.github.hectorvent.floci.services.eks.model.Update;
+import io.github.hectorvent.floci.services.eks.model.UpdateAccessEntryRequest;
 import io.github.hectorvent.floci.services.eks.model.UpdateAddonRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupConfigRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupVersionRequest;
 import io.github.hectorvent.floci.services.eks.model.UpdatePodIdentityAssociationRequest;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -47,16 +56,18 @@ public class EksController {
     private final EksPodIdentityAssociationService podIdentityAssociations;
     private final EksAddonService addons;
     private final EksCatalogService catalog;
+    private final EksInsightsService insights;
 
     @Inject
     public EksController(EksService eksService, EksAccessEntryService accessEntries,
                          EksPodIdentityAssociationService podIdentityAssociations,
-                         EksAddonService addons, EksCatalogService catalog) {
+                         EksAddonService addons, EksCatalogService catalog, EksInsightsService insights) {
         this.eksService = eksService;
         this.accessEntries = accessEntries;
         this.podIdentityAssociations = podIdentityAssociations;
         this.addons = addons;
         this.catalog = catalog;
+        this.insights = insights;
     }
 
     @GET
@@ -167,6 +178,22 @@ public class EksController {
         return Response.ok(Map.of("nodegroup", nodeGroup)).build();
     }
 
+    @POST
+    @Path("/clusters/{name}/node-groups/{nodegroupName}/update-config")
+    public Response updateNodegroupConfig(@PathParam("name") String name,
+            @PathParam("nodegroupName") String nodegroupName, UpdateNodegroupConfigRequest request) {
+        Update update = eksService.updateNodegroupConfig(name, nodegroupName, request);
+        return Response.ok(Map.of("update", update)).build();
+    }
+
+    @POST
+    @Path("/clusters/{name}/node-groups/{nodegroupName}/update-version")
+    public Response updateNodegroupVersion(@PathParam("name") String name,
+            @PathParam("nodegroupName") String nodegroupName, UpdateNodegroupVersionRequest request) {
+        Update update = eksService.updateNodegroupVersion(name, nodegroupName, request);
+        return Response.ok(Map.of("update", update)).build();
+    }
+
     @DELETE
     @Path("/clusters/{name}/node-groups/{nodegroupName}")
     public Response deleteNodeGroup(@PathParam("name") String name,
@@ -228,6 +255,53 @@ public class EksController {
         return Response.ok(Map.of("accessEntry", accessEntries.describe(eksService.describeCluster(name), principalArn))).build();
     }
 
+    // Principal and policy ARNs contain '/', so their labels match greedily whether the client
+    // percent-encodes them (%2F) or not.
+    @POST
+    @Path("/clusters/{name}/access-entries/{principalArn: .+}")
+    public Response updateAccessEntry(@PathParam("name") String name, @PathParam("principalArn") String principalArn,
+                                      UpdateAccessEntryRequest request) {
+        return Response.ok(Map.of("accessEntry",
+                accessEntries.update(eksService.describeCluster(name), principalArn, request))).build();
+    }
+
+    @GET
+    @Path("/clusters/{name}/access-entries/{principalArn: .+}/access-policies")
+    public Response listAssociatedAccessPolicies(@PathParam("name") String name,
+                                                 @PathParam("principalArn") String principalArn,
+                                                 @QueryParam("maxResults") String maxResults,
+                                                 @QueryParam("nextToken") String nextToken) {
+        Integer limit = Pagination.parseMaxResults(maxResults, "InvalidRequestException");
+        PaginatedResult<AssociatedAccessPolicy> page = Pagination.paginate(
+                accessEntries.listAssociatedAccessPolicies(eksService.describeCluster(name), principalArn),
+                AssociatedAccessPolicy::policyArn, limit, nextToken, 100, "InvalidRequestException");
+        return Response.ok(page.nextToken() == null
+                ? Map.of("clusterName", name, "principalArn", principalArn,
+                        "associatedAccessPolicies", page.items())
+                : Map.of("clusterName", name, "principalArn", principalArn,
+                        "associatedAccessPolicies", page.items(), "nextToken", page.nextToken())).build();
+    }
+
+    @POST
+    @Path("/clusters/{name}/access-entries/{principalArn: .+}/access-policies")
+    public Response associateAccessPolicy(@PathParam("name") String name,
+                                          @PathParam("principalArn") String principalArn,
+                                          AssociateAccessPolicyRequest request) {
+        AssociatedAccessPolicy policy = accessEntries.associateAccessPolicy(eksService.describeCluster(name),
+                principalArn, request);
+        return Response.ok(Map.of("clusterName", name, "principalArn", principalArn,
+                "associatedAccessPolicy", policy)).build();
+    }
+
+    @DELETE
+    @Path("/clusters/{name}/access-entries/{principalArn: .+}/access-policies/{policyArn: .+}")
+    public Response disassociateAccessPolicy(@PathParam("name") String name,
+                                             @PathParam("principalArn") String principalArn,
+                                             @PathParam("policyArn") String policyArn) {
+        accessEntries.disassociateAccessPolicy(eksService.describeCluster(name), principalArn, policyArn);
+        return Response.ok(Map.of()).build();
+    }
+
     @DELETE
     @Path("/clusters/{name}/access-entries/{principalArn: .+}")
     public Response deleteAccessEntry(@PathParam("name") String name, @PathParam("principalArn") String principalArn) {
@@ -276,11 +350,87 @@ public class EksController {
     }
 
     @GET
+    @Path("/clusters/{name}/updates")
+    public Response listUpdates(@PathParam("name") String name,
+                                @QueryParam("nodegroupName") String nodegroupName,
+                                @QueryParam("addonName") String addonName,
+                                @QueryParam("capabilityName") String capabilityName,
+                                @QueryParam("maxResults") String maxResults,
+                                @QueryParam("nextToken") String nextToken) {
+        PaginatedResult<String> page = eksService.listUpdates(name, nodegroupName, addonName, capabilityName,
+                Pagination.parseMaxResults(maxResults, "InvalidParameterException"), nextToken);
+        return Response.ok(page.nextToken() == null
+                ? Map.of("updateIds", page.items())
+                : Map.of("updateIds", page.items(), "nextToken", page.nextToken())).build();
+    }
+
+    @POST
+    @Path("/clusters/{name}/insights")
+    public Response listInsights(@PathParam("name") String name, ListInsightsRequest request) {
+        PaginatedResult<InsightSummary> page = insights.list(eksService.describeCluster(name), request);
+        return Response.ok(page.nextToken() == null
+                ? Map.of("insights", page.items())
+                : Map.of("insights", page.items(), "nextToken", page.nextToken())).build();
+    }
+
+    @GET
+    @Path("/clusters/{name}/insights/{id}")
+    public Response describeInsight(@PathParam("name") String name, @PathParam("id") String id) {
+        return Response.ok(Map.of("insight", insights.describe(eksService.describeCluster(name), id))).build();
+    }
+
+    @POST
+    @Path("/clusters/{name}/insights-refresh")
+    @Consumes(MediaType.WILDCARD)
+    public Response startInsightsRefresh(@PathParam("name") String name) {
+        return Response.ok(insights.startRefresh(eksService.describeCluster(name))).build();
+    }
+
+    @GET
+    @Path("/clusters/{name}/insights-refresh")
+    public Response describeInsightsRefresh(@PathParam("name") String name) {
+        return Response.ok(insights.describeRefresh(eksService.describeCluster(name))).build();
+    }
+
+    @GET
+    @Path("/clusters/{name}/capabilities")
+    public Response listCapabilities(@PathParam("name") String name,
+                                     @QueryParam("maxResults") String maxResults,
+                                     @QueryParam("nextToken") String nextToken) {
+        Pagination.parseMaxResults(maxResults, "InvalidParameterException");
+        eksService.describeCluster(name);
+        return Response.ok(Map.of("capabilities", List.of())).build();
+    }
+
+    @GET
+    @Path("/clusters/{name}/capabilities/{capabilityName}")
+    public Response describeCapability(@PathParam("name") String name,
+                                       @PathParam("capabilityName") String capabilityName) {
+        eksService.describeCapability(name, capabilityName);
+        return Response.ok(Map.of()).build();
+    }
+
+    @POST
+    @Path("/clusters/{name}/identity-provider-configs/describe")
+    public Response describeIdentityProviderConfig(@PathParam("name") String name,
+                                                   DescribeIdentityProviderConfigRequest request) {
+        DescribeIdentityProviderConfigRequest.IdentityProviderConfig config =
+                request == null ? null : request.identityProviderConfig();
+        eksService.describeIdentityProviderConfig(name, config == null ? null : config.type(),
+                config == null ? null : config.name());
+        return Response.ok(Map.of()).build();
+    }
+
+    @GET
     @Path("/clusters/{name}/updates/{updateId}")
     public Response describeUpdate(@PathParam("name") String name,
                                    @PathParam("updateId") String updateId,
                                    @QueryParam("addonName") String addonName,
                                    @QueryParam("nodegroupName") String nodegroupName) {
+        if (nodegroupName != null && !nodegroupName.isBlank()) {
+            return Response.ok(Map.of("update",
+                    eksService.describeNodegroupUpdate(name, nodegroupName, updateId))).build();
+        }
         Cluster cluster = eksService.describeCluster(name);
         Update update = addons.describeUpdate(cluster, updateId, addonName);
         return Response.ok(Map.of("update", update)).build();

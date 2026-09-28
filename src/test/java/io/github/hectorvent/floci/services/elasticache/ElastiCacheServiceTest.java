@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -215,7 +216,7 @@ class ElastiCacheServiceTest {
         ReplicationGroup group = service.createReplicationGroup("grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
         service.setReplicaCount("grp", 1);
 
-        assertEquals("172.20.0.3", group.getConfigurationEndpoint().address());
+        assertEquals(primaryHostname("grp"), group.getConfigurationEndpoint().address());
         assertEquals(6379, group.getConfigurationEndpoint().port());
         assertEquals(2, service.memberCacheClusters(group).size());
         assertTrue(service.memberCacheClusters(group).stream().allMatch(member -> member.port() == 6379));
@@ -226,7 +227,7 @@ class ElastiCacheServiceTest {
     }
 
     @Test
-    void usesLocalhostWhenHostnameNotConfigured() {
+    void usesAnAwsShapedHostnameWhenHostnameNotConfigured() {
         ElastiCacheContainerManager reachableContainerManager = mock(ElastiCacheContainerManager.class);
         ElastiCacheProxyManager reachableProxyManager = mock(ElastiCacheProxyManager.class);
         StorageFactory storageFactory = mock(StorageFactory.class);
@@ -253,7 +254,16 @@ class ElastiCacheServiceTest {
         ReplicationGroup group = reachableService.createReplicationGroup(
                 "grp", "test", AuthMode.NO_AUTH, null, "us-east-1");
 
-        assertEquals("localhost", group.getConfigurationEndpoint().address());
+        assertEquals(primaryHostname("grp"), group.getConfigurationEndpoint().address());
+        // As on AWS the endpoint reports the default Port; host clients use the group's proxy,
+        // on the first port of the range.
+        assertEquals(6379, group.getConfigurationEndpoint().port());
+        assertEquals(16379, group.getProxyPort());
+    }
+
+    private static String primaryHostname(String groupId) {
+        return "master." + groupId + "." + ElastiCacheEndpoints.hash("000000000000", "us-east-1")
+                + ".use1.cache.localhost.floci.io";
     }
 
     @Test
@@ -300,8 +310,9 @@ class ElastiCacheServiceTest {
     void requestedPortIsHonoredWhenFreeAndInRange() {
         ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 16390));
 
+        assertEquals(16390, group.getConfigurationEndpoint().port(), "The requested Port is the one reported");
         assertEquals(16390, group.getProxyPort(),
-                "A free, in-range requested Port must be the port the group reports");
+                "A free, in-range requested Port is also where host clients reach the group");
     }
 
     @Test
@@ -313,26 +324,106 @@ class ElastiCacheServiceTest {
     }
 
     @Test
-    void requestedPortAlreadyInUseIsRejected() {
-        // floci multiplexes every group's proxy onto one host, so two groups cannot share a port.
-        // Substituting a different one would hand back the drift honoring Port exists to remove,
-        // and it could only ever hit a caller who did pin a port.
-        service.createReplicationGroup(singleNodeRequest("grp1", 16390));
+    void aPortAnotherGroupUsesIsHonoredWithFlociOnTheHost() {
+        // As on AWS every group has its own hostname, so a Port is never exclusive, with Floci on
+        // the host too: only the second group's host proxy moves aside.
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 16390));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", 16390));
 
-        AwsException thrown = assertThrows(AwsException.class,
-                () -> service.createReplicationGroup(singleNodeRequest("grp2", 16390)));
-
-        assertEquals("InvalidParameterValue", thrown.getErrorCode());
-        assertTrue(thrown.getMessage().contains("16390"));
+        assertEquals(16390, first.getConfigurationEndpoint().port());
+        assertEquals(16390, second.getConfigurationEndpoint().port());
+        assertEquals(16390, first.getProxyPort());
+        assertNotEquals(16390, second.getProxyPort());
+        verify(containerManager).tryStart(eq("grp2"), anyString(), eq(16390));
     }
 
     @Test
-    void requestedPortOutsideTheProxyRangeIsRejected() {
+    void aPortOutsideTheProxyRangeIsHonoredWithFlociOnTheHost() {
+        // AWS accepts any Port from 1 to 65535. The engine listens on it; only the host proxy is
+        // confined to the range.
+        ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 9999));
+
+        assertEquals(9999, group.getConfigurationEndpoint().port());
+        assertEquals(16379, group.getProxyPort());
+        verify(containerManager).tryStart(eq("grp"), anyString(), eq(9999));
+    }
+
+    @Test
+    void theDefaultPortIsSharedByEveryGroupWithFlociOnTheHost() {
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 6379));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", null));
+
+        assertEquals(6379, first.getConfigurationEndpoint().port());
+        assertEquals(6379, second.getConfigurationEndpoint().port());
+        assertTrue(service.memberCacheClusters(second).stream().allMatch(member -> member.port() == 6379));
+    }
+
+    @Test
+    void anInvalidPortIsRejectedWithFlociOnTheHost() {
         AwsException thrown = assertThrows(AwsException.class,
-                () -> service.createReplicationGroup(singleNodeRequest("grp", 9999)));
+                () -> service.createReplicationGroup(singleNodeRequest("grp", 70000)));
 
         assertEquals("InvalidParameterValue", thrown.getErrorCode());
-        assertTrue(thrown.getMessage().contains("9999"));
+        verify(containerManager, never()).tryStart(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void aPortAnotherGroupUsesIsHonoredWithFlociInDocker() {
+        // In Docker every group has its own engine container and address, as every AWS group has
+        // its own hostname, so a Port is never exclusive: a replacement with the same Port is
+        // created while the old group still exists.
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 16390));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", 16390));
+
+        assertEquals(16390, first.getConfigurationEndpoint().port());
+        assertEquals(16390, second.getConfigurationEndpoint().port());
+        assertEquals(16390, second.getEnginePort());
+        assertEquals(16390, first.getProxyPort());
+        assertTrue(second.getProxyPort() != 16390, "The second host proxy moves aside, the Port does not");
+        assertFalse(first.getConfigurationEndpoint().address().equals(second.getConfigurationEndpoint().address()));
+        verify(containerManager).tryStart(eq("grp2"), anyString(), eq(16390));
+    }
+
+    @Test
+    void theDefaultPortIsSharedByEveryGroupWithFlociInDocker() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ReplicationGroup first = service.createReplicationGroup(singleNodeRequest("grp1", 6379));
+        ReplicationGroup second = service.createReplicationGroup(singleNodeRequest("grp2", null));
+
+        assertEquals(6379, first.getConfigurationEndpoint().port());
+        assertEquals(6379, second.getConfigurationEndpoint().port());
+        assertTrue(service.memberCacheClusters(second).stream().allMatch(member -> member.port() == 6379));
+    }
+
+    @Test
+    void aPortOutsideTheProxyRangeIsTheEnginePortWithFlociInDocker() {
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", 9999));
+
+        assertEquals(9999, group.getConfigurationEndpoint().port());
+        assertEquals(16379, group.getProxyPort());
+        verify(containerManager).tryStart(eq("grp"), anyString(), eq(9999));
+    }
+
+    @Test
+    void aTakenDefaultPortMovesTheHostProxyInsteadOfFailingTheCreateWithFlociInDocker() {
+        // Something else on this machine already listens on the group's Port: only the host
+        // proxy moves, the group keeps reporting its Port, which its own container serves.
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
+        when(ecConfigOf(config).proxyBasePort()).thenReturn(6379);
+        doThrow(new RuntimeException("Address already in use")).doNothing()
+                .when(proxyManager).startProxy(eq("grp"), any(), eq(6379), anyString(), anyInt(), any());
+
+        ReplicationGroup group = service.createReplicationGroup(singleNodeRequest("grp", null));
+
+        assertEquals(6379, group.getConfigurationEndpoint().port());
+        assertTrue(group.getProxyPort() != 6379);
+        verify(proxyManager).startProxy(eq("grp"), any(), eq(group.getProxyPort()), anyString(), anyInt(), any());
+    }
+
+    private static EmulatorConfig.ElastiCacheServiceConfig ecConfigOf(EmulatorConfig config) {
+        return config.services().elasticache();
     }
 
     @Test
@@ -572,7 +663,10 @@ class ElastiCacheServiceTest {
                 eq("localhost"), eq(6379), any());
         ReplicationGroup restored = restarted.getReplicationGroup("grp");
         assertEquals(ReplicationGroupStatus.AVAILABLE, restored.getStatus());
-        assertEquals(16379, restored.getConfigurationEndpoint().port());
+        assertEquals(6379, restored.getConfigurationEndpoint().port(),
+                "The endpoint reports the group's Port, not where its host proxy listens");
+        assertEquals(16379, restored.getProxyPort());
+        assertEquals(primaryHostname("grp"), restored.getConfigurationEndpoint().address());
         assertEquals("cid-grp", restored.getContainerId(),
                 "A restored group must track the container it actually has");
 

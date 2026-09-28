@@ -39,6 +39,7 @@ public class BatchJob {
     private String region;
     private String accountId;
     private String containerImage;
+    private BatchRuntimePlatform runtimePlatform;
     private String arrayJobId;
     private Integer arrayIndex;
     private Integer arraySize;
@@ -251,6 +252,14 @@ public class BatchJob {
 
     public void setContainerImage(String containerImage) {
         this.containerImage = containerImage;
+    }
+
+    public BatchRuntimePlatform getRuntimePlatform() {
+        return runtimePlatform;
+    }
+
+    public void setRuntimePlatform(BatchRuntimePlatform runtimePlatform) {
+        this.runtimePlatform = runtimePlatform;
     }
 
     public String getArrayJobId() {

@@ -62,6 +62,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -3545,6 +3546,107 @@ public class S3Service implements Resettable, ResourceProvider {
         return multipartUploads.values().stream()
                 .filter(u -> u.getBucket().equals(bucket))
                 .toList();
+    }
+
+    public record ListMultipartUploadsResult(List<MultipartUpload> uploads, List<String> commonPrefixes,
+                                             boolean isTruncated, String nextKeyMarker,
+                                             String nextUploadIdMarker) {}
+
+    /**
+     * Lists the in-progress multipart uploads of {@code bucket} the way S3 pages them: uploads are ordered by
+     * key and, within a key, by initiation time; {@code delimiter} rolls keys up into {@code CommonPrefixes};
+     * and {@code maxUploads} bounds the uploads plus common prefixes returned. Without {@code uploadIdMarker}
+     * the {@code keyMarker} is an exclusive lower bound on the key; with it, the uploads of {@code keyMarker}
+     * that follow the named upload are listed before any greater key.
+     */
+    public ListMultipartUploadsResult listMultipartUploads(String bucket, String prefix, String delimiter,
+                                                           int maxUploads, String keyMarker,
+                                                           String uploadIdMarker) {
+        ensureBucketExists(bucket);
+        String effectivePrefix = prefix != null ? prefix : "";
+        List<MultipartUpload> uploads = new ArrayList<>(multipartUploads.values().stream()
+                .filter(u -> u.getBucket().equals(bucket))
+                .filter(u -> u.getKey().startsWith(effectivePrefix))
+                .toList());
+        Comparator<MultipartUpload> order = Comparator.comparing(MultipartUpload::getKey)
+                .thenComparing(MultipartUpload::getInitiated, Comparator.nullsFirst(Comparator.<Instant>naturalOrder()))
+                .thenComparing(MultipartUpload::getUploadId);
+        uploads.sort(order);
+
+        List<String> commonPrefixes = new ArrayList<>();
+        if (delimiter != null && !delimiter.isEmpty()) {
+            Set<String> prefixSet = new TreeSet<>();
+            List<MultipartUpload> direct = new ArrayList<>();
+            for (MultipartUpload upload : uploads) {
+                String remainder = upload.getKey().substring(effectivePrefix.length());
+                int delimIdx = remainder.indexOf(delimiter);
+                if (delimIdx >= 0) {
+                    prefixSet.add(effectivePrefix + remainder.substring(0, delimIdx + delimiter.length()));
+                } else {
+                    direct.add(upload);
+                }
+            }
+            uploads = direct;
+            commonPrefixes.addAll(prefixSet);
+        }
+
+        if (keyMarker != null && !keyMarker.isEmpty()) {
+            String km = keyMarker;
+            commonPrefixes.removeIf(cp -> cp.compareTo(km) <= 0);
+            List<MultipartUpload> remaining = new ArrayList<>();
+            boolean markerNamed = uploadIdMarker != null && !uploadIdMarker.isEmpty();
+            boolean markerFound = markerNamed && uploads.stream().anyMatch(u ->
+                    km.equals(u.getKey()) && uploadIdMarker.equals(u.getUploadId()));
+            boolean afterMarker = false;
+            for (MultipartUpload upload : uploads) {
+                int keyCompare = upload.getKey().compareTo(km);
+                if (keyCompare > 0) {
+                    remaining.add(upload);
+                } else if (keyCompare == 0 && markerNamed) {
+                    if (markerFound) {
+                        if (afterMarker) {
+                            remaining.add(upload);
+                        } else if (uploadIdMarker.equals(upload.getUploadId())) {
+                            afterMarker = true;
+                        }
+                    } else if (upload.getUploadId().compareTo(uploadIdMarker) > 0) {
+                        // The marker upload was completed or aborted between pages.
+                        remaining.add(upload);
+                    }
+                }
+            }
+            uploads = remaining;
+        }
+
+        List<MultipartUpload> pageUploads = new ArrayList<>();
+        List<String> pagePrefixes = new ArrayList<>();
+        int uIdx = 0;
+        int cpIdx = 0;
+        String nextKeyMarker = null;
+        String nextUploadIdMarker = null;
+        while (pageUploads.size() + pagePrefixes.size() < maxUploads
+                && (uIdx < uploads.size() || cpIdx < commonPrefixes.size())) {
+            String uKey = uIdx < uploads.size() ? uploads.get(uIdx).getKey() : null;
+            String cpKey = cpIdx < commonPrefixes.size() ? commonPrefixes.get(cpIdx) : null;
+            if (uKey != null && (cpKey == null || uKey.compareTo(cpKey) <= 0)) {
+                MultipartUpload upload = uploads.get(uIdx++);
+                pageUploads.add(upload);
+                nextKeyMarker = upload.getKey();
+                nextUploadIdMarker = upload.getUploadId();
+            } else {
+                String commonPrefix = commonPrefixes.get(cpIdx++);
+                pagePrefixes.add(commonPrefix);
+                nextKeyMarker = commonPrefix;
+                nextUploadIdMarker = null;
+            }
+        }
+        boolean isTruncated = uIdx < uploads.size() || cpIdx < commonPrefixes.size();
+        if (!isTruncated) {
+            nextKeyMarker = null;
+            nextUploadIdMarker = null;
+        }
+        return new ListMultipartUploadsResult(pageUploads, pagePrefixes, isTruncated, nextKeyMarker,
+                nextUploadIdMarker);
     }
 
     public MultipartUpload listParts(String bucket, String key, String uploadId) {

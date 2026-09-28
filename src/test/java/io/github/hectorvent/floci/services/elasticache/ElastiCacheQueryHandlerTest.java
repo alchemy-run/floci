@@ -41,6 +41,7 @@ class ElastiCacheQueryHandlerTest {
     private ElastiCacheQueryHandler handler;
     private ElastiCacheService service;
     private ElastiCacheMemcachedService memcachedService;
+    private ElastiCacheServerlessQueryHandler serverlessHandler;
 
     @BeforeEach
     void setUp() {
@@ -51,7 +52,9 @@ class ElastiCacheQueryHandlerTest {
         when(regionResolver.getDefaultRegion()).thenReturn("us-east-1");
         when(regionResolver.getRegion()).thenReturn("us-east-1");
         when(regionResolver.getAccountId()).thenReturn("000000000000");
-        handler = new ElastiCacheQueryHandler(sigV4Validator, service, memcachedService, regionResolver);
+        serverlessHandler = mock(ElastiCacheServerlessQueryHandler.class);
+        handler = new ElastiCacheQueryHandler(sigV4Validator, service, memcachedService, regionResolver,
+                serverlessHandler);
     }
 
     @Test
@@ -385,40 +388,21 @@ class ElastiCacheQueryHandlerTest {
     }
 
     @Test
-    void serverlessDescribes_returnEmptyListsWithoutFilters() {
-        String caches = (String) handler.handle("DescribeServerlessCaches", params()).getEntity();
-        assertTrue(caches.contains("<ServerlessCaches></ServerlessCaches>"));
+    void serverlessActions_areDelegatedToTheServerlessHandler() {
+        MultivaluedMap<String, String> request = params();
+        request.add("ServerlessCacheName", "cache");
+        Response delegated = Response.ok("delegated").build();
+        when(serverlessHandler.handles("DescribeServerlessCaches", request)).thenReturn(true);
+        when(serverlessHandler.handle("DescribeServerlessCaches", request, "us-east-1")).thenReturn(delegated);
 
-        String snapshots = (String) handler.handle("DescribeServerlessCacheSnapshots", params()).getEntity();
-        assertTrue(snapshots.contains("<ServerlessCacheSnapshots></ServerlessCacheSnapshots>"));
-
-        MultivaluedMap<String, String> events = params();
-        events.add("SourceType", "serverless-cache");
-        assertTrue(((String) handler.handle("DescribeEvents", events).getEntity()).contains("<Events></Events>"));
+        assertSame(delegated, handler.handle("DescribeServerlessCaches", request, "us-east-1"));
     }
 
     @Test
-    void serverlessLookups_surfaceTypedNotFoundFaults() {
-        MultivaluedMap<String, String> cacheReq = params();
-        cacheReq.add("ServerlessCacheName", "nope");
-        Response cache = handler.handle("DescribeServerlessCaches", cacheReq);
-        assertEquals(404, cache.getStatus());
-        assertTrue(((String) cache.getEntity()).contains("ServerlessCacheNotFoundFault"));
-
-        for (String action : List.of("DeleteServerlessCacheSnapshot", "ExportServerlessCacheSnapshot")) {
-            MultivaluedMap<String, String> request = params();
-            request.add("ServerlessCacheSnapshotName", "nope");
-            Response response = handler.handle(action, request);
-            assertEquals(404, response.getStatus(), action);
-            assertTrue(((String) response.getEntity()).contains("ServerlessCacheSnapshotNotFoundFault"), action);
-        }
-
-        MultivaluedMap<String, String> copyReq = params();
-        copyReq.add("SourceServerlessCacheSnapshotName", "nope");
-        copyReq.add("TargetServerlessCacheSnapshotName", "nope-copy");
-        Response copy = handler.handle("CopyServerlessCacheSnapshot", copyReq);
-        assertEquals(404, copy.getStatus());
-        assertTrue(((String) copy.getEntity()).contains("ServerlessCacheSnapshotNotFoundFault"));
+    void describeEvents_returnsEmptyEventList() {
+        MultivaluedMap<String, String> events = params();
+        events.add("SourceType", "serverless-cache");
+        assertTrue(((String) handler.handle("DescribeEvents", events).getEntity()).contains("<Events></Events>"));
     }
 
     private static MultivaluedMap<String, String> params() {

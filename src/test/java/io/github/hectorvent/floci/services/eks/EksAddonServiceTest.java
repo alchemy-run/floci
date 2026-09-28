@@ -307,16 +307,42 @@ class EksAddonServiceTest {
     }
 
     @Test
-    void inactiveClusterRejectsOperations() {
+    void inactiveClusterRejectsMutationsButServesReads() {
         Fixture fixture = fixture();
+        fixture.service.create(fixture.cluster, new CreateAddonRequest("coredns", null, null, null, null, null, null, null));
         fixture.cluster.setStatus(ClusterStatus.CREATING);
 
         CreateAddonRequest request = new CreateAddonRequest("vpc-cni", null, null, null, null, null, null, null);
-        assertThrows(AwsException.class, () -> fixture.service.create(fixture.cluster, request));
-        assertThrows(AwsException.class, () -> fixture.service.describe(fixture.cluster, "vpc-cni"));
-        assertThrows(AwsException.class, () -> fixture.service.list(fixture.cluster, null, null));
-        assertThrows(AwsException.class, () -> fixture.service.update(fixture.cluster, "vpc-cni", null));
-        assertThrows(AwsException.class, () -> fixture.service.delete(fixture.cluster, "vpc-cni", false));
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.create(fixture.cluster, request)).getErrorCode());
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.update(fixture.cluster, "coredns", null)).getErrorCode());
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.delete(fixture.cluster, "coredns", false)).getErrorCode());
+
+        assertEquals(List.of("coredns"), fixture.service.list(fixture.cluster, null, null).addons());
+        assertEquals("coredns", fixture.service.describe(fixture.cluster, "coredns").addonName());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> fixture.service.describe(fixture.cluster, "vpc-cni")).getErrorCode());
+    }
+
+    @Test
+    void metricsServerCommunityAddonResolvesDefaultVersionAndIsActive() {
+        Fixture fixture = fixture();
+        fixture.cluster.setVersion("1.29");
+
+        Addon addon = fixture.service.create(fixture.cluster,
+                new CreateAddonRequest("metrics-server", null, null, null, null, null, null, null));
+        assertEquals("metrics-server", addon.addonName());
+        assertEquals("v0.7.2-eksbuild.3", addon.addonVersion());
+        assertEquals("ACTIVE", addon.status());
+        assertEquals("community", addon.owner());
+        assertEquals("eks", addon.publisher());
+        assertEquals(List.of("metrics-server"), fixture.service.list(fixture.cluster, null, null).addons());
+
+        AddonInfo info = fixture.catalog.findAddon("metrics-server").orElseThrow();
+        assertEquals("observability", info.type());
+        assertTrue(fixture.catalog.isVersionSupported("metrics-server", "v0.7.2-eksbuild.1", "1.32"));
     }
 
     @Test
@@ -564,6 +590,20 @@ class EksAddonServiceTest {
                 fixture.service.create(fixture.cluster, tagOver));
         assertEquals("InvalidParameterException", exTags.getErrorCode());
         assertTrue(exTags.getMessage().contains("Too many tags"));
+    }
+
+    @Test
+    void addonUpdatesAreListedPerAddonAndNotAsClusterUpdates() {
+        Fixture fixture = fixture();
+        fixture.service.create(fixture.cluster, new CreateAddonRequest(
+                "vpc-cni", "v1.18.1-eksbuild.1", null, null, null, null, null, null));
+        Update update = fixture.service.update(fixture.cluster, "vpc-cni",
+                new UpdateAddonRequest(null, null, null, null, "{\"env\":{}}", null));
+
+        assertEquals(List.of(update.id()), fixture.service.listUpdateIds(fixture.cluster, "VPC-CNI"));
+        assertTrue(fixture.service.listUpdateIds(fixture.cluster, null).isEmpty());
+        assertEquals(List.of("vpc-cni"), fixture.service.clusterAddons(fixture.cluster).stream()
+                .map(Addon::addonName).toList());
     }
 
     private static Fixture fixture() {

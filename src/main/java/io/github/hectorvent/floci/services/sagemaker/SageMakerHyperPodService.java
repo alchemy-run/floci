@@ -10,12 +10,16 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.eks.EksService;
+import io.github.hectorvent.floci.services.eks.model.AccessConfig;
+import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.ClusterStatus;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.s3.S3Service;
+import io.github.hectorvent.floci.services.sagemaker.SageMakerHyperPodNodeLauncher.NodeLaunch;
 import io.github.hectorvent.floci.services.sagemaker.SageMakerStateSupport.Scheduler;
 import io.github.hectorvent.floci.services.sagemaker.SageMakerStateSupport.StateEvents;
+import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.ClusterNodeResource;
 import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.ClusterResource;
 import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.ClusterSchedulerConfigResource;
 import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.ComputeQuotaResource;
@@ -31,8 +35,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -53,17 +59,22 @@ import static io.github.hectorvent.floci.services.sagemaker.SageMakerService.val
  * SageMaker HyperPod control plane: clusters, cluster policies (ClusterSchedulerConfig) and
  * compute quotas.
  *
- * <p>Floci cannot provision ML instances, so it behaves like an account whose HyperPod
- * "cluster usage" service quotas are all zero: {@code CreateCluster} rejects any instance group
- * that requests instances with AWS's {@code ResourceLimitExceeded}, and only clusters whose
- * instance groups are all sized to zero are created (they report no nodes). Cluster policies and
- * compute quotas are configuration attached to an existing EKS-orchestrated cluster and are
- * stored and versioned like AWS does.
+ * <p>Every instance an instance group asks for becomes a node. A node with a
+ * {@code LifeCycleConfig} is provisioned by running its {@code OnCreate} script for real through
+ * {@link SageMakerHyperPodNodeLauncher}; the cluster reaches {@code InService} once every node is
+ * {@code Running}, and {@code Failed} when a lifecycle script fails during creation. A failed
+ * scale-up during {@code UpdateCluster} drops the failed nodes and returns to {@code InService}
+ * with a {@code FailureMessage}. Cluster policies and compute quotas are configuration attached
+ * to an existing EKS-orchestrated cluster and are stored and versioned like AWS does.
  */
 @ApplicationScoped
 public class SageMakerHyperPodService {
     static final Duration TRANSITION_DURATION = Duration.ofSeconds(2);
     static final String CLUSTER_STATE_CHANGE = "SageMaker HyperPod Cluster State Change";
+
+    /** What HyperPod needs to know about the orchestrating Amazon EKS cluster. */
+    record EksClusterState(String status, String authenticationMode) {
+    }
 
     private static final Pattern CLUSTER_NAME = Pattern.compile("^[a-zA-Z0-9](-*[a-zA-Z0-9]){0,62}$");
     private static final Pattern INSTANCE_GROUP_NAME = Pattern.compile("^[a-zA-Z0-9](-*[a-zA-Z0-9]){0,62}$");
@@ -72,7 +83,9 @@ public class SageMakerHyperPodService {
     private static final Pattern TEAM_NAME = Pattern.compile("^[a-z0-9]([-a-z0-9]*[a-z0-9]){0,39}?$");
     private static final Pattern PRIORITY_CLASS_NAME = Pattern.compile("^[a-z0-9]([-a-z0-9]*[a-z0-9]){0,39}?$");
     private static final Set<String> FAILED_OR_DELETED = Set.of("Deleting", "Deleted");
+    private static final Set<String> EKS_AUTHENTICATION_MODES = Set.of("API", "API_AND_CONFIG_MAP");
     private static final char[] ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
+    private static final char[] HEX_ALPHABET = "0123456789abcdef".toCharArray();
 
     private final StorageBackend<String, ClusterResource> clusters;
     private final StorageBackend<String, ClusterSchedulerConfigResource> schedulerConfigs;
@@ -82,15 +95,16 @@ public class SageMakerHyperPodService {
     private final Clock clock;
     private final Predicate<String> bucketExists;
     private final Predicate<String> roleExists;
-    private final Function<String, Optional<String>> eksClusterStatus;
+    private final Function<String, Optional<EksClusterState>> eksClusterState;
     private final StateEvents events;
     private final Scheduler scheduler;
+    private final SageMakerHyperPodNodeLauncher nodeLauncher;
     private final SecureRandom random = new SecureRandom();
 
     @Inject
     public SageMakerHyperPodService(StorageFactory storageFactory, RegionResolver regionResolver, ObjectMapper mapper,
                                     Instance<S3Service> s3, Instance<IamService> iam, Instance<EksService> eks,
-                                    Instance<EventBridgeService> eventBridge) {
+                                    Instance<EventBridgeService> eventBridge, SageMakerHyperPodNodeRunner nodeRunner) {
         this(storageFactory.create("sagemaker", "sagemaker-clusters.json",
                         new TypeReference<Map<String, ClusterResource>>() {}),
                 storageFactory.create("sagemaker", "sagemaker-cluster-scheduler-configs.json",
@@ -100,9 +114,9 @@ public class SageMakerHyperPodService {
                 regionResolver, mapper, Clock.systemUTC(),
                 SageMakerStateSupport.bucketExists(s3),
                 SageMakerStateSupport.roleExists(iam, regionResolver::getAccountId),
-                eksClusterStatus(eks),
+                eksClusterState(eks),
                 SageMakerStateSupport.eventBridge(eventBridge, mapper),
-                Scheduler.DELAYED);
+                Scheduler.DELAYED, nodeRunner);
     }
 
     SageMakerHyperPodService(StorageBackend<String, ClusterResource> clusters,
@@ -110,8 +124,8 @@ public class SageMakerHyperPodService {
                              StorageBackend<String, ComputeQuotaResource> computeQuotas,
                              RegionResolver regionResolver, ObjectMapper mapper, Clock clock,
                              Predicate<String> bucketExists, Predicate<String> roleExists,
-                             Function<String, Optional<String>> eksClusterStatus,
-                             StateEvents events, Scheduler scheduler) {
+                             Function<String, Optional<EksClusterState>> eksClusterState,
+                             StateEvents events, Scheduler scheduler, SageMakerHyperPodNodeLauncher nodeLauncher) {
         this.clusters = clusters;
         this.schedulerConfigs = schedulerConfigs;
         this.computeQuotas = computeQuotas;
@@ -120,20 +134,25 @@ public class SageMakerHyperPodService {
         this.clock = clock;
         this.bucketExists = bucketExists;
         this.roleExists = roleExists;
-        this.eksClusterStatus = eksClusterStatus;
+        this.eksClusterState = eksClusterState;
         this.events = events;
         this.scheduler = scheduler;
+        this.nodeLauncher = nodeLauncher;
     }
 
-    /** Status of the Floci EKS cluster named by an EKS cluster ARN, when it exists. */
-    private static Function<String, Optional<String>> eksClusterStatus(Instance<EksService> eks) {
+    /** Status and authentication mode of the Floci EKS cluster named by an EKS cluster ARN, when it exists. */
+    private static Function<String, Optional<EksClusterState>> eksClusterState(Instance<EksService> eks) {
         return arn -> {
             if (eks == null || !eks.isResolvable() || !arn.contains(":cluster/")) {
                 return Optional.empty();
             }
             try {
-                ClusterStatus status = eks.get().describeCluster(arn.substring(arn.indexOf(":cluster/") + 9)).getStatus();
-                return Optional.of(status == null ? "" : status.name());
+                Cluster cluster = eks.get().describeCluster(arn.substring(arn.indexOf(":cluster/") + 9));
+                ClusterStatus status = cluster.getStatus();
+                AccessConfig access = cluster.getAccessConfig();
+                String mode = access == null || access.authenticationMode() == null
+                        ? "CONFIG_MAP" : access.authenticationMode();
+                return Optional.of(new EksClusterState(status == null ? "" : status.name(), mode));
             } catch (AwsException e) {
                 return Optional.empty();
             }
@@ -151,17 +170,9 @@ public class SageMakerHyperPodService {
             throw new AwsException("ResourceInUse", "Cluster " + name + " already exists.", 400);
         }
         JsonNode orchestrator = request.path("Orchestrator");
-        String eksArn = text(orchestrator.path("Eks"), "ClusterArn");
         boolean eks = orchestrator.path("Eks").isObject();
         if (eks) {
-            if (eksArn == null || eksArn.isBlank()) {
-                throw validation("Orchestrator.Eks.ClusterArn is required.");
-            }
-            String status = eksClusterStatus.apply(eksArn)
-                    .orElseThrow(() -> validation("The EKS cluster " + eksArn + " does not exist."));
-            if (!"ACTIVE".equals(status)) {
-                throw validation("The EKS cluster " + eksArn + " must be ACTIVE but is " + status + ".");
-            }
+            validateEksOrchestrator(text(orchestrator.path("Eks"), "ClusterArn"));
             if (!request.path("VpcConfig").isObject()) {
                 throw validation("VpcConfig is required for clusters orchestrated by Amazon EKS.");
             }
@@ -172,57 +183,8 @@ public class SageMakerHyperPodService {
             throw validation("At least one of InstanceGroups or RestrictedInstanceGroups must be specified.");
         }
         Set<String> groupNames = new HashSet<>();
-        Map<String, Integer> requestedByType = new LinkedHashMap<>();
         for (JsonNode group : concat(request.path("InstanceGroups"), request.path("RestrictedInstanceGroups"))) {
-            String groupName = required(group, "InstanceGroupName");
-            if (!INSTANCE_GROUP_NAME.matcher(groupName).matches()) {
-                throw validation("InstanceGroupName " + groupName + " must satisfy regular expression pattern: "
-                        + INSTANCE_GROUP_NAME.pattern());
-            }
-            if (!groupNames.add(groupName)) {
-                throw validation("InstanceGroupName " + groupName + " is duplicated.");
-            }
-            String instanceType = required(group, "InstanceType");
-            if (!instanceType.startsWith("ml.")) {
-                throw validation("InstanceType " + instanceType + " of instance group " + groupName + " is not valid.");
-            }
-            JsonNode count = group.path("InstanceCount");
-            if (!count.canConvertToInt() || count.asInt() < 0) {
-                throw validation("InstanceCount of instance group " + groupName + " must be a non-negative integer.");
-            }
-            String executionRole = required(group, "ExecutionRole");
-            if (!SageMakerStateSupport.isRoleArn(executionRole) || !roleExists.test(executionRole)) {
-                throw validation("SageMaker cannot assume the execution role " + executionRole + " of instance group "
-                        + groupName + ". Ensure the role exists and trusts sagemaker.amazonaws.com.");
-            }
-            JsonNode lifeCycle = group.path("LifeCycleConfig");
-            if (lifeCycle.isObject()) {
-                String sourceUri = required(lifeCycle, "SourceS3Uri");
-                S3Uri parsed;
-                try {
-                    parsed = S3Uri.parse(sourceUri);
-                } catch (IllegalArgumentException e) {
-                    throw validation("LifeCycleConfig.SourceS3Uri of instance group " + groupName + ": " + e.getMessage());
-                }
-                if (!bucketExists.test(parsed.bucket())) {
-                    throw validation("The S3 bucket " + parsed.bucket() + " in LifeCycleConfig.SourceS3Uri of instance group "
-                            + groupName + " does not exist.");
-                }
-            } else if (!eks) {
-                throw validation("LifeCycleConfig is required for instance group " + groupName
-                        + " of a Slurm-orchestrated cluster.");
-            }
-            requestedByType.merge(instanceType, count.asInt(), Integer::sum);
-        }
-        // Floci hosts no HyperPod capacity: every "<type> for cluster usage" quota is 0.
-        for (Map.Entry<String, Integer> requested : requestedByType.entrySet()) {
-            if (requested.getValue() > 0) {
-                throw new AwsException("ResourceLimitExceeded", "The account-level service limit '"
-                        + requested.getKey() + " for cluster usage' is 0 Instances, with current utilization of 0 Instances"
-                        + " and a request delta of " + requested.getValue() + " Instances. Please use AWS Service Quotas"
-                        + " to request an increase for this quota. If AWS Service Quotas is not available, contact AWS"
-                        + " support to request an increase for this quota.", 400);
-            }
+            validateInstanceGroup(group, eks, groupNames);
         }
 
         ClusterResource cluster = new ClusterResource();
@@ -231,14 +193,100 @@ public class SageMakerHyperPodService {
         cluster.clusterStatus = "Creating";
         cluster.instanceGroups = new ArrayList<>(groups);
         cluster.restrictedInstanceGroups = new ArrayList<>(restricted);
-        cluster.vpcConfig = request.path("VpcConfig").isObject() ? map(request.path("VpcConfig")) : null;
-        cluster.orchestrator = orchestrator.isObject() ? map(orchestrator) : null;
-        cluster.nodeRecovery = Optional.ofNullable(text(request, "NodeRecovery")).orElse("Automatic");
+        cluster.vpcConfig = objectOrNull(request.path("VpcConfig"));
+        cluster.orchestrator = objectOrNull(orchestrator);
+        cluster.nodeRecovery = nodeRecovery(text(request, "NodeRecovery"), "Automatic");
+        cluster.restrictedInstanceGroupsConfig = objectOrNull(request.path("RestrictedInstanceGroupsConfig"));
+        cluster.tieredStorageConfig = objectOrNull(request.path("TieredStorageConfig"));
+        cluster.nodeProvisioningMode = text(request, "NodeProvisioningMode");
+        cluster.clusterRole = text(request, "ClusterRole");
+        cluster.autoScaling = objectOrNull(request.path("AutoScaling"));
         cluster.creationTime = clock.millis();
+        cluster.lastModifiedTime = cluster.creationTime;
         cluster.region = region;
         cluster.accountId = regionResolver.getAccountId();
         cluster.tags = tagsFromList(request.path("Tags"));
+        List<ClusterNodeResource> pending = new ArrayList<>();
+        for (Map<String, Object> spec : allGroups(cluster)) {
+            pending.addAll(addNodes(cluster, spec, instanceCount(spec)));
+        }
         SageMakerStateSupport.putFor(clusters, cluster.accountId, key(region, name), cluster);
+        launchNodes(cluster, pending);
+        scheduleClusterSettle(cluster);
+        ObjectNode out = mapper.createObjectNode();
+        out.put("ClusterArn", cluster.clusterArn);
+        return out;
+    }
+
+    /**
+     * Updates instance groups (add, resize, reconfigure, delete) and cluster settings. New nodes
+     * run their group's lifecycle scripts; the cluster is {@code Updating} until they finish.
+     */
+    public synchronized ObjectNode updateCluster(JsonNode request, String region) {
+        String nameOrArn = required(request, "ClusterName");
+        ClusterResource cluster = cluster(region, nameOrArn).orElseThrow(() -> clusterNotFound(nameOrArn));
+        if (!"InService".equals(cluster.clusterStatus)) {
+            throw new AwsException("ConflictException", "Cluster " + cluster.clusterName + " is in "
+                    + cluster.clusterStatus + " status. Updates are only allowed when the cluster is InService.", 400);
+        }
+        boolean eks = isEksOrchestrated(cluster);
+        JsonNode orchestrator = request.path("Orchestrator");
+        if (orchestrator.isObject()) {
+            String requestedEks = text(orchestrator.path("Eks"), "ClusterArn");
+            if (orchestrator.path("Eks").isObject() != eks
+                    || (eks && !Objects.equals(requestedEks, eksClusterArn(cluster)))) {
+                throw validation("The orchestrator of cluster " + cluster.clusterName + " cannot be changed.");
+            }
+        }
+
+        Set<String> toDelete = new LinkedHashSet<>();
+        request.path("InstanceGroupsToDelete").forEach(n -> toDelete.add(n.asText()));
+        Set<String> existingNames = new HashSet<>();
+        allGroups(cluster).forEach(spec -> existingNames.add(groupName(spec)));
+        for (String groupName : toDelete) {
+            if (!existingNames.contains(groupName)) {
+                throw validation("Instance group " + groupName + " does not exist in cluster " + cluster.clusterName + ".");
+            }
+        }
+
+        Map<String, String> groupStatus = new LinkedHashMap<>();
+        Set<String> seen = new HashSet<>();
+        List<Map<String, Object>> groups = mergeGroups(cluster.instanceGroups, cluster.restrictedInstanceGroups,
+                request.path("InstanceGroups"), toDelete, eks, seen, groupStatus);
+        List<Map<String, Object>> restricted = mergeGroups(cluster.restrictedInstanceGroups, cluster.instanceGroups,
+                request.path("RestrictedInstanceGroups"), toDelete, eks, seen, groupStatus);
+        if (groups.isEmpty() && restricted.isEmpty()) {
+            throw validation("Cluster " + cluster.clusterName + " must keep at least one instance group.");
+        }
+        String recovery = nodeRecovery(text(request, "NodeRecovery"), cluster.nodeRecovery);
+
+        cluster.instanceGroups = groups;
+        cluster.restrictedInstanceGroups = restricted;
+        cluster.nodeRecovery = recovery;
+        if (request.path("RestrictedInstanceGroupsConfig").isObject()) {
+            cluster.restrictedInstanceGroupsConfig = map(request.path("RestrictedInstanceGroupsConfig"));
+        }
+        if (request.path("TieredStorageConfig").isObject()) {
+            cluster.tieredStorageConfig = map(request.path("TieredStorageConfig"));
+        }
+        if (request.has("NodeProvisioningMode")) {
+            cluster.nodeProvisioningMode = text(request, "NodeProvisioningMode");
+        }
+        if (request.has("ClusterRole")) {
+            cluster.clusterRole = text(request, "ClusterRole");
+        }
+        if (request.path("AutoScaling").isObject()) {
+            cluster.autoScaling = map(request.path("AutoScaling"));
+        }
+
+        List<ClusterNodeResource> pending = resizeNodes(cluster, groupStatus);
+        cluster.instanceGroupStatus = groupStatus;
+        cluster.clusterStatus = "Updating";
+        cluster.failureMessage = null;
+        cluster.lastModifiedTime = clock.millis();
+        SageMakerStateSupport.putFor(clusters, cluster.accountId, key(cluster.region, cluster.clusterName), cluster);
+        publishClusterStateChange(cluster);
+        launchNodes(cluster, pending);
         scheduleClusterSettle(cluster);
         ObjectNode out = mapper.createObjectNode();
         out.put("ClusterArn", cluster.clusterArn);
@@ -260,24 +308,48 @@ public class SageMakerHyperPodService {
         if (!cluster.restrictedInstanceGroups.isEmpty()) {
             renderInstanceGroups(cluster, cluster.restrictedInstanceGroups, out.putArray("RestrictedInstanceGroups"));
         }
+        if (cluster.restrictedInstanceGroupsConfig != null) {
+            out.set("RestrictedInstanceGroupsConfig", mapper.valueToTree(cluster.restrictedInstanceGroupsConfig));
+        }
         if (cluster.vpcConfig != null) {
             out.set("VpcConfig", mapper.valueToTree(cluster.vpcConfig));
         }
         if (cluster.orchestrator != null) {
             out.set("Orchestrator", mapper.valueToTree(cluster.orchestrator));
         }
+        if (cluster.tieredStorageConfig != null) {
+            out.set("TieredStorageConfig", mapper.valueToTree(cluster.tieredStorageConfig));
+        }
         out.put("NodeRecovery", cluster.nodeRecovery);
+        if (cluster.nodeProvisioningMode != null) {
+            out.put("NodeProvisioningMode", cluster.nodeProvisioningMode);
+        }
+        if (cluster.clusterRole != null) {
+            out.put("ClusterRole", cluster.clusterRole);
+        }
+        if (cluster.autoScaling != null) {
+            ObjectNode autoScaling = mapper.valueToTree(cluster.autoScaling);
+            autoScaling.put("Status", "Creating".equals(cluster.clusterStatus) ? "Creating" : "InService");
+            out.set("AutoScaling", autoScaling);
+        }
         return out;
     }
 
-    /** Echoes each group's specification with its (always zero) instance counts. */
+    /** Echoes each group's specification with the counts and status its nodes add up to. */
     private void renderInstanceGroups(ClusterResource cluster, List<Map<String, Object>> specs, ArrayNode out) {
         for (Map<String, Object> spec : specs) {
+            String name = groupName(spec);
             ObjectNode group = mapper.valueToTree(spec);
             group.remove("InstanceCount");
-            group.put("CurrentCount", 0);
-            group.put("TargetCount", 0);
-            group.put("Status", "Creating".equals(cluster.clusterStatus) ? "Creating" : "InService");
+            group.put("CurrentCount", nodesOf(cluster, name).stream().filter(n -> "Running".equals(n.status)).count());
+            group.put("TargetCount", instanceCount(spec));
+            String status = switch (cluster.clusterStatus) {
+                case "Creating" -> "Creating";
+                case "Failed" -> "Failed";
+                case "Deleting" -> "Deleting";
+                default -> cluster.instanceGroupStatus.getOrDefault(name, "InService");
+            };
+            group.put("Status", status);
             out.add(group);
         }
     }
@@ -292,6 +364,11 @@ public class SageMakerHyperPodService {
         if (!"Deleting".equals(cluster.clusterStatus)) {
             cluster.clusterStatus = "Deleting";
             cluster.lastModifiedTime = clock.millis();
+            for (ClusterNodeResource node : cluster.nodes) {
+                nodeLauncher.cancel(node.instanceId);
+                node.status = "ShuttingDown";
+                node.statusMessage = null;
+            }
             SageMakerStateSupport.putFor(clusters, cluster.accountId, key(cluster.region, cluster.clusterName), cluster);
             publishClusterStateChange(cluster);
             scheduleClusterSettle(cluster);
@@ -324,20 +401,336 @@ public class SageMakerHyperPodService {
         });
     }
 
-    /** Floci's HyperPod clusters never hold instances, so an existing cluster lists no nodes. */
     public synchronized ObjectNode listClusterNodes(JsonNode request, String region) {
         String nameOrArn = required(request, "ClusterName");
-        cluster(region, nameOrArn).orElseThrow(() -> clusterNotFound(nameOrArn));
-        ObjectNode out = mapper.createObjectNode();
-        out.putArray("ClusterNodeSummaries");
-        return out;
+        ClusterResource cluster = cluster(region, nameOrArn).orElseThrow(() -> clusterNotFound(nameOrArn));
+        String groupContains = text(request, "InstanceGroupNameContains");
+        List<ClusterNodeResource> filtered = cluster.nodes.stream()
+                .filter(n -> groupContains == null || n.instanceGroupName.contains(groupContains))
+                .filter(createdWithin(request, "CreationTimeAfter", "CreationTimeBefore", n -> n.launchTime))
+                .toList();
+        Comparator<ClusterNodeResource> comparator = switch (Optional.ofNullable(text(request, "SortBy")).orElse("CREATION_TIME")) {
+            case "NAME" -> Comparator.<ClusterNodeResource, String>comparing(n -> n.instanceGroupName)
+                    .thenComparing(n -> n.instanceId);
+            case "CREATION_TIME" -> Comparator.<ClusterNodeResource>comparingLong(n -> n.launchTime)
+                    .thenComparing(n -> n.instanceId);
+            default -> throw validation("SortBy must be one of [CREATION_TIME, NAME].");
+        };
+        return page(sorted(filtered, comparator, request, "Ascending"), request, "ClusterNodeSummaries", (node, n) -> {
+            n.put("InstanceGroupName", node.instanceGroupName);
+            n.put("InstanceId", node.instanceId);
+            n.put("InstanceType", node.instanceType);
+            n.put("LaunchTime", epoch(node.launchTime));
+            renderNodeStatus(node, n);
+        });
     }
 
     public synchronized ObjectNode describeClusterNode(JsonNode request, String region) {
         String nameOrArn = required(request, "ClusterName");
-        cluster(region, nameOrArn).orElseThrow(() -> clusterNotFound(nameOrArn));
-        String nodeId = Optional.ofNullable(text(request, "NodeId")).orElse(text(request, "NodeLogicalId"));
-        throw new AwsException("ResourceNotFound", "Node " + nodeId + " not found in cluster " + nameOrArn + ".", 400);
+        ClusterResource cluster = cluster(region, nameOrArn).orElseThrow(() -> clusterNotFound(nameOrArn));
+        String nodeId = text(request, "NodeId");
+        String logicalId = text(request, "NodeLogicalId");
+        if (nodeId == null && logicalId == null) {
+            throw validation("Either NodeId or NodeLogicalId must be specified.");
+        }
+        ClusterNodeResource node = cluster.nodes.stream()
+                .filter(n -> n.instanceId.equals(nodeId))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFound", "Node "
+                        + Optional.ofNullable(nodeId).orElse(logicalId) + " not found in cluster " + nameOrArn + ".", 400));
+        ObjectNode out = mapper.createObjectNode();
+        ObjectNode details = out.putObject("NodeDetails");
+        details.put("InstanceGroupName", node.instanceGroupName);
+        details.put("InstanceId", node.instanceId);
+        renderNodeStatus(node, details);
+        details.put("InstanceType", node.instanceType);
+        details.put("LaunchTime", epoch(node.launchTime));
+        groupSpec(cluster, node.instanceGroupName)
+                .map(spec -> spec.get("LifeCycleConfig"))
+                .filter(Map.class::isInstance)
+                .ifPresent(lifeCycle -> details.set("LifeCycleConfig", mapper.valueToTree(lifeCycle)));
+        return out;
+    }
+
+    private static void renderNodeStatus(ClusterNodeResource node, ObjectNode out) {
+        ObjectNode status = out.putObject("InstanceStatus");
+        status.put("Status", node.status);
+        if (node.statusMessage != null) {
+            status.put("Message", node.statusMessage);
+        }
+    }
+
+    // ─────────────────────────── Nodes ───────────────────────────
+
+    /** Adds {@code count} nodes to a group: pending when the group has lifecycle scripts to run, else running. */
+    private List<ClusterNodeResource> addNodes(ClusterResource cluster, Map<String, Object> spec, int count) {
+        List<ClusterNodeResource> pending = new ArrayList<>();
+        boolean lifecycle = spec.get("LifeCycleConfig") instanceof Map<?, ?>;
+        for (int i = 0; i < count; i++) {
+            ClusterNodeResource node = new ClusterNodeResource();
+            node.instanceGroupName = groupName(spec);
+            node.instanceId = newInstanceId();
+            node.instanceType = SageMakerEndpointManager.string(spec.get("InstanceType"));
+            node.launchTime = clock.millis();
+            node.status = lifecycle ? "Pending" : "Running";
+            cluster.nodes.add(node);
+            if (lifecycle) {
+                pending.add(node);
+            }
+        }
+        return pending;
+    }
+
+    /**
+     * Brings every group's nodes to its {@code InstanceCount}: nodes of deleted groups and the
+     * newest surplus nodes are terminated, missing ones added. Returns the nodes to provision.
+     */
+    private List<ClusterNodeResource> resizeNodes(ClusterResource cluster, Map<String, String> groupStatus) {
+        List<Map<String, Object>> specs = allGroups(cluster);
+        Set<String> names = new HashSet<>();
+        specs.forEach(spec -> names.add(groupName(spec)));
+        for (ClusterNodeResource node : List.copyOf(cluster.nodes)) {
+            if (!names.contains(node.instanceGroupName)) {
+                removeNode(cluster, node);
+            }
+        }
+        List<ClusterNodeResource> pending = new ArrayList<>();
+        for (Map<String, Object> spec : specs) {
+            String name = groupName(spec);
+            List<ClusterNodeResource> current = nodesOf(cluster, name);
+            int target = instanceCount(spec);
+            if (current.size() < target) {
+                pending.addAll(addNodes(cluster, spec, target - current.size()));
+                groupStatus.putIfAbsent(name, "Updating");
+            } else if (current.size() > target) {
+                current.stream()
+                        .sorted(Comparator.<ClusterNodeResource>comparingLong(n -> n.launchTime).reversed())
+                        .limit(current.size() - target)
+                        .forEach(node -> removeNode(cluster, node));
+                groupStatus.putIfAbsent(name, "Updating");
+            }
+        }
+        return pending;
+    }
+
+    private void removeNode(ClusterResource cluster, ClusterNodeResource node) {
+        nodeLauncher.cancel(node.instanceId);
+        cluster.nodes.remove(node);
+    }
+
+    private void launchNodes(ClusterResource cluster, List<ClusterNodeResource> pending) {
+        if (pending.isEmpty()) {
+            return;
+        }
+        String resourceConfig = resourceConfig(cluster);
+        String clusterKey = key(cluster.region, cluster.clusterName);
+        String accountId = cluster.accountId;
+        for (ClusterNodeResource node : pending) {
+            Map<?, ?> lifeCycle = groupSpec(cluster, node.instanceGroupName)
+                    .map(spec -> spec.get("LifeCycleConfig"))
+                    .filter(Map.class::isInstance)
+                    .map(Map.class::cast)
+                    .orElse(Map.of());
+            NodeLaunch launch = new NodeLaunch(accountId, cluster.region, cluster.clusterArn, clusterId(cluster),
+                    cluster.clusterName, node.instanceGroupName, node.instanceId, node.instanceType,
+                    SageMakerEndpointManager.string(lifeCycle.get("SourceS3Uri")),
+                    SageMakerEndpointManager.string(lifeCycle.get("OnCreate")), resourceConfig);
+            String instanceId = node.instanceId;
+            nodeLauncher.launch(launch, (succeeded, message) ->
+                    nodeCompleted(accountId, clusterKey, instanceId, succeeded, message));
+        }
+    }
+
+    private synchronized void nodeCompleted(String accountId, String clusterKey, String instanceId,
+                                            boolean succeeded, String message) {
+        Optional<ClusterResource> stored = SageMakerStateSupport.getFor(clusters, accountId, clusterKey);
+        if (stored.isEmpty()) {
+            return;
+        }
+        ClusterResource cluster = stored.get();
+        Optional<ClusterNodeResource> node = cluster.nodes.stream()
+                .filter(n -> n.instanceId.equals(instanceId))
+                .findFirst();
+        if (node.isEmpty() || !"Pending".equals(node.get().status)) {
+            return;
+        }
+        node.get().status = succeeded ? "Running" : "Failure";
+        node.get().statusMessage = succeeded ? null : message;
+        SageMakerStateSupport.putFor(clusters, accountId, clusterKey, cluster);
+        settleCluster(cluster);
+    }
+
+    /** The {@code /opt/ml/config/resource_config.json} HyperPod hands every node's lifecycle scripts. */
+    private String resourceConfig(ClusterResource cluster) {
+        ObjectNode root = mapper.createObjectNode();
+        ObjectNode clusterConfig = root.putObject("ClusterConfig");
+        clusterConfig.put("ClusterArn", cluster.clusterArn);
+        clusterConfig.put("ClusterName", cluster.clusterName);
+        ArrayNode groups = root.putArray("InstanceGroups");
+        for (Map<String, Object> spec : allGroups(cluster)) {
+            String name = groupName(spec);
+            ObjectNode group = groups.addObject();
+            group.put("Name", name);
+            group.put("InstanceType", SageMakerEndpointManager.string(spec.get("InstanceType")));
+            ArrayNode instances = group.putArray("Instances");
+            int index = 1;
+            for (ClusterNodeResource node : nodesOf(cluster, name)) {
+                ObjectNode instance = instances.addObject();
+                instance.put("InstanceName", name + "-" + index++);
+                instance.put("InstanceId", node.instanceId);
+            }
+        }
+        return root.toString();
+    }
+
+    private static List<ClusterNodeResource> nodesOf(ClusterResource cluster, String groupName) {
+        return cluster.nodes.stream().filter(n -> groupName.equals(n.instanceGroupName)).toList();
+    }
+
+    private static List<Map<String, Object>> allGroups(ClusterResource cluster) {
+        List<Map<String, Object>> all = new ArrayList<>(cluster.instanceGroups);
+        all.addAll(cluster.restrictedInstanceGroups);
+        return all;
+    }
+
+    private static Optional<Map<String, Object>> groupSpec(ClusterResource cluster, String groupName) {
+        return allGroups(cluster).stream().filter(spec -> groupName.equals(groupName(spec))).findFirst();
+    }
+
+    private static String groupName(Map<String, Object> spec) {
+        return SageMakerEndpointManager.string(spec.get("InstanceGroupName"));
+    }
+
+    private static int instanceCount(Map<String, Object> spec) {
+        return spec.get("InstanceCount") instanceof Number count ? count.intValue() : 0;
+    }
+
+    private static String clusterId(ClusterResource cluster) {
+        return cluster.clusterArn.substring(cluster.clusterArn.lastIndexOf('/') + 1);
+    }
+
+    /**
+     * Merges an update's group specifications into one list of existing groups. A new group is
+     * {@code Creating}; a changed one {@code Updating}. The instance type of an existing group is fixed.
+     */
+    private List<Map<String, Object>> mergeGroups(List<Map<String, Object>> current, List<Map<String, Object>> otherList,
+                                                  JsonNode requested, Set<String> toDelete, boolean eks,
+                                                  Set<String> seen, Map<String, String> groupStatus) {
+        Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
+        for (Map<String, Object> spec : current) {
+            merged.put(groupName(spec), spec);
+        }
+        Set<String> otherNames = new HashSet<>();
+        otherList.forEach(spec -> otherNames.add(groupName(spec)));
+        for (JsonNode group : requested) {
+            validateInstanceGroup(group, eks, seen);
+            String name = text(group, "InstanceGroupName");
+            if (toDelete.contains(name)) {
+                throw validation("Instance group " + name + " cannot be both updated and deleted.");
+            }
+            if (otherNames.contains(name)) {
+                throw validation("InstanceGroupName " + name + " is duplicated.");
+            }
+            Map<String, Object> spec = map(group);
+            Map<String, Object> prior = merged.get(name);
+            if (prior == null) {
+                groupStatus.put(name, "Creating");
+            } else {
+                if (!Objects.equals(prior.get("InstanceType"), spec.get("InstanceType"))) {
+                    throw validation("The InstanceType of instance group " + name + " cannot be changed from "
+                            + prior.get("InstanceType") + " to " + spec.get("InstanceType") + ".");
+                }
+                if (!prior.equals(spec)) {
+                    groupStatus.put(name, "Updating");
+                }
+            }
+            merged.put(name, spec);
+        }
+        toDelete.forEach(merged::remove);
+        return new ArrayList<>(merged.values());
+    }
+
+    private void validateInstanceGroup(JsonNode group, boolean eks, Set<String> groupNames) {
+        String groupName = required(group, "InstanceGroupName");
+        if (!INSTANCE_GROUP_NAME.matcher(groupName).matches()) {
+            throw validation("InstanceGroupName " + groupName + " must satisfy regular expression pattern: "
+                    + INSTANCE_GROUP_NAME.pattern());
+        }
+        if (!groupNames.add(groupName)) {
+            throw validation("InstanceGroupName " + groupName + " is duplicated.");
+        }
+        String instanceType = required(group, "InstanceType");
+        if (!instanceType.startsWith("ml.")) {
+            throw validation("InstanceType " + instanceType + " of instance group " + groupName + " is not valid.");
+        }
+        JsonNode count = group.path("InstanceCount");
+        if (!count.canConvertToInt() || count.asInt() < 0) {
+            throw validation("InstanceCount of instance group " + groupName + " must be a non-negative integer.");
+        }
+        String executionRole = required(group, "ExecutionRole");
+        if (!SageMakerStateSupport.isRoleArn(executionRole) || !roleExists.test(executionRole)) {
+            throw validation("SageMaker cannot assume the execution role " + executionRole + " of instance group "
+                    + groupName + ". Ensure the role exists and trusts sagemaker.amazonaws.com.");
+        }
+        JsonNode lifeCycle = group.path("LifeCycleConfig");
+        if (lifeCycle.isObject()) {
+            String sourceUri = required(lifeCycle, "SourceS3Uri");
+            required(lifeCycle, "OnCreate");
+            S3Uri parsed;
+            try {
+                parsed = S3Uri.parse(sourceUri);
+            } catch (IllegalArgumentException e) {
+                throw validation("LifeCycleConfig.SourceS3Uri of instance group " + groupName + ": " + e.getMessage());
+            }
+            if (!bucketExists.test(parsed.bucket())) {
+                throw validation("The S3 bucket " + parsed.bucket() + " in LifeCycleConfig.SourceS3Uri of instance group "
+                        + groupName + " does not exist.");
+            }
+        } else if (!eks) {
+            throw validation("LifeCycleConfig is required for instance group " + groupName
+                    + " of a Slurm-orchestrated cluster.");
+        }
+    }
+
+    /** HyperPod attaches to an ACTIVE EKS cluster that grants access through EKS access entries. */
+    private void validateEksOrchestrator(String eksArn) {
+        if (eksArn == null || eksArn.isBlank()) {
+            throw validation("Orchestrator.Eks.ClusterArn is required.");
+        }
+        EksClusterState state = eksClusterState.apply(eksArn)
+                .orElseThrow(() -> validation("The EKS cluster " + eksArn + " does not exist."));
+        if (!"ACTIVE".equals(state.status())) {
+            throw validation("The EKS cluster " + eksArn + " must be ACTIVE but is " + state.status() + ".");
+        }
+        if (!EKS_AUTHENTICATION_MODES.contains(state.authenticationMode())) {
+            throw validation("The EKS cluster " + eksArn + " uses the " + state.authenticationMode()
+                    + " authentication mode. SageMaker HyperPod requires the API or API_AND_CONFIG_MAP"
+                    + " authentication mode.");
+        }
+    }
+
+    private static boolean isEksOrchestrated(ClusterResource cluster) {
+        return cluster.orchestrator != null && cluster.orchestrator.get("Eks") instanceof Map<?, ?>;
+    }
+
+    private static String eksClusterArn(ClusterResource cluster) {
+        return cluster.orchestrator != null && cluster.orchestrator.get("Eks") instanceof Map<?, ?> eks
+                ? SageMakerEndpointManager.string(eks.get("ClusterArn"))
+                : null;
+    }
+
+    private static String nodeRecovery(String requested, String current) {
+        if (requested == null) {
+            return current;
+        }
+        if (!Set.of("Automatic", "None").contains(requested)) {
+            throw validation("NodeRecovery must be one of [Automatic, None].");
+        }
+        return requested;
+    }
+
+    private static Map<String, Object> objectOrNull(JsonNode node) {
+        return node.isObject() ? map(node) : null;
     }
 
     // ─────────────────────────── Cluster policies ───────────────────────────
@@ -658,19 +1051,80 @@ public class SageMakerHyperPodService {
 
     // ─────────────────────────── Status transitions ───────────────────────────
 
+    /**
+     * A creating or updating cluster settles once no node is still provisioning and the minimum
+     * transition time has passed; a deleting one disappears after the transition time.
+     */
     private Optional<ClusterResource> settleCluster(ClusterResource cluster) {
         long now = clock.millis();
         String clusterKey = key(cluster.region, cluster.clusterName);
-        if ("Creating".equals(cluster.clusterStatus) && now >= cluster.creationTime + TRANSITION_DURATION.toMillis()) {
-            cluster.clusterStatus = "InService";
-            SageMakerStateSupport.putFor(clusters, cluster.accountId, clusterKey, cluster);
-            publishClusterStateChange(cluster);
+        boolean creating = "Creating".equals(cluster.clusterStatus);
+        if (creating || "Updating".equals(cluster.clusterStatus)) {
+            boolean interrupted = failInterruptedNodes(cluster);
+            long since = creating ? cluster.creationTime : cluster.lastModifiedTime;
+            boolean provisioning = cluster.nodes.stream().anyMatch(n -> "Pending".equals(n.status));
+            if (!provisioning && now >= since + TRANSITION_DURATION.toMillis()) {
+                completeTransition(cluster, creating);
+                SageMakerStateSupport.putFor(clusters, cluster.accountId, clusterKey, cluster);
+                publishClusterStateChange(cluster);
+            } else if (interrupted) {
+                SageMakerStateSupport.putFor(clusters, cluster.accountId, clusterKey, cluster);
+            }
         } else if ("Deleting".equals(cluster.clusterStatus)
                 && now >= cluster.lastModifiedTime + TRANSITION_DURATION.toMillis()) {
             SageMakerStateSupport.deleteFor(clusters, cluster.accountId, clusterKey);
             return Optional.empty();
         }
         return Optional.of(cluster);
+    }
+
+    /**
+     * A pending node whose provisioning is no longer in flight in this process (the emulator
+     * restarted mid-provisioning) can never finish, so it fails instead of blocking the cluster.
+     */
+    private boolean failInterruptedNodes(ClusterResource cluster) {
+        boolean changed = false;
+        for (ClusterNodeResource node : cluster.nodes) {
+            if ("Pending".equals(node.status) && !nodeLauncher.inFlight(node.instanceId)) {
+                node.status = "Failure";
+                node.statusMessage = "Node provisioning was interrupted before its lifecycle scripts completed.";
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /**
+     * Ends a create or update. Failed lifecycle scripts fail a create outright (its instances are
+     * released); during an update the failed new nodes are dropped, their groups' target counts
+     * rolled back to the nodes that are running, and the cluster returns to service.
+     */
+    private void completeTransition(ClusterResource cluster, boolean creating) {
+        List<ClusterNodeResource> failed = cluster.nodes.stream().filter(n -> "Failure".equals(n.status)).toList();
+        cluster.instanceGroupStatus = new LinkedHashMap<>();
+        if (failed.isEmpty()) {
+            cluster.clusterStatus = "InService";
+            return;
+        }
+        String message = "Lifecycle scripts did not run successfully on " + failed.size() + " node(s) ("
+                + failed.getFirst().instanceId + ": " + failed.getFirst().statusMessage + "). To view lifecycle"
+                + " script logs, visit log group '/aws/sagemaker/Clusters/" + cluster.clusterName + "/"
+                + clusterId(cluster) + "'.";
+        if (creating) {
+            cluster.nodes.clear();
+            cluster.clusterStatus = "Failed";
+        } else {
+            cluster.nodes.removeAll(failed);
+            Set<String> affected = new HashSet<>();
+            failed.forEach(node -> affected.add(node.instanceGroupName));
+            for (Map<String, Object> spec : allGroups(cluster)) {
+                if (affected.contains(groupName(spec))) {
+                    spec.put("InstanceCount", nodesOf(cluster, groupName(spec)).size());
+                }
+            }
+            cluster.clusterStatus = "InService";
+        }
+        cluster.failureMessage = message;
     }
 
     private Optional<ClusterSchedulerConfigResource> settleSchedulerConfig(ClusterSchedulerConfigResource config) {
@@ -906,7 +1360,11 @@ public class SageMakerHyperPodService {
     }
 
     private static <T> List<T> sorted(List<T> items, Comparator<T> comparator, JsonNode request) {
-        String order = Optional.ofNullable(text(request, "SortOrder")).orElse("Descending");
+        return sorted(items, comparator, request, "Descending");
+    }
+
+    private static <T> List<T> sorted(List<T> items, Comparator<T> comparator, JsonNode request, String defaultOrder) {
+        String order = Optional.ofNullable(text(request, "SortOrder")).orElse(defaultOrder);
         if (!Set.of("Ascending", "Descending").contains(order)) {
             throw validation("SortOrder must be one of [Ascending, Descending].");
         }
@@ -944,6 +1402,15 @@ public class SageMakerHyperPodService {
             id[i] = ID_ALPHABET[random.nextInt(ID_ALPHABET.length)];
         }
         return new String(id);
+    }
+
+    /** An EC2-style instance id, {@code i-} followed by 17 hex digits. */
+    private String newInstanceId() {
+        char[] id = new char[17];
+        for (int i = 0; i < id.length; i++) {
+            id[i] = HEX_ALPHABET[random.nextInt(HEX_ALPHABET.length)];
+        }
+        return "i-" + new String(id);
     }
 
     private String arn(String region, String resource) {

@@ -19,6 +19,32 @@ public final class AwsRegions {
             "ap-south-1", "sa-east-1", "ca-central-1");
 
     /**
+     * Commercial regions every AWS account can use without opting in (AWS Account Management
+     * reports these as {@code ENABLED_BY_DEFAULT}; they cannot be enabled or disabled).
+     */
+    public static final List<String> ENABLED_BY_DEFAULT = List.of(
+            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+            "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
+            "ap-southeast-1", "ap-southeast-2", "ca-central-1",
+            "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1",
+            "sa-east-1");
+
+    /**
+     * Commercial regions launched after March 20, 2019, which are disabled until the account
+     * opts in through AWS Account Management's EnableRegion.
+     */
+    public static final List<String> OPT_IN = List.of(
+            "af-south-1",
+            "ap-east-1", "ap-east-2",
+            "ap-south-2",
+            "ap-southeast-3", "ap-southeast-4", "ap-southeast-5", "ap-southeast-6", "ap-southeast-7",
+            "ca-west-1",
+            "eu-central-2", "eu-south-1", "eu-south-2",
+            "il-central-1",
+            "me-central-1", "me-south-1",
+            "mx-central-1");
+
+    /**
      * Every published AWS region id, across the commercial, GovCloud and China partitions.
      *
      * <p>Distinct from {@link #ALL}, and deliberately a superset of it. {@code ALL} is what

@@ -28,6 +28,7 @@ import jakarta.ws.rs.core.Response;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,11 +42,13 @@ public class MskController {
     private static final String PROVISIONED_CLUSTER_TYPE = "PROVISIONED";
 
     private final MskService mskService;
+    private final MskTopicService topicService;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public MskController(MskService mskService, ObjectMapper objectMapper) {
+    public MskController(MskService mskService, MskTopicService topicService, ObjectMapper objectMapper) {
         this.mskService = mskService;
+        this.topicService = topicService;
         this.objectMapper = objectMapper;
     }
 
@@ -114,15 +117,70 @@ public class MskController {
 
     @GET
     @Path("/v1/clusters/{clusterArn}/topics")
-    public Response listTopics(@PathParam("clusterArn") String clusterArn) {
-        return topicControlPlaneUnavailable(clusterArn);
+    public Response listTopics(@PathParam("clusterArn") String clusterArn,
+                               @QueryParam("maxResults") String maxResultsParam,
+                               @QueryParam("nextToken") String nextToken,
+                               @QueryParam("topicNameFilter") String topicNameFilter) {
+        PaginatedResult<MskTopicService.TopicView> page = topicService.listTopics(clusterArn,
+                Pagination.parseMaxResults(maxResultsParam, "BadRequestException"), nextToken, topicNameFilter);
+        List<Map<String, Object>> topics = page.items().stream().map(topic -> {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("topicArn", topic.topicArn());
+            view.put("topicName", topic.topicName());
+            view.put("partitionCount", topic.partitionCount());
+            view.put("replicationFactor", topic.replicationFactor());
+            view.put("outOfSyncReplicaCount", topic.outOfSyncReplicaCount());
+            return view;
+        }).toList();
+        Map<String, Object> response = new HashMap<>();
+        response.put("topics", topics);
+        putIfPresent(response, "nextToken", page.nextToken());
+        return Response.ok(response).build();
     }
 
     @GET
     @Path("/v1/clusters/{clusterArn}/topics/{topicName}")
     public Response describeTopic(@PathParam("clusterArn") String clusterArn,
                                   @PathParam("topicName") String topicName) {
-        return topicControlPlaneUnavailable(clusterArn);
+        MskTopicService.TopicView topic = topicService.describeTopic(clusterArn, topicName);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("topicArn", topic.topicArn());
+        response.put("topicName", topic.topicName());
+        response.put("partitionCount", topic.partitionCount());
+        response.put("replicationFactor", topic.replicationFactor());
+        response.put("status", topic.status());
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/v1/clusters/{clusterArn}/topics/{topicName}/partitions")
+    public Response describeTopicPartitions(@PathParam("clusterArn") String clusterArn,
+                                            @PathParam("topicName") String topicName,
+                                            @QueryParam("maxResults") String maxResultsParam,
+                                            @QueryParam("nextToken") String nextToken) {
+        PaginatedResult<KafkaTopicClient.Partition> page = topicService.describeTopicPartitions(clusterArn,
+                topicName, Pagination.parseMaxResults(maxResultsParam, "BadRequestException"), nextToken);
+        List<Map<String, Object>> partitions = page.items().stream().map(partition -> {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("partition", partition.partition());
+            view.put("leader", partition.leader());
+            view.put("replicas", partition.replicas());
+            view.put("isr", partition.isr());
+            return view;
+        }).toList();
+        Map<String, Object> response = new HashMap<>();
+        response.put("partitions", partitions);
+        putIfPresent(response, "nextToken", page.nextToken());
+        return Response.ok(response).build();
+    }
+
+    @DELETE
+    @Path("/v1/clusters/{clusterArn}/topics/{topicName}")
+    public Response deleteTopic(@PathParam("clusterArn") String clusterArn,
+                                @PathParam("topicName") String topicName) {
+        MskTopicService.TopicView topic = topicService.deleteTopic(clusterArn, topicName);
+        return Response.ok(Map.of("topicArn", topic.topicArn(), "topicName", topic.topicName(),
+                "status", topic.status())).build();
     }
 
     @POST
@@ -143,7 +201,15 @@ public class MskController {
         }
         requirePositiveInteger(request, "partitionCount");
         requirePositiveInteger(request, "replicationFactor");
-        return topicControlPlaneUnavailable(clusterArn);
+        JsonNode configs = request.path("configs");
+        if (!configs.isMissingNode() && !configs.isNull() && !configs.isTextual()) {
+            throw topicValidationError("configs", "configs must be a Base64-encoded string.");
+        }
+        MskTopicService.TopicView topic = topicService.createTopic(clusterArn, topicName.asText(),
+                request.path("partitionCount").intValue(), request.path("replicationFactor").intValue(),
+                configs.isTextual() ? configs.asText() : null);
+        return Response.ok(Map.of("topicArn", topic.topicArn(), "topicName", topic.topicName(),
+                "status", topic.status())).build();
     }
 
     private void requirePositiveInteger(JsonNode request, String field) {
@@ -155,12 +221,6 @@ public class MskController {
 
     private AwsException topicValidationError(String field, String message) {
         return new AwsException("BadRequestException", message, 400, Map.of("invalidParameter", field));
-    }
-
-    private Response topicControlPlaneUnavailable(String clusterArn) {
-        mskService.describeCluster(clusterArn);
-        // Topic metadata must come from the broker, not an independent control-plane store.
-        throw new AwsException("UnsupportedOperationException", "MSK topic control-plane operations are not implemented.", 501);
     }
 
     // ── Configurations ───────────────────────────────────────────────────────

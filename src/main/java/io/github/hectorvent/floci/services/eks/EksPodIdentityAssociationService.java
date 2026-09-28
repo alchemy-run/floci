@@ -37,7 +37,7 @@ public class EksPodIdentityAssociationService {
     }
 
     public PodIdentityAssociation describe(Cluster cluster, String associationId) {
-        requireActiveCluster(cluster);
+        requireCluster(cluster);
         return toModel(associations.describe(cluster, associationId));
     }
 
@@ -55,7 +55,7 @@ public class EksPodIdentityAssociationService {
     }
 
     public Page list(Cluster cluster, String namespace, String serviceAccount, Integer maxResults, String nextToken) {
-        requireActiveCluster(cluster);
+        requireCluster(cluster);
         EksPodIdentityService.Page page = associations.list(cluster, namespace, serviceAccount, maxResults, nextToken);
         return new Page(page.associations().stream().map(value -> new PodIdentityAssociationSummary(
                 value.clusterName(), value.namespace(), value.serviceAccount(), value.associationArn(),
@@ -84,10 +84,15 @@ public class EksPodIdentityAssociationService {
                 association.disableSessionTags(), association.externalId(), association.policy());
     }
 
-    private static void requireActiveCluster(Cluster cluster) {
+    /** Reads stay available while the cluster is CREATING or UPDATING, as they do on EKS. */
+    private static void requireCluster(Cluster cluster) {
         if (cluster == null) {
             throw new AwsException("ResourceNotFoundException", "Cluster not found", 404);
         }
+    }
+
+    private static void requireActiveCluster(Cluster cluster) {
+        requireCluster(cluster);
         if (cluster.getStatus() != ClusterStatus.ACTIVE) {
             throw new AwsException("InvalidRequestException", "Cluster must be ACTIVE", 400);
         }

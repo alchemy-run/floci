@@ -243,15 +243,27 @@ class EksPodIdentityAssociationServiceTest {
     }
 
     @Test
-    void inactiveClusterRejectsOperations() {
+    void inactiveClusterRejectsMutationsButServesReads() {
         Fixture fixture = fixture();
-        fixture.cluster.setStatus(ClusterStatus.CREATING);
-
         CreatePodIdentityAssociationRequest request = new CreatePodIdentityAssociationRequest(
                 fixture.cluster.getName(), NAMESPACE, SERVICE_ACCOUNT, ROLE, null, Map.of(), null, null, null);
-        assertThrows(AwsException.class, () -> fixture.service.create(fixture.cluster, request));
-        assertThrows(AwsException.class, () -> fixture.service.describe(fixture.cluster, "a-123"));
-        assertThrows(AwsException.class, () -> fixture.service.list(fixture.cluster, null, null, null, null));
+        PodIdentityAssociation created = fixture.service.create(fixture.cluster, request);
+        fixture.cluster.setStatus(ClusterStatus.CREATING);
+
+        CreatePodIdentityAssociationRequest another = new CreatePodIdentityAssociationRequest(
+                fixture.cluster.getName(), NAMESPACE, "other", ROLE, null, Map.of(), null, null, null);
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.create(fixture.cluster, another)).getErrorCode());
+        assertEquals("InvalidRequestException", assertThrows(AwsException.class,
+                () -> fixture.service.delete(fixture.cluster, created.associationId())).getErrorCode());
+
+        // Enumerating every cluster (e.g. an IaC list) must not fail on one that is still CREATING.
+        assertEquals(List.of(created.associationId()), fixture.service.list(fixture.cluster, null, null, null, null)
+                .associations().stream().map(summary -> summary.associationId()).toList());
+        assertEquals(created.associationArn(),
+                fixture.service.describe(fixture.cluster, created.associationId()).associationArn());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> fixture.service.describe(fixture.cluster, "a-123")).getErrorCode());
     }
 
     @Test

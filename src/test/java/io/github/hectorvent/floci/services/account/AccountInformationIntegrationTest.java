@@ -92,11 +92,29 @@ class AccountInformationIntegrationTest {
             post(OWNER, "us-east-1", "listRegions", body).statusCode(400)
                     .body("__type", equalTo("ValidationException"));
         }
-        post(OWNER, "us-east-1", "enableRegion", "{\"RegionName\":\"ap-east-1\"}")
-                .statusCode(400).body("__type", equalTo("ValidationException"))
-                .body("message", containsString("activation is not supported"));
+        post(OWNER, "us-east-1", "enableRegion", "{\"RegionName\":\"us-east-1\"}")
+                .statusCode(400).body("__type", equalTo("ValidationException"));
         post(OWNER, "us-east-1", "disableRegion", "{\"RegionName\":\"us-east-1\"}")
                 .statusCode(400).body("__type", equalTo("ValidationException"));
+    }
+
+    @Test
+    void optInRegionEnablesThenDisablesAcrossReads() {
+        String account = "731000000001";
+        post(account, "us-east-1", "getRegionOptStatus", "{\"RegionName\":\"me-central-1\"}")
+                .statusCode(200).body("RegionOptStatus", equalTo("DISABLED"));
+        post(account, "us-east-1", "enableRegion", "{\"RegionName\":\"me-central-1\"}").statusCode(200);
+        post(account, "us-east-1", "disableRegion", "{\"RegionName\":\"me-central-1\"}")
+                .statusCode(409).body("__type", equalTo("ConflictException"));
+        post(account, "us-east-1", "getRegionOptStatus", "{\"RegionName\":\"me-central-1\"}")
+                .statusCode(200).body("RegionOptStatus", equalTo("ENABLING"));
+        post(account, "us-east-1", "listRegions", "{\"RegionOptStatusContains\":[\"ENABLED\"]}")
+                .statusCode(200).body("Regions.RegionName", equalTo(List.of("me-central-1")));
+        post(account, "us-east-1", "disableRegion", "{\"RegionName\":\"me-central-1\"}").statusCode(200);
+        post(account, "us-east-1", "getRegionOptStatus", "{\"RegionName\":\"me-central-1\"}")
+                .statusCode(200).body("RegionOptStatus", equalTo("DISABLING"));
+        post(account, "us-east-1", "getRegionOptStatus", "{\"RegionName\":\"me-central-1\"}")
+                .statusCode(200).body("RegionOptStatus", equalTo("DISABLED"));
     }
 
     private static ValidatableResponse post(String account, String region, String operation, String body) {

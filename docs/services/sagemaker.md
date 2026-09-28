@@ -8,7 +8,7 @@ Floci emulates SageMaker control-plane APIs and runs real Docker containers for 
 | --- | --- |
 | Models | `CreateModel`, `DescribeModel`, `DeleteModel`, `ListModels` |
 | Endpoint configs | `CreateEndpointConfig`, `DescribeEndpointConfig`, `DeleteEndpointConfig`, `ListEndpointConfigs` |
-| Endpoints | `CreateEndpoint`, `DescribeEndpoint`, `UpdateEndpoint`, `DeleteEndpoint`, `ListEndpoints` |
+| Endpoints | `CreateEndpoint`, `DescribeEndpoint`, `UpdateEndpoint`, `UpdateEndpointWeightsAndCapacities`, `DeleteEndpoint`, `ListEndpoints` |
 | Training | `CreateTrainingJob`, `DescribeTrainingJob`, `ListTrainingJobs`, `StopTrainingJob` |
 | Tags | `AddTags`, `ListTags`, `DeleteTags` |
 | Runtime | `POST /endpoints/{EndpointName}/invocations` |
@@ -27,10 +27,11 @@ Floci emulates SageMaker control-plane APIs and runs real Docker containers for 
 | `DeleteEndpointConfig` | Deletes an endpoint configuration by name, scoped to the calling region. |
 | `ListEndpointConfigs` | Lists endpoint configurations for the calling region; supports `MaxResults` and `NextToken`. |
 | `CreateEndpoint` | Starts hosting the configured model image asynchronously; the endpoint is `Creating` until the container passes its `/ping` check. |
-| `DescribeEndpoint` | Returns an endpoint's status, scoped to the calling region. |
+| `DescribeEndpoint` | Returns an endpoint's status, scoped to the calling region; once `InService` it reports `ProductionVariants` (weights, instance counts or serverless config, and `DeployedImages` with the digest-resolved image). |
 | `DeleteEndpoint` | Stops and removes the endpoint's container; a start still in flight for this endpoint discards its result instead of resurrecting the deleted record. |
 | `ListEndpoints` | Lists endpoints for the calling region; supports `MaxResults` and `NextToken`. |
 | `UpdateEndpoint` | Swaps an endpoint to a new endpoint configuration, restarting its container; a superseded in-flight start discards its result. |
+| `UpdateEndpointWeightsAndCapacities` | Applies desired weights, instance counts, or serverless concurrency to an `InService` endpoint's variants; the new values take effect immediately. |
 | `CreateTrainingJob` | Runs `AlgorithmSpecification.TrainingImage` asynchronously against the `/opt/ml` contract and uploads the resulting model artifacts to S3. |
 | `DescribeTrainingJob` | Returns a training job's status, scoped to the calling region. |
 | `ListTrainingJobs` | Lists training jobs for the calling region; supports `NameContains`, `StatusEquals`, `MaxResults`, and `NextToken`. |
@@ -40,12 +41,13 @@ Floci emulates SageMaker control-plane APIs and runs real Docker containers for 
 | `UpdateFeatureGroup` | - |
 | `DeleteFeatureGroup` | - |
 | `ListFeatureGroups` | - |
-| `CreateCluster` | - |
-| `DescribeCluster` | - |
-| `DeleteCluster` | - |
+| `CreateCluster` | Creates a HyperPod cluster; each requested instance becomes a node that runs its group's lifecycle scripts in a container. EKS orchestration requires an `ACTIVE` Floci EKS cluster using the `API` or `API_AND_CONFIG_MAP` authentication mode. |
+| `DescribeCluster` | Returns the cluster with each instance group's `CurrentCount` (running nodes), `TargetCount` and status. |
+| `UpdateCluster` | Adds, resizes, reconfigures (`InstanceGroups`) and deletes (`InstanceGroupsToDelete`) instance groups and changes `NodeRecovery` and other settings of an `InService` cluster; the cluster is `Updating` until new nodes finish their lifecycle scripts. An instance group's `InstanceType` cannot change. |
+| `DeleteCluster` | Deletes a cluster that is not `Creating`, stopping any node still provisioning. |
 | `ListClusters` | - |
-| `ListClusterNodes` | - |
-| `DescribeClusterNode` | - |
+| `ListClusterNodes` | Lists a cluster's nodes with their `InstanceStatus`; supports `InstanceGroupNameContains`, creation-time filters, sorting and pagination. |
+| `DescribeClusterNode` | Returns one node by `NodeId`. |
 | `CreateClusterSchedulerConfig` | - |
 | `DescribeClusterSchedulerConfig` | - |
 | `UpdateClusterSchedulerConfig` | - |
@@ -100,6 +102,17 @@ A training job fails with an explanatory `FailureReason`, rather than running on
 - `InstanceCount` is above one, since Floci runs a job as a single container
 
 Only the accelerator is substituted. An instance type also implies vCPU and memory, which Floci does not emulate for any service: EC2 instance types are metadata for `DescribeInstanceTypes` and do not size containers, and RDS records `DBInstanceClass` without acting on it. Resource limits are applied only where an API supplies an explicit number, as Lambda's `MemorySize` does.
+
+## HyperPod clusters
+
+Every instance an instance group asks for becomes a node with an EC2-style instance id. A node whose group has a `LifeCycleConfig` is provisioned the way HyperPod provisions a fresh instance: Floci downloads everything under `SourceS3Uri` to `/tmp/sagemaker-lifecycle`, writes the cluster's `/opt/ml/config/resource_config.json`, and runs `OnCreate` with bash from that directory in a short-lived container. The script's output goes to the log group `/aws/sagemaker/Clusters/<cluster-name>/<cluster-id>`, stream `LifecycleConfig/<instance-group>/<instance-id>`.
+
+- The node is `Running` when the script exits 0. The container is removed afterwards, so an idle cluster holds no containers.
+- A script that fails, or runs longer than 20 minutes, fails the node. During `CreateCluster` that fails the cluster with a `FailureMessage`; during an `UpdateCluster` scale-up the failed nodes are dropped, the group's target count rolls back to its running nodes, and the cluster returns to `InService` with a `FailureMessage`.
+- Nodes without a `LifeCycleConfig` (allowed for EKS-orchestrated groups) are `Running` at once.
+- At most four nodes provision at a time; each container is capped at 512 MiB.
+
+The node image defaults to `public.ecr.aws/docker/library/ubuntu:22.04`, since HyperPod's own images are Ubuntu based. Override it with `floci.services.sagemaker.hyperpod-node-image`.
 
 ## Endpoint hosting
 

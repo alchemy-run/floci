@@ -218,6 +218,8 @@ class IamActionRegistryTest {
         assertTrue(registry.isRoleEnforcedAction("kms:GetKeyRotationStatus"));
         assertFalse(registry.isRoleEnforcedAction("kms:Encrypt"));
         assertFalse(registry.isRoleEnforcedAction("dynamodb:PutItem"));
+        assertTrue(registry.isRoleEnforcedAction("secretsmanager:GetSecretValue"));
+        assertTrue(registry.isRoleEnforcedAction("secretsmanager:DescribeSecret"));
         assertFalse(registry.isRoleEnforcedAction(null));
     }
 

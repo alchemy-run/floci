@@ -379,6 +379,21 @@ public class SecretsManagerService implements ResourceProvider {
     }
 
     /**
+     * The secret {@code secretId} (name, partial ARN or full ARN) names in the request's account,
+     * or empty when there is none. Used by IAM to evaluate policies against the secret's real ARN.
+     */
+    public java.util.Optional<Secret> findSecret(String secretId, String region) {
+        if (secretId == null || secretId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(resolveSecret(secretId, region));
+        } catch (AwsException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /**
      * Marks the secret with this ARN as owned by an AWS service, so that it rotates the way a
      * service-managed secret does. Ownership is normally set when the owning service creates the
      * secret; this backfills secrets persisted before floci tracked it. A secret that is already

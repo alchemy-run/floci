@@ -17,6 +17,11 @@ Floci emulates Amazon MSK by orchestrating **Redpanda** containers. This provide
 | `DescribeClusterV2` | Get cluster metadata and state using V2 API |
 | `DeleteCluster` | Stops and removes the Redpanda container |
 | `GetBootstrapBrokers` | Get the connection strings for the cluster |
+| `ListTopics` | List the topics the cluster's broker has (internal topics omitted) |
+| `DescribeTopic` | Partition count and replication factor of a topic, read from the broker |
+| `DescribeTopicPartitions` | Leader, replicas and ISR of each partition |
+| `CreateTopic` | Create a topic on the broker; `configs` is Base64 of a JSON object or `name=value` lines |
+| `DeleteTopic` | Delete a topic from the broker |
 | `CreateConfiguration` | Create a broker configuration (`server.properties`) |
 | `ListConfigurations` | List all configurations |
 | `DescribeConfiguration` | Get configuration metadata and latest revision |
@@ -102,6 +107,19 @@ Floci serves the endpoint itself, on port 9098, the way MSK does:
 
 IAM policies are not evaluated for the `kafka-cluster:*` data-plane actions: an authenticated
 client may use the cluster. In mock mode the endpoint is reported but no broker runs behind it.
+
+Containers Floci launches resolve every broker hostname to Floci. When Floci runs from source
+with `FLOCI_DNS_SOURCE_ENABLED`, the source network helper relays port 9098 to the host, so a VPC
+Lambda bootstrapping from `BootstrapBrokerStringSaslIam` reaches the endpoint the same way.
+
+### Topics
+
+The topic APIs read and change the cluster's own broker: a topic exists exactly when Redpanda has
+it, whether it was created through `CreateTopic` or by a Kafka client. They use the broker's
+internal plaintext listener, so they need a running broker; in mock mode, or while no Docker
+daemon is reachable, they answer `UnsupportedOperationException` (501) instead of inventing
+topics. An unreachable broker is `ServiceUnavailableException` for reads and
+`ClusterConnectivityException` for `CreateTopic`/`DeleteTopic`.
 
 The v1 API predates serverless and its `ClusterInfo` cannot represent one, so — as on AWS —
 `DescribeCluster` on a serverless cluster returns `BadRequestException` pointing you at

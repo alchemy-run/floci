@@ -32,6 +32,7 @@ import org.jboss.logging.Logger;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RequestContext;
+import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsRegions;
@@ -122,7 +123,7 @@ import jakarta.enterprise.context.ContextNotActiveException;
 import jakarta.inject.Inject;
 
 @ApplicationScoped
-public class Ec2Service implements ContainerTeardown, ResourceProvider {
+public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettable {
 
     private static final Logger LOG = Logger.getLogger(Ec2Service.class);
 
@@ -3303,6 +3304,20 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider {
      * really is stopped, and the id is kept so StartInstances can revive it after a restart.
      * Runs during the ShutdownEvent phase, so the state change is captured by the final flush.
      */
+    /**
+     * A state reset wipes the stores that hold the default VPC, its subnets and its security
+     * group, so the per-Region seeding marks go with them: every account and Region keeps a
+     * default VPC, as on AWS, and the next request seeds it again. The in-memory resources that
+     * never reach a store go too.
+     */
+    @Override
+    public void clear() {
+        seededAccountRegions.clear();
+        deletedVpcKeys.clear();
+        egressOnlyInternetGateways.clear();
+        dhcpOptionsSets.clear();
+    }
+
     @Override
     public void stopManagedContainers() {
         if (config.services().ec2().mock()) {

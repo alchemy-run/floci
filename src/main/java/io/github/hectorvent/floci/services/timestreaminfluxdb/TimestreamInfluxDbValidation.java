@@ -2,12 +2,16 @@ package io.github.hectorvent.floci.services.timestreaminfluxdb;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -182,12 +186,87 @@ final class TimestreamInfluxDbValidation {
         return optionalString(request, "kmsKeyId", 1, 2048, KMS_KEY_ID);
     }
 
+    /** The VPC each subnet and security group belongs to, as EC2 records it. */
+    interface VpcResources {
+        Optional<String> subnetVpc(String region, String subnetId);
+
+        Optional<String> securityGroupVpc(String region, String groupId);
+
+        static VpcResources of(Ec2Service ec2Service) {
+            return new VpcResources() {
+                @Override
+                public Optional<String> subnetVpc(String region, String subnetId) {
+                    return ec2Service.findSubnetById(region, subnetId)
+                            .filter(subnet -> subnet.getRegion() == null || region.equals(subnet.getRegion()))
+                            .map(subnet -> subnet.getVpcId() != null ? subnet.getVpcId() : "");
+                }
+
+                @Override
+                public Optional<String> securityGroupVpc(String region, String groupId) {
+                    try {
+                        return ec2Service.describeSecurityGroups(region, List.of(groupId), List.of(), Map.of())
+                                .stream().findFirst()
+                                .map(SecurityGroup::getVpcId)
+                                .map(vpcId -> vpcId != null ? vpcId : "");
+                    } catch (AwsException e) {
+                        // EC2 rejects an unknown group id outright; for this lookup that means absent.
+                        return Optional.empty();
+                    }
+                }
+            };
+        }
+    }
+
+    /**
+     * The shape checks on the subnet list. Which ids are acceptable is decided by
+     * {@link #requireVpcResources}: an id EC2 knows is accepted whatever its spelling, so Floci's
+     * own default subnets ({@code subnet-default-us-east-1-a}) are usable.
+     */
     static List<String> subnetIds(JsonNode request, boolean required) {
-        return stringList(request, "vpcSubnetIds", required, 1, 6, SUBNET_ID);
+        return stringList(request, "vpcSubnetIds", required, 1, 6, null);
     }
 
     static List<String> securityGroupIds(JsonNode request, boolean required) {
-        return stringList(request, "vpcSecurityGroupIds", required, 1, 5, SECURITY_GROUP_ID);
+        return stringList(request, "vpcSecurityGroupIds", required, 1, 5, null);
+    }
+
+    /**
+     * Validates subnets and security groups the way the service does: each must exist in the
+     * account and region, the subnets must share one VPC, and the security groups must be in that
+     * VPC. An id EC2 does not know fails the id pattern first when it does not match it, and the
+     * existence check otherwise. Either list may be null when the request omits it.
+     */
+    static void requireVpcResources(VpcResources vpcResources, String region, List<String> subnetIds,
+                                    List<String> securityGroupIds) {
+        Set<String> subnetVpcs = new LinkedHashSet<>();
+        if (subnetIds != null) {
+            for (String subnetId : subnetIds) {
+                Optional<String> vpcId = vpcResources.subnetVpc(region, subnetId);
+                if (vpcId.isEmpty()) {
+                    throw SUBNET_ID.matcher(subnetId).matches()
+                            ? validation("The subnet ID '" + subnetId + "' does not exist.")
+                            : validation("vpcSubnetIds contains an invalid value.");
+                }
+                subnetVpcs.add(vpcId.get());
+            }
+            if (subnetVpcs.size() > 1) {
+                throw validation("All vpcSubnetIds must belong to the same VPC; they span " + subnetVpcs + ".");
+            }
+        }
+        if (securityGroupIds != null) {
+            for (String groupId : securityGroupIds) {
+                Optional<String> vpcId = vpcResources.securityGroupVpc(region, groupId);
+                if (vpcId.isEmpty()) {
+                    throw SECURITY_GROUP_ID.matcher(groupId).matches()
+                            ? validation("The security group '" + groupId + "' does not exist.")
+                            : validation("vpcSecurityGroupIds contains an invalid value.");
+                }
+                if (subnetVpcs.size() == 1 && !subnetVpcs.contains(vpcId.get())) {
+                    throw validation("The security group '" + groupId + "' belongs to VPC " + vpcId.get()
+                            + ", not to VPC " + subnetVpcs.iterator().next() + " of the vpcSubnetIds.");
+                }
+            }
+        }
     }
 
     static List<String> stringList(JsonNode request, String field, boolean required, int min, int max, Pattern member) {

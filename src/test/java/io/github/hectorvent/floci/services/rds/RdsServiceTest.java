@@ -27,6 +27,7 @@ import io.github.hectorvent.floci.services.rds.model.DbClusterParameterGroup;
 import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
+import io.github.hectorvent.floci.services.rds.model.DbInstanceModification;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceSettings;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceStatus;
 import io.github.hectorvent.floci.services.rds.model.DbParameterGroup;
@@ -157,6 +158,10 @@ class RdsServiceTest {
         when(rdsConfig.defaultMysqlImage()).thenReturn(Optional.empty());
         when(rdsConfig.defaultMariadbImage()).thenReturn(Optional.empty());
         when(rdsConfig.defaultSqlServerImage()).thenReturn("mcr.microsoft.com/mssql/server:2022-latest");
+        when(rdsConfig.creatingStatusMillis()).thenReturn(RdsInstanceLifecycle.CREATING_PERIOD.toMillis());
+        when(rdsConfig.modifyingStatusMillis()).thenReturn(RdsInstanceLifecycle.MODIFYING_PERIOD.toMillis());
+        when(rdsConfig.storageOptimizationStatusMillis())
+                .thenReturn(RdsInstanceLifecycle.STORAGE_OPTIMIZATION_PERIOD.toMillis());
 
         rdsService = newService(containerManager, proxyManager,
                 new InMemoryStorage<>(), new InMemoryStorage<>(),
@@ -6871,6 +6876,250 @@ class RdsServiceTest {
         return rdsService.createDbInstance(id, engine, engineVersion, "admin", "password",
                 "dbname", "db.t3.micro", 20, false, null, null, null, null, false, false,
                 null, Map.of(), List.of(), optionGroupName, null, true);
+    }
+
+    // ── Instance storage, protection and the pending-modification queue ───────────────────
+    // The Alchemy DBInstance lifecycle suites pin these against a live account.
+
+    private DbInstance createInstanceWith(String id, DbInstanceSettings settings) {
+        return rdsService.createDbInstance(id, "postgres", "16.3", "admin", "password", null,
+                "db.t3.micro", 20, false, null, null, null, null, false, false, null,
+                Map.of(), List.of(), null, "us-east-1", true, settings, null);
+    }
+
+    private static DbInstanceSettings storageSettings(String storageType, Integer iops, Integer throughput,
+                                                      Boolean deletionProtection, String networkType) {
+        return new DbInstanceSettings(null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, storageType, iops, throughput, deletionProtection, networkType);
+    }
+
+    private static DbInstanceModification applying(boolean applyImmediately) {
+        return new DbInstanceModification(applyImmediately, null, null, null, null, null, null);
+    }
+
+    private DbInstance modify(String id, Boolean iamEnabled, DbInstanceSettings settings,
+                              Boolean publiclyAccessible, DbInstanceModification modification) {
+        return rdsService.modifyDbInstance(id, null, iamEnabled, null, List.of(), null, "us-east-1", null,
+                settings, publiclyAccessible, modification);
+    }
+
+    @Test
+    void createDbInstanceDefaultsToGp3AndReportsProtectionAndNetworkType() {
+        DbInstance instance = createInstanceWith("storage-db", DbInstanceSettings.defaults());
+
+        assertEquals("gp3", instance.getStorageType());
+        assertEquals(3000, instance.getIops());
+        assertEquals(125, instance.getStorageThroughput());
+        assertFalse(instance.isDeletionProtection());
+        assertNull(instance.getNetworkType());
+        assertEquals("creating", RdsInstanceLifecycle.reportedStatus(instance, "available", Instant.now()));
+        assertEquals(DbInstanceStatus.AVAILABLE, instance.getStatus());
+
+        DbInstance striped = rdsService.createDbInstance("striped-db", "postgres", "16.3", "admin", "password",
+                null, "db.t3.micro", 400, false, null, null, null, null, false, false, null,
+                Map.of(), List.of(), null, "us-east-1", true,
+                storageSettings("gp3", 16000, 750, true, "dual"), null);
+        assertEquals(16000, striped.getIops());
+        assertEquals(750, striped.getStorageThroughput());
+        assertTrue(striped.isDeletionProtection());
+        assertEquals("DUAL", striped.getNetworkType());
+    }
+
+    @Test
+    void deleteDbInstanceRefusesAProtectedInstanceUntilProtectionIsRemoved() {
+        createInstanceWith("protected-db", storageSettings(null, null, null, true, null));
+
+        AwsException refused = assertThrows(AwsException.class,
+                () -> rdsService.deleteDbInstance("protected-db", "us-east-1"));
+        assertEquals("InvalidParameterCombination", refused.getErrorCode());
+
+        modify("protected-db", null, storageSettings(null, null, null, false, null), null, applying(false));
+        rdsService.deleteDbInstance("protected-db", "us-east-1");
+        assertThrows(AwsException.class, () -> rdsService.getDbInstance("protected-db"));
+    }
+
+    @Test
+    void modifyWithoutApplyImmediatelyQueuesIamAndABackupToggleUntilApplyImmediately() {
+        createInstanceWith("queued-db", new DbInstanceSettings(null, null, 0, null, null, null));
+
+        modify("queued-db", null, new DbInstanceSettings(null, null, 1, null, null, null), null, applying(false));
+        modify("queued-db", true, DbInstanceSettings.unchanged(), null, applying(false));
+
+        DbInstance queued = rdsService.getDbInstance("queued-db");
+        assertEquals(0, queued.getBackupRetentionPeriod());
+        assertFalse(queued.isIamDatabaseAuthenticationEnabled());
+        assertEquals(1, queued.getPendingModifiedValues().getBackupRetentionPeriod());
+        assertTrue(queued.getPendingModifiedValues().getIamDatabaseAuthenticationEnabled());
+        verify(proxyManager, never()).updateIamEnabled(anyString(), anyBoolean());
+
+        // Public access and deletion protection apply at once and leave the queue alone.
+        modify("queued-db", null, storageSettings(null, null, null, true, null), true, applying(false));
+        DbInstance immediateOnly = rdsService.getDbInstance("queued-db");
+        assertTrue(immediateOnly.isPubliclyAccessible());
+        assertTrue(immediateOnly.isDeletionProtection());
+        assertEquals(1, immediateOnly.getPendingModifiedValues().getBackupRetentionPeriod());
+
+        DbInstance promoted = modify("queued-db", null, DbInstanceSettings.unchanged(), null, applying(true));
+        assertEquals(1, promoted.getBackupRetentionPeriod());
+        assertTrue(promoted.isIamDatabaseAuthenticationEnabled());
+        assertNull(promoted.getPendingModifiedValues());
+        verify(proxyManager).updateIamEnabled(anyString(), eq(true));
+    }
+
+    @Test
+    void anImmediateValueReplacesTheQueuedOneForTheSameMember() {
+        createInstanceWith("replace-db", DbInstanceSettings.defaults());
+        modify("replace-db", true, DbInstanceSettings.unchanged(), null, applying(false));
+
+        DbInstance applied = modify("replace-db", false, DbInstanceSettings.unchanged(), null, applying(true));
+
+        assertFalse(applied.isIamDatabaseAuthenticationEnabled());
+        assertNull(applied.getPendingModifiedValues());
+    }
+
+    @Test
+    void aBackupRetentionChangeBetweenNonZeroValuesIsNotQueued() {
+        createInstanceWith("retention-db", new DbInstanceSettings(null, null, 1, null, null, null));
+
+        DbInstance modified = modify("retention-db", null,
+                new DbInstanceSettings(null, null, 3, null, null, null), null, applying(false));
+
+        assertEquals(3, modified.getBackupRetentionPeriod());
+        assertNull(modified.getPendingModifiedValues());
+    }
+
+    @Test
+    void queuedModificationsApplyOnceTheMaintenanceWindowHasStarted() {
+        when(containerManager.isContainerRunning(any())).thenReturn(true);
+        createInstanceWith("window-db", new DbInstanceSettings(null, null, null, null, "tue:03:00-tue:04:00", null));
+        modify("window-db", true, DbInstanceSettings.unchanged(), null, applying(false));
+        DbInstance stored = rdsService.getDbInstance("window-db");
+        stored.getPendingModifiedValues().setQueuedAt(Instant.now().minus(Duration.ofDays(8)));
+
+        DbInstance settled = rdsService.refreshDbInstanceRuntimeHealth(stored);
+
+        assertTrue(settled.isIamDatabaseAuthenticationEnabled());
+        assertNull(settled.getPendingModifiedValues());
+    }
+
+    @Test
+    void anImmediateStorageChangeIsOptimizedAndBlocksAnotherUntilThen() {
+        createInstanceWith("grow-db", DbInstanceSettings.defaults());
+
+        DbInstance grown = modify("grow-db", null, storageSettings("gp3", null, null, null, null), null,
+                new DbInstanceModification(true, 25, null, null, null, null, null));
+
+        assertEquals(25, grown.getAllocatedStorage());
+        assertEquals(3000, grown.getIops());
+        assertEquals("modifying", RdsInstanceLifecycle.reportedStatus(grown, "available", Instant.now()));
+        assertEquals("storage-optimization", RdsInstanceLifecycle.reportedStatus(grown, "available",
+                Instant.now().plus(RdsInstanceLifecycle.MODIFYING_PERIOD)));
+        AwsException cooldown = assertThrows(AwsException.class, () -> modify("grow-db", null,
+                storageSettings("gp2", null, null, null, null), null, applying(true)));
+        assertEquals("InvalidParameterCombination", cooldown.getErrorCode());
+
+        // The autoscaling ceiling is not a storage change; one equal to the allocation disables it.
+        DbInstanceSettings ceiling = new DbInstanceSettings(null, null, null, null, null, null, null, null,
+                null, null, null, null, null, 100, null);
+        assertEquals(100, modify("grow-db", null, ceiling, null, applying(true)).getMaxAllocatedStorage());
+        DbInstanceSettings disabled = new DbInstanceSettings(null, null, null, null, null, null, null, null,
+                null, null, null, null, null, 25, null);
+        assertNull(modify("grow-db", null, disabled, null, applying(true)).getMaxAllocatedStorage());
+        DbInstanceSettings below = new DbInstanceSettings(null, null, null, null, null, null, null, null,
+                null, null, null, null, null, 10, null);
+        assertThrows(AwsException.class, () -> modify("grow-db", null, below, null, applying(true)));
+    }
+
+    @Test
+    void transitionalStatusPeriodsAreConfigurable() {
+        when(rdsConfig.creatingStatusMillis()).thenReturn(0L);
+        when(rdsConfig.modifyingStatusMillis()).thenReturn(0L);
+        when(rdsConfig.storageOptimizationStatusMillis()).thenReturn(0L);
+        DbInstance created = createInstanceWith("instant-db", DbInstanceSettings.defaults());
+        assertEquals("available", RdsInstanceLifecycle.reportedStatus(created, "available", Instant.now()));
+
+        DbInstance grown = modify("instant-db", null, DbInstanceSettings.unchanged(), null,
+                new DbInstanceModification(true, 25, null, null, null, null, null));
+        assertEquals("available", RdsInstanceLifecycle.reportedStatus(grown, "available", Instant.now()));
+        assertEquals(30, modify("instant-db", null, DbInstanceSettings.unchanged(), null,
+                new DbInstanceModification(true, 30, null, null, null, null, null)).getAllocatedStorage());
+    }
+
+    @Test
+    void aQueuedStorageChangeIsReportedPending() {
+        createInstanceWith("pending-storage-db", DbInstanceSettings.defaults());
+
+        DbInstance queued = modify("pending-storage-db", null, DbInstanceSettings.unchanged(), null,
+                new DbInstanceModification(false, 30, null, null, null, null, null));
+
+        assertEquals(20, queued.getAllocatedStorage());
+        assertEquals(30, queued.getPendingModifiedValues().getAllocatedStorage());
+        assertNull(queued.getPendingModifiedValues().getStorageType());
+
+        DbInstance applied = modify("pending-storage-db", null, DbInstanceSettings.unchanged(), null, applying(true));
+        assertEquals(30, applied.getAllocatedStorage());
+        assertNull(applied.getPendingModifiedValues());
+    }
+
+    @Test
+    void aParameterGroupAssociationIsPendingRebootUntilTheInstanceReboots() {
+        createInstanceWith("params-db", DbInstanceSettings.defaults());
+        rdsService.createDbParameterGroup("custom-params", "postgres16", "custom");
+
+        DbInstance associated = modify("params-db", null, DbInstanceSettings.unchanged(), null,
+                new DbInstanceModification(false, null, null, null, "custom-params", null, null));
+
+        assertEquals("custom-params", associated.getParameterGroupName());
+        assertEquals("pending-reboot", associated.getParameterApplyStatus());
+        assertNull(rdsService.rebootDbInstance("params-db", "us-east-1").getParameterApplyStatus());
+    }
+
+    @Test
+    void aMasterPasswordChangeRecordsTheResetEvent() {
+        createInstanceWith("reset-db", DbInstanceSettings.defaults());
+        assertTrue(rdsService.describeEvents("reset-db", "db-instance", null, null, 60).isEmpty());
+
+        rdsService.modifyDbInstance("reset-db", "RotatedPass1", null, null, List.of(), null, "us-east-1",
+                null, DbInstanceSettings.unchanged(), null, applying(true));
+
+        List<RdsEvent> events = rdsService.describeEvents("reset-db", "db-instance", null, null, 60);
+        assertEquals(1, events.size());
+        assertEquals("Reset master credentials", events.getFirst().message());
+        assertEquals(List.of("configuration change"), events.getFirst().eventCategories());
+    }
+
+    @Test
+    void enablingManagedCredentialsCreatesTheSecretAndDeletingTheInstanceRemovesIt() {
+        SecretsManagerService secretsManager = mock(SecretsManagerService.class);
+        Secret secret = new Secret();
+        String secretArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-MANAGED";
+        secret.setArn(secretArn);
+        when(secretsManager.createSecret(any(), any(), eq(null), any(), any(), any(), eq("rds"), eq("us-east-1")))
+                .thenReturn(secret);
+        RdsService service = newService(containerManager, proxyManager,
+                new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), secretsManager);
+        service.createDbInstance("managed-db", "postgres", "16.3", "admin", "Original-pass1", null,
+                "db.t3.micro", 20, false, null, null, null, null, false, false, null,
+                Map.of(), List.of(), null, "us-east-1", true, DbInstanceSettings.defaults(), null);
+
+        AwsException withPassword = assertThrows(AwsException.class, () -> service.modifyDbInstance(
+                "managed-db", "Another-pass1", null, null, List.of(), null, "us-east-1", null,
+                DbInstanceSettings.unchanged(), null,
+                new DbInstanceModification(true, null, null, null, null, true, null)));
+        assertEquals("InvalidParameterCombination", withPassword.getErrorCode());
+
+        DbInstance managed = service.modifyDbInstance("managed-db", null, null, null, List.of(), null,
+                "us-east-1", null, DbInstanceSettings.unchanged(), null,
+                new DbInstanceModification(true, null, null, null, null, true, null));
+
+        assertEquals(secretArn, managed.getMasterUserSecretArn());
+        assertTrue(managed.getMasterPassword().startsWith("floci-"));
+        verify(containerManager).rotateMasterPassword(any(), any(), any(), eq("admin"),
+                eq("Original-pass1"), eq(managed.getMasterPassword()));
+
+        service.deleteDbInstance("managed-db", "us-east-1");
+        verify(secretsManager).deleteSecret(eq(secretArn), isNull(), eq(true), eq("us-east-1"));
     }
 
     private RdsService newService(RdsContainerManager containerManager,

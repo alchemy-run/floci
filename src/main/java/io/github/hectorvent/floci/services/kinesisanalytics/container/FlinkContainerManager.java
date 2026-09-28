@@ -64,6 +64,7 @@ public class FlinkContainerManager {
     private static final Logger LOG = Logger.getLogger(FlinkContainerManager.class);
     private static final int JOBMANAGER_REST_PORT = 8081;
     private static final String SAVEPOINTS_MOUNT = "/opt/flink/savepoints";
+    static final int MAX_SAVEPOINT_TRIGGER_ATTEMPTS = 10;
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
@@ -179,6 +180,12 @@ public class FlinkContainerManager {
             // anything the JobManager logs from its own boot onward.
             copyFileIntoContainer(jmContainerId, "/opt/flink/conf", "log4j-console.properties",
                     msfStyleLog4j2Config(app), true);
+            // Docker creates a fresh named volume's mount point root-owned, but the Flink processes
+            // run as the image's unprivileged "flink" user, so every savepoint failed with "Failed to
+            // create savepoint directory". Extracting a flink-owned directory entry onto the mount
+            // point of the created (not yet started) container re-owns the volume root itself.
+            copyDirectoryIntoContainer(jmContainerId, "/opt/flink",
+                    SAVEPOINTS_MOUNT.substring("/opt/flink/".length()));
             jm = lifecycleManager.startCreated(jmContainerId, jmBuiltSpec);
         } catch (RuntimeException e) {
             lifecycleManager.removeIfExists(jmName);
@@ -197,7 +204,7 @@ public class FlinkContainerManager {
             // provides the task slots the job needs to run.
             String tmProps = "jobmanager.rpc.address: localhost\n"
                     + "taskmanager.numberOfTaskSlots: " + Math.max(1, app.getParallelism());
-            ContainerSpec tmSpec = containerBuilder.newContainer(image)
+            ContainerBuilder.Builder tmBuilder = containerBuilder.newContainer(image)
                     .withName(tmName)
                     .withCmd("taskmanager")
                     .withEnv(awsBaselineEnv)
@@ -206,8 +213,13 @@ public class FlinkContainerManager {
                     .withLogRotation()
                     .withLabels(ContainerStorageHelper.resourceIdentityLabels(
                             "kinesisanalytics", app.getApplicationName(), regionResolver.getAccountId(),
-                            applicationRegion(app)))
-                    .build();
+                            applicationRegion(app)));
+            // Tasks write their own state files into the savepoint directory (only the metadata is
+            // written by the JobManager), so the TaskManager must see the same volume.
+            ContainerStorageHelper.applyStorage(tmBuilder, lifecycleManager, config, "kinesisanalytics",
+                    resourceId(app) + "-savepoints", resourceId(app) + "-savepoints",
+                    SAVEPOINTS_MOUNT);
+            ContainerSpec tmSpec = tmBuilder.build();
             try {
                 String tmContainerId = lifecycleManager.create(tmSpec);
                 copyFileIntoContainer(tmContainerId, "/opt/flink/conf", "log4j-console.properties",
@@ -359,6 +371,43 @@ public class FlinkContainerManager {
         }
     }
 
+    /** Extracts an empty directory owned by the image's {@code flink} user at
+     *  {@code remoteDir/name}; a failure is rethrown so the start rolls back. */
+    private void copyDirectoryIntoContainer(String containerId, String remoteDir, String name) {
+        try {
+            lifecycleManager.getDockerClient()
+                    .copyArchiveToContainerCmd(containerId)
+                    .withTarInputStream(new ByteArrayInputStream(flinkOwnedDirectoryTar(name)))
+                    .withRemotePath(remoteDir)
+                    .exec();
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Could not prepare " + remoteDir + "/" + name + " in Flink container " + containerId, e);
+        }
+    }
+
+    /** Uid/gid of the {@code flink} user in the official {@code apache/flink} images. */
+    static final int FLINK_UID = 9999;
+
+    static byte[] flinkOwnedDirectoryTar(String name) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
+                TarArchiveEntry entry = new TarArchiveEntry(name.endsWith("/") ? name : name + "/");
+                entry.setUserId(FLINK_UID);
+                entry.setGroupId(FLINK_UID);
+                entry.setUserName("flink");
+                entry.setGroupName("flink");
+                entry.setMode(TarArchiveEntry.DEFAULT_DIR_MODE);
+                tar.putArchiveEntry(entry);
+                tar.closeArchiveEntry();
+            }
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not build in-memory tar for " + name, e);
+        }
+    }
+
     private static byte[] tarSingleFile(String entryName, byte[] content) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -434,7 +483,7 @@ public class FlinkContainerManager {
             }
             return false;
         }
-        return "RUNNING".equals(flinkRest.jobState(rest, app.getFlinkJobId()));
+        return flinkRest.jobFullyRunning(rest, app.getFlinkJobId());
     }
 
     /**
@@ -517,9 +566,11 @@ public class FlinkContainerManager {
 
     /**
      * Polls a CREATING snapshot toward a terminal state, mutating {@code snapshot}'s status in place.
-     * Returns {@code true} once terminal (READY or FAILED) so the caller stops polling; {@code false}
-     * while still in progress, including when the JobManager probe itself fails (transient — the
-     * caller should keep retrying, same as {@code advanceToRunning}'s job-state polling).
+     * Returns {@code true} when the snapshot changed and must be persisted: it reached a terminal
+     * state (READY or FAILED), or its savepoint was re-triggered (still CREATING) because Flink
+     * aborted it while tasks were not all running. {@code false} while still in progress, including
+     * when the JobManager probe itself fails (transient — the caller should keep retrying, same as
+     * {@code advanceToRunning}'s job-state polling).
      */
     public boolean advanceSnapshot(FlinkApplication app, Snapshot snapshot) {
         String rest = app.getRestEndpoint();
@@ -530,6 +581,21 @@ public class FlinkContainerManager {
                 snapshot.getFlinkRequestId());
         if (status == null || !"COMPLETED".equals(status.statusId())) {
             return false; // still IN_PROGRESS, or a transient probe failure — keep polling
+        }
+        if (status.tasksNotRunning() && snapshot.getFlinkTriggerAttempts() < MAX_SAVEPOINT_TRIGGER_ATTEMPTS) {
+            // Tasks were (re)deploying: AWS keeps the snapshot CREATING until the job can take it.
+            try {
+                snapshot.setFlinkRequestId(flinkRest.triggerSavepoint(rest, app.getFlinkJobId(),
+                        SAVEPOINTS_MOUNT));
+                snapshot.setFlinkTriggerAttempts(snapshot.getFlinkTriggerAttempts() + 1);
+                LOG.infov("Re-triggered Flink savepoint for application {0} snapshot {1} (tasks not yet "
+                        + "running): request {2}", app.getApplicationName(), snapshot.getSnapshotName(),
+                        snapshot.getFlinkRequestId());
+                return true;
+            } catch (Exception e) {
+                LOG.warnv("Could not re-trigger Flink savepoint for application {0} snapshot {1}: {2}",
+                        app.getApplicationName(), snapshot.getSnapshotName(), e.getMessage());
+            }
         }
         if (status.failed()) {
             snapshot.setSnapshotStatus(SnapshotStatus.FAILED);
@@ -552,7 +618,9 @@ public class FlinkContainerManager {
             return;
         }
         try {
-            execInContainer(containerId, new String[]{"rm", "-rf", snapshot.getFlinkLocation()});
+            // Flink reports the location as a URI (file:/opt/flink/savepoints/savepoint-...).
+            String path = snapshot.getFlinkLocation().replaceFirst("^file:", "");
+            execInContainer(containerId, new String[]{"rm", "-rf", path});
         } catch (Exception e) {
             LOG.warnv("Could not remove savepoint files at {0} for application {1}: {2}",
                     snapshot.getFlinkLocation(), app.getApplicationName(), e.getMessage());

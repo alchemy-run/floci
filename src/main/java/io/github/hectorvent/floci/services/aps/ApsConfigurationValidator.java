@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.regex.Pattern;
 
 /** Validates stored control-plane definitions; it does not evaluate rules, alerting, or anomaly models. */
 final class ApsConfigurationValidator {
@@ -29,6 +31,8 @@ final class ApsConfigurationValidator {
     private static final int MAX_DEFINITION_BYTES = 1024 * 1024;
     private static final ObjectMapper JSON = new ObjectMapper()
             .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY);
+    private static final Pattern SCRAPER_ALIAS = Pattern.compile("^[0-9A-Za-z][-.0-9A-Z_a-z]*$");
+    private static final List<String> SCRAPER_COMPONENT_TYPES = List.of("SERVICE_DISCOVERY", "COLLECTOR", "EXPORTER");
 
     private ApsConfigurationValidator() {}
 
@@ -322,6 +326,65 @@ final class ApsConfigurationValidator {
                 stringMap(request.get(field), field, "tags".equals(field));
             }
         }
+    }
+
+    /** Validates a ScrapeConfiguration union and returns its base64 configurationBlob. */
+    static String scrapeConfiguration(JsonNode value) {
+        ObjectNode configuration = object(value, "scrapeConfiguration");
+        if (configuration.size() != 1 || !configuration.has("configurationBlob")) {
+            throw invalid("scrapeConfiguration must contain exactly one configurationBlob");
+        }
+        String blob = text(configuration.get("configurationBlob"), "scrapeConfiguration.configurationBlob");
+        JsonNode document = definition(blob);
+        JsonNode scrapeConfigs = document.path("scrape_configs");
+        if (!scrapeConfigs.isArray() || scrapeConfigs.isEmpty()) {
+            throw invalid("The scrape configuration must contain a nonempty scrape_configs list");
+        }
+        Set<String> jobs = new HashSet<>();
+        for (JsonNode scrapeConfig : scrapeConfigs) {
+            object(scrapeConfig, "scrape_config");
+            if (!jobs.add(text(scrapeConfig.path("job_name"), "scrape_configs.job_name"))) {
+                throw invalid("scrape_configs job_name values must be unique");
+            }
+        }
+        return blob;
+    }
+
+    static String scraperAlias(JsonNode value) {
+        String alias = text(value, "alias");
+        if (alias.length() > 100 || !SCRAPER_ALIAS.matcher(alias).matches()) {
+            throw invalid("alias must be 1 to 100 characters matching " + SCRAPER_ALIAS.pattern());
+        }
+        return alias;
+    }
+
+    /** Validates scraperComponents; an omitted list selects every component. */
+    static ArrayNode scraperComponents(JsonNode value) {
+        if (value == null || value.isNull()) {
+            ArrayNode all = JSON.createArrayNode();
+            for (String type : SCRAPER_COMPONENT_TYPES) {
+                all.addObject().put("type", type);
+            }
+            return all;
+        }
+        if (!value.isArray() || value.isEmpty()) {
+            throw invalid("scraperComponents must be a nonempty array");
+        }
+        Set<String> types = new HashSet<>();
+        for (JsonNode component : value) {
+            object(component, "scraperComponent");
+            String type = text(component.get("type"), "scraperComponent.type");
+            if (!SCRAPER_COMPONENT_TYPES.contains(type) || !types.add(type)) {
+                throw invalid("scraperComponent.type must be a distinct one of " + SCRAPER_COMPONENT_TYPES);
+            }
+            if (component.has("config")) {
+                ObjectNode config = object(component.get("config"), "scraperComponent.config");
+                if (config.has("options")) {
+                    stringMap(config.get("options"), "scraperComponent.config.options", false);
+                }
+            }
+        }
+        return (ArrayNode) value.deepCopy();
     }
 
     static AwsException invalid(String message) {

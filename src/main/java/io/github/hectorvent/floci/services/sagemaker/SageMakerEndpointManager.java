@@ -106,6 +106,14 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
             endpoint.invokePort = ep.port();
             containers.put(endpoint.endpointName, containerId);
             waitForPing(endpoint.invokeHost, endpoint.invokePort);
+            Map<String, String> resolved = new LinkedHashMap<>();
+            for (String specified : service.deployedImages(endpoint)) {
+                String digest = resolveImage(specified);
+                if (digest != null) {
+                    resolved.put(specified, digest);
+                }
+            }
+            endpoint.resolvedImages = resolved;
             endpoint.endpointStatus = "InService";
             endpoint.failureReason = null;
             finishStart(endpoint, service);
@@ -189,6 +197,43 @@ public class SageMakerEndpointManager implements ContainerTeardown, Resettable {
         env.add("FLOCI_ENDPOINT=" + endpoint);
         modelEnv.forEach((k, v) -> env.add(k + "=" + (v == null ? "" : v)));
         return env;
+    }
+
+    /**
+     * Pins an image reference to the registry digest Docker pulled for it, as SageMaker reports in
+     * {@code DeployedImages[].ResolvedImage}. Returns {@code null} when Docker knows no digest.
+     */
+    String resolveImage(String image) {
+        if (image == null || image.isBlank()) {
+            return null;
+        }
+        if (image.contains("@sha256:")) {
+            return image;
+        }
+        try {
+            List<String> digests = lifecycleManager.getDockerClient().inspectImageCmd(image).exec().getRepoDigests();
+            if (digests == null || digests.isEmpty()) {
+                return null;
+            }
+            String repository = repositoryOf(image);
+            String chosen = digests.stream()
+                    .filter(d -> d.startsWith(repository + "@"))
+                    .findFirst()
+                    .orElse(digests.get(0));
+            int at = chosen.indexOf('@');
+            return at < 0 ? null : repository + chosen.substring(at);
+        } catch (RuntimeException e) {
+            LOG.debugv("Could not resolve SageMaker image {0} to a digest: {1}", image, e.getMessage());
+            return null;
+        }
+    }
+
+    /** The image reference without its tag or digest. */
+    static String repositoryOf(String image) {
+        int at = image.indexOf('@');
+        String withoutDigest = at >= 0 ? image.substring(0, at) : image;
+        int colon = withoutDigest.lastIndexOf(':');
+        return colon > withoutDigest.lastIndexOf('/') ? withoutDigest.substring(0, colon) : withoutDigest;
     }
 
     private String resolveEndpointHostname() {

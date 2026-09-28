@@ -63,6 +63,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 
@@ -154,6 +156,16 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     static final String CIRCUIT_BREAKER_FAILED_REASON = "ECS deployment circuit breaker: tasks failed to start.";
     private static final String CIRCUIT_BREAKER_OUTCOME_HEALTHY = "HEALTHY";
     private static final String CIRCUIT_BREAKER_OUTCOME_FAILED = "FAILED";
+    /**
+     * How long a Docker-backed service task must stay RUNNING before it counts towards its
+     * deployment's steady state. ECS marks a deployment COMPLETED only once the service reaches a
+     * steady state, and its circuit breaker counts a task that stops before then as a failure, so
+     * a container that exits right after starting must not complete the deployment just because
+     * one reconcile tick saw it running. AWS documents no figure; 15 seconds is the delay of the
+     * SDK's own {@code ServicesStable} waiter and spans three 5-second reconcile ticks, so an
+     * essential container that exits is inspected as stopped before its task could count.
+     */
+    static final Duration STEADY_STATE_WINDOW = Duration.ofSeconds(15);
     /** DescribeServices reports at most the 100 most recent service events. */
     private static final int MAX_SERVICE_EVENTS = 100;
     /** RunTask places at most ten tasks in one call, and StartTask at most ten instances. */
@@ -191,6 +203,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     private Map<String, String> accountSettings = new ConcurrentHashMap<>();
     // deploymentIds for which SERVICE_DEPLOYMENT_IN_PROGRESS has already been emitted this process.
     private final Set<String> inProgressEmitted = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // Task start times and the steady-state window are measured on this clock; tests replace it.
+    private volatile Clock clock = Clock.systemUTC();
 
     @Inject
     public EcsService(RegionResolver regionResolver, EcsContainerManager containerManager,
@@ -218,6 +232,10 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     private static ScheduledExecutorService newReconciler() {
         return Executors.newSingleThreadScheduledExecutor(
                 r -> { Thread t = new Thread(r, "ecs-reconciler"); t.setDaemon(true); return t; });
+    }
+
+    void setClock(Clock clock) {
+        this.clock = clock;
     }
 
     void initializeStorage() {
@@ -609,7 +627,11 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             validateFargateUnsupportedParameters(request);
         }
         String family = request.getFamily();
-        int revision = latestRevisions.merge(family, 1, Integer::sum);
+        // Revision numbers are never reused, including those of deregistered or deleted revisions,
+        // so the next one also clears every revision still held for the family.
+        int floor = highestHeldRevision(family) + 1;
+        int revision = latestRevisions.merge(family, floor,
+                (current, next) -> Math.max(current + 1, next));
 
         TaskDefinition td = new TaskDefinition();
         td.setFamily(family);
@@ -643,6 +665,17 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         taskDefinitions.put(family + ":" + revision, td);
         LOG.infov("Registered task definition: {0}:{1}", family, revision);
         return td;
+    }
+
+    /** The highest revision number held for a family in any status, or 0 when it holds none. */
+    private int highestHeldRevision(String family) {
+        int highest = 0;
+        for (TaskDefinition held : taskDefinitions.values()) {
+            if (family.equals(held.getFamily()) && held.getRevision() > highest) {
+                highest = held.getRevision();
+            }
+        }
+        return highest;
     }
 
     /**
@@ -1082,8 +1115,17 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         return STATUS_ACTIVE.equals(status) == hasActiveRevision;
     }
 
+    /**
+     * Moves a revision to {@code INACTIVE}. Deregistering a revision that already left
+     * {@code ACTIVE} changes nothing: an {@code INACTIVE} revision keeps its original
+     * {@code deregisteredAt}, and a {@code DELETE_IN_PROGRESS} one never returns to
+     * {@code INACTIVE}.
+     */
     public TaskDefinition deregisterTaskDefinition(String taskDefinitionRef, String region) {
         TaskDefinition td = resolveTaskDefinitionOrThrow(taskDefinitionRef, region);
+        if (!STATUS_ACTIVE.equals(td.getStatus())) {
+            return td;
+        }
         td.setStatus(STATUS_INACTIVE);
         td.setDeregisteredAt(Instant.now());
         taskDefinitions.put(td.getFamily() + ":" + td.getRevision(), td);
@@ -1110,6 +1152,11 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                         "You must specify a revision to delete a task definition: " + ref, 400);
             }
             TaskDefinition td = resolveTaskDefinitionOrThrow(ref, region);
+            if (STATUS_DELETE_IN_PROGRESS.equals(td.getStatus())) {
+                // Already on its way out: asking again reports it as it stands.
+                deleted.add(td);
+                continue;
+            }
             if (!STATUS_INACTIVE.equals(td.getStatus())) {
                 throw new AwsException("InvalidParameterException",
                         "Task definition " + ref + " must be INACTIVE before deletion.", 400);
@@ -1369,11 +1416,12 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      * as ECS can tell. {@code healthStatus} stays UNKNOWN unless a container declares a health
      * check, which is what AWS reports for a task nothing is probing.
      */
-    private static void markTaskRunning(EcsTask task) {
+    private void markTaskRunning(EcsTask task) {
+        Instant now = clock.instant();
         task.setLastStatus(TaskStatus.RUNNING.name());
-        task.setStartedAt(Instant.now());
+        task.setStartedAt(now);
         task.setConnectivity(CONNECTIVITY_CONNECTED);
-        task.setConnectivityAt(Instant.now());
+        task.setConnectivityAt(now);
         task.setHealthStatus(HEALTH_STATUS_UNKNOWN);
         task.bumpVersion();
     }
@@ -3611,19 +3659,25 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     /**
-     * Whether the PRIMARY deployment has reached a steady state. Normally derived from the
-     * service's counts; while it is replacing a failed deployment or rolling back, the reconciler
-     * decides it from the deployment's own tasks instead, since the service-wide running count
-     * still includes the tasks it is replacing.
+     * Whether the PRIMARY deployment has reached a steady state. The reconciler decides that from
+     * the deployment's own tasks (see {@link #reachedSteadyState}), never from a momentary
+     * running count: a task whose essential container exits right after starting is RUNNING for
+     * a tick, and completing on it would hide the failure from the circuit breaker. A plain
+     * deployment with no tasks to run has nothing to wait for and is complete from the start.
+     * Daemon services are not tracked by the reconciler this way and keep the count-derived rule.
      */
     private boolean primaryConverged(EcsServiceModel svc) {
         if (ROLLOUT_STATE_FAILED.equals(svc.getDeploymentRolloutState())) {
             return false;
         }
-        if (!svc.getFailedDeployments().isEmpty() || svc.getDeploymentRolloutStateReason() != null) {
-            return deploymentId(svc).equals(svc.getLastCompletedDeploymentId());
+        if (SCHEDULING_DAEMON.equals(svc.getSchedulingStrategy())) {
+            return svc.getRunningCount() >= svc.getDesiredCount();
         }
-        return svc.getRunningCount() >= svc.getDesiredCount();
+        if (deploymentId(svc).equals(svc.getLastCompletedDeploymentId())) {
+            return true;
+        }
+        return svc.getFailedDeployments().isEmpty() && svc.getDeploymentRolloutStateReason() == null
+                && svc.getDesiredCount() == 0;
     }
 
     private Deployment primaryDeployment(EcsServiceModel svc) {
@@ -4305,15 +4359,29 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
         svc.setRunningCount((int) running);
 
+        Instant now = clock.instant();
         CircuitBreaker breaker = CircuitBreaker.of(svc);
-        if (breaker != null && evaluateCircuitBreaker(key, svc, cluster, breaker, region)) {
+        if (breaker != null && evaluateCircuitBreaker(key, svc, cluster, breaker, region, now)) {
             // Rolled back: the next tick reconciles the rollback deployment from scratch.
             return;
         }
         boolean deploymentFailed = ROLLOUT_STATE_FAILED.equals(svc.getDeploymentRolloutState());
 
         String deploymentId = currentDeploymentId;
-        boolean converged = !deploymentFailed && current >= svc.getDesiredCount();
+        // A deployment completes once enough of its own tasks have reached a steady state; once
+        // COMPLETED it stays so, and only its running count matters for draining failed ones.
+        boolean converged;
+        if (deploymentFailed) {
+            converged = false;
+        } else if (deploymentId.equals(svc.getLastCompletedDeploymentId())) {
+            converged = current >= svc.getDesiredCount();
+        } else {
+            long steady = runningTasks.stream()
+                    .filter(t -> !staleTasks.contains(t))
+                    .filter(t -> reachedSteadyState(t, svc, region, now))
+                    .count();
+            converged = steady >= svc.getDesiredCount();
+        }
         if (converged) {
             if (!deploymentId.equals(svc.getLastCompletedDeploymentId())) {
                 svc.setLastCompletedDeploymentId(deploymentId);
@@ -4474,14 +4542,55 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     /**
+     * Whether a service task counts towards its deployment's steady state: RUNNING and not
+     * UNHEALTHY and, for a Docker-backed task, RUNNING without interruption for
+     * {@link #STEADY_STATE_WINDOW}, reported HEALTHY when an essential container declares a health
+     * check, and healthy in every target group the service registers it into. ECS waits for the
+     * container health check and the load balancer before counting a task as healthy for a
+     * deployment. A mock-mode task has no container that could exit, so RUNNING is enough.
+     */
+    private boolean reachedSteadyState(EcsTask task, EcsServiceModel svc, String region, Instant now) {
+        if (!TaskStatus.RUNNING.name().equals(task.getLastStatus())
+                || HEALTH_STATUS_UNHEALTHY.equals(task.getHealthStatus())) {
+            return false;
+        }
+        if (!dockerMode) {
+            return true;
+        }
+        Instant startedAt = task.getStartedAt();
+        if (startedAt == null || startedAt.plus(STEADY_STATE_WINDOW).isAfter(now)) {
+            return false;
+        }
+        if (essentialContainerDeclaresHealthCheck(task, region)
+                && !HEALTH_STATUS_HEALTHY.equals(task.getHealthStatus())) {
+            return false;
+        }
+        return svc.getLoadBalancers().isEmpty() || lbRegistrar == null
+                || lbRegistrar.targetsHealthy(task, svc, region);
+    }
+
+    private boolean essentialContainerDeclaresHealthCheck(EcsTask task, String region) {
+        TaskDefinition taskDef;
+        try {
+            taskDef = resolveTaskDefinitionOrThrow(task.getTaskDefinitionArn(), region);
+        } catch (AwsException e) {
+            return false;
+        }
+        return taskDef.getContainerDefinitions() != null && taskDef.getContainerDefinitions().stream()
+                .anyMatch(def -> def.isEssential() && def.getHealthCheck() != null);
+    }
+
+    /**
      * Counts the current deployment's newly failed tasks, and with {@code resetOnHealthyTask}
-     * resets the count when one of its tasks newly reaches a healthy RUNNING state. Each task is
-     * judged once per outcome, from the exit results the task reconciler recorded.
+     * resets the count when one of its tasks newly reaches a steady state
+     * ({@link #reachedSteadyState}). A task merely seen RUNNING neither resets the count nor stops
+     * a later exit from counting as a failure. Each task is judged once per outcome, from the exit
+     * results the task reconciler recorded.
      *
      * @return whether the breaker tripped and rolled the service back to another deployment
      */
     private boolean evaluateCircuitBreaker(String key, EcsServiceModel svc, EcsCluster cluster,
-                                           CircuitBreaker breaker, String region) {
+                                           CircuitBreaker breaker, String region, Instant now) {
         if (!isMonitoredByCircuitBreaker(svc)) {
             return false;
         }
@@ -4497,8 +4606,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 task.setCircuitBreakerOutcome(CIRCUIT_BREAKER_OUTCOME_FAILED);
                 failures++;
             } else if (task.getCircuitBreakerOutcome() == null
-                    && TaskStatus.RUNNING.name().equals(task.getLastStatus())
-                    && !HEALTH_STATUS_UNHEALTHY.equals(task.getHealthStatus())) {
+                    && reachedSteadyState(task, svc, region, now)) {
                 task.setCircuitBreakerOutcome(CIRCUIT_BREAKER_OUTCOME_HEALTHY);
                 becameHealthy = true;
             }
@@ -4635,25 +4743,57 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 .findFirst().orElse(null);
     }
 
+    /**
+     * Resolves a task definition reference. {@code family:revision} and a full ARN name one
+     * revision in whatever status it is in; a bare family (or an ARN without a revision) names
+     * the family's latest {@code ACTIVE} revision, so a family whose revisions were all
+     * deregistered or deleted no longer resolves that way.
+     */
     private TaskDefinition resolveTaskDefinitionOrThrow(String ref, String region) {
-        TaskDefinition td = taskDefinitions.get(ref);
-        if (td != null) { return td; }
-        td = taskDefinitions.values().stream()
-                .filter(d -> d.getTaskDefinitionArn().equals(ref))
-                .findFirst().orElse(null);
-        if (td != null) { return td; }
-        Integer latest = latestRevisions.get(ref);
-        if (latest != null) {
-            td = taskDefinitions.get(ref + ":" + latest);
+        if (ref != null) {
+            TaskDefinition td = taskDefinitions.get(ref);
             if (td != null) { return td; }
+            td = taskDefinitions.values().stream()
+                    .filter(d -> ref.equals(d.getTaskDefinitionArn()))
+                    .findFirst().orElse(null);
+            if (td != null) { return td; }
+            String family = familyOnlyReference(ref);
+            if (family != null) {
+                td = latestActiveRevision(family);
+                if (td != null) { return td; }
+            }
         }
         throw new AwsException("ClientException", "Unable to describe task definition: " + ref, 400);
     }
 
+    /** The family a reference names when it carries no revision, otherwise {@code null}. */
+    private static String familyOnlyReference(String ref) {
+        if (namesARevision(ref)) {
+            return null;
+        }
+        if (ref.startsWith("arn:")) {
+            int slash = ref.lastIndexOf("task-definition/");
+            return slash < 0 ? null : ref.substring(slash + "task-definition/".length());
+        }
+        return ref;
+    }
+
+    private TaskDefinition latestActiveRevision(String family) {
+        TaskDefinition latest = null;
+        for (TaskDefinition td : taskDefinitions.values()) {
+            if (family.equals(td.getFamily()) && STATUS_ACTIVE.equals(td.getStatus())
+                    && (latest == null || td.getRevision() > latest.getRevision())) {
+                latest = td;
+            }
+        }
+        return latest;
+    }
+
     /**
-     * Resolves a task definition for something that is about to run on it. A revision on its way
-     * out cannot start new work: AWS refuses to run a task or create a service on a
-     * {@code DELETE_IN_PROGRESS} revision, while the tasks already on it keep running.
+     * Resolves a task definition for something that is about to run on it. A revision that left
+     * {@code ACTIVE} cannot start new work: AWS refuses to run a task, create a service, or point
+     * a service at an {@code INACTIVE} or {@code DELETE_IN_PROGRESS} revision, while the tasks
+     * already on it keep running.
      */
     private TaskDefinition resolveLaunchableTaskDefinition(String ref, String region) {
         TaskDefinition td = resolveTaskDefinitionOrThrow(ref, region);
@@ -4661,6 +4801,9 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             throw new AwsException("ClientException",
                     "The task definition " + td.getTaskDefinitionArn() + " is being deleted and "
                             + "cannot be used to start new tasks.", 400);
+        }
+        if (STATUS_INACTIVE.equals(td.getStatus())) {
+            throw new AwsException("ClientException", "TaskDefinition is inactive", 400);
         }
         return td;
     }

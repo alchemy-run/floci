@@ -76,8 +76,25 @@ class CloudTrailLakeIntegrationTest {
                     .statusCode(200);
             ct(ACCOUNT, REGION, "ListTags", Map.of("ResourceIdList", List.of(arn))).statusCode(200)
                     .body("ResourceTagList[0].TagsList.Key", contains("team"));
-            ct(ACCOUNT, REGION, "StartQuery", Map.of("QueryStatement", "SELECT * FROM " + arn.substring(arn.lastIndexOf('/') + 1)))
-                    .statusCode(400).body("__type", containsString("UnsupportedOperationException"));
+            String storeId = arn.substring(arn.lastIndexOf('/') + 1);
+            ct(ACCOUNT, REGION, "StartQuery", Map.of("QueryStatement", "DELETE FROM " + storeId))
+                    .statusCode(400).body("__type", containsString("InvalidQueryStatementException"));
+            ct(ACCOUNT, REGION, "StartQuery", Map.of("QueryStatement", "SELECT 1"))
+                    .statusCode(400).body("__type", containsString("InvalidQueryStatementException"));
+            ct(OTHER, REGION, "StartQuery", Map.of("QueryStatement", "SELECT eventID FROM " + storeId))
+                    .statusCode(400).body("__type", containsString("EventDataStoreNotFoundException"));
+            ct(ACCOUNT, REGION, "DescribeQuery", Map.of("QueryId", "00000000-0000-0000-0000-000000000000"))
+                    .statusCode(404).body("__type", containsString("QueryIdNotFoundException"));
+            ct(ACCOUNT, REGION, "ListQueries", Map.of("EventDataStore", arn)).statusCode(200)
+                    .body("Queries", empty());
+            ct(ACCOUNT, REGION, "GenerateQuery", Map.of("EventDataStores", List.of(arn),
+                    "Prompt", "How many events were recorded in the last day?")).statusCode(200)
+                    .body("QueryStatement", equalTo("SELECT COUNT(*) AS eventCount FROM " + storeId
+                            + " WHERE eventTime > now() - INTERVAL '1' DAY"))
+                    .body("QueryAlias", startsWith("query-"));
+            ct(ACCOUNT, REGION, "GenerateQuery", Map.of("EventDataStores", List.of(arn),
+                    "Prompt", "Compose a poem about autumn")).statusCode(400)
+                    .body("__type", containsString("GenerateResponseException"));
             ct(ACCOUNT, REGION, "DeleteEventDataStore", Map.of("EventDataStore", arn)).statusCode(200);
             ct(ACCOUNT, REGION, "GetEventDataStore", Map.of("EventDataStore", arn)).statusCode(200)
                     .body("Status", equalTo("PENDING_DELETION"));

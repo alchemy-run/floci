@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.aps;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
@@ -22,8 +23,10 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
@@ -37,26 +40,41 @@ public class ApsService implements TagHandler {
     private static final int MAX_PAGE = 1000;
     private static final int MAX_NAMESPACE_NAME_LENGTH = 128;
     private static final Pattern NAMESPACE_NAME = Pattern.compile(".*[0-9A-Za-z][-.0-9A-Z_a-z]*.*");
+    private static final Pattern SCRAPER_ID = Pattern.compile(
+            "s-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+    private static final Set<String> SCRAPER_FILTER_KEYS = Set.of("status", "sourceArn", "destinationArn", "alias");
+    static final String SCRAPER_LIMITATION =
+            "Scraper configuration stored; the local emulator does not collect metrics from the source.";
 
     private final StorageBackend<String, PrometheusWorkspace> storage;
     private final StorageBackend<String, RuleGroupsNamespace> namespaceStorage;
     private final StorageBackend<String, ObjectNode> scraperStorage;
+    private final StorageBackend<String, ObjectNode> scraperLoggingStorage;
     private final RegionResolver regionResolver;
     private final ApsPrometheusBackend backend;
+    private final ApsScraperSources scraperSources;
     private final URI endpointBase;
     private final Object[] workspaceLocks = IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
 
-    @Inject
     public ApsService(StorageFactory storageFactory, RegionResolver regionResolver,
                       EmulatorConfig config, ApsPrometheusBackend backend) {
+        this(storageFactory, regionResolver, config, backend, null);
+    }
+
+    @Inject
+    public ApsService(StorageFactory storageFactory, RegionResolver regionResolver,
+                      EmulatorConfig config, ApsPrometheusBackend backend, ApsScraperSources scraperSources) {
         this.storage = storageFactory.create("aps", "aps-workspaces.json",
                 new TypeReference<Map<String, PrometheusWorkspace>>() {});
         this.namespaceStorage = storageFactory.create("aps", "aps-rule-groups-namespaces.json",
                 new TypeReference<Map<String, RuleGroupsNamespace>>() {});
         this.scraperStorage = storageFactory.create("aps", "aps-scrapers.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
+        this.scraperLoggingStorage = storageFactory.create("aps", "aps-scraper-logging.json",
+                new TypeReference<Map<String, ObjectNode>>() {});
         this.regionResolver = regionResolver;
         this.backend = backend;
+        this.scraperSources = scraperSources;
         this.endpointBase = URI.create(config.effectiveBaseUrl());
     }
 
@@ -225,11 +243,296 @@ public class ApsService implements TagHandler {
     }
 
     public ObjectNode describeScraper(String region, String scraperId) {
-        if (scraperId == null || !scraperId.matches("s-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")) {
+        return requireScraper(region, scraperId).deepCopy();
+    }
+
+    private ObjectNode requireScraper(String region, String scraperId) {
+        if (scraperId == null || !SCRAPER_ID.matcher(scraperId).matches()) {
             throw ApsConfigurationValidator.invalid("scraperId must identify an AMP scraper");
         }
-        return scraperStorage.get(key(region, scraperId)).map(ObjectNode::deepCopy)
+        return scraperStorage.get(key(region, scraperId))
                 .orElseThrow(() -> notFound("Scraper", scraperId));
+    }
+
+    /**
+     * CreateScraper. The source cluster or VPC, the destination workspace and the scrape
+     * configuration are validated and a service-linked role is created, but the emulator does not
+     * run the collector, which {@code statusReason} states on every scraper.
+     */
+    public ObjectNode createScraper(String region, Map<String, Object> body) {
+        ObjectNode request = ApsConfigurationValidator.request(body);
+        String alias = request.hasNonNull("alias") ? ApsConfigurationValidator.scraperAlias(request.get("alias")) : null;
+        String configurationBlob = ApsConfigurationValidator.scrapeConfiguration(request.get("scrapeConfiguration"));
+        ObjectNode roleConfiguration = request.hasNonNull("roleConfiguration")
+                ? scraperRoleConfiguration(request.get("roleConfiguration")) : null;
+        ObjectNode destination = scraperDestination(region, request.get("destination"), roleConfiguration != null);
+        if (request.hasNonNull("tags")) {
+            ApsConfigurationValidator.stringMap(request.get("tags"), "tags", true);
+        }
+        ArrayNode exporters = request.hasNonNull("exporters") ? scraperExporters(request.get("exporters")) : null;
+        ObjectNode source = requireScraperSources().validateSource(region, regionResolver.getAccountId(),
+                request.get("source"));
+
+        String scraperId = "s-" + UUID.randomUUID();
+        synchronized (workspaceLock(region, scraperId)) {
+            String roleArn = requireScraperSources().createScraperRole(scraperId);
+            double now = Instant.now().toEpochMilli() / 1000.0;
+            ObjectNode scraper = JsonNodeFactory.instance.objectNode();
+            if (alias != null) {
+                scraper.put("alias", alias);
+            }
+            scraper.put("scraperId", scraperId);
+            scraper.put("arn", regionResolver.buildArn("aps", region, "scraper/" + scraperId));
+            scraper.put("roleArn", roleArn);
+            scraper.set("status", scraperStatus("ACTIVE"));
+            scraper.put("statusReason", SCRAPER_LIMITATION);
+            scraper.put("createdAt", now);
+            scraper.put("lastModifiedAt", now);
+            scraper.set("tags", request.hasNonNull("tags") ? request.get("tags").deepCopy()
+                    : JsonNodeFactory.instance.objectNode());
+            scraper.putObject("scrapeConfiguration").put("configurationBlob", configurationBlob);
+            scraper.set("source", source);
+            scraper.set("destination", destination);
+            if (roleConfiguration != null) {
+                scraper.set("roleConfiguration", roleConfiguration);
+            }
+            if (exporters != null) {
+                scraper.set("exporters", exporters);
+            }
+            scraperStorage.put(key(region, scraperId), scraper);
+            LOG.infov("Created AMP scraper: {0} in {1}", scraperId, region);
+            return scraperMutation(scraper, "CREATING");
+        }
+    }
+
+    public ObjectNode updateScraper(String region, String scraperId, Map<String, Object> body) {
+        ObjectNode request = ApsConfigurationValidator.request(body);
+        synchronized (workspaceLock(region, scraperId)) {
+            ObjectNode scraper = requireScraper(region, scraperId);
+            String alias = request.hasNonNull("alias") ? ApsConfigurationValidator.scraperAlias(request.get("alias")) : null;
+            String configurationBlob = request.hasNonNull("scrapeConfiguration")
+                    ? ApsConfigurationValidator.scrapeConfiguration(request.get("scrapeConfiguration")) : null;
+            ObjectNode roleConfiguration = request.hasNonNull("roleConfiguration")
+                    ? scraperRoleConfiguration(request.get("roleConfiguration")) : null;
+            boolean crossAccount = roleConfiguration != null || scraper.has("roleConfiguration");
+            ObjectNode destination = request.hasNonNull("destination")
+                    ? scraperDestination(region, request.get("destination"), crossAccount) : null;
+            ArrayNode exporters = request.hasNonNull("exporters") ? scraperExporters(request.get("exporters")) : null;
+
+            if (alias != null) {
+                scraper.put("alias", alias);
+            }
+            if (configurationBlob != null) {
+                scraper.putObject("scrapeConfiguration").put("configurationBlob", configurationBlob);
+            }
+            if (destination != null) {
+                scraper.set("destination", destination);
+            }
+            if (roleConfiguration != null) {
+                scraper.set("roleConfiguration", roleConfiguration);
+            }
+            if (exporters != null) {
+                scraper.set("exporters", exporters);
+            }
+            scraper.put("lastModifiedAt", Instant.now().toEpochMilli() / 1000.0);
+            scraperStorage.put(key(region, scraperId), scraper);
+            return scraperMutation(scraper, "UPDATING");
+        }
+    }
+
+    public ObjectNode deleteScraper(String region, String scraperId) {
+        synchronized (workspaceLock(region, scraperId)) {
+            ObjectNode scraper = requireScraper(region, scraperId);
+            requireScraperSources().deleteScraperRole(scraper.path("roleArn").asText(null));
+            scraperLoggingStorage.delete(key(region, scraperId));
+            scraperStorage.delete(key(region, scraperId));
+            LOG.infov("Deleted AMP scraper: {0} in {1}", scraperId, region);
+            ObjectNode response = JsonNodeFactory.instance.objectNode();
+            response.put("scraperId", scraperId);
+            response.set("status", scraperStatus("DELETING"));
+            return response;
+        }
+    }
+
+    /**
+     * ListScrapers. Filters on one key are OR'd and filters on different keys are AND'd; the
+     * supported keys are status, sourceArn, destinationArn and alias.
+     */
+    public PaginatedResult<ObjectNode> listScrapers(String region, Map<String, List<String>> filters,
+                                                    Integer maxResults, String nextToken) {
+        Map<String, List<String>> effective = filters == null ? Map.of() : filters;
+        for (String filterKey : effective.keySet()) {
+            if (!SCRAPER_FILTER_KEYS.contains(filterKey)) {
+                throw ApsConfigurationValidator.invalid("Unsupported scraper filter key: " + filterKey
+                        + ". Supported keys are status, sourceArn, destinationArn and alias.");
+            }
+        }
+        String regionPrefix = keyPrefix(region);
+        List<ObjectNode> summaries = scraperStorage.scan(k -> k.startsWith(regionPrefix)).stream()
+                .filter(scraper -> matchesScraperFilter(effective, "status", scraper.path("status").path("statusCode").asText(null))
+                        && matchesScraperFilter(effective, "sourceArn",
+                                scraper.path("source").path("eksConfiguration").path("clusterArn").asText(null))
+                        && matchesScraperFilter(effective, "destinationArn", destinationArn(scraper))
+                        && matchesScraperFilter(effective, "alias", scraper.path("alias").asText(null)))
+                .map(scraper -> {
+                    ObjectNode summary = scraper.deepCopy();
+                    summary.remove("scrapeConfiguration");
+                    return summary;
+                })
+                .toList();
+        return Pagination.paginate(summaries, node -> node.path("scraperId").asText(), maxResults, nextToken,
+                DEFAULT_PAGE, MAX_PAGE, "ValidationException");
+    }
+
+    public ObjectNode describeScraperLoggingConfiguration(String region, String scraperId) {
+        synchronized (workspaceLock(region, scraperId)) {
+            requireScraper(region, scraperId);
+            return scraperLoggingStorage.get(key(region, scraperId)).map(ObjectNode::deepCopy)
+                    .orElseThrow(() -> notFound("Scraper logging configuration", scraperId));
+        }
+    }
+
+    /** UpdateScraperLoggingConfiguration is an upsert; there is no separate create operation. */
+    public ObjectNode updateScraperLoggingConfiguration(String region, String scraperId, Map<String, Object> body) {
+        ObjectNode request = ApsConfigurationValidator.request(body);
+        ObjectNode destination = ApsConfigurationValidator.object(request.get("loggingDestination"), "loggingDestination");
+        if (destination.size() != 1 || !destination.has("cloudWatchLogs")) {
+            throw ApsConfigurationValidator.invalid("loggingDestination must contain exactly one cloudWatchLogs destination");
+        }
+        String logGroupArn = ApsConfigurationValidator.text(
+                ApsConfigurationValidator.object(destination.get("cloudWatchLogs"), "cloudWatchLogs").get("logGroupArn"),
+                "cloudWatchLogs.logGroupArn");
+        ApsConfigurationValidator.logGroup(logGroupArn, region, regionResolver.getAccountId());
+        ArrayNode components = ApsConfigurationValidator.scraperComponents(request.get("scraperComponents"));
+        synchronized (workspaceLock(region, scraperId)) {
+            requireScraper(region, scraperId);
+            boolean exists = scraperLoggingStorage.get(key(region, scraperId)).isPresent();
+            ObjectNode configuration = JsonNodeFactory.instance.objectNode();
+            configuration.set("status", metadataStatus("ACTIVE",
+                    "Logging configuration stored; scraper component logs are not delivered locally."));
+            configuration.put("scraperId", scraperId);
+            configuration.putObject("loggingDestination").putObject("cloudWatchLogs").put("logGroupArn", logGroupArn);
+            configuration.set("scraperComponents", components);
+            configuration.put("modifiedAt", Instant.now().toEpochMilli() / 1000.0);
+            scraperLoggingStorage.put(key(region, scraperId), configuration);
+            ObjectNode response = JsonNodeFactory.instance.objectNode();
+            response.set("status", JsonNodeFactory.instance.objectNode()
+                    .put("statusCode", exists ? "UPDATING" : "CREATING"));
+            return response;
+        }
+    }
+
+    public void deleteScraperLoggingConfiguration(String region, String scraperId) {
+        synchronized (workspaceLock(region, scraperId)) {
+            requireScraper(region, scraperId);
+            if (scraperLoggingStorage.get(key(region, scraperId)).isEmpty()) {
+                throw notFound("Scraper logging configuration", scraperId);
+            }
+            scraperLoggingStorage.delete(key(region, scraperId));
+        }
+    }
+
+    private ApsScraperSources requireScraperSources() {
+        if (scraperSources == null) {
+            throw new AwsException("InternalServerException", "Scraper sources are not available", 500);
+        }
+        return scraperSources;
+    }
+
+    private ObjectNode scraperDestination(String region, JsonNode value, boolean crossAccountRoles) {
+        ObjectNode destination = ApsConfigurationValidator.object(value, "destination");
+        if (destination.size() != 1
+                || !(destination.has("ampConfiguration") || destination.has("cloudWatchConfiguration"))) {
+            throw ApsConfigurationValidator.invalid(
+                    "destination must contain exactly one of ampConfiguration or cloudWatchConfiguration");
+        }
+        if (destination.has("cloudWatchConfiguration")) {
+            ApsConfigurationValidator.text(ApsConfigurationValidator.object(destination.get("cloudWatchConfiguration"),
+                    "cloudWatchConfiguration").get("datasetArn"), "cloudWatchConfiguration.datasetArn");
+            return destination.deepCopy();
+        }
+        String workspaceArn = ApsConfigurationValidator.text(ApsConfigurationValidator.object(
+                destination.get("ampConfiguration"), "ampConfiguration").get("workspaceArn"),
+                "ampConfiguration.workspaceArn");
+        AwsArnUtils.Arn arn;
+        try {
+            arn = AwsArnUtils.parse(workspaceArn);
+        } catch (IllegalArgumentException e) {
+            throw ApsConfigurationValidator.invalid("ampConfiguration.workspaceArn must be an AMP workspace ARN");
+        }
+        if (!"aps".equals(arn.service()) || !arn.resource().startsWith("workspace/")) {
+            throw ApsConfigurationValidator.invalid("ampConfiguration.workspaceArn must be an AMP workspace ARN");
+        }
+        boolean local = region.equals(arn.region()) && regionResolver.getAccountId().equals(arn.accountId());
+        if (!local && !crossAccountRoles) {
+            throw ApsConfigurationValidator.invalid(
+                    "A workspace in another account or Region requires roleConfiguration");
+        }
+        if (local) {
+            PrometheusWorkspace workspace = describeWorkspace(region, arn.resource().substring("workspace/".length()));
+            if (!workspaceArn.equals(workspace.getArn())) {
+                throw notFound("Workspace", workspaceArn);
+            }
+        }
+        return destination.deepCopy();
+    }
+
+    private static ObjectNode scraperRoleConfiguration(JsonNode value) {
+        ObjectNode roles = ApsConfigurationValidator.object(value, "roleConfiguration");
+        for (String field : List.of("sourceRoleArn", "targetRoleArn")) {
+            if (roles.hasNonNull(field)) {
+                String roleArn = ApsConfigurationValidator.text(roles.get(field), "roleConfiguration." + field);
+                try {
+                    AwsArnUtils.Arn arn = AwsArnUtils.parse(roleArn);
+                    if (!"iam".equals(arn.service()) || !arn.resource().startsWith("role/")) {
+                        throw ApsConfigurationValidator.invalid("roleConfiguration." + field + " must be an IAM role ARN");
+                    }
+                } catch (IllegalArgumentException e) {
+                    throw ApsConfigurationValidator.invalid("roleConfiguration." + field + " must be an IAM role ARN");
+                }
+            }
+        }
+        return roles.deepCopy();
+    }
+
+    private static ArrayNode scraperExporters(JsonNode value) {
+        if (!value.isArray()) {
+            throw ApsConfigurationValidator.invalid("exporters must be an array");
+        }
+        for (JsonNode exporter : value) {
+            ObjectNode node = ApsConfigurationValidator.object(exporter, "exporter");
+            if (node.size() != 1 || !node.has("openSearchConfiguration")) {
+                throw ApsConfigurationValidator.invalid("Each exporter must contain exactly one openSearchConfiguration");
+            }
+            ApsConfigurationValidator.text(ApsConfigurationValidator.object(node.get("openSearchConfiguration"),
+                    "openSearchConfiguration").get("domainArn"), "openSearchConfiguration.domainArn");
+        }
+        return (ArrayNode) value.deepCopy();
+    }
+
+    private static boolean matchesScraperFilter(Map<String, List<String>> filters, String key, String value) {
+        List<String> accepted = filters.get(key);
+        return accepted == null || accepted.isEmpty() || (value != null && accepted.contains(value));
+    }
+
+    private static String destinationArn(ObjectNode scraper) {
+        JsonNode destination = scraper.path("destination");
+        return destination.has("ampConfiguration")
+                ? destination.path("ampConfiguration").path("workspaceArn").asText(null)
+                : destination.path("cloudWatchConfiguration").path("datasetArn").asText(null);
+    }
+
+    private static ObjectNode scraperStatus(String code) {
+        return JsonNodeFactory.instance.objectNode().put("statusCode", code);
+    }
+
+    private static ObjectNode scraperMutation(ObjectNode scraper, String statusCode) {
+        ObjectNode response = JsonNodeFactory.instance.objectNode();
+        response.put("scraperId", scraper.path("scraperId").asText());
+        response.put("arn", scraper.path("arn").asText());
+        response.set("status", scraperStatus(statusCode));
+        response.set("tags", scraper.path("tags").deepCopy());
+        return response;
     }
 
     public enum ConfigurationKind {
@@ -575,6 +878,21 @@ public class ApsService implements TagHandler {
                         () -> namespaceStorage.put(namespaceKey(region, parts[0], parts[1]), namespace));
             }
         }
+        String scraperPrefix = "scraper/";
+        if (resource.startsWith(scraperPrefix) && resource.length() > scraperPrefix.length()) {
+            String scraperId = resource.substring(scraperPrefix.length());
+            ObjectNode scraper = requireScraper(region, scraperId);
+            if (!arn.equals(scraper.path("arn").asText())) {
+                throw notFound("Scraper", scraperId);
+            }
+            Map<String, String> tags = new HashMap<>();
+            scraper.path("tags").fields().forEachRemaining(tag -> tags.put(tag.getKey(), tag.getValue().asText()));
+            return new Taggable(tags, () -> {
+                ObjectNode tagNode = scraper.putObject("tags");
+                tags.forEach(tagNode::put);
+                scraperStorage.put(key(region, scraperId), scraper);
+            });
+        }
         String detectorPrefix = "anomalydetector/";
         if (resource.startsWith(detectorPrefix)) {
             String[] parts = resource.substring(detectorPrefix.length()).split("/", 2);
@@ -585,7 +903,8 @@ public class ApsService implements TagHandler {
             }
         }
         throw new AwsException("ValidationException",
-                "Tags are only supported on AMP workspaces, rule groups namespaces, and anomaly detectors: " + arn, 400);
+                "Tags are only supported on AMP workspaces, rule groups namespaces, anomaly detectors, and scrapers: "
+                        + arn, 400);
     }
 
     // AMP is regional ("You can have one or more workspaces in each Region in your account"), so

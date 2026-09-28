@@ -22,6 +22,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.services.redshift.model.Cluster;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -44,6 +45,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.RETURNS_SELF;
@@ -310,6 +312,20 @@ class RedshiftContainerManagerTest {
         manager.stop(ACCOUNT_ID, "test-cluster");
         assertTrue(manager.getContainer(ACCOUNT_ID, "test-cluster").isEmpty());
         verify(lifecycleManager).removeIfExists("floci-redshift-" + ACCOUNT_ID + "-test-cluster");
+    }
+
+    @Test
+    void testStartRemovesAStaleContainerHoldingTheClusterNameBeforeCreating() {
+        ContainerBuilder.Builder specBuilder = mock(ContainerBuilder.Builder.class, org.mockito.Mockito.RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(specBuilder);
+        ContainerInfo info = new ContainerInfo("cont-123", Map.of(5432, new EndpointInfo("localhost", 5432)));
+        when(lifecycleManager.createAndStart(any())).thenReturn(info);
+
+        manager.start(ACCOUNT_ID, "test-cluster", "admin", "pass");
+
+        InOrder order = inOrder(lifecycleManager);
+        order.verify(lifecycleManager).removeIfExistsStrict("floci-redshift-" + ACCOUNT_ID + "-test-cluster");
+        order.verify(lifecycleManager).createAndStart(any());
     }
 
     @Test

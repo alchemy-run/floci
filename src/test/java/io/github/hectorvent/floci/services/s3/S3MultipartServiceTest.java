@@ -233,6 +233,66 @@ class S3MultipartServiceTest {
     }
 
     @Test
+    void listMultipartUploadsFiltersByPrefixAndPagesWithinAKey() {
+        MultipartUpload first = s3Service.initiateMultipartUpload("test-bucket", "list/matching.txt", null);
+        MultipartUpload sibling = s3Service.initiateMultipartUpload("test-bucket", "list/matching.txt", null);
+        MultipartUpload next = s3Service.initiateMultipartUpload("test-bucket", "list/next.txt", null);
+        s3Service.initiateMultipartUpload("test-bucket", "other/excluded.txt", null);
+
+        S3Service.ListMultipartUploadsResult all =
+                s3Service.listMultipartUploads("test-bucket", "list/", null, 1000, null, null);
+        assertFalse(all.isTruncated());
+        assertEquals(Set.of(first.getUploadId(), sibling.getUploadId(), next.getUploadId()),
+                Set.copyOf(all.uploads().stream().map(MultipartUpload::getUploadId).toList()));
+
+        S3Service.ListMultipartUploadsResult page1 =
+                s3Service.listMultipartUploads("test-bucket", "list/", null, 1, null, null);
+        assertTrue(page1.isTruncated());
+        assertEquals(1, page1.uploads().size());
+        assertEquals("list/matching.txt", page1.nextKeyMarker());
+        assertEquals(page1.uploads().get(0).getUploadId(), page1.nextUploadIdMarker());
+
+        S3Service.ListMultipartUploadsResult page2 = s3Service.listMultipartUploads("test-bucket", "list/",
+                null, 1, page1.nextKeyMarker(), page1.nextUploadIdMarker());
+        assertTrue(page2.isTruncated());
+        assertEquals("list/matching.txt", page2.uploads().get(0).getKey());
+        assertEquals(Set.of(first.getUploadId(), sibling.getUploadId()),
+                Set.of(page1.nextUploadIdMarker(), page2.nextUploadIdMarker()));
+
+        S3Service.ListMultipartUploadsResult page3 = s3Service.listMultipartUploads("test-bucket", "list/",
+                null, 1, page2.nextKeyMarker(), page2.nextUploadIdMarker());
+        assertFalse(page3.isTruncated());
+        assertEquals(List.of(next.getUploadId()),
+                page3.uploads().stream().map(MultipartUpload::getUploadId).toList());
+        assertNull(page3.nextKeyMarker());
+    }
+
+    @Test
+    void listMultipartUploadsKeyMarkerWithoutUploadIdSkipsTheWholeKey() {
+        s3Service.initiateMultipartUpload("test-bucket", "a.txt", null);
+        s3Service.initiateMultipartUpload("test-bucket", "a.txt", null);
+        MultipartUpload b = s3Service.initiateMultipartUpload("test-bucket", "b.txt", null);
+
+        S3Service.ListMultipartUploadsResult result =
+                s3Service.listMultipartUploads("test-bucket", null, null, 1000, "a.txt", null);
+        assertEquals(List.of(b.getUploadId()),
+                result.uploads().stream().map(MultipartUpload::getUploadId).toList());
+    }
+
+    @Test
+    void listMultipartUploadsRollsUpCommonPrefixes() {
+        s3Service.initiateMultipartUpload("test-bucket", "dir/a.txt", null);
+        s3Service.initiateMultipartUpload("test-bucket", "dir/b.txt", null);
+        MultipartUpload top = s3Service.initiateMultipartUpload("test-bucket", "top.txt", null);
+
+        S3Service.ListMultipartUploadsResult result =
+                s3Service.listMultipartUploads("test-bucket", null, "/", 1000, null, null);
+        assertEquals(List.of("dir/"), result.commonPrefixes());
+        assertEquals(List.of(top.getUploadId()),
+                result.uploads().stream().map(MultipartUpload::getUploadId).toList());
+    }
+
+    @Test
     void listMultipartUploadsEmpty() {
         List<MultipartUpload> uploads = s3Service.listMultipartUploads("test-bucket");
         assertTrue(uploads.isEmpty());

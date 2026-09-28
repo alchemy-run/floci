@@ -60,6 +60,12 @@ public final class SageMakerEntities {
         // late.
         public long generation;
         public Map<String, String> tags = new LinkedHashMap<>();
+        // Specified image -> digest-pinned image, filled in by the start worker before it
+        // publishes an InService result.
+        public Map<String, String> resolvedImages = new LinkedHashMap<>();
+        // DescribeEndpoint ProductionVariants (ProductionVariantSummary); empty until the
+        // endpoint first reaches InService.
+        public List<Map<String, Object>> productionVariants = new ArrayList<>();
     }
 
     @RegisterForReflection
@@ -139,11 +145,32 @@ public final class SageMakerEntities {
         public Map<String, Object> vpcConfig;
         public Map<String, Object> orchestrator;
         public String nodeRecovery;
+        public Map<String, Object> restrictedInstanceGroupsConfig;
+        public Map<String, Object> tieredStorageConfig;
+        public String nodeProvisioningMode;
+        public String clusterRole;
+        public Map<String, Object> autoScaling;
+        /** Status of an instance group an in-flight update creates or changes, keyed by group name. */
+        public Map<String, String> instanceGroupStatus = new LinkedHashMap<>();
+        public List<ClusterNodeResource> nodes = new ArrayList<>();
         public long creationTime;
         public long lastModifiedTime;
         public String region;
         public String accountId;
         public Map<String, String> tags = new LinkedHashMap<>();
+    }
+
+    /** One HyperPod node: an instance of an instance group, provisioned by running its lifecycle scripts. */
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ClusterNodeResource {
+        public String instanceGroupName;
+        public String instanceId;
+        public String instanceType;
+        public long launchTime;
+        /** Pending, Running, Failure or ShuttingDown. */
+        public String status;
+        public String statusMessage;
     }
 
     @RegisterForReflection

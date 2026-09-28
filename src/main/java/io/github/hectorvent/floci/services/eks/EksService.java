@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.eks;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestScopes;
 import io.github.hectorvent.floci.core.common.TagHandler;
@@ -37,15 +39,24 @@ import io.github.hectorvent.floci.services.eks.model.NodegroupStatus;
 import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
 import io.github.hectorvent.floci.services.eks.model.Provider;
 import io.github.hectorvent.floci.services.eks.model.ResourcesVpcConfig;
+import io.github.hectorvent.floci.services.eks.model.Update;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupConfigRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupVersionRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateParam;
+import io.quarkus.runtime.annotations.RegisterForReflection;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
@@ -53,6 +64,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -60,9 +72,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
@@ -86,6 +100,7 @@ public class EksService implements TagHandler, ResourceProvider {
     private final StorageBackend<String, Cluster> storage;
     private final StorageBackend<String, Nodegroup> nodeGroupStorage;
     private final StorageBackend<String, FargateProfile> fargateProfileStorage;
+    private final StorageBackend<String, StoredNodegroupUpdate> nodegroupUpdateStorage;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final EksClusterManager clusterManager;
@@ -95,6 +110,16 @@ public class EksService implements TagHandler, ResourceProvider {
     private final EksPodIdentityAssociationService podIdentityAssociations;
     private final EksAddonService addons;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Set<String> TAINT_EFFECTS = Set.of("NO_SCHEDULE", "NO_EXECUTE", "PREFER_NO_SCHEDULE");
+
+    /** How long a nodegroup update stays InProgress (nodegroup UPDATING) before it completes. */
+    Duration nodegroupUpdateDuration = Duration.ofSeconds(3);
+
+    /** A nodegroup Update plus what is needed to settle it lazily and replay it idempotently. */
+    @RegisterForReflection
+    public record StoredNodegroupUpdate(Update update, String nodegroupName, String clientRequestToken,
+                                        String requestFingerprint, long completesAtEpochMillis) {}
 
     @Inject
     public EksService(StorageFactory storageFactory, EmulatorConfig config,
@@ -110,6 +135,9 @@ public class EksService implements TagHandler, ResourceProvider {
                 });
         this.fargateProfileStorage = storageFactory.create("eks", "eks-fargate-profiles.json",
                 new TypeReference<Map<String, FargateProfile>>() {
+                });
+        this.nodegroupUpdateStorage = storageFactory.create("eks", "eks-nodegroup-updates.json",
+                new TypeReference<Map<String, StoredNodegroupUpdate>>() {
                 });
         this.config = config;
         this.regionResolver = regionResolver;
@@ -716,9 +744,359 @@ public class EksService implements TagHandler, ResourceProvider {
 
     public Nodegroup describeNodeGroup(String clusterName, String nodegroupName) {
         describeCluster(clusterName);
-        return nodeGroupStorage.get(nodeGroupKey(clusterName, nodegroupName))
+        Nodegroup nodegroup = nodeGroupStorage.get(nodeGroupKey(clusterName, nodegroupName))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "No nodegroup found for name: " + nodegroupName, 404));
+        settleNodegroupUpdates(clusterName, nodegroup);
+        return nodegroup;
+    }
+
+    /**
+     * UpdateNodegroupConfig: applies scaling, label/taint deltas, updateConfig and
+     * nodeRepairConfig, then reports the nodegroup UPDATING with an InProgress ConfigUpdate
+     * until {@link #nodegroupUpdateDuration} elapses.
+     */
+    public synchronized Update updateNodegroupConfig(String clusterName, String nodegroupName,
+                                                     UpdateNodegroupConfigRequest request) {
+        Nodegroup nodegroup = describeNodeGroup(clusterName, nodegroupName);
+        if (request == null) {
+            throw new AwsException("InvalidParameterException", "No changes needed", 400);
+        }
+        String fingerprint = fingerprint(request);
+        Optional<Update> replay = replayNodegroupUpdate(clusterName, nodegroupName,
+                request.clientRequestToken(), fingerprint);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        requireNodegroupUpdatable(nodegroup);
+
+        List<UpdateParam> params = new ArrayList<>();
+        NodegroupScalingConfig scaling = nodegroup.getScalingConfig();
+        if (request.scalingConfig() != null) {
+            scaling = mergeScalingConfig(nodegroup.getScalingConfig(), request.scalingConfig());
+            params.add(new UpdateParam("MinSize", String.valueOf(scaling.getMinSize())));
+            params.add(new UpdateParam("MaxSize", String.valueOf(scaling.getMaxSize())));
+            params.add(new UpdateParam("DesiredSize", String.valueOf(scaling.getDesiredSize())));
+        }
+        Map<String, String> labels = nodegroup.getLabels();
+        if (request.labels() != null) {
+            labels = applyLabels(nodegroup.getLabels(), request.labels(), params);
+        }
+        List<Object> taints = nodegroup.getTaints();
+        if (request.taints() != null) {
+            taints = applyTaints(nodegroup.getTaints(), request.taints(), params);
+        }
+        Object updateConfig = nodegroup.getUpdateConfig();
+        if (request.updateConfig() != null) {
+            updateConfig = mergeUpdateConfig(nodegroup.getUpdateConfig(), request.updateConfig(), params);
+        }
+        Object nodeRepairConfig = nodegroup.getNodeRepairConfig();
+        if (request.nodeRepairConfig() != null) {
+            Object enabled = request.nodeRepairConfig().get("enabled");
+            if (enabled != null && !(enabled instanceof Boolean)) {
+                throw new AwsException("InvalidParameterException", "nodeRepairConfig.enabled must be a boolean", 400);
+            }
+            nodeRepairConfig = new LinkedHashMap<>(request.nodeRepairConfig());
+            params.add(new UpdateParam("NodeRepairEnabled", String.valueOf(Boolean.TRUE.equals(enabled))));
+        }
+        if (params.isEmpty()) {
+            throw new AwsException("InvalidParameterException", "No changes needed", 400);
+        }
+
+        nodegroup.setScalingConfig(scaling);
+        nodegroup.setLabels(labels);
+        nodegroup.setTaints(taints);
+        nodegroup.setUpdateConfig(updateConfig);
+        nodegroup.setNodeRepairConfig(nodeRepairConfig);
+        return startNodegroupUpdate(clusterName, nodegroup, "ConfigUpdate", params,
+                request.clientRequestToken(), fingerprint);
+    }
+
+    /**
+     * UpdateNodegroupVersion: moves the nodegroup to {@code version} (default: the cluster's
+     * version) and its release version, never past the control plane and never backwards.
+     */
+    public synchronized Update updateNodegroupVersion(String clusterName, String nodegroupName,
+                                                      UpdateNodegroupVersionRequest request) {
+        Cluster cluster = describeCluster(clusterName);
+        Nodegroup nodegroup = describeNodeGroup(clusterName, nodegroupName);
+        UpdateNodegroupVersionRequest body = request != null ? request
+                : new UpdateNodegroupVersionRequest(null, null, null, null, null);
+        String fingerprint = fingerprint(body);
+        Optional<Update> replay = replayNodegroupUpdate(clusterName, nodegroupName,
+                body.clientRequestToken(), fingerprint);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        requireNodegroupUpdatable(nodegroup);
+
+        String target = body.version() != null && !body.version().isBlank() ? body.version().trim() : cluster.getVersion();
+        Matcher targetMatcher = K8S_VERSION_PATTERN.matcher(target == null ? "" : target);
+        if (!targetMatcher.matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "The specified parameter version is not valid: " + target, 400);
+        }
+        int targetMinor = Integer.parseInt(targetMatcher.group(1));
+        Matcher clusterMatcher = K8S_VERSION_PATTERN.matcher(Objects.toString(cluster.getVersion(), ""));
+        if (clusterMatcher.matches() && targetMinor > Integer.parseInt(clusterMatcher.group(1))) {
+            throw new AwsException("InvalidParameterException", "Requested Nodegroup Kubernetes version "
+                    + target + " is newer than the cluster Kubernetes version " + cluster.getVersion(), 400);
+        }
+        Matcher currentMatcher = K8S_VERSION_PATTERN.matcher(Objects.toString(nodegroup.getVersion(), ""));
+        if (currentMatcher.matches() && targetMinor < Integer.parseInt(currentMatcher.group(1))) {
+            throw new AwsException("InvalidParameterException", "Requested Nodegroup Kubernetes version "
+                    + target + " is older than the current Nodegroup version " + nodegroup.getVersion(), 400);
+        }
+        if (body.launchTemplate() != null) {
+            if (nodegroup.getLaunchTemplate() == null) {
+                throw new AwsException("InvalidParameterException",
+                        "launchTemplate can only be updated on a nodegroup created with a launch template", 400);
+            }
+            validateLaunchTemplate(resolveClusterRegion(cluster), body.launchTemplate());
+        }
+        String releaseVersion = body.releaseVersion() != null && !body.releaseVersion().isBlank()
+                ? body.releaseVersion().trim() : target + "-eks-1";
+
+        List<UpdateParam> params = new ArrayList<>();
+        params.add(new UpdateParam("Version", target));
+        params.add(new UpdateParam("ReleaseVersion", releaseVersion));
+        if (body.launchTemplate() != null) {
+            Object ltName = body.launchTemplate().get("name");
+            Object ltVersion = body.launchTemplate().get("version");
+            if (ltName != null) {
+                params.add(new UpdateParam("LaunchTemplateName", ltName.toString()));
+            }
+            if (ltVersion != null) {
+                params.add(new UpdateParam("LaunchTemplateVersion", ltVersion.toString()));
+            }
+            nodegroup.setLaunchTemplate(new LinkedHashMap<>(body.launchTemplate()));
+        }
+        nodegroup.setVersion(target);
+        nodegroup.setReleaseVersion(releaseVersion);
+        return startNodegroupUpdate(clusterName, nodegroup, "VersionUpdate", params,
+                body.clientRequestToken(), fingerprint);
+    }
+
+    public Update describeNodegroupUpdate(String clusterName, String nodegroupName, String updateId) {
+        Nodegroup nodegroup = describeNodeGroup(clusterName, nodegroupName);
+        return nodegroupUpdateStorage.get(nodegroupUpdateKey(clusterName, nodegroup.getNodegroupName(), updateId))
+                .map(stored -> effectiveUpdate(stored, System.currentTimeMillis()))
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "No update found for ID: " + updateId, 404));
+    }
+
+    List<String> listNodegroupUpdateIds(String clusterName, String nodegroupName) {
+        String prefix = nodeGroupKey(clusterName, nodegroupName) + "/";
+        return nodegroupUpdateStorage.scan(key -> key.startsWith(prefix)).stream()
+                .map(stored -> stored.update().id())
+                .toList();
+    }
+
+    private Update startNodegroupUpdate(String clusterName, Nodegroup nodegroup, String type,
+                                        List<UpdateParam> params, String clientRequestToken, String fingerprint) {
+        Instant now = Instant.now();
+        nodegroup.setStatus(NodegroupStatus.UPDATING);
+        nodegroup.setModifiedAt(now);
+        nodeGroupStorage.put(nodeGroupKey(clusterName, nodegroup.getNodegroupName()), nodegroup);
+        Update update = new Update(UUID.randomUUID().toString(), "InProgress", type, List.copyOf(params),
+                now.toEpochMilli() / 1000.0, List.of());
+        nodegroupUpdateStorage.put(nodegroupUpdateKey(clusterName, nodegroup.getNodegroupName(), update.id()),
+                new StoredNodegroupUpdate(update, nodegroup.getNodegroupName(), clientRequestToken, fingerprint,
+                        now.toEpochMilli() + nodegroupUpdateDuration.toMillis()));
+        return update;
+    }
+
+    private Optional<Update> replayNodegroupUpdate(String clusterName, String nodegroupName,
+                                                   String clientRequestToken, String fingerprint) {
+        if (clientRequestToken == null || clientRequestToken.isBlank()) {
+            return Optional.empty();
+        }
+        String prefix = nodeGroupKey(clusterName, nodegroupName) + "/";
+        long now = System.currentTimeMillis();
+        return nodegroupUpdateStorage.scan(key -> key.startsWith(prefix)).stream()
+                .filter(stored -> clientRequestToken.equals(stored.clientRequestToken())
+                        && fingerprint.equals(stored.requestFingerprint()))
+                .findFirst()
+                .map(stored -> effectiveUpdate(stored, now));
+    }
+
+    /** Completes elapsed updates and returns the nodegroup to ACTIVE once none is in progress. */
+    private void settleNodegroupUpdates(String clusterName, Nodegroup nodegroup) {
+        if (nodegroup.getStatus() != NodegroupStatus.UPDATING) {
+            return;
+        }
+        String prefix = nodeGroupKey(clusterName, nodegroup.getNodegroupName()) + "/";
+        long now = System.currentTimeMillis();
+        boolean inProgress = nodegroupUpdateStorage.scan(key -> key.startsWith(prefix)).stream()
+                .anyMatch(stored -> now < stored.completesAtEpochMillis());
+        if (!inProgress) {
+            nodegroup.setStatus(NodegroupStatus.ACTIVE);
+            nodeGroupStorage.put(nodeGroupKey(clusterName, nodegroup.getNodegroupName()), nodegroup);
+        }
+    }
+
+    private static Update effectiveUpdate(StoredNodegroupUpdate stored, long nowMillis) {
+        Update update = stored.update();
+        if (!"InProgress".equals(update.status()) || nowMillis < stored.completesAtEpochMillis()) {
+            return update;
+        }
+        return new Update(update.id(), "Successful", update.type(), update.params(), update.createdAt(),
+                update.errors());
+    }
+
+    private static void requireNodegroupUpdatable(Nodegroup nodegroup) {
+        if (nodegroup.getStatus() != NodegroupStatus.ACTIVE && nodegroup.getStatus() != NodegroupStatus.DEGRADED) {
+            throw new AwsException("ResourceInUseException", "Nodegroup " + nodegroup.getNodegroupName()
+                    + " cannot be updated while it is " + nodegroup.getStatus(), 409);
+        }
+    }
+
+    private static NodegroupScalingConfig mergeScalingConfig(NodegroupScalingConfig current,
+                                                             NodegroupScalingConfig requested) {
+        NodegroupScalingConfig merged = new NodegroupScalingConfig();
+        merged.setMinSize(requested.getMinSize() != null ? requested.getMinSize()
+                : current != null ? current.getMinSize() : null);
+        merged.setMaxSize(requested.getMaxSize() != null ? requested.getMaxSize()
+                : current != null ? current.getMaxSize() : null);
+        merged.setDesiredSize(requested.getDesiredSize() != null ? requested.getDesiredSize()
+                : current != null ? current.getDesiredSize() : null);
+        Integer min = merged.getMinSize();
+        Integer max = merged.getMaxSize();
+        Integer desired = merged.getDesiredSize();
+        if (min == null || max == null || desired == null || min < 0 || max < 1 || desired < 0) {
+            throw new AwsException("InvalidParameterException",
+                    "scalingConfig requires minSize >= 0, maxSize >= 1 and desiredSize >= 0", 400);
+        }
+        if (min > max) {
+            throw new AwsException("InvalidParameterException",
+                    "Minimum capacity " + min + " can't be greater than maximum capacity " + max, 400);
+        }
+        if (desired < min || desired > max) {
+            throw new AwsException("InvalidParameterException", "Desired capacity " + desired
+                    + " must be between minimum capacity " + min + " and maximum capacity " + max, 400);
+        }
+        return merged;
+    }
+
+    private static Map<String, String> applyLabels(Map<String, String> current, UpdateNodegroupConfigRequest.Labels delta,
+                                                   List<UpdateParam> params) {
+        Map<String, String> add = delta.addOrUpdateLabels() == null ? Map.of() : delta.addOrUpdateLabels();
+        List<String> remove = delta.removeLabels() == null ? List.of() : delta.removeLabels();
+        for (Map.Entry<String, String> label : add.entrySet()) {
+            if (label.getKey() == null || label.getKey().isBlank() || label.getKey().length() > 63
+                    || label.getValue() == null || label.getValue().length() > 63) {
+                throw new AwsException("InvalidParameterException", "Invalid label: " + label.getKey(), 400);
+            }
+            if (remove.contains(label.getKey())) {
+                throw new AwsException("InvalidParameterException",
+                        "Label " + label.getKey() + " cannot be both added and removed", 400);
+            }
+        }
+        Map<String, String> updated = current == null ? new LinkedHashMap<>() : new LinkedHashMap<>(current);
+        remove.forEach(updated::remove);
+        updated.putAll(add);
+        if (!add.isEmpty()) {
+            params.add(new UpdateParam("LabelsToAdd", toJson(add)));
+        }
+        if (!remove.isEmpty()) {
+            params.add(new UpdateParam("LabelsToRemove", toJson(remove)));
+        }
+        return updated.isEmpty() && current == null ? null : updated;
+    }
+
+    private static List<Object> applyTaints(List<Object> current, UpdateNodegroupConfigRequest.Taints delta,
+                                            List<UpdateParam> params) {
+        List<Map<String, Object>> add = delta.addOrUpdateTaints() == null ? List.of() : delta.addOrUpdateTaints();
+        List<Map<String, Object>> remove = delta.removeTaints() == null ? List.of() : delta.removeTaints();
+        for (Map<String, Object> taint : add) {
+            Object key = taint.get("key");
+            if (key == null || key.toString().isBlank() || key.toString().length() > 63
+                    || !TAINT_EFFECTS.contains(String.valueOf(taint.get("effect")))) {
+                throw new AwsException("InvalidParameterException",
+                        "Taints require a key and an effect of NO_SCHEDULE, NO_EXECUTE or PREFER_NO_SCHEDULE", 400);
+            }
+        }
+        List<Object> updated = new ArrayList<>(current == null ? List.of() : current);
+        for (Map<String, Object> taint : remove) {
+            updated.removeIf(existing -> existing instanceof Map<?, ?> map
+                    && Objects.equals(map.get("key"), taint.get("key"))
+                    && (taint.get("effect") == null || Objects.equals(map.get("effect"), taint.get("effect"))));
+        }
+        for (Map<String, Object> taint : add) {
+            updated.removeIf(existing -> existing instanceof Map<?, ?> map
+                    && Objects.equals(map.get("key"), taint.get("key"))
+                    && Objects.equals(map.get("effect"), taint.get("effect")));
+            updated.add(new LinkedHashMap<>(taint));
+        }
+        if (updated.size() > 50) {
+            throw new AwsException("InvalidParameterException", "A nodegroup can have at most 50 taints", 400);
+        }
+        if (!add.isEmpty()) {
+            params.add(new UpdateParam("TaintsToAdd", toJson(add)));
+        }
+        if (!remove.isEmpty()) {
+            params.add(new UpdateParam("TaintsToRemove", toJson(remove)));
+        }
+        return updated.isEmpty() && current == null ? null : updated;
+    }
+
+    private static Object mergeUpdateConfig(Object current, Map<String, Object> requested, List<UpdateParam> params) {
+        Object maxUnavailable = requested.get("maxUnavailable");
+        Object percentage = requested.get("maxUnavailablePercentage");
+        Object strategy = requested.get("updateStrategy");
+        if (maxUnavailable != null && percentage != null) {
+            throw new AwsException("InvalidParameterException",
+                    "Specify either maxUnavailable or maxUnavailablePercentage, not both", 400);
+        }
+        for (Object value : Arrays.asList(maxUnavailable, percentage)) {
+            if (value != null && (!(value instanceof Integer number) || number < 1 || number > 100)) {
+                throw new AwsException("InvalidParameterException",
+                        "maxUnavailable and maxUnavailablePercentage must be between 1 and 100", 400);
+            }
+        }
+        if (strategy != null && !"DEFAULT".equals(strategy) && !"MINIMAL".equals(strategy)) {
+            throw new AwsException("InvalidParameterException", "updateStrategy must be DEFAULT or MINIMAL", 400);
+        }
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (maxUnavailable == null && percentage == null && current instanceof Map<?, ?> existing) {
+            if (existing.get("maxUnavailable") != null) {
+                merged.put("maxUnavailable", existing.get("maxUnavailable"));
+            }
+            if (existing.get("maxUnavailablePercentage") != null) {
+                merged.put("maxUnavailablePercentage", existing.get("maxUnavailablePercentage"));
+            }
+        }
+        if (maxUnavailable != null) {
+            merged.put("maxUnavailable", maxUnavailable);
+            params.add(new UpdateParam("MaxUnavailable", maxUnavailable.toString()));
+        }
+        if (percentage != null) {
+            merged.put("maxUnavailablePercentage", percentage);
+            params.add(new UpdateParam("MaxUnavailablePercentage", percentage.toString()));
+        }
+        if (strategy != null) {
+            merged.put("updateStrategy", strategy);
+            params.add(new UpdateParam("UpdateStrategy", strategy.toString()));
+        } else if (current instanceof Map<?, ?> existing && existing.get("updateStrategy") != null) {
+            merged.put("updateStrategy", existing.get("updateStrategy"));
+        }
+        return merged;
+    }
+
+    private static String fingerprint(Object request) {
+        return toJson(request);
+    }
+
+    private static String toJson(Object value) {
+        try {
+            return JSON.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private String nodegroupUpdateKey(String clusterName, String nodegroupName, String updateId) {
+        return nodeGroupKey(clusterName, nodegroupName) + "/" + updateId;
     }
 
     public List<String> listNodeGroups(String clusterName) {
@@ -734,6 +1112,9 @@ public class EksService implements TagHandler, ResourceProvider {
         nodeGroup.setStatus(NodegroupStatus.DELETING);
         nodeGroup.setModifiedAt(Instant.now());
         nodeGroupStorage.delete(nodeGroupKey(clusterName, nodegroupName));
+        String updatePrefix = nodeGroupKey(clusterName, nodegroupName) + "/";
+        nodegroupUpdateStorage.keys().stream().filter(key -> key.startsWith(updatePrefix)).toList()
+                .forEach(nodegroupUpdateStorage::delete);
         return nodeGroup;
     }
 
@@ -797,6 +1178,63 @@ public class EksService implements TagHandler, ResourceProvider {
         profile.setStatus(FargateProfileStatus.DELETING);
         fargateProfileStorage.delete(fargateProfileKey(clusterName, fargateProfileName));
         return profile;
+    }
+
+    /**
+     * ListUpdates for the cluster or, with exactly one filter, for one of its nodegroups, add-ons
+     * or capabilities. No capability can exist (CreateCapability is not implemented), so that
+     * filter resolves the parent first and then returns what is actually recorded.
+     */
+    public PaginatedResult<String> listUpdates(String clusterName, String nodegroupName, String addonName,
+                                               String capabilityName, Integer maxResults, String nextToken) {
+        Cluster cluster = describeCluster(clusterName);
+        long filters = Stream.of(nodegroupName, addonName, capabilityName)
+                .filter(value -> value != null && !value.isBlank()).count();
+        if (filters > 1) {
+            throw new AwsException("InvalidParameterException",
+                    "Specify at most one of nodegroupName, addonName and capabilityName", 400);
+        }
+        List<String> updateIds;
+        if (capabilityName != null && !capabilityName.isBlank()) {
+            describeCapability(clusterName, capabilityName);
+            updateIds = List.of();
+        } else if (nodegroupName != null && !nodegroupName.isBlank()) {
+            describeNodeGroup(clusterName, nodegroupName);
+            updateIds = listNodegroupUpdateIds(clusterName, nodegroupName);
+        } else if (addonName != null && !addonName.isBlank()) {
+            if (addons == null) {
+                throw new AwsException("ResourceNotFoundException", "No addon: " + addonName
+                        + " found for cluster: " + clusterName, 404);
+            }
+            addons.describe(cluster, addonName);
+            updateIds = addons.listUpdateIds(cluster, addonName);
+        } else {
+            updateIds = addons == null ? List.of() : addons.listUpdateIds(cluster, null);
+        }
+        return Pagination.paginate(updateIds, Function.identity(), maxResults, nextToken,
+                100, "InvalidParameterException");
+    }
+
+    /** No capability can exist because CreateCapability is not implemented. */
+    public void describeCapability(String clusterName, String capabilityName) {
+        describeCluster(clusterName);
+        throw new AwsException("ResourceNotFoundException",
+                "No capability found for name: " + capabilityName, 404);
+    }
+
+    /** No identity provider config can exist because AssociateIdentityProviderConfig is not implemented. */
+    public void describeIdentityProviderConfig(String clusterName, String type, String name) {
+        describeCluster(clusterName);
+        if (type == null || name == null || name.isBlank()) {
+            throw new AwsException("InvalidParameterException",
+                    "identityProviderConfig type and name are required", 400);
+        }
+        if (!"oidc".equals(type)) {
+            throw new AwsException("InvalidParameterException",
+                    "The identity provider config type " + type + " is not supported", 400);
+        }
+        throw new AwsException("ResourceNotFoundException",
+                "No identity provider config found for name: " + name, 404);
     }
 
     @Override

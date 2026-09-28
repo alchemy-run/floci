@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.core.storage.PersistentStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ecs.container.EcsContainerManager;
 import io.github.hectorvent.floci.services.ecs.container.HostVolumePolicy;
+import io.github.hectorvent.floci.services.ecs.model.ContainerDefinition;
 import io.github.hectorvent.floci.services.ecs.model.FirelensConfiguration;
 import io.github.hectorvent.floci.services.ecs.model.LaunchType;
 import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
@@ -18,6 +19,7 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -131,6 +133,34 @@ class EcsJsonHandlerTaskDefinitionPersistenceTest {
         JsonNode svc = objectMapper.readTree(resp.getEntity().toString()).path("service");
         String newId = svc.path("deployments").path(0).path("id").asText();
         assertNotEquals(firstId, newId);
+    }
+
+    @Test
+    void revisionNumbersAreNeverReusedAcrossRestarts(@TempDir Path dataDir) throws Exception {
+        EcsService first = serviceWithStorage(new FileStorageFactory(dataDir));
+        registerRevision(first, "counter-family");
+        first.deregisterTaskDefinition("counter-family:1", REGION);
+        first.deleteTaskDefinitions(List.of("counter-family:1"), REGION);
+
+        EcsService restarted = serviceWithStorage(new FileStorageFactory(dataDir));
+        assertEquals(2, registerRevision(restarted, "counter-family").getRevision());
+
+        // A store that kept the revisions but lost the counter still never hands out a number a
+        // held revision carries.
+        Files.deleteIfExists(dataDir.resolve("ecs-latest-revisions.json"));
+        EcsService withoutCounter = serviceWithStorage(new FileStorageFactory(dataDir));
+        assertEquals(3, registerRevision(withoutCounter, "counter-family").getRevision());
+        assertEquals("DELETE_IN_PROGRESS",
+                withoutCounter.describeTaskDefinition("counter-family:1", REGION).getStatus());
+        assertEquals(3, withoutCounter.describeTaskDefinition("counter-family", REGION).getRevision());
+    }
+
+    private static TaskDefinition registerRevision(EcsService service, String family) {
+        ContainerDefinition container = new ContainerDefinition();
+        container.setName("app");
+        container.setImage("alpine:latest");
+        return service.registerTaskDefinition(family, List.of(container), null, null, null,
+                null, null, null, REGION);
     }
 
     private static EcsService serviceWithStorage(StorageFactory storage) {

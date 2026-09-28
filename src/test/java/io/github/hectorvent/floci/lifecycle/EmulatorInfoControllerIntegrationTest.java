@@ -153,6 +153,36 @@ class EmulatorInfoControllerIntegrationTest {
     }
 
     @Test
+    void stateReset_leavesEveryRegionWithItsDefaultVpc() {
+        // Every account and Region has a default VPC on AWS. The reset wipes the EC2 stores that
+        // hold it, so the next request must seed it again rather than find nothing.
+        String ec2Auth = "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/ec2/aws4_request";
+        given()
+            .formParam("Action", "DescribeVpcs")
+            .header("Authorization", ec2Auth)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .when().post("/_floci/state/reset")
+            .then()
+                .statusCode(200);
+
+        given()
+            .formParam("Action", "DescribeSubnets")
+            .formParam("SubnetId.1", "subnet-default-us-east-1-a")
+            .header("Authorization", ec2Auth)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DescribeSubnetsResponse.subnetSet.item[0].subnetId", equalTo("subnet-default-us-east-1-a"))
+            .body("DescribeSubnetsResponse.subnetSet.item[0].defaultForAz", equalTo("true"));
+    }
+
+    @Test
     void stateReset_clearsDatabaseState() {
         // 1. Put SSM parameter
         given()

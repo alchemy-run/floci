@@ -34,7 +34,8 @@ public class EcsTask {
     private String deploymentId;
     /**
      * What the deployment circuit breaker has already counted this task as: {@code HEALTHY} once
-     * it reached a healthy RUNNING state, {@code FAILED} once it counted towards failedTasks.
+     * it reached a steady state (RUNNING and healthy for the stabilization window, not merely
+     * seen RUNNING), {@code FAILED} once it counted towards failedTasks.
      * Null until the breaker has seen it. Keeps a task from being counted on every tick.
      */
     private String circuitBreakerOutcome;

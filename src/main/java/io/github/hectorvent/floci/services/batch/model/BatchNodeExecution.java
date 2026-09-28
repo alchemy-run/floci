@@ -15,6 +15,7 @@ public class BatchNodeExecution {
     private int nodeIndex;
     private boolean mainNode;
     private String containerImage;
+    private BatchRuntimePlatform runtimePlatform;
     private List<String> resolvedCommand = new ArrayList<>();
     private List<BatchKeyValue> resolvedEnvironment = new ArrayList<>();
     private List<BatchResourceRequirement> resourceRequirements = new ArrayList<>();
@@ -42,6 +43,14 @@ public class BatchNodeExecution {
 
     public void setContainerImage(String containerImage) {
         this.containerImage = containerImage;
+    }
+
+    public BatchRuntimePlatform getRuntimePlatform() {
+        return runtimePlatform;
+    }
+
+    public void setRuntimePlatform(BatchRuntimePlatform runtimePlatform) {
+        this.runtimePlatform = runtimePlatform;
     }
 
     public List<String> getResolvedCommand() {

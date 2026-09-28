@@ -93,14 +93,16 @@ class RedshiftIntegrationsIntegrationTest {
                         }
                         """.formatted(tableName))
                 .when().post("/");
-        if (response.statusCode() != 200) {
-            response = given()
-                    .header("X-Amz-Target", "DynamoDB_20120810.DescribeTable")
-                    .contentType("application/x-amz-json-1.0")
-                    .body("{\"TableName\":\"%s\"}".formatted(tableName))
-                    .when().post("/");
+        if (response.statusCode() == 200) {
+            return response.then().extract().path("TableDescription.LatestStreamArn");
         }
-        return response.then().statusCode(200).extract().path("TableDescription.LatestStreamArn");
+        // Left over from an earlier attempt: DescribeTable answers with a Table, not a TableDescription.
+        return given()
+                .header("X-Amz-Target", "DynamoDB_20120810.DescribeTable")
+                .contentType("application/x-amz-json-1.0")
+                .body("{\"TableName\":\"%s\"}".formatted(tableName))
+                .when().post("/")
+                .then().statusCode(200).extract().path("Table.LatestStreamArn");
     }
 
     private static String createIntegration(String name) {

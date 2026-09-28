@@ -114,8 +114,26 @@ returned as the key ARN; a key that does not exist or is not enabled is
 `KMSKeyNotAccessibleFault`. Where AWS picks a random window,
 Floci uses `04:00-06:00` and `mon:00:00-mon:03:00` (or, when the window given on create overlaps the
 usual default, a 30-minute window starting where the given one ends); a window given on modify is
-checked against the instance's other window. Modifications apply immediately :
-`PendingModifiedValues` is not modeled.
+checked against the instance's other window.
+
+`ModifyDBInstance` follows `ApplyImmediately` the way AWS does. Without it, IAM database
+authentication, the instance class, Multi-AZ, storage, and a backup retention change between
+zero and non-zero are queued and reported as `PendingModifiedValues`; they apply when the next
+maintenance window starts, or at once with the next request that sets `ApplyImmediately`, which
+also applies everything already queued. The password, public access, deletion protection,
+network type, log exports, the autoscaling ceiling and the parameter and security group
+associations apply at once either way. A new parameter group reports `pending-reboot` until
+`RebootDBInstance`, and a password change records a `Reset master credentials` event.
+
+Storage defaults to `gp3` (`io1` when only `Iops` is given). Below 400 GiB (200 GiB for Oracle)
+gp3 has a fixed 3000 IOPS and 125 MiBps; at or above it the baseline is 12000 IOPS and 500 MiBps
+and both can be provisioned higher, with throughput at most a quarter of the IOPS. Storage cannot
+shrink and must grow by at least 10%, and a `MaxAllocatedStorage` equal to the allocation turns
+autoscaling off. Floci completes each operation at once but reports `creating` for a second
+after `CreateDBInstance`, and `modifying` (one second) then `storage-optimization` (two seconds)
+after a storage change, during which a further storage change is refused. The periods are
+configurable below. `DeleteDBInstance` refuses an instance with
+deletion protection and deletes the Secrets Manager secret RDS manages for its master password.
 
 !!! note "Stopping and starting"
 
@@ -163,6 +181,9 @@ checked against the instance's other window. Modifications apply immediately :
 | `FLOCI_SERVICES_RDS_PROXY_HANDSHAKE_TIMEOUT_MILLIS` | `10000` | Max time a client has to complete the startup/auth handshake before the proxy drops it |
 | `FLOCI_SERVICES_RDS_PROXY_BACKEND_CONNECT_TIMEOUT_MILLIS` | `5000` | Max time the proxy waits for the backend TCP connect |
 | `FLOCI_SERVICES_RDS_PROXY_MAX_CONNECTIONS` | `100` | Max concurrent connections per proxy before new ones are refused |
+| `FLOCI_SERVICES_RDS_CREATING_STATUS_MILLIS` | `1000` | How long a new instance reports `creating` (`0` skips it) |
+| `FLOCI_SERVICES_RDS_MODIFYING_STATUS_MILLIS` | `1000` | How long a storage change reports `modifying` |
+| `FLOCI_SERVICES_RDS_STORAGE_OPTIMIZATION_STATUS_MILLIS` | `2000` | How long `storage-optimization` is reported and further storage changes are refused |
 
 ### Docker Compose
 

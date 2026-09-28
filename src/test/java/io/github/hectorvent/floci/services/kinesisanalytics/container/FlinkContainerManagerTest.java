@@ -66,6 +66,7 @@ class FlinkContainerManagerTest {
     private ContainerLifecycleManager lifecycleManager;
     private LaunchedContainerAwsEnv awsEnv;
     private S3Service s3Service;
+    private FlinkRestClient flinkRest;
     private FlinkContainerManager manager;
 
     @BeforeEach
@@ -111,6 +112,7 @@ class FlinkContainerManagerTest {
         s3Service = mock(S3Service.class);
         awsEnv = mock(LaunchedContainerAwsEnv.class);
         when(awsEnv.sdkBaselineEnv(eq("us-west-2"), eq(Optional.empty()))).thenReturn(AWS_ENV);
+        flinkRest = mock(FlinkRestClient.class);
 
         manager = new FlinkContainerManager(
                 containerBuilder,
@@ -121,7 +123,7 @@ class FlinkContainerManagerTest {
                 regionResolver,
                 awsEnv,
                 s3Service,
-                mock(FlinkRestClient.class),
+                flinkRest,
                 MAPPER);
     }
 
@@ -384,6 +386,120 @@ class FlinkContainerManagerTest {
         verify(lifecycleManager).removeIfExists("floci-kinesisanalytics-111111111111-us-west-2-shared");
         manager.stopAll();
         verify(lifecycleManager).stopAndRemove("owned-jm", null);
+    }
+
+    @Test
+    void savepointsVolumeIsFlinkOwnedAndSharedWithTheTaskManager() {
+        FlinkApplication app = application("snap");
+        app.setCodeS3Bucket("code-bucket");
+        app.setCodeS3Key("jobs/demo.jar");
+        when(s3Service.getObject("code-bucket", "jobs/demo.jar", null))
+                .thenReturn(new S3Object("code-bucket", "jobs/demo.jar", new byte[]{1}, "application/java-archive"));
+        DockerClient docker = mock(DockerClient.class, RETURNS_DEEP_STUBS);
+        when(lifecycleManager.getDockerClient()).thenReturn(docker);
+        when(lifecycleManager.create(any())).thenReturn("jm-id").thenReturn("tm-id");
+        when(lifecycleManager.startCreated(any(), any()))
+                .thenReturn(new ContainerInfo("jm-id", Map.of(8081, new EndpointInfo("localhost", 49152))))
+                .thenReturn(new ContainerInfo("tm-id", Map.of()));
+
+        manager.startCluster(app);
+
+        String volume = "floci-kinesisanalytics-000000000000-us-west-2-snap-savepoints";
+        for (ContainerSpec spec : captureCreatedSpecs()) {
+            assertTrue(spec.mounts().stream().anyMatch(m -> volume.equals(m.getSource())
+                    && "/opt/flink/savepoints".equals(m.getTarget())), spec.cmd() + " must mount " + volume);
+        }
+        // log4j config + the flink-owned mount point are extracted into the JobManager before it starts.
+        org.mockito.InOrder order = Mockito.inOrder(docker, lifecycleManager);
+        order.verify(docker, Mockito.calls(2)).copyArchiveToContainerCmd("jm-id");
+        order.verify(lifecycleManager).startCreated(eq("jm-id"), any());
+    }
+
+    @Test
+    void savepointMountPointTarIsAFlinkOwnedDirectory() throws Exception {
+        byte[] tar = FlinkContainerManager.flinkOwnedDirectoryTar("savepoints");
+        try (var in = new org.apache.commons.compress.archivers.tar.TarArchiveInputStream(
+                new java.io.ByteArrayInputStream(tar))) {
+            var entry = in.getNextEntry();
+            assertEquals("savepoints/", entry.getName());
+            assertTrue(entry.isDirectory());
+            assertEquals(9999L, entry.getLongUserId());
+            assertEquals(9999L, entry.getLongGroupId());
+            assertNull(in.getNextEntry());
+        }
+    }
+
+    @Test
+    void savepointAbortedBecauseTasksWereNotRunningIsRetriggered() throws Exception {
+        FlinkApplication app = application("retry");
+        app.setRestEndpoint("http://jm:8081");
+        app.setFlinkJobId("job-1");
+        var snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
+        snapshot.setFlinkRequestId("req-1");
+        when(flinkRest.savepointStatus("http://jm:8081", "job-1", "req-1")).thenReturn(
+                new FlinkRestClient.SavepointStatus("COMPLETED", null, true,
+                        "CheckpointException: Checkpoint triggering task Source (1/1) is not being executed at "
+                                + "the moment. Aborting checkpoint. Failure reason: Not all required tasks are "
+                                + "currently running."));
+        when(flinkRest.triggerSavepoint("http://jm:8081", "job-1", "/opt/flink/savepoints")).thenReturn("req-2");
+
+        assertTrue(manager.advanceSnapshot(app, snapshot));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.CREATING,
+                snapshot.getSnapshotStatus());
+        assertEquals("req-2", snapshot.getFlinkRequestId());
+
+        when(flinkRest.savepointStatus("http://jm:8081", "job-1", "req-2")).thenReturn(
+                new FlinkRestClient.SavepointStatus("COMPLETED", "file:/opt/flink/savepoints/savepoint-1", false, null));
+        assertTrue(manager.advanceSnapshot(app, snapshot));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.READY,
+                snapshot.getSnapshotStatus());
+    }
+
+    @Test
+    void savepointTaskRetriesAreBoundedAndOtherFailuresAreTerminal() {
+        FlinkApplication app = application("bounded");
+        app.setRestEndpoint("http://jm:8081");
+        app.setFlinkJobId("job-1");
+        var snapshot = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("snap", 1L, "FLINK-1_20");
+        snapshot.setFlinkRequestId("req-1");
+        snapshot.setFlinkTriggerAttempts(FlinkContainerManager.MAX_SAVEPOINT_TRIGGER_ATTEMPTS);
+        when(flinkRest.savepointStatus(any(), any(), any())).thenReturn(new FlinkRestClient.SavepointStatus(
+                "COMPLETED", null, true, "Not all required tasks are currently running."));
+        assertTrue(manager.advanceSnapshot(app, snapshot));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.FAILED,
+                snapshot.getSnapshotStatus());
+
+        var ioFailure = new io.github.hectorvent.floci.services.kinesisanalytics.model.Snapshot("io", 1L, "FLINK-1_20");
+        ioFailure.setFlinkRequestId("req-io");
+        when(flinkRest.savepointStatus(any(), any(), eq("req-io"))).thenReturn(new FlinkRestClient.SavepointStatus(
+                "COMPLETED", null, true, "java.io.IOException: Failed to create savepoint directory"));
+        assertTrue(manager.advanceSnapshot(app, ioFailure));
+        assertEquals(io.github.hectorvent.floci.services.kinesisanalytics.model.SnapshotStatus.FAILED,
+                ioFailure.getSnapshotStatus());
+    }
+
+    @Test
+    void jobIsOnlyRunningOnceEveryVertexIsDeployed() throws Exception {
+        assertFalse(FlinkRestClient.jobFullyRunning(MAPPER.readTree(
+                "{\"state\":\"RUNNING\",\"vertices\":[{\"status\":\"RUNNING\"},{\"status\":\"DEPLOYING\"}]}")));
+        assertFalse(FlinkRestClient.jobFullyRunning(MAPPER.readTree(
+                "{\"state\":\"CREATED\",\"vertices\":[{\"status\":\"CREATED\"}]}")));
+        assertTrue(FlinkRestClient.jobFullyRunning(MAPPER.readTree(
+                "{\"state\":\"RUNNING\",\"vertices\":[{\"status\":\"RUNNING\"},{\"status\":\"FINISHED\"}]}")));
+    }
+
+    @Test
+    void savepointStatusParsesTheFlinkFailureCause() throws Exception {
+        FlinkRestClient.SavepointStatus status = FlinkRestClient.parseSavepointStatus(MAPPER.readTree(
+                "{\"status\":{\"id\":\"COMPLETED\"},\"operation\":{\"failure-cause\":{\"class\":\"x\","
+                        + "\"stack-trace\":\"Failure reason: Not all required tasks are currently running.\"}}}"));
+        assertTrue(status.failed());
+        assertTrue(status.tasksNotRunning());
+        FlinkRestClient.SavepointStatus ok = FlinkRestClient.parseSavepointStatus(MAPPER.readTree(
+                "{\"status\":{\"id\":\"COMPLETED\"},\"operation\":{\"location\":\"file:/opt/flink/savepoints/s\"}}"));
+        assertFalse(ok.failed());
+        assertFalse(ok.tasksNotRunning());
+        assertEquals("file:/opt/flink/savepoints/s", ok.location());
     }
 
     private List<ContainerSpec> captureCreatedSpecs() {

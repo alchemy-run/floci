@@ -22,8 +22,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.SequencedSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -77,7 +80,14 @@ public class EmbeddedDnsServer {
     private DatagramSocket socket;
     private SourceNetworkHelper sourceHelper;
     private final SequencedSet<String> suffixes = new LinkedHashSet<>();
+    private final Map<String, HostRoute> hostRoutes = new ConcurrentHashMap<>();
     private volatile List<String> upstreamDnsServers = List.of();
+
+    /**
+     * What containers are told for one resource endpoint hostname: the address of the container
+     * that serves it, or, with a null address, no address at all.
+     */
+    record HostRoute(String address) {}
 
     EmbeddedDnsServer(List<String> suffixes) {
         this.suffixes.addAll(BUILTIN_SUFFIXES);
@@ -187,6 +197,62 @@ public class EmbeddedDnsServer {
         return ready ? Optional.ofNullable(serverIp) : Optional.empty();
     }
 
+    /**
+     * Answers {@code hostname} with {@code address} for the containers Floci launches, ahead of
+     * every suffix rule. Used for a resource endpoint served by its own backing container, which
+     * containers then reach directly on the endpoint's port.
+     */
+    public void routeHost(String hostname, String address) {
+        String name = normalizeHost(hostname);
+        if (name == null) {
+            return;
+        }
+        hostRoutes.put(name, new HostRoute(requireRouteAddress(address)));
+    }
+
+    /**
+     * Answers {@code hostname} with no address, ahead of every suffix rule, so a container never
+     * reaches a listener that belongs to another resource under that name.
+     */
+    public void refuseHost(String hostname) {
+        String name = normalizeHost(hostname);
+        if (name != null) {
+            hostRoutes.put(name, new HostRoute(null));
+        }
+    }
+
+    /** Drops a {@link #routeHost} or {@link #refuseHost} entry; the name falls back to the suffix rules. */
+    public void releaseHost(String hostname) {
+        String name = normalizeHost(hostname);
+        if (name != null) {
+            hostRoutes.remove(name);
+        }
+    }
+
+    HostRoute hostRoute(String name) {
+        String normalized = normalizeHost(name);
+        return normalized == null ? null : hostRoutes.get(normalized);
+    }
+
+    private static String normalizeHost(String hostname) {
+        if (hostname == null) {
+            return null;
+        }
+        String name = hostname.trim().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".")) {
+            name = name.substring(0, name.length() - 1);
+        }
+        return name.isEmpty() ? null : name;
+    }
+
+    private static String requireRouteAddress(String address) {
+        if (address == null || !address.matches("(?:\\d{1,3}\\.){3}\\d{1,3}")
+                || Arrays.stream(address.split("\\.")).anyMatch(octet -> Integer.parseInt(octet) > 255)) {
+            throw new IllegalArgumentException("A routed endpoint hostname needs an IPv4 address: " + address);
+        }
+        return address;
+    }
+
     // ── packet handling ───────────────────────────────────────────────────────
 
     private void handleQuery(Vertx vertx, DatagramSocket socket, byte[] data,
@@ -212,6 +278,15 @@ public class EmbeddedDnsServer {
             short qtype = buf.getShort();
             buf.getShort(); // qclass
             int questionEnd = buf.position();
+
+            HostRoute route = hostRoute(qname);
+            if (route != null) {
+                byte[] response = qtype == 1 && route.address() != null
+                        ? buildAResponse(data, txId, questionOffset, questionEnd, route.address())
+                        : buildEmptyResponse(data, txId, questionOffset, questionEnd);
+                socket.send(Buffer.buffer(response), senderPort, senderHost, v -> {});
+                return;
+            }
 
             Optional<String> resolvedAddress = resolveARecord(qname, myIp);
             if (resolvedAddress.isPresent()) {

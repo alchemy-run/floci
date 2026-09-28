@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.msk;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -33,6 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * The SASL/IAM listener end to end over real sockets: TLS with a certificate for the broker
@@ -111,6 +115,25 @@ class MskIamGatewayTest {
                 client.getInputStream().read();
             }
         });
+    }
+
+    @Test
+    void theListenerIsPublishedToContainersWhileItRuns() throws Exception {
+        // VPC Lambdas resolve every broker hostname to Floci and dial the SASL/IAM port there.
+        FlociCertificateAuthority ca = FlociCertificateAuthority.loadOrCreate(tlsDir);
+        ContainerEndpoints endpoints = mock(ContainerEndpoints.class);
+        gateway = new MskIamGateway(ca, new MskIamAuthenticator((accessKeyId, sessionToken) -> Optional.empty(),
+                new ObjectMapper(), Clock.systemUTC()), 0, endpoints);
+
+        assertTrue(gateway.ensureStarted(host -> Optional.empty()));
+        int port = gateway.localPort();
+        verify(endpoints).publishHostPort(port);
+        assertTrue(gateway.ensureStarted(host -> Optional.empty()));
+        verify(endpoints, times(1)).publishHostPort(port);
+
+        gateway.stop();
+        verify(endpoints).withdrawHostPort(port);
+        gateway = null;
     }
 
     private void startGateway(FlociCertificateAuthority ca) {

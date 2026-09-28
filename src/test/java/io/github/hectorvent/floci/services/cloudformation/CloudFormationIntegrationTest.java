@@ -7316,6 +7316,17 @@ class CloudFormationIntegrationTest {
             .statusCode(200)
             .body("clusters[0].clusterName", equalTo("cfn-ecs-delete-cluster"));
 
+        String taskDefinitionArn = given()
+            .header("X-Amz-Target", ECS_TARGET_PREFIX + "DescribeTaskDefinition")
+            .contentType(ECS_CONTENT_TYPE)
+            .body("{\"taskDefinition\": \"cfn-ecs-delete-taskdef\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("taskDefinition.status", equalTo("ACTIVE"))
+            .extract().path("taskDefinition.taskDefinitionArn");
+
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DeleteStack")
@@ -7338,7 +7349,18 @@ class CloudFormationIntegrationTest {
             .statusCode(200)
             .body("clusters", org.hamcrest.Matchers.empty());
 
-        // Task definition is deregistered (INACTIVE)
+        // Task definition is deregistered (INACTIVE): the revision still describes by ARN,
+        // while the bare family no longer resolves because it has no ACTIVE revision left.
+        given()
+            .header("X-Amz-Target", ECS_TARGET_PREFIX + "DescribeTaskDefinition")
+            .contentType(ECS_CONTENT_TYPE)
+            .body("{\"taskDefinition\": \"" + taskDefinitionArn + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("taskDefinition.status", equalTo("INACTIVE"));
+
         given()
             .header("X-Amz-Target", ECS_TARGET_PREFIX + "DescribeTaskDefinition")
             .contentType(ECS_CONTENT_TYPE)
@@ -7346,8 +7368,8 @@ class CloudFormationIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(200)
-            .body("taskDefinition.status", equalTo("INACTIVE"));
+            .statusCode(400)
+            .body("__type", equalTo("ClientException"));
     }
 
     // ── Issue #924: ELBv2 provisioning via CloudFormation ────────────────────

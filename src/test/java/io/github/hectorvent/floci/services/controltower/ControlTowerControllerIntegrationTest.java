@@ -389,6 +389,132 @@ class ControlTowerControllerIntegrationTest {
     }
 
     @Test
+    void disableBaselineRemovesEnablementAndRecordsSucceededOperation() {
+        String authorization = auth("000000000208", EAST);
+        Response baselines = given()
+                .header("Authorization", authorization)
+                .when()
+                .post("/list-baselines")
+                .then()
+                .statusCode(200)
+                .extract().response();
+        String baselineArn = ((List<Map<String, Object>>) baselines.path("baselines")).stream()
+                .filter(b -> "AWSControlTowerBaseline".equals(b.get("name")))
+                .findFirst().orElseThrow().get("arn").toString();
+        String targetArn = createOuArn("000000000208", "disable-ou");
+
+        String enabledArn = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"baselineIdentifier\":\"" + baselineArn + "\",\"baselineVersion\":\"4.0\","
+                        + "\"targetIdentifier\":\"" + targetArn + "\",\"tags\":{\"fixture\":\"baseline\"}}")
+                .when()
+                .post("/enable-baseline")
+                .then()
+                .statusCode(200)
+                .extract().path("arn");
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/tags/{arn}", enabledArn)
+                .then()
+                .statusCode(200)
+                .body("tags.fixture", equalTo("baseline"));
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"tags\":{\"alchemy::id\":\"OuBaseline\"}}")
+                .when()
+                .post("/tags/{arn}", enabledArn)
+                .then()
+                .statusCode(204);
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .get("/tags/{arn}", enabledArn)
+                .then()
+                .statusCode(200)
+                .body("tags.fixture", equalTo("baseline"))
+                .body("tags.'alchemy::id'", equalTo("OuBaseline"));
+
+        String operationIdentifier = given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"enabledBaselineIdentifier\":\"" + enabledArn + "\"}")
+                .when()
+                .post("/disable-baseline")
+                .then()
+                .statusCode(200)
+                .extract().path("operationIdentifier");
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"operationIdentifier\":\"" + operationIdentifier + "\"}")
+                .when()
+                .post("/get-baseline-operation")
+                .then()
+                .statusCode(200)
+                .body("baselineOperation.operationType", equalTo("DISABLE_BASELINE"))
+                .body("baselineOperation.status", equalTo("SUCCEEDED"));
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"enabledBaselineIdentifier\":\"" + enabledArn + "\"}")
+                .when()
+                .post("/get-enabled-baseline")
+                .then()
+                .statusCode(404)
+                .body("__type", containsString("ResourceNotFoundException"));
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"enabledBaselineIdentifier\":\"" + enabledArn + "\"}")
+                .when()
+                .post("/disable-baseline")
+                .then()
+                .statusCode(404)
+                .body("__type", containsString("ResourceNotFoundException"));
+    }
+
+    @Test
+    void listEnabledBaselinesKeepsWorkingAfterTheTargetOuIsDeleted() {
+        String accountId = "000000000209";
+        String authorization = auth(accountId, EAST);
+        Response baselines = given()
+                .header("Authorization", authorization)
+                .when()
+                .post("/list-baselines")
+                .then()
+                .statusCode(200)
+                .extract().response();
+        String baselineArn = ((List<Map<String, Object>>) baselines.path("baselines")).stream()
+                .filter(b -> "AWSControlTowerBaseline".equals(b.get("name")))
+                .findFirst().orElseThrow().get("arn").toString();
+        String targetArn = createOuArn(accountId, "deleted-ou");
+
+        given()
+                .contentType("application/json")
+                .header("Authorization", authorization)
+                .body("{\"baselineIdentifier\":\"" + baselineArn + "\",\"baselineVersion\":\"4.0\","
+                        + "\"targetIdentifier\":\"" + targetArn + "\"}")
+                .when()
+                .post("/enable-baseline")
+                .then()
+                .statusCode(200);
+
+        String ouId = targetArn.substring(targetArn.lastIndexOf('/') + 1);
+        organizationsService.deleteOrganizationalUnit(accountId, ouId);
+
+        given()
+                .header("Authorization", authorization)
+                .when()
+                .post("/list-enabled-baselines")
+                .then()
+                .statusCode(200);
+    }
+
+    @Test
     void landingZonesAreIsolatedPerAccount() {
         String authA = auth("000000000205", EAST);
         String authB = auth("000000000206", EAST);

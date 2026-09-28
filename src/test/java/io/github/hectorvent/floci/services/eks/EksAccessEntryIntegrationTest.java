@@ -65,6 +65,76 @@ class EksAccessEntryIntegrationTest {
         }
     }
 
+    @Test
+    void updateAndAccessPolicyRoutesAcceptEncodedAndRawPrincipalArns() {
+        String account = "135791357913";
+        String name = "entry-upd-" + UUID.randomUUID().toString().substring(0, 8);
+        String role = "admin-" + name;
+        String principal = "arn:aws:iam::" + account + ":role/team/" + role;
+        String path = "/clusters/" + name + "/access-entries";
+        String encodedEntry = path + "/" + URLEncoder.encode(principal, StandardCharsets.UTF_8);
+        String rawEntry = path + "/" + principal;
+        String viewPolicy = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy";
+        given().header("Authorization", auth(account, "iam")).contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", role).formParam("Path", "/team/")
+                .formParam("AssumeRolePolicyDocument", "{}").post("/").then().statusCode(200);
+        createCluster(account, name, "API_AND_CONFIG_MAP");
+        try {
+            String arn = given().header("Authorization", auth(account, "eks")).contentType("application/json")
+                    .body(Map.of("principalArn", principal)).post(path).then().statusCode(200)
+                    .extract().path("accessEntry.accessEntryArn");
+            given().header("Authorization", auth(account, "eks")).contentType("application/json")
+                    .urlEncodingEnabled(false).body(Map.of("kubernetesGroups", java.util.List.of("editors")))
+                    .post(encodedEntry).then().statusCode(200)
+                    .body("accessEntry.accessEntryArn", equalTo(arn))
+                    .body("accessEntry.kubernetesGroups", contains("editors"))
+                    .body("accessEntry.username", startsWith("arn:aws:sts::" + account + ":assumed-role/" + role));
+            given().header("Authorization", auth(account, "eks")).contentType("application/json")
+                    .urlEncodingEnabled(false).body(Map.of("username", "ops:{{SessionName}}"))
+                    .post(rawEntry).then().statusCode(200)
+                    .body("accessEntry.username", equalTo("ops:{{SessionName}}"))
+                    .body("accessEntry.kubernetesGroups", contains("editors"));
+
+            given().header("Authorization", auth(account, "eks")).contentType("application/json")
+                    .urlEncodingEnabled(false)
+                    .body(Map.of("policyArn", viewPolicy,
+                            "accessScope", Map.of("type", "namespace", "namespaces", java.util.List.of("dev"))))
+                    .post(encodedEntry + "/access-policies").then().statusCode(200)
+                    .body("clusterName", equalTo(name))
+                    .body("principalArn", equalTo(principal))
+                    .body("associatedAccessPolicy.policyArn", equalTo(viewPolicy))
+                    .body("associatedAccessPolicy.accessScope.type", equalTo("namespace"))
+                    .body("associatedAccessPolicy.accessScope.namespaces", contains("dev"))
+                    .body("associatedAccessPolicy.associatedAt", instanceOf(Number.class));
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .get(rawEntry + "/access-policies").then().statusCode(200)
+                    .body("associatedAccessPolicies.policyArn", contains(viewPolicy))
+                    .body("nextToken", nullValue());
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .delete(encodedEntry + "/access-policies/" + URLEncoder.encode(viewPolicy, StandardCharsets.UTF_8))
+                    .then().statusCode(200).body(equalTo("{}"));
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .delete(rawEntry + "/access-policies/" + viewPolicy)
+                    .then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .get(encodedEntry + "/access-policies").then().statusCode(200)
+                    .body("associatedAccessPolicies", empty());
+
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .get(rawEntry).then().statusCode(200).body("accessEntry.username", equalTo("ops:{{SessionName}}"));
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .delete(rawEntry).then().statusCode(200);
+            given().header("Authorization", auth(account, "eks")).contentType("application/json")
+                    .urlEncodingEnabled(false).body(Map.of("kubernetesGroups", java.util.List.of("editors")))
+                    .post(encodedEntry).then().statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
+        } finally {
+            given().header("Authorization", auth(account, "eks")).delete("/clusters/" + name)
+                    .then().statusCode(200);
+            given().header("Authorization", auth(account, "iam")).contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "DeleteRole").formParam("RoleName", role).post("/").then().statusCode(200);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"abc", "1.5", "2147483648", "0", "-1", "101"})
     void invalidMaxResultsReturnsAwsJsonError(String maxResults) {

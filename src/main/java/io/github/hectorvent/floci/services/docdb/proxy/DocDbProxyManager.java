@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.docdb.proxy;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyTlsCertificates;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -32,16 +33,24 @@ public class DocDbProxyManager {
     static final int MAX_PORT = 27117;
 
     private final RdsProxyTlsCertificates tlsCertificates;
+    private final ContainerEndpoints containerEndpoints;
     private final Map<Integer, DocDbProxy> listeners = new HashMap<>();
     private final Map<String, Integer> clusterPorts = new HashMap<>();
+
+    public DocDbProxyManager(RdsProxyTlsCertificates tlsCertificates) {
+        this(tlsCertificates, null);
+    }
 
     /**
      * DocumentDB serves certificates issued by the Amazon RDS certificate authority, so the
      * listeners serve the certificate of Floci's RDS CA, which a client trusts once for both.
+     * Each listener is published to the containers Floci launches, whose DNS resolves every
+     * cluster and instance endpoint to Floci, so a VPC Lambda reaches it on the cluster's port.
      */
     @Inject
-    public DocDbProxyManager(RdsProxyTlsCertificates tlsCertificates) {
+    public DocDbProxyManager(RdsProxyTlsCertificates tlsCertificates, ContainerEndpoints containerEndpoints) {
         this.tlsCertificates = tlsCertificates;
+        this.containerEndpoints = containerEndpoints;
     }
 
     /**
@@ -139,6 +148,9 @@ public class DocDbProxyManager {
         if (!listener.hasRoutes()) {
             listeners.remove(port);
             listener.stop();
+            if (containerEndpoints != null) {
+                containerEndpoints.withdrawHostPort(port);
+            }
             LOG.infov("Closed DocumentDB listener on port {0}", String.valueOf(port));
         }
     }
@@ -151,6 +163,9 @@ public class DocDbProxyManager {
     @PreDestroy
     public synchronized void stopAll() {
         listeners.values().forEach(DocDbProxy::stop);
+        if (containerEndpoints != null) {
+            listeners.keySet().forEach(containerEndpoints::withdrawHostPort);
+        }
         listeners.clear();
         clusterPorts.clear();
     }
@@ -173,6 +188,9 @@ public class DocDbProxyManager {
             return null;
         }
         listeners.put(port, listener);
+        if (containerEndpoints != null) {
+            containerEndpoints.publishHostPort(port);
+        }
         return listener;
     }
 

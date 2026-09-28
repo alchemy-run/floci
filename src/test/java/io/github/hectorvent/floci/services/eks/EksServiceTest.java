@@ -37,6 +37,10 @@ import io.github.hectorvent.floci.services.eks.model.NodegroupScalingConfig;
 import io.github.hectorvent.floci.services.eks.model.NodegroupStatus;
 import io.github.hectorvent.floci.services.eks.model.Provider;
 import io.github.hectorvent.floci.services.eks.model.ResourcesVpcConfig;
+import io.github.hectorvent.floci.services.eks.model.Update;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupConfigRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupVersionRequest;
+import io.github.hectorvent.floci.services.eks.model.UpdateParam;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -953,6 +957,153 @@ class EksServiceTest {
         AwsException delete = assertThrows(AwsException.class,
                 () -> eksService.deleteNodeGroup("my-eks-cluster", "missing-nodegroup"));
         assertEquals(404, delete.getHttpStatus());
+    }
+
+    @Test
+    void updateNodegroupConfigAppliesChangesAndSettlesToActive() throws Exception {
+        createTestCluster("my-eks-cluster");
+        CreateNodeGroupRequest request = nodeGroupRequest("scaled");
+        request.setLabels(Map.of("tier", "web", "old", "x"));
+        request.setTaints(List.of(Map.of("key", "dedicated", "value", "gpu", "effect", "NO_SCHEDULE")));
+        eksService.createNodeGroup("my-eks-cluster", request);
+        eksService.nodegroupUpdateDuration = java.time.Duration.ofMillis(300);
+
+        NodegroupScalingConfig scaling = new NodegroupScalingConfig();
+        scaling.setMaxSize(3);
+        scaling.setDesiredSize(2);
+        Update update = eksService.updateNodegroupConfig("my-eks-cluster", "scaled", new UpdateNodegroupConfigRequest(
+                new UpdateNodegroupConfigRequest.Labels(Map.of("tier", "api"), List.of("old")),
+                new UpdateNodegroupConfigRequest.Taints(
+                        List.of(Map.of("key", "spot", "value", "true", "effect", "PREFER_NO_SCHEDULE")),
+                        List.of(Map.of("key", "dedicated", "effect", "NO_SCHEDULE"))),
+                scaling, Map.of("maxUnavailablePercentage", 50), null, "config-token"));
+
+        assertEquals("InProgress", update.status());
+        assertEquals("ConfigUpdate", update.type());
+        Map<String, String> params = update.params().stream()
+                .collect(Collectors.toMap(UpdateParam::type, UpdateParam::value));
+        assertEquals("1", params.get("MinSize"));
+        assertEquals("3", params.get("MaxSize"));
+        assertEquals("2", params.get("DesiredSize"));
+        assertEquals("{\"tier\":\"api\"}", params.get("LabelsToAdd"));
+        assertEquals("[\"old\"]", params.get("LabelsToRemove"));
+        assertEquals("50", params.get("MaxUnavailablePercentage"));
+        assertTrue(params.containsKey("TaintsToAdd") && params.containsKey("TaintsToRemove"));
+
+        Nodegroup updating = eksService.describeNodeGroup("my-eks-cluster", "scaled");
+        assertEquals(NodegroupStatus.UPDATING, updating.getStatus());
+        assertEquals(2, updating.getScalingConfig().getDesiredSize());
+        assertEquals(1, updating.getScalingConfig().getMinSize());
+        assertEquals(Map.of("tier", "api"), updating.getLabels());
+        assertEquals(List.of(Map.of("key", "spot", "value", "true", "effect", "PREFER_NO_SCHEDULE")),
+                updating.getTaints());
+        assertEquals(Map.of("maxUnavailablePercentage", 50), updating.getUpdateConfig());
+        assertEquals("InProgress",
+                eksService.describeNodegroupUpdate("my-eks-cluster", "scaled", update.id()).status());
+        assertEquals("ResourceInUseException", assertThrows(AwsException.class,
+                () -> eksService.updateNodegroupConfig("my-eks-cluster", "scaled", new UpdateNodegroupConfigRequest(
+                        null, null, scaling, null, null, "other-token"))).getErrorCode());
+        // A retry with the same token and parameters replays the original update.
+        assertEquals(update.id(), eksService.updateNodegroupConfig("my-eks-cluster", "scaled",
+                new UpdateNodegroupConfigRequest(
+                        new UpdateNodegroupConfigRequest.Labels(Map.of("tier", "api"), List.of("old")),
+                        new UpdateNodegroupConfigRequest.Taints(
+                                List.of(Map.of("key", "spot", "value", "true", "effect", "PREFER_NO_SCHEDULE")),
+                                List.of(Map.of("key", "dedicated", "effect", "NO_SCHEDULE"))),
+                        scaling, Map.of("maxUnavailablePercentage", 50), null, "config-token")).id());
+
+        Thread.sleep(400);
+        assertEquals(NodegroupStatus.ACTIVE, eksService.describeNodeGroup("my-eks-cluster", "scaled").getStatus());
+        assertEquals("Successful",
+                eksService.describeNodegroupUpdate("my-eks-cluster", "scaled", update.id()).status());
+        assertEquals(List.of(update.id()), eksService.listUpdates("my-eks-cluster", "scaled", null, null, null, null)
+                .items());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> eksService.describeNodegroupUpdate("my-eks-cluster", "scaled", "missing")).getErrorCode());
+
+        eksService.deleteNodeGroup("my-eks-cluster", "scaled");
+        eksService.createNodeGroup("my-eks-cluster", nodeGroupRequest("scaled"));
+        assertTrue(eksService.listUpdates("my-eks-cluster", "scaled", null, null, null, null).items().isEmpty());
+    }
+
+    @Test
+    void updateNodegroupConfigValidatesInput() {
+        createTestCluster("my-eks-cluster");
+        eksService.createNodeGroup("my-eks-cluster", nodeGroupRequest("validated"));
+
+        NodegroupScalingConfig tooSmall = new NodegroupScalingConfig();
+        tooSmall.setMinSize(2);
+        NodegroupScalingConfig negative = new NodegroupScalingConfig();
+        negative.setDesiredSize(-1);
+        for (UpdateNodegroupConfigRequest invalid : List.of(
+                new UpdateNodegroupConfigRequest(null, null, null, null, null, null),
+                new UpdateNodegroupConfigRequest(null, null, tooSmall, null, null, null),
+                new UpdateNodegroupConfigRequest(null, null, negative, null, null, null),
+                new UpdateNodegroupConfigRequest(new UpdateNodegroupConfigRequest.Labels(
+                        Map.of("a", "b"), List.of("a")), null, null, null, null, null),
+                new UpdateNodegroupConfigRequest(null, new UpdateNodegroupConfigRequest.Taints(
+                        List.of(Map.of("key", "k", "effect", "BOGUS")), null), null, null, null, null),
+                new UpdateNodegroupConfigRequest(null, null, null,
+                        Map.of("maxUnavailable", 1, "maxUnavailablePercentage", 10), null, null),
+                new UpdateNodegroupConfigRequest(null, null, null, Map.of("maxUnavailable", 0), null, null),
+                new UpdateNodegroupConfigRequest(null, null, null, Map.of("updateStrategy", "FAST"), null, null))) {
+            assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                    () -> eksService.updateNodegroupConfig("my-eks-cluster", "validated", invalid)).getErrorCode());
+        }
+        assertEquals(NodegroupStatus.ACTIVE, eksService.describeNodeGroup("my-eks-cluster", "validated").getStatus());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> eksService.updateNodegroupConfig("my-eks-cluster", "missing",
+                        new UpdateNodegroupConfigRequest(null, null, null, Map.of("maxUnavailable", 2), null, null)))
+                .getErrorCode());
+    }
+
+    @Test
+    void updateNodegroupVersionFollowsClusterAndRejectsSkew() throws Exception {
+        CreateClusterRequest clusterRequest = new CreateClusterRequest();
+        clusterRequest.setName("versioned");
+        clusterRequest.setRoleArn("arn:aws:iam::000000000000:role/eks-role");
+        clusterRequest.setVersion("1.30");
+        eksService.createCluster(clusterRequest);
+        CreateNodeGroupRequest request = nodeGroupRequest("workers");
+        request.setVersion("1.29");
+        eksService.createNodeGroup("versioned", request);
+        eksService.nodegroupUpdateDuration = java.time.Duration.ofMillis(200);
+
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> eksService.updateNodegroupVersion("versioned", "workers",
+                        new UpdateNodegroupVersionRequest("1.31", null, null, null, null))).getErrorCode());
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> eksService.updateNodegroupVersion("versioned", "workers",
+                        new UpdateNodegroupVersionRequest("1.28", null, null, null, null))).getErrorCode());
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> eksService.updateNodegroupVersion("versioned", "workers",
+                        new UpdateNodegroupVersionRequest(null, null,
+                                Map.of("name", "my-node-launch-template", "version", "2"), null, null))).getErrorCode());
+
+        Update update = eksService.updateNodegroupVersion("versioned", "workers", null);
+        assertEquals("VersionUpdate", update.type());
+        assertEquals("InProgress", update.status());
+        assertEquals(List.of(new UpdateParam("Version", "1.30"), new UpdateParam("ReleaseVersion", "1.30-eks-1")),
+                update.params());
+        Nodegroup updating = eksService.describeNodeGroup("versioned", "workers");
+        assertEquals(NodegroupStatus.UPDATING, updating.getStatus());
+        assertEquals("1.30", updating.getVersion());
+        assertEquals("1.30-eks-1", updating.getReleaseVersion());
+
+        Thread.sleep(300);
+        assertEquals(NodegroupStatus.ACTIVE, eksService.describeNodeGroup("versioned", "workers").getStatus());
+        assertEquals("Successful", eksService.describeNodegroupUpdate("versioned", "workers", update.id()).status());
+
+        CreateNodeGroupRequest templated = nodeGroupRequest("templated");
+        templated.setLaunchTemplate(Map.of("name", "my-node-launch-template", "version", "1"));
+        eksService.createNodeGroup("versioned", templated);
+        Update templateUpdate = eksService.updateNodegroupVersion("versioned", "templated",
+                new UpdateNodegroupVersionRequest(null, "1.30.4-20250101",
+                        Map.of("name", "my-node-launch-template", "version", "2"), null, null));
+        assertTrue(templateUpdate.params().contains(new UpdateParam("LaunchTemplateVersion", "2")));
+        assertEquals("1.30.4-20250101", eksService.describeNodeGroup("versioned", "templated").getReleaseVersion());
+        assertEquals(Map.of("name", "my-node-launch-template", "version", "2"),
+                eksService.describeNodeGroup("versioned", "templated").getLaunchTemplate());
     }
 
     @Test

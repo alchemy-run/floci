@@ -270,6 +270,9 @@ public class SageMakerService {
         if (ep.failureReason != null) {
             out.put("FailureReason", ep.failureReason);
         }
+        if (ep.productionVariants != null && !ep.productionVariants.isEmpty()) {
+            out.set("ProductionVariants", mapper.valueToTree(ep.productionVariants));
+        }
         out.put("CreationTime", epoch(ep.creationTime));
         out.put("LastModifiedTime", epoch(ep.lastModifiedTime));
         return out;
@@ -467,8 +470,164 @@ public class SageMakerService {
             return false;
         }
         ep.lastModifiedTime = nowMillis();
+        if ("InService".equals(ep.endpointStatus)) {
+            ep.productionVariants = variantSummaries(ep, ep.lastModifiedTime);
+        }
         endpointStore.put(regionKey(ep.region, ep.endpointName), ep);
         return true;
+    }
+
+    /** Every image the endpoint's current config deploys, across all variants and containers. */
+    synchronized List<String> deployedImages(EndpointResource ep) {
+        List<String> images = new ArrayList<>();
+        EndpointConfigResource cfg = endpointConfig(ep.region, ep.endpointConfigName).orElse(null);
+        if (cfg == null) {
+            return images;
+        }
+        for (Map<String, Object> variant : cfg.productionVariants) {
+            for (String image : variantImages(ep.region, variant)) {
+                if (!images.contains(image)) {
+                    images.add(image);
+                }
+            }
+        }
+        return images;
+    }
+
+    private List<String> variantImages(String region, Map<String, Object> variant) {
+        ModelResource model = model(region, SageMakerEndpointManager.string(variant.get("ModelName"))).orElse(null);
+        if (model == null) {
+            return List.of();
+        }
+        List<Map<String, Object>> containers = model.containers.isEmpty()
+                ? List.of(model.primaryContainer) : model.containers;
+        List<String> images = new ArrayList<>();
+        for (Map<String, Object> container : containers) {
+            String image = SageMakerEndpointManager.string(container.get("Image"));
+            if (image != null && !image.isBlank()) {
+                images.add(image);
+            }
+        }
+        return images;
+    }
+
+    /**
+     * Builds DescribeEndpoint's ProductionVariantSummary list from the endpoint config the
+     * endpoint just finished deploying: the initial weight and capacity become both the current
+     * and desired values, and each container image is reported with its resolved digest.
+     */
+    private List<Map<String, Object>> variantSummaries(EndpointResource ep, long resolutionTime) {
+        EndpointConfigResource cfg = endpointConfig(ep.region, ep.endpointConfigName).orElse(null);
+        if (cfg == null) {
+            return new ArrayList<>();
+        }
+        List<Map<String, Object>> summaries = new ArrayList<>();
+        for (Map<String, Object> variant : cfg.productionVariants) {
+            Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("VariantName", variant.getOrDefault("VariantName", "AllTraffic"));
+            List<Map<String, Object>> deployed = new ArrayList<>();
+            for (String image : variantImages(ep.region, variant)) {
+                Map<String, Object> deployedImage = new LinkedHashMap<>();
+                deployedImage.put("SpecifiedImage", image);
+                deployedImage.put("ResolvedImage", ep.resolvedImages.getOrDefault(image, image));
+                deployedImage.put("ResolutionTime", epoch(resolutionTime));
+                deployed.add(deployedImage);
+            }
+            summary.put("DeployedImages", deployed);
+            double weight = variant.get("InitialVariantWeight") instanceof Number n ? n.doubleValue() : 1.0;
+            summary.put("CurrentWeight", weight);
+            summary.put("DesiredWeight", weight);
+            if (variant.get("ServerlessConfig") instanceof Map<?, ?> serverless) {
+                summary.put("CurrentServerlessConfig", new LinkedHashMap<>(serverless));
+                summary.put("DesiredServerlessConfig", new LinkedHashMap<>(serverless));
+            } else {
+                int count = variant.get("InitialInstanceCount") instanceof Number n ? n.intValue() : 1;
+                summary.put("CurrentInstanceCount", count);
+                summary.put("DesiredInstanceCount", count);
+            }
+            summaries.add(summary);
+        }
+        return summaries;
+    }
+
+    /**
+     * Applies new weights and capacities to an InService endpoint's variants. Nothing is
+     * re-provisioned behind a variant, so the desired values take effect immediately and the
+     * endpoint stays InService.
+     */
+    public synchronized ObjectNode updateEndpointWeightsAndCapacities(JsonNode request, String region) {
+        String name = required(request, "EndpointName");
+        EndpointResource ep = endpoint(region, name).orElseThrow(() -> validation("Could not find endpoint \"" + name + "\"."));
+        JsonNode desired = request.path("DesiredWeightsAndCapacities");
+        if (!desired.isArray() || desired.isEmpty()) {
+            throw validation("DesiredWeightsAndCapacities is required");
+        }
+        if (!"InService".equals(ep.endpointStatus)) {
+            throw validation("Cannot update in-progress endpoint \"" + ep.endpointArn + "\".");
+        }
+        Map<String, Map<String, Object>> byName = new LinkedHashMap<>();
+        for (Map<String, Object> summary : ep.productionVariants) {
+            byName.put(String.valueOf(summary.get("VariantName")), summary);
+        }
+        List<String> missing = new ArrayList<>();
+        for (JsonNode entry : desired) {
+            String variantName = text(entry, "VariantName");
+            if (variantName == null || variantName.isBlank()) {
+                throw validation("DesiredWeightsAndCapacities.VariantName is required");
+            }
+            if (!byName.containsKey(variantName)) {
+                missing.add(variantName);
+                continue;
+            }
+            Map<String, Object> summary = byName.get(variantName);
+            boolean serverless = summary.containsKey("CurrentServerlessConfig");
+            if (entry.has("DesiredWeight") && entry.path("DesiredWeight").asDouble(-1) < 0) {
+                throw validation("DesiredWeight must be greater than or equal to 0.");
+            }
+            if (entry.has("DesiredInstanceCount")) {
+                if (serverless) {
+                    throw validation("DesiredInstanceCount cannot be specified for serverless variant \"" + variantName + "\".");
+                }
+                if (entry.path("DesiredInstanceCount").asInt(-1) < 0) {
+                    throw validation("DesiredInstanceCount must be greater than or equal to 0.");
+                }
+            }
+            if (entry.path("ServerlessUpdateConfig").isObject() && !serverless) {
+                throw validation("ServerlessUpdateConfig can only be specified for serverless variant \"" + variantName + "\".");
+            }
+        }
+        if (!missing.isEmpty()) {
+            throw validation("The variant name(s) \"" + String.join(",", missing)
+                    + "\" is/are not present in the endpoint \"" + ep.endpointArn + "\".");
+        }
+        for (JsonNode entry : desired) {
+            Map<String, Object> summary = byName.get(text(entry, "VariantName"));
+            if (entry.has("DesiredWeight")) {
+                double weight = entry.path("DesiredWeight").asDouble();
+                summary.put("DesiredWeight", weight);
+                summary.put("CurrentWeight", weight);
+            }
+            if (entry.has("DesiredInstanceCount")) {
+                int count = entry.path("DesiredInstanceCount").asInt();
+                summary.put("DesiredInstanceCount", count);
+                summary.put("CurrentInstanceCount", count);
+            }
+            if (entry.path("ServerlessUpdateConfig").isObject()) {
+                for (String key : List.of("DesiredServerlessConfig", "CurrentServerlessConfig")) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> config = new LinkedHashMap<>((Map<String, Object>) summary.get(key));
+                    entry.path("ServerlessUpdateConfig").fields().forEachRemaining(field ->
+                            config.put(field.getKey(), field.getValue().isNumber()
+                                    ? field.getValue().numberValue() : field.getValue().asText()));
+                    summary.put(key, config);
+                }
+            }
+        }
+        ep.lastModifiedTime = nowMillis();
+        endpointStore.put(regionKey(region, name), ep);
+        ObjectNode out = mapper.createObjectNode();
+        out.put("EndpointArn", ep.endpointArn);
+        return out;
     }
 
     /**

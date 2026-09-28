@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.elasticache;
 
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
@@ -19,11 +20,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
+/**
+ * Replication groups with authentication, driven from the host. As on AWS every group reports its
+ * Port (6379 by default) on its own hostname; containers reach each group by name on that Port.
+ * Host clients share one loopback address, where each group's auth proxy has a port of its own:
+ * the group's Port for the first group using it, a free port of the proxy range for the others.
+ * These tests connect through each group's own host proxy.
+ */
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ElastiCacheIntegrationTest {
@@ -46,8 +56,13 @@ class ElastiCacheIntegrationTest {
     /** Retries only when no bytes were read yet for the line (safe: no partial-line corruption). */
     private static final int READ_LINE_MAX_ATTEMPTS = 3;
 
+    private static final int DEFAULT_PORT = 6379;
+
+    /** The host proxy of {@link #GROUP_ID}, which host clients connect to. */
     private static int firstProxyPort;
-    private static int crossGroupPort;
+
+    @Inject
+    ElastiCacheService elastiCacheService;
 
     @BeforeAll
     static void requireDocker() {
@@ -79,7 +94,7 @@ class ElastiCacheIntegrationTest {
     @Test
     @Order(1)
     void createReplicationGroup() {
-        firstProxyPort =
+        int port =
                 given()
                     .formParam("Action", "CreateReplicationGroup")
                     .formParam("ReplicationGroupId", GROUP_ID)
@@ -94,11 +109,13 @@ class ElastiCacheIntegrationTest {
                     .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ReplicationGroupId", equalTo(GROUP_ID))
                     .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.Status", equalTo("available"))
                     .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.AuthTokenEnabled", equalTo("true"))
-                    .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Address", equalTo("localhost"))
+                    .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Address", equalTo("master." + GROUP_ID + "." + ElastiCacheEndpoints.hash("000000000000", "us-east-1") + ".use1.cache.localhost.floci.io"))
                     .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Port", notNullValue())
                 .extract()
                     .xmlPath()
                     .getInt("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Port");
+        assertEquals(DEFAULT_PORT, port);
+        firstProxyPort = hostProxyPort(GROUP_ID);
     }
 
     @Test
@@ -115,7 +132,7 @@ class ElastiCacheIntegrationTest {
             .body("DescribeReplicationGroupsResponse.DescribeReplicationGroupsResult.ReplicationGroups.ReplicationGroup.ReplicationGroupId",
                     equalTo(GROUP_ID))
             .body("DescribeReplicationGroupsResponse.DescribeReplicationGroupsResult.ReplicationGroups.ReplicationGroup.ConfigurationEndpoint.Port",
-                    equalTo(String.valueOf(firstProxyPort)));
+                    equalTo(String.valueOf(DEFAULT_PORT)));
     }
 
     @Test
@@ -223,7 +240,7 @@ class ElastiCacheIntegrationTest {
 
         // Create a second group and verify the user (associated with GROUP_ID only) cannot auth
         try {
-            crossGroupPort = given()
+            int crossGroupPort = given()
                     .formParam("Action", "CreateReplicationGroup")
                     .formParam("ReplicationGroupId", CROSS_GROUP_ID)
                     .formParam("ReplicationGroupDescription", "Cross-group isolation test")
@@ -237,9 +254,18 @@ class ElastiCacheIntegrationTest {
                     .xmlPath()
                     .getInt("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Port");
 
+            // Both groups report the same Port, each on its own hostname, as on AWS. On the host
+            // they cannot share a listener, so each is served by a proxy of its own.
+            assertEquals(DEFAULT_PORT, crossGroupPort);
+            int crossGroupProxyPort = hostProxyPort(CROSS_GROUP_ID);
+            assertNotEquals(firstProxyPort, crossGroupProxyPort);
+
             // User associated with GROUP_ID should be rejected on CROSS_GROUP_ID
-            String reply = sendCommand(crossGroupPort, respArray("AUTH", USER_NAME, INITIAL_PASSWORD));
+            String reply = sendCommand(crossGroupProxyPort, respArray("AUTH", USER_NAME, INITIAL_PASSWORD));
             assertEquals("-ERR invalid username-password pair or user is disabled.\r\n", reply);
+            // ...while the cross group's own token opens it.
+            reply = sendCommand(crossGroupProxyPort, respArray("AUTH", CROSS_GROUP_AUTH_TOKEN));
+            assertEquals("+OK\r\n", reply);
         } finally {
             // Clean up the cross-group without masking test assertions if creation/auth failed
             try {
@@ -345,12 +371,14 @@ class ElastiCacheIntegrationTest {
                     .post("/")
                 .then()
                     .statusCode(200)
-                    .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Address", equalTo("localhost"))
+                    .body("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Address", endsWith(".use1.cache.localhost.floci.io"))
                 .extract()
                     .xmlPath()
                     .getInt("CreateReplicationGroupResponse.CreateReplicationGroupResult.ReplicationGroup.ConfigurationEndpoint.Port");
 
-        assertEquals(firstProxyPort, reusedPort);
+        assertEquals(DEFAULT_PORT, reusedPort);
+        assertEquals(firstProxyPort, hostProxyPort(GROUP_ID + "-reused"),
+                "The deleted group's host proxy port is free for the next group");
 
         given()
             .formParam("Action", "DeleteReplicationGroup")
@@ -362,6 +390,11 @@ class ElastiCacheIntegrationTest {
             .statusCode(200)
             .body("DeleteReplicationGroupResponse.DeleteReplicationGroupResult.ReplicationGroup.ReplicationGroupId",
                     equalTo(GROUP_ID + "-reused"));
+    }
+
+    /** The port host clients reach a group's auth proxy on. */
+    private int hostProxyPort(String groupId) {
+        return elastiCacheService.getReplicationGroup(groupId).getProxyPort();
     }
 
     static boolean isDockerAvailable() {

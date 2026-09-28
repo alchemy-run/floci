@@ -349,7 +349,7 @@ public class SesAccountController {
             throw new AwsException("NotFoundException",
                     "To use this feature you must enable Virtual Deliverability Manager.", 404);
         }
-        if (messageId == null || messageId.isBlank() || !messageId.contains("-")) {
+        if (!SesMessageIds.isWellFormed(messageId)) {
             throw new AwsException("BadRequestException",
                     "MessageId is not a valid SES message id.", 400);
         }

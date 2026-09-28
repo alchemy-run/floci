@@ -58,7 +58,7 @@ class BedrockAgentCorePersistenceTest {
                 "arn:aws:iam::000000000000:role/agent", "v2", null, authorizer, null, REGION);
         svc.createEndpoint(id, "prod", "1", "prod ep", null, REGION);
         AgentRuntime before = svc.getAgentRuntime(id, REGION);
-        svc.tagByArn(REGION, svc.arn(before, "1", REGION), Map.of("env", "prod"));
+        svc.tagByArn(REGION, svc.arn(before, REGION), Map.of("env", "prod"));
         before = svc.getAgentRuntime(id, REGION);
 
         // Write to disk, then reload into a brand-new backend (simulated restart).
@@ -183,7 +183,7 @@ class BedrockAgentCorePersistenceTest {
         RegionResolver resolver = spy(new RegionResolver(REGION, "000000000000"));
         doReturn("111111111111").when(resolver).getAccountId();
         BedrockAgentCoreTagHandler handler = toolTagHandler(mock(BedrockAgentCoreToolsService.class), resolver);
-        for (String resource : List.of("agent/agentId", "gateway/gatewayId", "memory/memoryId")) {
+        for (String resource : List.of("runtime/agentId", "gateway/gatewayId", "memory/memoryId")) {
             String arn = resolver.buildArn("bedrock-agentcore", REGION, resource);
             assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
                     () -> handler.listTags(REGION, arn)).getErrorCode());

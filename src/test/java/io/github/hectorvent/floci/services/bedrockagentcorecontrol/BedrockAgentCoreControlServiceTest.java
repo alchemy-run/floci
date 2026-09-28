@@ -60,9 +60,31 @@ class BedrockAgentCoreControlServiceTest {
         assertEquals(1, rt.getLatestVersion());
         assertEquals("READY", rt.getStatus());
         assertTrue(rt.getWorkloadIdentityArn().contains(":bedrock-agentcore:"));
-        assertTrue(service.arn(rt, "1", REGION)
-                .matches("arn:aws:bedrock-agentcore:us-east-1:000000000000:agent/[0-9a-f-]{36}:1"),
-                service.arn(rt, "1", REGION));
+        assertEquals("arn:aws:bedrock-agentcore:us-east-1:000000000000:runtime/" + rt.getAgentRuntimeId(),
+                service.arn(rt, REGION));
+    }
+
+    @Test
+    void arnsMatchRealAgentCoreShapes() {
+        AgentRuntime rt = create("myAgent");
+        String runtimeArn = service.arn(rt, REGION);
+        AgentRuntimeEndpoint endpoint = service.getEndpoint(rt.getAgentRuntimeId(), "DEFAULT", REGION);
+        assertEquals(runtimeArn + "/runtime-endpoint/DEFAULT", service.endpointArn(rt, endpoint, REGION));
+
+        // The runtime ARN is stable across versions.
+        AgentRuntime updated = service.updateAgentRuntime(rt.getAgentRuntimeId(), artifact(), network(),
+                "arn:aws:iam::000000000000:role/agent", null, null, null, null, REGION);
+        assertEquals(runtimeArn, service.arn(updated, REGION));
+
+        assertTrue(service.runtimeArnExists(REGION, runtimeArn));
+        assertTrue(service.runtimeArnExists(REGION, runtimeArn + "/runtime-endpoint/DEFAULT"));
+        assertTrue(!service.runtimeArnExists(REGION,
+                "arn:aws:bedrock-agentcore:us-east-1:000000000000:runtime/ghost-abcdefghij"));
+
+        service.tagByArn(REGION, runtimeArn, java.util.Map.of("env", "test"));
+        assertEquals(java.util.Map.of("env", "test"), service.getTagsByArn(REGION, runtimeArn));
+        assertEquals("ValidationException", assertThrows(AwsException.class,
+                () -> service.getTagsByArn(REGION, runtimeArn + ":1")).getErrorCode());
     }
 
     @Test

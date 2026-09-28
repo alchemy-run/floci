@@ -62,7 +62,9 @@ class TimestreamInfluxDbServiceTest {
                 AccountAwareStorageBackend.<DbCluster>inMemory(ACCOUNT),
                 AccountAwareStorageBackend.<DbParameterGroup>inMemory(ACCOUNT),
                 AccountAwareStorageBackend.<DbBackup>inMemory(ACCOUNT),
-                new RegionResolver(REGION, ACCOUNT), secrets, objectMapper, containerManager, false, Runnable::run);
+                new RegionResolver(REGION, ACCOUNT), secrets, objectMapper, containerManager,
+                TimestreamInfluxDbVpcValidationTest.vpcResources(Map.of("subnet-abc", "vpc-1"), Map.of("sg-abc", "vpc-1")),
+                false, Runnable::run);
     }
 
     @Test

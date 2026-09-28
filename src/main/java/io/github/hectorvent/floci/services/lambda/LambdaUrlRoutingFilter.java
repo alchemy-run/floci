@@ -31,7 +31,7 @@ public class LambdaUrlRoutingFilter implements ContainerRequestFilter {
         if (host == null) return;
 
         // Pattern: <urlId>.lambda-url.<region>.<anything>
-        if (host.contains(".lambda-url.")) {
+        if (isFunctionUrlHost(host)) {
             String[] parts = host.split("\\.");
             if (parts.length >= 3) {
                 String urlId = parts[0];
@@ -51,5 +51,10 @@ public class LambdaUrlRoutingFilter implements ContainerRequestFilter {
                 requestContext.setRequestUri(newUri);
             }
         }
+    }
+
+    /** Whether the addressed host is a host-style Function URL this filter rewrites. */
+    static boolean isFunctionUrlHost(String host) {
+        return host != null && host.contains(".lambda-url.") && host.split("\\.").length >= 3;
     }
 }

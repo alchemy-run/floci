@@ -49,7 +49,10 @@ final class CloudTrailPages {
     }
 
     private static String identity(ObjectNode value) {
-        return value.has("EventId") ? value.path("EventId").asText() : value.path("EventDataStoreArn").asText();
+        if (value.has("EventId")) {
+            return value.path("EventId").asText();
+        }
+        return value.has("QueryId") ? value.path("QueryId").asText() : value.path("EventDataStoreArn").asText();
     }
 
     static void validateTimeRange(JsonNode request) {

@@ -107,6 +107,46 @@ class ControlTowerControlControllerIntegrationTest {
     }
 
     @Test
+    void disableControlByArnOrPairRemovesEnablementAndRecordsOperation() {
+        String target = "arn:aws:organizations::000000000000:ou/o-example/ou-example-disable01";
+        String control = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES";
+        String enabledArn = post("/enable-control", "{\"controlIdentifier\":\"" + control
+                + "\",\"targetIdentifier\":\"" + target + "\",\"tags\":{\"fixture\":\"control\"}}")
+                .then().statusCode(200).extract().path("arn");
+
+        given().header("Authorization", auth()).get("/tags/{arn}", enabledArn)
+                .then().statusCode(200).body("tags.fixture", equalTo("control"));
+        given().contentType("application/json").header("Authorization", auth())
+                .body("{\"tags\":{\"alchemy::id\":\"Guardrail\"}}").post("/tags/{arn}", enabledArn)
+                .then().statusCode(204);
+        given().header("Authorization", auth()).queryParam("tagKeys", "fixture").delete("/tags/{arn}", enabledArn)
+                .then().statusCode(204);
+        given().header("Authorization", auth()).get("/tags/{arn}", enabledArn)
+                .then().statusCode(200).body("tags.size()", equalTo(1))
+                .body("tags.'alchemy::id'", equalTo("Guardrail"));
+
+        String operation = post("/disable-control", "{\"enabledControlIdentifier\":\"" + enabledArn + "\"}")
+                .then().statusCode(200).extract().path("operationIdentifier");
+        post("/get-control-operation", "{\"operationIdentifier\":\"" + operation + "\"}")
+                .then().statusCode(200)
+                .body("controlOperation.operationType", equalTo("DISABLE_CONTROL"))
+                .body("controlOperation.status", equalTo("SUCCEEDED"))
+                .body("controlOperation.enabledControlIdentifier", equalTo(enabledArn));
+        post("/get-enabled-control", "{\"enabledControlIdentifier\":\"" + enabledArn + "\"}")
+                .then().statusCode(404).body("__type", containsString("ResourceNotFoundException"));
+        post("/disable-control", "{\"enabledControlIdentifier\":\"" + enabledArn + "\"}")
+                .then().statusCode(404).body("__type", containsString("ResourceNotFoundException"));
+
+        String pair = "{\"controlIdentifier\":\"" + control + "\",\"targetIdentifier\":\"" + target + "\"}";
+        post("/enable-control", pair).then().statusCode(200);
+        post("/disable-control", pair).then().statusCode(200).body("operationIdentifier", notNullValue());
+        post("/list-enabled-controls", "{\"targetIdentifier\":\"" + target + "\"}")
+                .then().statusCode(200).body("enabledControls", hasSize(0));
+        post("/disable-control", "{}")
+                .then().statusCode(400).body("__type", containsString("ValidationException"));
+    }
+
+    @Test
     void listEnabledControlsRejectsNegativeNextToken() {
         post("/list-enabled-controls", "{\"nextToken\":\"-1\"}")
                 .then().statusCode(400).body("__type", containsString("ValidationException"));

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import org.jboss.logging.Logger;
@@ -36,10 +37,16 @@ public class ResourceArnBuilder {
     private static final Pattern FROM_EMAIL_JSON =
             Pattern.compile("\"FromEmailAddress\"\\s*:\\s*\"([^\"]+)\"");
     private final ObjectMapper objectMapper;
+    private final Instance<ResourceArnResolver> arnResolvers;
 
     @Inject
-    public ResourceArnBuilder(ObjectMapper objectMapper) {
+    public ResourceArnBuilder(ObjectMapper objectMapper, Instance<ResourceArnResolver> arnResolvers) {
         this.objectMapper = objectMapper;
+        this.arnResolvers = arnResolvers;
+    }
+
+    public ResourceArnBuilder(ObjectMapper objectMapper) {
+        this(objectMapper, null);
     }
 
     public ResourceArnBuilder() {
@@ -405,14 +412,28 @@ public class ResourceArnBuilder {
             if (json.hasNonNull("SecretId")) {
                 String secretId = json.get("SecretId").asText().trim();
                 if (!secretId.isEmpty()) {
-                    if (AwsArnUtils.isArnFor(secretId, "secretsmanager")) {
-                        return secretId;
-                    }
-                    return AwsArnUtils.Arn.of("secretsmanager", region, accountId, "secret:" + secretId).toString();
+                    String requestArn = AwsArnUtils.isArnFor(secretId, "secretsmanager")
+                            ? secretId
+                            : AwsArnUtils.Arn.of("secretsmanager", region, accountId, "secret:" + secretId).toString();
+                    return resolveStoredArn("secretsmanager", requestArn, region);
                 }
             }
         }
         return AwsArnUtils.Arn.of("secretsmanager", region, accountId, "secret:*").toString();
+    }
+
+    /** The stored resource's real ARN when a resolver knows it, otherwise {@code requestArn}. */
+    private String resolveStoredArn(String credentialScope, String requestArn, String region) {
+        if (arnResolvers == null || arnResolvers.isUnsatisfied()) {
+            return requestArn;
+        }
+        for (ResourceArnResolver resolver : arnResolvers) {
+            java.util.Optional<String> resolved = resolver.resolve(credentialScope, requestArn, region);
+            if (resolved.isPresent()) {
+                return resolved.get();
+            }
+        }
+        return requestArn;
     }
 
     // ── SSM ──────────────────────────────────────────────────────────────────────

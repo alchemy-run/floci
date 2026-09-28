@@ -69,7 +69,7 @@ class TimestreamInfluxDbDockerIntegrationTest {
         String sourceId = call("CreateDbInstance", """
                 {"name":"docker-source","username":"%s","password":"%s","organization":"acme","bucket":"metrics",
                  "dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":["subnet-abc123"],"vpcSecurityGroupIds":["sg-abc123"]}
+                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
                 """.formatted(USERNAME, PASSWORD)).statusCode(200).extract().path("id");
         String restoredId = null;
         try {

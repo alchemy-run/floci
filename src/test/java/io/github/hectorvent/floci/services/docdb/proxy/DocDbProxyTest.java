@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.docdb.proxy;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyTlsCertificates;
 import org.junit.jupiter.api.Test;
@@ -41,6 +42,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DocDbProxyTest {
@@ -205,6 +209,27 @@ class DocDbProxyTest {
         manager.release("more");
         new ServerSocket(port).close();
         assertNull(manager.portOf("more"));
+    }
+
+    @Test
+    void eachListenerIsPublishedToContainersWhileItServesAnyCluster() throws IOException {
+        // A VPC Lambda resolves every cluster endpoint to Floci and connects on the cluster's
+        // port, so that port must be reachable from containers for as long as it is served.
+        ContainerEndpoints endpoints = mock(ContainerEndpoints.class);
+        DocDbProxyManager manager = new DocDbProxyManager(certificates(), endpoints);
+        int port = freePort();
+        try {
+            manager.reserve("docs", port, true);
+            manager.reserve("more", port, true);
+            verify(endpoints, times(1)).publishHostPort(port);
+
+            manager.release("docs");
+            verify(endpoints, never()).withdrawHostPort(port);
+            manager.release("more");
+            verify(endpoints).withdrawHostPort(port);
+        } finally {
+            manager.stopAll();
+        }
     }
 
     private RdsProxyTlsCertificates certificates() {

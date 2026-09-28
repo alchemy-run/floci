@@ -16,6 +16,8 @@ import io.github.hectorvent.floci.services.rds.model.DbClusterSettings;
 import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
+import io.github.hectorvent.floci.services.rds.model.DbInstanceModification;
+import io.github.hectorvent.floci.services.rds.model.DbInstancePendingModifiedValues;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceSettings;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceStatus;
 import io.github.hectorvent.floci.services.rds.model.DbParameterGroup;
@@ -39,6 +41,7 @@ import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -486,7 +489,16 @@ public class RdsQueryHandler {
             return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.RDS, e.getHttpStatus());
         }
         try {
+            validateMasterUserPassword(newPassword);
             DbInstanceSettings settings = instanceSettings(params, false);
+            DbInstanceModification modification = new DbInstanceModification(
+                    parseOptionalBoolean(params, "ApplyImmediately"),
+                    optionalInt(params.getFirst("AllocatedStorage")),
+                    params.getFirst("DBInstanceClass"),
+                    parseOptionalBoolean(params, "MultiAZ"),
+                    params.getFirst("DBParameterGroupName"),
+                    parseOptionalBoolean(params, "ManageMasterUserPassword"),
+                    params.getFirst("MasterUserSecretKmsKeyId"));
             List<String> vpcSecurityGroupIds = vpcSecurityGroupIds(params);
             Integer dbPortNumber = optionalInt(params.getFirst("DBPortNumber"));
             if (dbPortNumber != null) {
@@ -495,7 +507,7 @@ public class RdsQueryHandler {
             DbInstance instance = service.modifyDbInstance(
                     id, newPassword, iamEnabled, dbSubnetGroupName,
                     vpcSecurityGroupIds, optionGroupName, region, autoMinorVersionUpgrade,
-                    settings, publiclyAccessible);
+                    settings, publiclyAccessible, modification);
             if (dbPortNumber != null) {
                 instance = service.modifyDbInstancePort(id, dbPortNumber, region);
             }
@@ -512,7 +524,8 @@ public class RdsQueryHandler {
 
     /**
      * ModifyDBInstance has no StorageEncrypted or KmsKeyId in its request shape — encryption is
-     * fixed at create — so a modify reads only the backup settings and the windows.
+     * fixed at create — so a modify reads neither. Both operations carry the storage type and
+     * performance, deletion protection and network type.
      */
     private static DbInstanceSettings instanceSettings(MultivaluedMap<String, String> params,
                                                        boolean includeEncryption) {
@@ -533,7 +546,12 @@ public class RdsQueryHandler {
                 optionalInt(params.getFirst("MaxAllocatedStorage")),
                 // CreateDBInstance names the listener Port; ModifyDBInstance's DBPortNumber is
                 // applied on its own.
-                includeEncryption ? optionalInt(params.getFirst("Port")) : null);
+                includeEncryption ? optionalInt(params.getFirst("Port")) : null,
+                params.getFirst("StorageType"),
+                optionalInt(params.getFirst("Iops")),
+                optionalInt(params.getFirst("StorageThroughput")),
+                parseOptionalBoolean(params, "DeletionProtection"),
+                params.getFirst("NetworkType"));
     }
 
     /**
@@ -2495,7 +2513,9 @@ public class RdsQueryHandler {
     private String dbInstanceInnerXml(DbInstance i) {
         DbEndpoint ep = i.getEndpoint();
         String engineStr = instanceEngine(i);
-        String statusStr = i.getStatus() != null ? statusLabel(i.getStatus()) : "available";
+        String statusStr = RdsInstanceLifecycle.reportedStatus(i,
+                i.getStatus() != null ? statusLabel(i.getStatus()) : "available", Instant.now());
+        RdsInstanceStorage.Storage storage = RdsInstanceStorage.current(i, engineStr);
 
         XmlBuilder xml = new XmlBuilder()
                 .elem("DBInstanceIdentifier", i.getDbInstanceIdentifier())
@@ -2517,8 +2537,14 @@ public class RdsQueryHandler {
         xml.elem("IAMDatabaseAuthenticationEnabled", i.isIamDatabaseAuthenticationEnabled())
            .elem("MultiAZ", i.isMultiAz())
            .elem("AutoMinorVersionUpgrade", i.isAutoMinorVersionUpgrade())
-           .elem("StorageType", "gp2")
-           .elem("PubliclyAccessible", i.isPubliclyAccessible())
+           .elem("StorageType", storage.storageType());
+        if (storage.iops() != null) {
+            xml.elem("Iops", storage.iops());
+        }
+        if (storage.storageThroughput() != null) {
+            xml.elem("StorageThroughput", storage.storageThroughput());
+        }
+        xml.elem("PubliclyAccessible", i.isPubliclyAccessible())
            .elem("AvailabilityZone", i.getAvailabilityZone() != null ? i.getAvailabilityZone() : config.defaultAvailabilityZone())
            .elem("PreferredMaintenanceWindow", i.getPreferredMaintenanceWindow() != null
                    ? i.getPreferredMaintenanceWindow() : DbInstanceSettings.DEFAULT_MAINTENANCE_WINDOW)
@@ -2535,7 +2561,12 @@ public class RdsQueryHandler {
            .elem("DBInstanceArn", i.getDbInstanceArn())
            .elem("MonitoringInterval", i.getMonitoringInterval())
            .elem("PerformanceInsightsEnabled", i.isPerformanceInsightsEnabled())
-           .elem("EngineLifecycleSupport", i.getEngineLifecycleSupport());
+           .elem("EngineLifecycleSupport", i.getEngineLifecycleSupport())
+           .elem("DeletionProtection", i.isDeletionProtection())
+           .elem("NetworkType", i.getNetworkType() != null ? i.getNetworkType() : "IPV4")
+           // A live account reports 0 here and the listener under Endpoint.Port.
+           .elem("DbInstancePort", 0)
+           .raw(pendingModifiedValuesXml(i.getPendingModifiedValues()));
         if (i.getMonitoringRoleArn() != null && !i.getMonitoringRoleArn().isBlank()) {
             xml.elem("MonitoringRoleArn", i.getMonitoringRoleArn());
         }
@@ -2570,6 +2601,39 @@ public class RdsQueryHandler {
         writeTags(xml, i.getTags());
         xml.end("TagList");
         return xml.build();
+    }
+
+    /** The queued changes, reported only when there are any, as a live account reports them. */
+    private static String pendingModifiedValuesXml(DbInstancePendingModifiedValues pending) {
+        if (pending == null || !pending.hasChanges()) {
+            return "";
+        }
+        XmlBuilder xml = new XmlBuilder().start("PendingModifiedValues");
+        if (pending.getDbInstanceClass() != null) {
+            xml.elem("DBInstanceClass", pending.getDbInstanceClass());
+        }
+        if (pending.getAllocatedStorage() != null) {
+            xml.elem("AllocatedStorage", pending.getAllocatedStorage());
+        }
+        if (pending.getBackupRetentionPeriod() != null) {
+            xml.elem("BackupRetentionPeriod", pending.getBackupRetentionPeriod());
+        }
+        if (pending.getMultiAz() != null) {
+            xml.elem("MultiAZ", pending.getMultiAz());
+        }
+        if (pending.getIops() != null) {
+            xml.elem("Iops", pending.getIops());
+        }
+        if (pending.getStorageThroughput() != null) {
+            xml.elem("StorageThroughput", pending.getStorageThroughput());
+        }
+        if (pending.getStorageType() != null) {
+            xml.elem("StorageType", pending.getStorageType());
+        }
+        if (pending.getIamDatabaseAuthenticationEnabled() != null) {
+            xml.elem("IAMDatabaseAuthenticationEnabled", pending.getIamDatabaseAuthenticationEnabled());
+        }
+        return xml.end("PendingModifiedValues").build();
     }
 
     /**
@@ -2655,7 +2719,8 @@ public class RdsQueryHandler {
         XmlBuilder xml = new XmlBuilder().start("DBParameterGroups");
         xml.start("DBParameterGroup")
            .elem("DBParameterGroupName", name)
-           .elem("ParameterApplyStatus", "in-sync")
+           .elem("ParameterApplyStatus", instance.getParameterApplyStatus() != null
+                   ? instance.getParameterApplyStatus() : RdsInstanceLifecycle.IN_SYNC)
            .end("DBParameterGroup");
         return xml.end("DBParameterGroups").build();
     }

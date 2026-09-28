@@ -28,6 +28,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -161,7 +162,7 @@ public class EksAddonService {
     }
 
     public Addon describe(Cluster cluster, String addonName) {
-        requireActiveCluster(cluster);
+        requireCluster(cluster);
         if (addonName == null || addonName.isBlank()) {
             throw new AwsException("InvalidParameterException", "addonName is required", 400);
         }
@@ -174,7 +175,7 @@ public class EksAddonService {
     }
 
     public AddonNamesPage list(Cluster cluster, Integer maxResults, String nextToken) {
-        requireActiveCluster(cluster);
+        requireCluster(cluster);
         String p = prefix(cluster);
         List<String> addonNames = storage.scan(key -> key.startsWith(p)).stream()
                 .map(stored -> stored.addon().addonName())
@@ -342,7 +343,7 @@ public class EksAddonService {
     }
 
     public Update describeUpdate(Cluster cluster, String updateId, String addonName) {
-        requireActiveCluster(cluster);
+        requireCluster(cluster);
         if (updateId == null || updateId.isBlank()) {
             throw new AwsException("InvalidParameterException", "updateId is required", 400);
         }
@@ -355,6 +356,30 @@ public class EksAddonService {
                     "No update: " + updateId + " found for addon: " + addonName, 404);
         }
         return stored.update();
+    }
+
+    /**
+     * Update ids recorded for the cluster itself ({@code addonName == null}) or for one add-on.
+     * Only add-on updates are recorded today, so the cluster-level list is empty until an
+     * operation that records a cluster update exists.
+     */
+    public List<String> listUpdateIds(Cluster cluster, String addonName) {
+        String p = prefix(cluster);
+        return updatesStorage.scan(key -> key.startsWith(p)).stream()
+                .filter(stored -> addonName == null
+                        ? stored.addonName() == null
+                        : stored.addonName() != null && stored.addonName().equalsIgnoreCase(addonName.trim()))
+                .map(stored -> stored.update().id())
+                .toList();
+    }
+
+    /** Every add-on installed on the cluster, for callers that evaluate cluster state. */
+    public List<Addon> clusterAddons(Cluster cluster) {
+        String p = prefix(cluster);
+        return storage.scan(key -> key.startsWith(p)).stream()
+                .map(StoredAddon::addon)
+                .sorted(Comparator.comparing(Addon::addonName))
+                .toList();
     }
 
     public AddonVersionsPage describeAddonVersions(String addonName, String kubernetesVersion,
@@ -459,10 +484,15 @@ public class EksAddonService {
                 + clusterArn[4] + ":addon/" + cluster.getName() + "/" + addonName + "/" + UUID.randomUUID();
     }
 
-    private static void requireActiveCluster(Cluster cluster) {
+    /** Reads stay available while the cluster is CREATING or UPDATING, as they do on EKS. */
+    private static void requireCluster(Cluster cluster) {
         if (cluster == null) {
             throw new AwsException("ResourceNotFoundException", "Cluster not found", 404);
         }
+    }
+
+    private static void requireActiveCluster(Cluster cluster) {
+        requireCluster(cluster);
         if (cluster.getStatus() != ClusterStatus.ACTIVE) {
             throw new AwsException("InvalidRequestException",
                     "Cluster must be ACTIVE, but was " + cluster.getStatus(), 400);

@@ -46,7 +46,7 @@ class BedrockAgentCoreControlIntegrationTest {
                 .body("agentRuntimeVersion", equalTo("1"))
                 .body("status", equalTo("READY"))
                 .body("agentRuntimeArn", containsString(":bedrock-agentcore:"))
-                .body("agentRuntimeArn", containsString(":agent/"))
+                .body("agentRuntimeArn", matchesPattern("arn:aws:bedrock-agentcore:us-east-1:000000000000:runtime/itAgent-[a-zA-Z0-9]{10}"))
                 .body("workloadIdentityDetails.workloadIdentityArn", notNullValue())
                 .extract().path("agentRuntimeId");
     }

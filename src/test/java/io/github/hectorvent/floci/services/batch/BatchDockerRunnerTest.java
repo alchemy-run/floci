@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.services.batch.model.BatchJob;
 import io.github.hectorvent.floci.services.batch.model.BatchNodeExecution;
 import io.github.hectorvent.floci.services.batch.model.BatchResourceRequirement;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
+import io.github.hectorvent.floci.services.batch.model.BatchRuntimePlatform;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -81,8 +82,7 @@ class BatchDockerRunnerTest {
         when(detector.isRunningInContainer()).thenReturn(false);
 
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of()));
+        when(lifecycleManager.create(any(), anyString())).thenReturn("container-id");
         DockerClient dockerClient =
                 mock(DockerClient.class, RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
@@ -130,9 +130,9 @@ class BatchDockerRunnerTest {
         CountDownLatch containerStarted = new CountDownLatch(1);
         AtomicBoolean stopped = new AtomicBoolean();
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
-        when(lifecycleManager.createAndStart(any())).thenAnswer(invocation -> {
+        when(lifecycleManager.create(any(), anyString())).thenAnswer(invocation -> {
             containerStarted.countDown();
-            return new ContainerLifecycleManager.ContainerInfo("container-id", Map.of());
+            return "container-id";
         });
         DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
@@ -175,8 +175,7 @@ class BatchDockerRunnerTest {
         when(config.port()).thenReturn(4566);
 
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of()));
+        when(lifecycleManager.create(any(), anyString())).thenReturn("container-id");
         DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
         when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning()).thenReturn(false);
@@ -194,7 +193,7 @@ class BatchDockerRunnerTest {
         BatchRunResult result = runner.run(job(), 1);
 
         assertEquals(0, result.exitCode());
-        verify(lifecycleManager).createAndStart(any());
+        verify(lifecycleManager).create(any(), eq("linux/amd64"));
     }
 
     @Test
@@ -211,10 +210,10 @@ class BatchDockerRunnerTest {
         AtomicInteger containerSequence = new AtomicInteger();
         Set<String> stoppedContainers = ConcurrentHashMap.newKeySet();
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
-        when(lifecycleManager.createAndStart(any())).thenAnswer(invocation -> {
+        when(lifecycleManager.create(any(), anyString())).thenAnswer(invocation -> {
             String containerId = "container-" + containerSequence.getAndIncrement();
             containersStarted.countDown();
-            return new ContainerLifecycleManager.ContainerInfo(containerId, Map.of());
+            return containerId;
         });
         DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
@@ -267,8 +266,7 @@ class BatchDockerRunnerTest {
         when(config.port()).thenReturn(4566);
 
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
-        when(lifecycleManager.createAndStart(any())).thenReturn(
-                new ContainerLifecycleManager.ContainerInfo("container-id", Map.of()));
+        when(lifecycleManager.create(any(), anyString())).thenReturn("container-id");
         DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
         when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning()).thenReturn(false);
@@ -301,6 +299,96 @@ class BatchDockerRunnerTest {
                 && env.contains("AWS_SECRET_ACCESS_KEY=test")));
         verify(logStreamer).attachForAccount(eq("123456789012"), eq("container-id"), eq("/aws/batch/job"),
                 eq("my-def/default/job-1"), eq("us-east-1"), anyString());
+    }
+
+    @Test
+    void runDefaultsToX86ContainerPlatformWhenRuntimePlatformIsOmitted() {
+        ContainerLifecycleManager lifecycleManager = exitedLifecycleManager();
+        BatchDockerRunner runner = platformRunner(lifecycleManager);
+
+        BatchRunResult result = runner.run(job(), 1);
+
+        assertEquals(0, result.exitCode());
+        verify(lifecycleManager).create(any(), eq("linux/amd64"));
+        verify(lifecycleManager).startCreated(eq("container-id"), any());
+    }
+
+    @Test
+    void runUsesJobDefinitionCpuArchitectureAsContainerPlatform() {
+        ContainerLifecycleManager lifecycleManager = exitedLifecycleManager();
+        BatchDockerRunner runner = platformRunner(lifecycleManager);
+        BatchJob job = job();
+        job.setRuntimePlatform(new BatchRuntimePlatform("ARM64", "LINUX"));
+
+        BatchRunResult result = runner.run(job, 1);
+
+        assertEquals(0, result.exitCode());
+        verify(lifecycleManager).create(any(), eq("linux/arm64"));
+    }
+
+    @Test
+    void runExplicitX86CpuArchitectureUsesAmd64Platform() {
+        ContainerLifecycleManager lifecycleManager = exitedLifecycleManager();
+        BatchDockerRunner runner = platformRunner(lifecycleManager);
+        BatchJob job = job();
+        job.setRuntimePlatform(new BatchRuntimePlatform("X86_64", null));
+
+        runner.run(job, 1);
+
+        verify(lifecycleManager).create(any(), eq("linux/amd64"));
+    }
+
+    @Test
+    void runNodeUsesNodeCpuArchitectureAsContainerPlatform() {
+        ContainerLifecycleManager lifecycleManager = exitedLifecycleManager();
+        BatchDockerRunner runner = platformRunner(lifecycleManager);
+        BatchNodeExecution node = node(0);
+        node.setRuntimePlatform(new BatchRuntimePlatform("ARM64", null));
+
+        BatchRunResult result = runner.run(job(), 1, node);
+
+        assertEquals(0, result.exitCode());
+        verify(lifecycleManager).create(any(), eq("linux/arm64"));
+    }
+
+    @Test
+    void runRemovesCreatedContainerWhenStartFails() {
+        ContainerLifecycleManager lifecycleManager = exitedLifecycleManager();
+        when(lifecycleManager.startCreated(eq("container-id"), any()))
+                .thenThrow(new IllegalStateException("start failed"));
+        BatchDockerRunner runner = platformRunner(lifecycleManager);
+
+        BatchRunResult result = runner.run(job(), 1);
+
+        assertEquals(1, result.exitCode());
+        assertEquals("start failed", result.reason());
+        verify(lifecycleManager).stopAndRemove("container-id", null);
+    }
+
+    private ContainerLifecycleManager exitedLifecycleManager() {
+        ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
+        when(lifecycleManager.create(any(), anyString())).thenReturn("container-id");
+        DockerClient dockerClient = mock(DockerClient.class, RETURNS_DEEP_STUBS);
+        when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning()).thenReturn(false);
+        when(dockerClient.inspectContainerCmd("container-id").exec().getState().getExitCodeLong()).thenReturn(0L);
+        return lifecycleManager;
+    }
+
+    private BatchDockerRunner platformRunner(ContainerLifecycleManager lifecycleManager) {
+        EmulatorConfig config = config(Optional.empty());
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.BatchServiceConfig batch = mock(EmulatorConfig.BatchServiceConfig.class);
+        when(config.services()).thenReturn(services);
+        when(services.batch()).thenReturn(batch);
+        when(batch.dockerNetwork()).thenReturn(Optional.empty());
+        when(config.port()).thenReturn(4566);
+        ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
+        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        when(containerBuilder.newContainer(anyString())).thenReturn(builder);
+        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        return new BatchDockerRunner(containerBuilder, lifecycleManager,
+                mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
     }
 
     private BatchJob job() {

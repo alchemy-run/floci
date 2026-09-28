@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.stream.Collectors;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Control Tower landing-zone and baseline emulation, backed by the configured Floci storage mode.
@@ -55,6 +56,7 @@ public class ControlTowerService {
     private static final String OP_TYPE_BASELINE_ENABLED = "ENABLE_BASELINE";
     private static final String OP_TYPE_BASELINE_UPDATE = "UPDATE_ENABLED_BASELINE";
     private static final String OP_TYPE_BASELINE_RESET = "RESET_ENABLED_BASELINE";
+    private static final String OP_TYPE_BASELINE_DISABLE = "DISABLE_BASELINE";
     private static final String IDENTITY_CENTER_BASELINE_NAME = "IdentityCenterBaseline";
     private static final String IDENTITY_CENTER_BASELINE_ID = "LN25R72TTG6IGPTQ";
     private static final String IDENTITY_CENTER_ENABLED_BASELINE_ID = "FLOCIIDCBASELINE1";
@@ -176,7 +178,7 @@ public class ControlTowerService {
         if (!version.matches("^\\d+\\.\\d+$") || version.length() < 3 || version.length() > 10) {
             throw validation("version must be a valid landing zone version.");
         }
-        validateTags(request.get("tags"));
+        Map<String, String> tags = readTags(request.get("tags"));
         if (landingZoneStore.get(region).isPresent()) {
             throw new AwsException("ConflictException",
                     "Updating or deleting the resource can cause an inconsistent state.", 409);
@@ -185,6 +187,7 @@ public class ControlTowerService {
         String arn = "arn:aws:controltower:" + region + ":" + accountId + ":landingzone/" + shortId();
         LandingZone landingZone = new LandingZone(
                 arn, version, version, STATUS_ACTIVE, DRIFT_IN_SYNC, manifest, null);
+        landingZone.setTags(tags);
         landingZoneStore.put(region, landingZone);
         String operationIdentifier = UUID.randomUUID().toString();
         recordOperation(accountId, region, operationIdentifier, OP_TYPE_CREATE);
@@ -469,6 +472,7 @@ public class ControlTowerService {
         }
         JsonNode parameters = request.get("parameters");
         validateParameters(parameters);
+        Map<String, String> tags = readTags(request.get("tags"));
         requireBaselineExists(region, baselineIdentifier);
         requireSupportedBaselineVersion(region, baselineIdentifier, baselineVersion);
         requireOrganizationalUnitTarget(accountId, targetIdentifier);
@@ -490,10 +494,83 @@ public class ControlTowerService {
         EnabledBaseline value = new EnabledBaseline(
                 arn, baselineIdentifier, baselineVersion, targetIdentifier, OP_SUCCEEDED, parameters);
         value.setLastOperationIdentifier(opId);
+        value.setTags(tags);
         enabledBaselineStore.put(key, value);
 
         recordOperation(accountId, region, opId, OP_TYPE_BASELINE_ENABLED);
         return new EnableBaselineResult(opId, arn);
+    }
+
+    /**
+     * Disables a stored enabled baseline and records a completed {@code DISABLE_BASELINE}
+     * operation. The Identity Center baseline is derived from the landing zone manifest, so it is
+     * turned off through {@code UpdateLandingZone} rather than here.
+     */
+    public synchronized String disableBaseline(String accountId, String region, String enabledBaselineIdentifier) {
+        if (enabledBaselineIdentifier == null || enabledBaselineIdentifier.isBlank() || !isArn(enabledBaselineIdentifier)) {
+            throw validation("enabledBaselineIdentifier must be a valid ARN.");
+        }
+        EnabledBaseline baseline = getEnabledBaseline(accountId, region, enabledBaselineIdentifier);
+        if (isIdentityCenterBaseline(baseline.getArn())) {
+            throw validation("The Identity Center baseline is managed by the landing zone; update the landing zone "
+                    + "access management settings to disable it.");
+        }
+        enabledBaselineStore.delete(enabledBaselineKey(
+                region, baseline.getTargetIdentifier(), baseline.getBaselineIdentifier()));
+        String opId = UUID.randomUUID().toString();
+        recordOperation(accountId, region, opId, OP_TYPE_BASELINE_DISABLE);
+        return opId;
+    }
+
+    public synchronized Map<String, String> listTags(String accountId, String region, String arn) {
+        if (isLandingZoneArn(arn)) {
+            Map<String, String> tags = requireSeededLandingZone(accountId, region, arn).getTags();
+            return tags == null ? Map.of() : new LinkedHashMap<>(tags);
+        }
+        EnabledBaseline baseline = getEnabledBaseline(accountId, region, arn);
+        return baseline.getTags() == null ? Map.of() : new LinkedHashMap<>(baseline.getTags());
+    }
+
+    public synchronized void tagResource(String accountId, String region, String arn, Map<String, String> tags) {
+        tags.forEach((key, value) -> {
+            if (key == null || key.isBlank() || key.length() > 128 || value == null || value.length() > 256) {
+                throw validation("tags must contain string values with valid lengths.");
+            }
+        });
+        updateTags(accountId, region, arn, current -> current.putAll(tags));
+    }
+
+    public synchronized void untagResource(String accountId, String region, String arn, List<String> tagKeys) {
+        updateTags(accountId, region, arn, current -> tagKeys.forEach(current::remove));
+    }
+
+    private void updateTags(String accountId, String region, String arn, Consumer<Map<String, String>> change) {
+        if (isLandingZoneArn(arn)) {
+            LandingZone landingZone = requireSeededLandingZone(accountId, region, arn);
+            landingZone.setTags(changedTags(landingZone.getTags(), change));
+            landingZoneStore.put(region, landingZone);
+            return;
+        }
+        EnabledBaseline baseline = getEnabledBaseline(accountId, region, arn);
+        if (isIdentityCenterBaseline(baseline.getArn())) {
+            throw validation("The Identity Center baseline is managed by the landing zone and cannot be tagged.");
+        }
+        baseline.setTags(changedTags(baseline.getTags(), change));
+        enabledBaselineStore.put(enabledBaselineKey(
+                region, baseline.getTargetIdentifier(), baseline.getBaselineIdentifier()), baseline);
+    }
+
+    private static Map<String, String> changedTags(Map<String, String> current, Consumer<Map<String, String>> change) {
+        Map<String, String> tags = new LinkedHashMap<>(current == null ? Map.of() : current);
+        change.accept(tags);
+        if (tags.size() > 200) {
+            throw validation("A resource can have at most 200 tags.");
+        }
+        return tags;
+    }
+
+    private static boolean isLandingZoneArn(String arn) {
+        return arn != null && arn.contains(":landingzone/");
     }
 
     public synchronized String resetEnabledBaseline(String accountId, String region, String enabledBaselineIdentifier) {
@@ -539,7 +616,8 @@ public class ControlTowerService {
     public String getBaselineOperationType(String accountId, String region, String operationIdentifier) {
         validateOperationIdentifier(operationIdentifier);
         String recorded = recordedOperationType(accountId, region, operationIdentifier);
-        if (recorded == null || !Set.of(OP_TYPE_BASELINE_ENABLED, OP_TYPE_BASELINE_UPDATE, OP_TYPE_BASELINE_RESET).contains(recorded)) {
+        if (recorded == null || !Set.of(OP_TYPE_BASELINE_ENABLED, OP_TYPE_BASELINE_UPDATE, OP_TYPE_BASELINE_RESET,
+                OP_TYPE_BASELINE_DISABLE).contains(recorded)) {
             throw new AwsException("ResourceNotFoundException",
                     "The baseline operation does not exist or is no longer available.", 404);
         }
@@ -803,19 +881,22 @@ public class ControlTowerService {
         return values;
     }
 
-    private static void validateTags(JsonNode tags) {
+    private static Map<String, String> readTags(JsonNode tags) {
         if (tags == null || tags.isNull()) {
-            return;
+            return null;
         }
         if (!tags.isObject() || tags.size() > 200) {
             throw validation("tags must be an object with at most 200 entries.");
         }
+        Map<String, String> result = new LinkedHashMap<>();
         tags.fields().forEachRemaining(entry -> {
             if (entry.getKey().isBlank() || entry.getKey().length() > 128
                     || !entry.getValue().isTextual() || entry.getValue().textValue().length() > 256) {
                 throw validation("tags must contain string values with valid lengths.");
             }
+            result.put(entry.getKey(), entry.getValue().textValue());
         });
+        return result;
     }
 
     private static void validateParameters(JsonNode parameters) {

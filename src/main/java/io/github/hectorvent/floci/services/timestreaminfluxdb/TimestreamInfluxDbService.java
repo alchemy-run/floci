@@ -12,6 +12,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.container.TimestreamInfluxDbContainerManager;
@@ -91,13 +92,15 @@ public class TimestreamInfluxDbService implements Resettable {
     private final SecretsManagerService secretsManagerService;
     private final ObjectMapper objectMapper;
     private final TimestreamInfluxDbContainerManager containerManager;
+    private final TimestreamInfluxDbValidation.VpcResources vpcResources;
     private final boolean mock;
     private final Executor executor;
 
     @Inject
     public TimestreamInfluxDbService(StorageFactory storageFactory, RegionResolver regionResolver,
                                      SecretsManagerService secretsManagerService, ObjectMapper objectMapper,
-                                     EmulatorConfig config, TimestreamInfluxDbContainerManager containerManager) {
+                                     EmulatorConfig config, TimestreamInfluxDbContainerManager containerManager,
+                                     Ec2Service ec2Service) {
         this(storageFactory.create("timestreaminfluxdb", "timestream-influxdb-instances.json",
                         new TypeReference<Map<String, DbInstance>>() {}),
                 storageFactory.create("timestreaminfluxdb", "timestream-influxdb-clusters.json",
@@ -107,6 +110,7 @@ public class TimestreamInfluxDbService implements Resettable {
                 storageFactory.create("timestreaminfluxdb", "timestream-influxdb-backups.json",
                         new TypeReference<Map<String, DbBackup>>() {}),
                 regionResolver, secretsManagerService, objectMapper, containerManager,
+                TimestreamInfluxDbValidation.VpcResources.of(ec2Service),
                 config.services().timestreamInfluxdb().mock(),
                 Executors.newFixedThreadPool(4, runnable -> {
                     Thread thread = new Thread(runnable, "timestream-influxdb-provisioner");
@@ -121,6 +125,7 @@ public class TimestreamInfluxDbService implements Resettable {
                               AccountAwareStorageBackend<DbBackup> backups,
                               RegionResolver regionResolver, SecretsManagerService secretsManagerService,
                               ObjectMapper objectMapper, TimestreamInfluxDbContainerManager containerManager,
+                              TimestreamInfluxDbValidation.VpcResources vpcResources,
                               boolean mock, Executor executor) {
         this.instances = instances;
         this.clusters = clusters;
@@ -130,6 +135,7 @@ public class TimestreamInfluxDbService implements Resettable {
         this.secretsManagerService = secretsManagerService;
         this.objectMapper = objectMapper;
         this.containerManager = containerManager;
+        this.vpcResources = vpcResources;
         this.mock = mock;
         this.executor = executor;
     }
@@ -152,6 +158,7 @@ public class TimestreamInfluxDbService implements Resettable {
                 TimestreamInfluxDbValidation.INSTANCE_TYPES);
         List<String> subnets = TimestreamInfluxDbValidation.subnetIds(request, true);
         List<String> securityGroups = TimestreamInfluxDbValidation.securityGroupIds(request, true);
+        TimestreamInfluxDbValidation.requireVpcResources(vpcResources, region, subnets, securityGroups);
         Boolean publiclyAccessible = TimestreamInfluxDbValidation.optionalBoolean(request, "publiclyAccessible");
         String storageType = orDefault(TimestreamInfluxDbValidation.optionalEnum(request, "dbStorageType",
                 TimestreamInfluxDbValidation.STORAGE_TYPES), "InfluxIOIncludedT1");
@@ -331,6 +338,7 @@ public class TimestreamInfluxDbService implements Resettable {
         Boolean publiclyAccessible = TimestreamInfluxDbValidation.optionalBoolean(request, "publiclyAccessible");
         List<String> subnets = TimestreamInfluxDbValidation.subnetIds(request, true);
         List<String> securityGroups = TimestreamInfluxDbValidation.securityGroupIds(request, true);
+        TimestreamInfluxDbValidation.requireVpcResources(vpcResources, region, subnets, securityGroups);
         String deploymentType = TimestreamInfluxDbValidation.optionalEnum(request, "deploymentType",
                 TimestreamInfluxDbValidation.CLUSTER_DEPLOYMENT_TYPES);
         String failoverMode = orDefault(TimestreamInfluxDbValidation.optionalEnum(request, "failoverMode",
@@ -639,6 +647,7 @@ public class TimestreamInfluxDbService implements Resettable {
                 TimestreamInfluxDbValidation.RESTORE_MODES), "NEW_RESOURCE");
         List<String> subnets = TimestreamInfluxDbValidation.subnetIds(request, false);
         List<String> securityGroups = TimestreamInfluxDbValidation.securityGroupIds(request, false);
+        TimestreamInfluxDbValidation.requireVpcResources(vpcResources, region, subnets, securityGroups);
         Boolean publiclyAccessible = TimestreamInfluxDbValidation.optionalBoolean(request, "publiclyAccessible");
         JsonNode logDelivery = TimestreamInfluxDbValidation.logDeliveryConfiguration(request);
         JsonNode maintenance = TimestreamInfluxDbValidation.maintenanceSchedule(request);

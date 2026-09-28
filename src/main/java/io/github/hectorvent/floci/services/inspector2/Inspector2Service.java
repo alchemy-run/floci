@@ -2,6 +2,9 @@ package io.github.hectorvent.floci.services.inspector2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
@@ -9,6 +12,8 @@ import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.inspector2.model.CisScanConfiguration;
+import io.github.hectorvent.floci.services.inspector2.model.CisTargets;
 import io.github.hectorvent.floci.services.inspector2.model.InspectorFilter;
 import io.github.hectorvent.floci.services.inspector2.model.InspectorState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
@@ -16,12 +21,17 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 @ApplicationScoped
 public class Inspector2Service implements Resettable {
@@ -32,6 +42,9 @@ public class Inspector2Service implements Resettable {
             "CODE_REPOSITORY", "Microsoft.Compute/virtualMachines",
             "Microsoft.ContainerRegistry/registry/containerImage", "Microsoft.Web/sites");
     private static final Map<String, List<String>> PERMISSION_OPERATIONS = permissionOperations();
+    private static final Set<String> CIS_SECURITY_LEVELS = Set.of("LEVEL_1", "LEVEL_2");
+    private static final Set<String> DAYS = Set.of("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT");
+    private static final String TIME_OF_DAY = "^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$";
     /** Amazon Inspector's free trial lasts 15 days from activation of each scan type. */
     private static final double FREE_TRIAL_SECONDS = 15 * 24 * 60 * 60;
 
@@ -136,6 +149,42 @@ public class Inspector2Service implements Resettable {
                 "ValidationException");
     }
 
+    public synchronized Map<String, String> listTags(String region, String accountId, String arn) {
+        if (isCisScanConfigurationArn(arn)) {
+            return new LinkedHashMap<>(requireCisScanConfiguration(stateForAccount(accountId, region), arn).getTags());
+        }
+        return listFilterTags(region, accountId, arn);
+    }
+
+    public synchronized void tagResource(String region, String accountId, String arn, Map<String, String> tags) {
+        if (!isCisScanConfigurationArn(arn)) {
+            tagFilter(region, accountId, arn, tags);
+            return;
+        }
+        InspectorState state = stateForAccount(accountId, region);
+        CisScanConfiguration configuration = requireCisScanConfiguration(state, arn).copy();
+        validateTags(tags);
+        configuration.getTags().putAll(tags);
+        validateTags(configuration.getTags());
+        state.getCisScanConfigurations().put(arn, configuration);
+        states.putForAccount(accountId, region, state);
+    }
+
+    public synchronized void untagResource(String region, String accountId, String arn, List<String> keys) {
+        if (!isCisScanConfigurationArn(arn)) {
+            untagFilter(region, accountId, arn, keys);
+            return;
+        }
+        InspectorState state = stateForAccount(accountId, region);
+        CisScanConfiguration configuration = requireCisScanConfiguration(state, arn).copy();
+        for (String key : keys) {
+            validateTagKey(key);
+        }
+        keys.forEach(configuration.getTags()::remove);
+        state.getCisScanConfigurations().put(arn, configuration);
+        states.putForAccount(accountId, region, state);
+    }
+
     public synchronized Map<String, String> listFilterTags(String region, String accountId, String arn) {
         return new LinkedHashMap<>(requireFilter(stateForAccount(accountId, region), arn).getTags());
     }
@@ -170,15 +219,352 @@ public class Inspector2Service implements Resettable {
                 "packagePaths", List.of(), "orgPackagePaths", List.of());
     }
 
+    public synchronized String createCisScanConfiguration(String region, String accountId, JsonNode request) {
+        requireObject(request);
+        CisScanConfiguration configuration = new CisScanConfiguration();
+        configuration.setScanName(text(request, "scanName", 1, 128, true));
+        configuration.setSecurityLevel(cisSecurityLevel(request));
+        configuration.setSchedule(cisSchedule(request.get("schedule")));
+        configuration.setTargets(cisTargets(region, accountId, request.get("targets"), null));
+        configuration.setTags(readTags(request.get("tags")));
+        InspectorState state = requireEnabledAccount(accountId, region);
+        String arn = AwsArnUtils.Arn.of("inspector2", region, accountId,
+                "owner/" + accountId + "/cis-configuration/" + UUID.randomUUID()).toString();
+        configuration.setScanConfigurationArn(arn);
+        configuration.setOwnerId(accountId);
+        state.getCisScanConfigurations().put(arn, configuration);
+        states.putForAccount(accountId, region, state);
+        return arn;
+    }
+
+    public synchronized String updateCisScanConfiguration(String region, String accountId, JsonNode request) {
+        requireObject(request);
+        String arn = text(request, "scanConfigurationArn", 1, 2048, true);
+        InspectorState state = requireEnabledAccount(accountId, region);
+        CisScanConfiguration configuration = requireCisScanConfiguration(state, arn).copy();
+        if (request.hasNonNull("scanName")) {
+            configuration.setScanName(text(request, "scanName", 1, 128, true));
+        }
+        if (request.hasNonNull("securityLevel")) {
+            configuration.setSecurityLevel(cisSecurityLevel(request));
+        }
+        if (request.hasNonNull("schedule")) {
+            configuration.setSchedule(cisSchedule(request.get("schedule")));
+        }
+        if (request.hasNonNull("targets")) {
+            configuration.setTargets(cisTargets(region, accountId, request.get("targets"),
+                    configuration.getTargets()));
+        }
+        state.getCisScanConfigurations().put(arn, configuration);
+        states.putForAccount(accountId, region, state);
+        return arn;
+    }
+
+    public synchronized String deleteCisScanConfiguration(String region, String accountId, JsonNode request) {
+        requireObject(request);
+        String arn = text(request, "scanConfigurationArn", 1, 2048, true);
+        InspectorState state = requireEnabledAccount(accountId, region);
+        requireCisScanConfiguration(state, arn);
+        state.getCisScanConfigurations().remove(arn);
+        states.putForAccount(accountId, region, state);
+        return arn;
+    }
+
     public synchronized Map<String, Object> listCisScanConfigurations(
             String region, String accountId, JsonNode request) {
         requireObject(request);
+        optionalObject(request, "filterCriteria");
+        JsonNode criteria = request.path("filterCriteria");
+        List<JsonNode> nameFilters = cisStringFilters(criteria, "scanNameFilters");
+        List<JsonNode> arnFilters = cisStringFilters(criteria, "scanConfigurationArnFilters");
+        List<JsonNode> tagFilters = cisTagFilters(criteria);
+        optionalEnum(request, "sortBy", Set.of("SCAN_NAME", "SCAN_CONFIGURATION_ARN"));
+        optionalEnum(request, "sortOrder", Set.of("ASC", "DESC"));
+        Integer maxResults = maxResults(request, 100);
+        String token = text(request, "nextToken", 1, 1000000, false);
+        InspectorState state = requireEnabledAccount(accountId, region);
+
+        Comparator<CisScanConfiguration> byArn = Comparator.comparing(CisScanConfiguration::getScanConfigurationArn);
+        Comparator<CisScanConfiguration> order = "SCAN_CONFIGURATION_ARN".equals(request.path("sortBy").asText(null))
+                ? byArn
+                : Comparator.comparing(CisScanConfiguration::getScanName).thenComparing(byArn);
+        if ("DESC".equals(request.path("sortOrder").asText(null))) {
+            order = order.reversed();
+        }
+        List<CisScanConfiguration> matches = state.getCisScanConfigurations().values().stream()
+                .filter(configuration -> matchesCisStringFilters(configuration.getScanName(), nameFilters))
+                .filter(configuration -> matchesCisStringFilters(configuration.getScanConfigurationArn(), arnFilters))
+                .filter(configuration -> matchesTargetResourceTagFilters(configuration, tagFilters))
+                .sorted(order)
+                .map(CisScanConfiguration::copy)
+                .toList();
+        // The cursor is the position in the requested sort order, which may be descending.
+        List<Integer> positions = IntStream.range(0, matches.size()).boxed().toList();
+        PaginatedResult<Integer> page = Pagination.paginate(positions,
+                position -> String.format(Locale.ROOT, "%010d", position), maxResults, token, 100,
+                "ValidationException");
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("scanConfigurations", page.items().stream().map(matches::get).toList());
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return response;
+    }
+
+    private InspectorState requireEnabledAccount(String accountId, String region) {
         InspectorState state = stateForAccount(accountId, region);
         if (!"ENABLED".equals(state.getStatus())) {
             throw accessDenied("Invoking account is not enabled.");
         }
-        throw new AwsException("NotImplementedException",
-                "CIS scan configurations are not implemented by Floci.", 501);
+        return state;
+    }
+
+    private static CisScanConfiguration requireCisScanConfiguration(InspectorState state, String arn) {
+        CisScanConfiguration configuration = state.getCisScanConfigurations().get(arn);
+        if (configuration == null) {
+            throw new AwsException("ResourceNotFoundException",
+                    "The specified CIS scan configuration was not found.", 404);
+        }
+        return configuration;
+    }
+
+    private static boolean isCisScanConfigurationArn(String arn) {
+        return arn != null && arn.contains(":owner/") && arn.contains("/cis-configuration/");
+    }
+
+    private static String cisSecurityLevel(JsonNode request) {
+        String level = text(request, "securityLevel", 1, 16, true);
+        if (!CIS_SECURITY_LEVELS.contains(level)) {
+            throw validation("securityLevel must be LEVEL_1 or LEVEL_2.");
+        }
+        return level;
+    }
+
+    /** Validates the Schedule union and returns it in its canonical wire shape. */
+    private static JsonNode cisSchedule(JsonNode schedule) {
+        if (schedule == null || !schedule.isObject()) {
+            throw validation("schedule is required.");
+        }
+        List<String> members = new ArrayList<>();
+        schedule.fieldNames().forEachRemaining(name -> {
+            if (!schedule.get(name).isNull()) {
+                members.add(name);
+            }
+        });
+        if (members.size() != 1) {
+            throw validation("schedule must specify exactly one of oneTime, daily, weekly, or monthly.");
+        }
+        String member = members.getFirst();
+        JsonNode value = schedule.get(member);
+        if (!value.isObject()) {
+            throw validation("schedule." + member + " must be an object.");
+        }
+        ObjectNode result = JsonNodeFactory.instance.objectNode();
+        switch (member) {
+            case "oneTime" -> result.putObject("oneTime");
+            case "daily" -> result.putObject("daily")
+                    .set("startTime", cisTime(value.get("startTime"), "schedule.daily.startTime"));
+            case "weekly" -> {
+                ObjectNode weekly = result.putObject("weekly");
+                weekly.set("startTime", cisTime(value.get("startTime"), "schedule.weekly.startTime"));
+                weekly.set("days", cisDays(value.get("days")));
+            }
+            case "monthly" -> {
+                ObjectNode monthly = result.putObject("monthly");
+                monthly.set("startTime", cisTime(value.get("startTime"), "schedule.monthly.startTime"));
+                monthly.put("day", cisDay(value.get("day"), "schedule.monthly.day"));
+            }
+            default -> throw validation("schedule must specify exactly one of oneTime, daily, weekly, or monthly.");
+        }
+        return result;
+    }
+
+    private static ObjectNode cisTime(JsonNode time, String field) {
+        if (time == null || !time.isObject()) {
+            throw validation(field + " is required.");
+        }
+        String timeOfDay = text(time, "timeOfDay", 1, 5, true);
+        if (!timeOfDay.matches(TIME_OF_DAY)) {
+            throw validation(field + ".timeOfDay must be a time of day in HH:MM format.");
+        }
+        String timezone = text(time, "timezone", 1, 50, true);
+        if (!ZoneId.getAvailableZoneIds().contains(timezone)) {
+            throw validation(field + ".timezone must be a valid time zone.");
+        }
+        ObjectNode result = JsonNodeFactory.instance.objectNode();
+        result.put("timeOfDay", timeOfDay);
+        result.put("timezone", timezone);
+        return result;
+    }
+
+    private static ArrayNode cisDays(JsonNode days) {
+        if (days == null || !days.isArray() || days.isEmpty() || days.size() > 7) {
+            throw validation("schedule.weekly.days must contain between 1 and 7 days.");
+        }
+        ArrayNode result = JsonNodeFactory.instance.arrayNode();
+        Set<String> seen = new HashSet<>();
+        for (JsonNode day : days) {
+            String value = cisDay(day, "schedule.weekly.days");
+            if (!seen.add(value)) {
+                throw validation("schedule.weekly.days must not contain duplicates.");
+            }
+            result.add(value);
+        }
+        return result;
+    }
+
+    private static String cisDay(JsonNode day, String field) {
+        if (day == null || !day.isTextual() || !DAYS.contains(day.textValue())) {
+            throw validation(field + " must be one of SUN, MON, TUE, WED, THU, FRI, or SAT.");
+        }
+        return day.textValue();
+    }
+
+    /** Validates CIS targets; on update, members that are omitted keep their current value. */
+    private CisTargets cisTargets(String region, String callerAccountId, JsonNode targets, CisTargets current) {
+        if (targets == null || !targets.isObject()) {
+            throw validation("targets must be an object.");
+        }
+        List<String> accountIds = current == null ? null : current.getAccountIds();
+        JsonNode accountsNode = targets.get("accountIds");
+        if (accountsNode != null && !accountsNode.isNull()) {
+            accountIds = cisAccountIds(region, callerAccountId, accountsNode);
+        } else if (current == null) {
+            throw validation("targets.accountIds is required.");
+        }
+        Map<String, List<String>> resourceTags = current == null ? null : current.getTargetResourceTags();
+        JsonNode tagsNode = targets.get("targetResourceTags");
+        if (tagsNode != null && !tagsNode.isNull()) {
+            resourceTags = cisTargetResourceTags(tagsNode);
+        } else if (current == null) {
+            throw validation("targets.targetResourceTags is required.");
+        }
+        return new CisTargets(accountIds, resourceTags);
+    }
+
+    private List<String> cisAccountIds(String region, String callerAccountId, JsonNode accountIds) {
+        if (!accountIds.isArray() || accountIds.isEmpty() || accountIds.size() > 10000) {
+            throw validation("targets.accountIds must contain between 1 and 10000 entries.");
+        }
+        List<String> result = new ArrayList<>(accountIds.size());
+        for (JsonNode node : accountIds) {
+            String accountId = node.isTextual() ? node.textValue() : null;
+            if (!"SELF".equals(accountId)) {
+                requireAccountId(accountId);
+                authorizeAccountAccess(region, callerAccountId, accountId);
+            }
+            result.add(accountId);
+        }
+        return result;
+    }
+
+    private static Map<String, List<String>> cisTargetResourceTags(JsonNode tags) {
+        if (!tags.isObject() || tags.isEmpty() || tags.size() > 5) {
+            throw validation("targets.targetResourceTags must contain between 1 and 5 tag keys.");
+        }
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        tags.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            if (key.isEmpty() || key.length() > 128) {
+                throw validation("targets.targetResourceTags keys must contain 1 to 128 characters.");
+            }
+            JsonNode values = entry.getValue();
+            if (!values.isArray() || values.isEmpty() || values.size() > 5) {
+                throw validation("targets.targetResourceTags values must contain between 1 and 5 entries.");
+            }
+            List<String> list = new ArrayList<>(values.size());
+            for (JsonNode value : values) {
+                if (!value.isTextual() || value.textValue().isEmpty() || value.textValue().length() > 256) {
+                    throw validation("targets.targetResourceTags values must contain 1 to 256 characters.");
+                }
+                list.add(value.textValue());
+            }
+            result.put(key, list);
+        });
+        return result;
+    }
+
+    private static List<JsonNode> cisStringFilters(JsonNode criteria, String field) {
+        JsonNode filters = criteria.get(field);
+        if (filters == null || filters.isNull()) {
+            return List.of();
+        }
+        if (!filters.isArray() || filters.isEmpty() || filters.size() > 10) {
+            throw validation("filterCriteria." + field + " must contain between 1 and 10 filters.");
+        }
+        List<JsonNode> result = new ArrayList<>(filters.size());
+        for (JsonNode filter : filters) {
+            if (!filter.isObject()
+                    || !Set.of("EQUALS", "PREFIX", "NOT_EQUALS").contains(filter.path("comparison").asText(""))
+                    || !filter.path("value").isTextual() || filter.path("value").textValue().isEmpty()
+                    || filter.path("value").textValue().length() > 1024) {
+                throw validation("filterCriteria." + field + " contains an invalid filter.");
+            }
+            result.add(filter);
+        }
+        return result;
+    }
+
+    private static List<JsonNode> cisTagFilters(JsonNode criteria) {
+        JsonNode filters = criteria.get("targetResourceTagFilters");
+        if (filters == null || filters.isNull()) {
+            return List.of();
+        }
+        if (!filters.isArray() || filters.isEmpty() || filters.size() > 10) {
+            throw validation("filterCriteria.targetResourceTagFilters must contain between 1 and 10 filters.");
+        }
+        List<JsonNode> result = new ArrayList<>(filters.size());
+        for (JsonNode filter : filters) {
+            if (!filter.isObject() || !"EQUALS".equals(filter.path("comparison").asText(""))
+                    || !filter.path("key").isTextual() || filter.path("key").textValue().isEmpty()
+                    || !filter.path("value").isTextual()) {
+                throw validation("filterCriteria.targetResourceTagFilters contains an invalid filter.");
+            }
+            result.add(filter);
+        }
+        return result;
+    }
+
+    /** Positive comparisons are alternatives; NOT_EQUALS comparisons all have to hold. */
+    private static boolean matchesCisStringFilters(String value, List<JsonNode> filters) {
+        if (filters.isEmpty()) {
+            return true;
+        }
+        boolean hasPositive = false;
+        boolean positiveMatch = false;
+        for (JsonNode filter : filters) {
+            String expected = filter.get("value").textValue();
+            switch (filter.get("comparison").textValue()) {
+                case "EQUALS" -> {
+                    hasPositive = true;
+                    positiveMatch |= expected.equals(value);
+                }
+                case "PREFIX" -> {
+                    hasPositive = true;
+                    positiveMatch |= value != null && value.startsWith(expected);
+                }
+                default -> {
+                    if (expected.equals(value)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return !hasPositive || positiveMatch;
+    }
+
+    private static boolean matchesTargetResourceTagFilters(CisScanConfiguration configuration, List<JsonNode> filters) {
+        if (filters.isEmpty()) {
+            return true;
+        }
+        Map<String, List<String>> tags = configuration.getTargets().getTargetResourceTags();
+        for (JsonNode filter : filters) {
+            List<String> values = tags.get(filter.get("key").textValue());
+            if (values != null && values.contains(filter.get("value").textValue())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public synchronized Map<String, Object> listFindings(String region, String accountId, JsonNode request) {
@@ -340,7 +726,7 @@ public class Inspector2Service implements Resettable {
         if (!"ENABLED".equals(stateForAccount(accountId, region).getStatus())) {
             throw accessDenied("Invoking account is not enabled.");
         }
-        // CIS scan configurations cannot be created in Floci, so no scans have run.
+        // Floci does not run CIS benchmark checks against instances, so no scan is ever started.
         return page("scans", List.<String>of(), id -> id, maxResults, token, 100);
     }
 
@@ -612,33 +998,40 @@ public class Inspector2Service implements Resettable {
         states.putForAccount(accountId, region, delegated);
     }
 
+    /**
+     * Reports an account's scan status. Enabling and disabling are asynchronous in AWS: a
+     * resource type that was just enabled or disabled is observed once in its transitional
+     * state (ENABLING or DISABLING) before it settles.
+     */
     public synchronized InspectorState accountStatus(String region, String callerAccountId, String accountId) {
         requireAccountId(accountId);
         authorizeAccountAccess(region, callerAccountId, accountId);
         InspectorState state = stateForAccount(accountId, region);
-        if ("ENABLING".equals(state.getStatus()) && state.getEnablingPollsRemaining() > 0) {
-            InspectorState response = copyState(state);
-            state.setEnablingPollsRemaining(state.getEnablingPollsRemaining() - 1);
-            states.putForAccount(accountId, region, state);
-            return response;
+        boolean enabling = hasResourceStatus(state, "ENABLING");
+        boolean disabling = hasResourceStatus(state, "DISABLING");
+        if (!enabling && !disabling) {
+            return copyState(state);
         }
-        if ("ENABLING".equals(state.getStatus())) {
-            for (String resourceType : RESOURCE_TYPES) {
-                if ("ENABLING".equals(state.resourceStatus(resourceType))) {
-                    state.setResourceStatus(resourceType, "ENABLED");
-                    if ("EC2".equals(resourceType)) {
-                        state.setDeepInspectionStatus("ACTIVATED");
-                    }
-                }
+        if (enabling) {
+            if (state.getEnablingPollsRemaining() > 0) {
+                state.setEnablingPollsRemaining(state.getEnablingPollsRemaining() - 1);
+            } else {
+                settle(state, "ENABLING", "ENABLED", "ACTIVATED");
             }
-            state.setStatus(overallStatus(state));
-            states.putForAccount(accountId, region, state);
         }
+        if (disabling) {
+            if (state.getDisablingPollsRemaining() > 0) {
+                state.setDisablingPollsRemaining(state.getDisablingPollsRemaining() - 1);
+            } else {
+                settle(state, "DISABLING", "DISABLED", "DEACTIVATED");
+            }
+        }
+        state.setStatus(overallStatus(state));
+        states.putForAccount(accountId, region, state);
         return copyState(state);
     }
 
-    public synchronized Map<String, InspectorState> enable(
-            String region, String callerAccountId, JsonNode request) {
+    public synchronized StatusChange enable(String region, String callerAccountId, JsonNode request) {
         List<String> resourceTypes = resourceTypes(request);
         List<String> accountIds = accountIds(request, callerAccountId);
 
@@ -647,8 +1040,16 @@ public class Inspector2Service implements Resettable {
         }
 
         Map<String, InspectorState> result = new LinkedHashMap<>();
+        List<FailedAccount> failed = new ArrayList<>();
         for (String accountId : accountIds) {
             InspectorState state = stateForAccount(accountId, region);
+            boolean disabling = resourceTypes.stream()
+                    .anyMatch(resourceType -> "DISABLING".equals(state.resourceStatus(resourceType)));
+            if (disabling) {
+                failed.add(new FailedAccount(accountId, copyState(state), "DISABLE_IN_PROGRESS",
+                        "A requested resource type is still being disabled for this account."));
+                continue;
+            }
             boolean changed = false;
             for (String resourceType : resourceTypes) {
                 String current = state.resourceStatus(resourceType);
@@ -659,11 +1060,88 @@ public class Inspector2Service implements Resettable {
                 }
             }
             if (changed) {
-                state.setStatus("ENABLING");
+                state.setStatus(overallStatus(state));
                 state.setEnablingPollsRemaining(1);
                 states.putForAccount(accountId, region, state);
             }
             result.put(accountId, copyState(state));
+        }
+        return new StatusChange(result, failed);
+    }
+
+    /**
+     * Disables scanning of the requested resource types (all of them when none are named).
+     * Types that are still enabling are rejected per account with {@code ENABLE_IN_PROGRESS},
+     * and types that are not enabled are left untouched.
+     */
+    public synchronized StatusChange disable(String region, String callerAccountId, JsonNode request) {
+        requireObject(request);
+        List<String> resourceTypes = disableResourceTypes(request);
+        List<String> accountIds = accountIds(request, callerAccountId);
+
+        for (String accountId : accountIds) {
+            authorizeAccountAccess(region, callerAccountId, accountId);
+        }
+
+        Map<String, InspectorState> result = new LinkedHashMap<>();
+        List<FailedAccount> failed = new ArrayList<>();
+        for (String accountId : accountIds) {
+            InspectorState state = stateForAccount(accountId, region);
+            boolean enabling = resourceTypes.stream()
+                    .anyMatch(resourceType -> "ENABLING".equals(state.resourceStatus(resourceType)));
+            if (enabling) {
+                failed.add(new FailedAccount(accountId, copyState(state), "ENABLE_IN_PROGRESS",
+                        "A requested resource type is still being enabled for this account."));
+                continue;
+            }
+            boolean changed = false;
+            for (String resourceType : resourceTypes) {
+                if ("ENABLED".equals(state.resourceStatus(resourceType))) {
+                    state.setResourceStatus(resourceType, "DISABLING");
+                    changed = true;
+                }
+            }
+            if (changed) {
+                state.setStatus(overallStatus(state));
+                state.setDisablingPollsRemaining(1);
+                states.putForAccount(accountId, region, state);
+            }
+            result.put(accountId, copyState(state));
+        }
+        return new StatusChange(result, failed);
+    }
+
+    private static boolean hasResourceStatus(InspectorState state, String status) {
+        return RESOURCE_TYPES.stream().anyMatch(type -> status.equals(state.resourceStatus(type)));
+    }
+
+    private static void settle(InspectorState state, String from, String to, String deepInspectionStatus) {
+        for (String resourceType : RESOURCE_TYPES) {
+            if (from.equals(state.resourceStatus(resourceType))) {
+                state.setResourceStatus(resourceType, to);
+                if ("EC2".equals(resourceType)) {
+                    state.setDeepInspectionStatus(deepInspectionStatus);
+                }
+            }
+        }
+    }
+
+    private static List<String> disableResourceTypes(JsonNode request) {
+        JsonNode resourceTypes = request.get("resourceTypes");
+        if (resourceTypes == null || resourceTypes.isNull() || (resourceTypes.isArray() && resourceTypes.isEmpty())) {
+            return List.copyOf(RESOURCE_TYPES);
+        }
+        if (!resourceTypes.isArray() || resourceTypes.size() > 5) {
+            throw validation("resourceTypes must contain at most 5 resource types.");
+        }
+        List<String> result = new ArrayList<>(resourceTypes.size());
+        for (JsonNode resourceType : resourceTypes) {
+            if (!resourceType.isTextual() || !RESOURCE_TYPES.contains(resourceType.textValue())) {
+                throw validation("resourceTypes contains an invalid resource type.");
+            }
+            if (!result.contains(resourceType.textValue())) {
+                result.add(resourceType.textValue());
+            }
         }
         return result;
     }
@@ -782,12 +1260,13 @@ public class Inspector2Service implements Resettable {
     }
 
     private static String overallStatus(InspectorState state) {
-        boolean enabling = RESOURCE_TYPES.stream().anyMatch(type -> "ENABLING".equals(state.resourceStatus(type)));
-        if (enabling) {
+        if (hasResourceStatus(state, "ENABLING")) {
             return "ENABLING";
         }
-        boolean enabled = RESOURCE_TYPES.stream().anyMatch(type -> "ENABLED".equals(state.resourceStatus(type)));
-        return enabled ? "ENABLED" : "DISABLED";
+        if (hasResourceStatus(state, "ENABLED")) {
+            return "ENABLED";
+        }
+        return hasResourceStatus(state, "DISABLING") ? "DISABLING" : "DISABLED";
     }
 
     private static InspectorState copyState(InspectorState source) {
@@ -795,6 +1274,7 @@ public class Inspector2Service implements Resettable {
         copy.setAdminAccountId(source.getAdminAccountId());
         copy.setStatus(source.getStatus());
         copy.setEnablingPollsRemaining(source.getEnablingPollsRemaining());
+        copy.setDisablingPollsRemaining(source.getDisablingPollsRemaining());
         copy.setEc2Status(source.getEc2Status());
         copy.setEcrStatus(source.getEcrStatus());
         copy.setLambdaStatus(source.getLambdaStatus());
@@ -807,6 +1287,8 @@ public class Inspector2Service implements Resettable {
         copy.setAutoEnableCodeRepository(source.isAutoEnableCodeRepository());
         copy.setDeepInspectionStatus(source.getDeepInspectionStatus());
         source.getFilters().forEach((arn, filter) -> copy.getFilters().put(arn, filter.copy()));
+        source.getCisScanConfigurations().forEach((arn, configuration) ->
+                copy.getCisScanConfigurations().put(arn, configuration.copy()));
         copy.getFreeTrialStarts().putAll(source.getFreeTrialStarts());
         return copy;
     }
@@ -845,4 +1327,10 @@ public class Inspector2Service implements Resettable {
                     "accountId must be a 12 digit AWS account ID.", 400);
         }
     }
+
+    /** An account an Enable or Disable request could not change, with the AWS error code. */
+    public record FailedAccount(String accountId, InspectorState state, String errorCode, String errorMessage) {}
+
+    /** The outcome of an Enable or Disable request, per account. */
+    public record StatusChange(Map<String, InspectorState> accounts, List<FailedAccount> failedAccounts) {}
 }

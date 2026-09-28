@@ -91,6 +91,7 @@ call `LeaveOrganization`. An account in no organization gets
 | `EnablePolicyType` | Enables a policy type on the specified root. |
 | `DisablePolicyType` | Disables a policy type on the specified root. |
 | `DescribeEffectivePolicy` | Returns the merged policy of the given type that applies to a target. |
+| `ListEffectivePolicyValidationErrors` | Management account only. `EffectivePolicyNotFoundException` when the policy type is not enabled on the root; otherwise the account's organization `Path` with an empty error list (policy contents are not schema-validated). |
 | `TagResource` | Adds or overwrites tags on a root, OU, account or policy. |
 | `UntagResource` | Removes the specified tags from a root, OU, account or policy. |
 | `ListTagsForResource` | Lists the tags on a root, OU, account or policy. |

@@ -34,6 +34,7 @@ public class SageMakerJsonHandler {
             case "DeleteEndpoint" -> service.deleteEndpoint(request, region);
             case "ListEndpoints" -> service.listEndpoints(request, region);
             case "UpdateEndpoint" -> service.updateEndpoint(request, region);
+            case "UpdateEndpointWeightsAndCapacities" -> service.updateEndpointWeightsAndCapacities(request, region);
             case "CreateTrainingJob" -> service.createTrainingJob(request, region);
             case "DescribeTrainingJob" -> service.describeTrainingJob(request, region);
             case "ListTrainingJobs" -> service.listTrainingJobs(request, region);
@@ -45,6 +46,7 @@ public class SageMakerJsonHandler {
             case "ListFeatureGroups" -> featureStore.listFeatureGroups(request, region);
             case "CreateCluster" -> hyperPod.createCluster(request, region);
             case "DescribeCluster" -> hyperPod.describeCluster(request, region);
+            case "UpdateCluster" -> hyperPod.updateCluster(request, region);
             case "DeleteCluster" -> hyperPod.deleteCluster(request, region);
             case "ListClusters" -> hyperPod.listClusters(request, region);
             case "ListClusterNodes" -> hyperPod.listClusterNodes(request, region);

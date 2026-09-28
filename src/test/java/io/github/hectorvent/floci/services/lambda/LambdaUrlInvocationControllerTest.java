@@ -269,6 +269,54 @@ class LambdaUrlInvocationControllerTest {
         assertNull(response.getEntity());
     }
 
+    @Test
+    void rawQueryStringAndPathArePassedVerbatimAndParametersDecodedOnce() {
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("my-function");
+        fn.setFunctionArn(FUNCTION_ARN);
+        fn.setAccountId("100000000012");
+
+        LambdaService lambdaService = mock(LambdaService.class);
+        when(lambdaService.getTargetByUrlId("url-id")).thenReturn(fn);
+        InvokeResult invokeResult = new InvokeResult();
+        invokeResult.setStatusCode(200);
+        invokeResult.setPayload("{\"statusCode\":200,\"body\":\"ok\"}".getBytes(StandardCharsets.UTF_8));
+        when(lambdaService.invokeArn(eq(FUNCTION_ARN), any(byte[].class), eq(InvocationType.RequestResponse)))
+                .thenReturn(invokeResult);
+
+        LambdaUrlInvocationController controller = newController(lambdaService);
+        String rawQuery = "key=presign%2Fa+b%2B%25%3F%23%2F%E9%9B%AA.txt&versionId=v%2B1&versionId=v2";
+
+        controller.handleGet("url-id", "presign/a b", headersWith(null),
+                uriInfoFor("http://localhost/lambda-url/url-id/presign/a%20b?" + rawQuery))
+                .toCompletableFuture().join();
+
+        ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
+        verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
+        JsonNode eventNode = readTree(event.getValue());
+
+        assertEquals(rawQuery, eventNode.get("rawQueryString").asText());
+        assertEquals("/presign/a%20b", eventNode.get("rawPath").asText());
+        JsonNode params = eventNode.get("queryStringParameters");
+        assertEquals("presign/a b+%?#/\u96ea.txt", params.get("key").asText());
+        assertEquals("v+1,v2", params.get("versionId").asText());
+    }
+
+    @Test
+    void functionPathStripsOnlyThePathStyleRoutingPrefix() {
+        assertEquals("/", LambdaUrlInvocationController.functionPath("url-id", "/lambda-url/url-id", false));
+        assertEquals("/a%2Bb", LambdaUrlInvocationController.functionPath("url-id", "/lambda-url/url-id/a%2Bb", false));
+        assertEquals("/lambda-url/url-id/a",
+                LambdaUrlInvocationController.functionPath("url-id", "/lambda-url/url-id/a", true));
+        assertEquals("/", LambdaUrlInvocationController.functionPath("url-id", "", true));
+    }
+
+    @Test
+    void emptyQueryHasNoParameters() {
+        assertTrue(LambdaUrlInvocationController.decodeQueryParameters("").isEmpty());
+        assertEquals(List.of(""), LambdaUrlInvocationController.decodeQueryParameters("flag").get("flag"));
+    }
+
     private JsonNode readTree(byte[] json) {
         try {
             return new ObjectMapper().readTree(json);

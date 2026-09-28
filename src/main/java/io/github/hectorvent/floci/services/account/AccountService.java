@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.account.model.AccountMetadata;
 import io.github.hectorvent.floci.services.account.model.AlternateContact;
+import io.github.hectorvent.floci.services.account.model.RegionOptState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.organizations.model.Organization;
 import io.github.hectorvent.floci.services.organizations.model.OrganizationAccount;
@@ -18,6 +19,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,10 +42,14 @@ public class AccountService implements Resettable {
     private static final Set<String> STATE_REQUIRED = Set.of("US", "CA", "GB", "DE", "JP", "IN", "BR");
     private static final Set<String> REGION_STATUSES = Set.of(
             "ENABLED", "ENABLING", "DISABLING", "DISABLED", "ENABLED_BY_DEFAULT");
+    /** Every commercial region Account Management reports on, default and opt-in alike. */
+    private static final List<String> ACCOUNT_REGIONS = java.util.stream.Stream.concat(
+            AwsRegions.ENABLED_BY_DEFAULT.stream(), AwsRegions.OPT_IN.stream()).sorted().toList();
 
     private final AccountAwareStorageBackend<AlternateContact> contacts;
     private final AccountAwareStorageBackend<AccountMetadata> metadata;
     private final AccountAwareStorageBackend<Map<String, String>> primaryContacts;
+    private final AccountAwareStorageBackend<RegionOptState> regionStates;
     private final StorageFactory storageFactory;
     private final OrganizationsService organizationsService;
 
@@ -55,6 +61,8 @@ public class AccountService implements Resettable {
                 new TypeReference<Map<String, AccountMetadata>>() {});
         this.primaryContacts = storageFactory.create("account", "account-primary-contacts.json",
                 new TypeReference<Map<String, Map<String, String>>>() {});
+        this.regionStates = storageFactory.create("account", "account-region-opt-status.json",
+                new TypeReference<Map<String, RegionOptState>>() {});
         this.storageFactory = storageFactory;
         this.organizationsService = organizationsService;
     }
@@ -156,14 +164,14 @@ public class AccountService implements Resettable {
         }
     }
 
-    public Map<String, String> getRegionOptStatus(String callerAccountId, JsonNode request) {
-        resolveTargetAccount(callerAccountId, request);
+    public synchronized Map<String, String> getRegionOptStatus(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
         String region = requireAdvertisedRegion(request);
-        return regionStatus(region);
+        return regionStatus(region, observeRegionStatus(accountId, region));
     }
 
-    public Map<String, Object> listRegions(String callerAccountId, JsonNode request) {
-        resolveTargetAccount(callerAccountId, request);
+    public synchronized Map<String, Object> listRegions(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
         Set<String> statuses = new HashSet<>();
         JsonNode filter = request.get("RegionOptStatusContains");
         if (filter != null && !filter.isNull()) {
@@ -187,35 +195,109 @@ public class AccountService implements Resettable {
         }
         String nextToken = request.hasNonNull("NextToken")
                 ? requireLength(request, "NextToken", 0, 1000) : null;
-        List<String> regions = statuses.isEmpty() || statuses.contains("ENABLED_BY_DEFAULT")
-                ? AwsRegions.ALL : List.of();
-        PaginatedResult<String> page = Pagination.paginate(regions, region -> region, maxResults, nextToken,
-                20, 50, "ValidationException");
+        List<Map<String, String>> regions = new ArrayList<>();
+        for (String region : ACCOUNT_REGIONS) {
+            String status = observeRegionStatus(accountId, region);
+            if (statuses.isEmpty() || statuses.contains(status)) {
+                regions.add(regionStatus(region, status));
+            }
+        }
+        PaginatedResult<Map<String, String>> page = Pagination.paginate(regions,
+                region -> region.get("RegionName"), maxResults, nextToken, 20, 50, "ValidationException");
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("Regions", page.items().stream().map(AccountService::regionStatus).toList());
+        response.put("Regions", page.items());
         if (page.nextToken() != null) {
             response.put("NextToken", page.nextToken());
         }
         return response;
     }
 
-    public void rejectRegionChange(String callerAccountId, JsonNode request) {
-        resolveTargetAccount(callerAccountId, request);
-        requireAdvertisedRegion(request);
-        throw validation("Regions enabled by default cannot be enabled or disabled.");
+    /**
+     * Opts the account into a region. The region reports {@code ENABLING} on the next read and
+     * {@code ENABLED} after that. Re-enabling a region that is enabled or enabling is a no-op.
+     */
+    public synchronized void enableRegion(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
+        String region = requireOptInRegion(request);
+        String status = currentRegionStatus(accountId, region);
+        if ("DISABLING".equals(status)) {
+            throw conflict("The region " + region + " is currently being disabled and cannot be enabled.");
+        }
+        if ("DISABLED".equals(status)) {
+            regionStates.putForAccount(accountId, region, new RegionOptState("ENABLING", 1));
+        }
+    }
+
+    /**
+     * Opts the account out of a region. The region reports {@code DISABLING} on the next read and
+     * {@code DISABLED} after that. Disabling a region that is disabled or disabling is a no-op.
+     */
+    public synchronized void disableRegion(String callerAccountId, JsonNode request) {
+        String accountId = resolveTargetAccount(callerAccountId, request);
+        String region = requireOptInRegion(request);
+        String status = currentRegionStatus(accountId, region);
+        if ("ENABLING".equals(status)) {
+            throw conflict("The region " + region + " is currently being enabled and cannot be disabled.");
+        }
+        if ("ENABLED".equals(status)) {
+            regionStates.putForAccount(accountId, region, new RegionOptState("DISABLING", 1));
+        }
     }
 
     private static String requireAdvertisedRegion(JsonNode request) {
         String region = requireLength(request, "RegionName", 1, 50);
-        if (!AwsRegions.ALL.contains(region)) {
-            throw validation("The region is not in the emulator's supported region catalog. "
-                    + "Per-account region activation is not supported.");
+        if (!ACCOUNT_REGIONS.contains(region)) {
+            throw validation("The region " + region + " is not a valid AWS Region.");
         }
         return region;
     }
 
-    private static Map<String, String> regionStatus(String region) {
-        return Map.of("RegionName", region, "RegionOptStatus", "ENABLED_BY_DEFAULT");
+    private static String requireOptInRegion(JsonNode request) {
+        String region = requireAdvertisedRegion(request);
+        if (AwsRegions.ENABLED_BY_DEFAULT.contains(region)) {
+            throw validation("Regions enabled by default cannot be enabled or disabled.");
+        }
+        return region;
+    }
+
+    /** The region's status without advancing an in-flight transition. */
+    private String currentRegionStatus(String accountId, String region) {
+        if (AwsRegions.ENABLED_BY_DEFAULT.contains(region)) {
+            return "ENABLED_BY_DEFAULT";
+        }
+        return regionStates.getForAccount(accountId, region).map(RegionOptState::status).orElse("DISABLED");
+    }
+
+    /** Reads the region's status as a client would, settling a transition that has been observed. */
+    private String observeRegionStatus(String accountId, String region) {
+        if (AwsRegions.ENABLED_BY_DEFAULT.contains(region)) {
+            return "ENABLED_BY_DEFAULT";
+        }
+        RegionOptState state = regionStates.getForAccount(accountId, region).orElse(null);
+        if (state == null) {
+            return "DISABLED";
+        }
+        boolean transitional = "ENABLING".equals(state.status()) || "DISABLING".equals(state.status());
+        if (!transitional) {
+            return state.status();
+        }
+        if (state.pendingReads() > 0) {
+            regionStates.putForAccount(accountId, region, new RegionOptState(state.status(), state.pendingReads() - 1));
+            return state.status();
+        }
+        if ("DISABLING".equals(state.status())) {
+            regionStates.deleteForAccount(accountId, region);
+            return "DISABLED";
+        }
+        regionStates.putForAccount(accountId, region, new RegionOptState("ENABLED", 0));
+        return "ENABLED";
+    }
+
+    private static Map<String, String> regionStatus(String region, String status) {
+        Map<String, String> result = new LinkedHashMap<>();
+        result.put("RegionName", region);
+        result.put("RegionOptStatus", status);
+        return result;
     }
 
     public void putAlternateContact(String callerAccountId, JsonNode request) {
@@ -300,6 +382,7 @@ public class AccountService implements Resettable {
         contacts.clear();
         metadata.clear();
         primaryContacts.clear();
+        regionStates.clear();
     }
 
     private static String requireContactType(JsonNode request) {
@@ -329,6 +412,10 @@ public class AccountService implements Resettable {
     private static String text(JsonNode request, String field) {
         JsonNode value = request == null ? null : request.get(field);
         return value != null && value.isTextual() ? value.textValue() : null;
+    }
+
+    private static AwsException conflict(String message) {
+        return new AwsException("ConflictException", message, 409);
     }
 
     private static AwsException validation(String message) {

@@ -18,10 +18,10 @@ Floci supports alternate-contact management over the AWS REST JSON protocol.
 | `PutAccountName` | - |
 | `GetContactInformation` | - |
 | `PutContactInformation` | - |
-| `ListRegions` | - |
-| `GetRegionOptStatus` | - |
-| `EnableRegion` | - |
-| `DisableRegion` | - |
+| `ListRegions` | Lists every commercial region with the account's opt-in status; supports `RegionOptStatusContains`, `MaxResults`, and `NextToken`. |
+| `GetRegionOptStatus` | Default regions report `ENABLED_BY_DEFAULT`; opt-in regions start `DISABLED` per account. |
+| `EnableRegion` | Opts into an opt-in region: `ENABLING` on the next read, then `ENABLED`. Default regions are rejected with `ValidationException`; a region that is `DISABLING` with `ConflictException`. |
+| `DisableRegion` | Opts out of an opt-in region: `DISABLING` on the next read, then `DISABLED`. Default regions are rejected with `ValidationException`; a region that is `ENABLING` with `ConflictException`. |
 <!-- floci:actions:end -->
 
 Alternate contacts are isolated by caller account and stored through `StorageFactory`.

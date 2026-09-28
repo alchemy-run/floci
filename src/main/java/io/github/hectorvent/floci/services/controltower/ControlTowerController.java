@@ -237,6 +237,17 @@ public class ControlTowerController {
     }
 
     @POST
+    @Path("/disable-baseline")
+    public Response disableBaseline(@Context HttpHeaders headers, String body) {
+        String identifier = requireText(parse(body), "enabledBaselineIdentifier");
+        String opId = service.disableBaseline(
+                requestContext.getAccountId(), regionResolver.resolveRegion(headers), identifier);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("operationIdentifier", opId);
+        return Response.ok(response).build();
+    }
+
+    @POST
     @Path("/reset-enabled-baseline")
     public Response resetEnabledBaseline(@Context HttpHeaders headers, String body) {
         JsonNode request = parse(body);

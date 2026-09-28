@@ -16,7 +16,11 @@ EKS uses a standard REST API with JSON bodies: not the JSON 1.1 (`X-Amz-Target`)
 | `CreateAccessEntry` | Create STANDARD or EC2_LINUX access-entry metadata |
 | `DescribeAccessEntry` | Describe an access entry by IAM principal ARN |
 | `ListAccessEntries` | List principal ARNs with pagination |
+| `UpdateAccessEntry` | Update the username or Kubernetes groups of a STANDARD access entry |
 | `DeleteAccessEntry` | Delete access-entry metadata |
+| `AssociateAccessPolicy` | Associate an EKS access policy with a STANDARD access entry (metadata) |
+| `DisassociateAccessPolicy` | Remove an access-policy association |
+| `ListAssociatedAccessPolicies` | List access policies associated with an access entry |
 | `CreatePodIdentityAssociation` | Create a pod identity association between a service account and IAM role |
 | `DescribePodIdentityAssociation` | Describe a pod identity association by association ID |
 | `ListPodIdentityAssociations` | List pod identity associations in a cluster with optional filtering and pagination |
@@ -26,12 +30,14 @@ EKS uses a standard REST API with JSON bodies: not the JSON 1.1 (`X-Amz-Target`)
 | `DescribeAddon` | Describe an addon by cluster and addon name |
 | `ListAddons` | List addon names installed in a cluster with pagination |
 | `UpdateAddon` | Update addon configuration, version, or service account role |
-| `DescribeUpdate` | Describe an update for an addon |
+| `DescribeUpdate` | Describe an update for an addon or node group |
 | `DeleteAddon` | Delete an addon from a cluster |
 | `DescribeAddonVersions` | Describe supported addon versions by Kubernetes version or addon name |
 | `CreateNodegroup` | Create node group metadata for a cluster |
 | `DescribeNodegroup` | Describe a node group by cluster and name |
 | `ListNodegroups` | List node group names for a cluster |
+| `UpdateNodegroupConfig` | Update scaling, labels, taints, update and node-repair config of a node group |
+| `UpdateNodegroupVersion` | Update a node group's Kubernetes and release version |
 | `DeleteNodegroup` | Delete a node group |
 | `CreateFargateProfile` | Create Fargate profile metadata for a cluster |
 | `DescribeFargateProfile` | Describe a Fargate profile by cluster and name |
@@ -88,9 +94,9 @@ They are not automatically refreshed or a complete regional/marketplace inventor
 
 ## Access-entry management
 
-`CreateCluster` accepts `accessConfig.authenticationMode` (`CONFIG_MAP`, `API_AND_CONFIG_MAP`, or `API`) and `bootstrapClusterCreatorAdminPermissions`. The API default is `CONFIG_MAP`; access-entry operations require an ACTIVE cluster created with `API` or `API_AND_CONFIG_MAP`.
+`CreateCluster` accepts `accessConfig.authenticationMode` (`CONFIG_MAP`, `API_AND_CONFIG_MAP`, or `API`) and `bootstrapClusterCreatorAdminPermissions`. The API default is `CONFIG_MAP`; access-entry operations require a cluster created with `API` or `API_AND_CONFIG_MAP`. Mutating operations require the cluster to be ACTIVE; describe and list operations also answer while it is still CREATING, as on AWS.
 
-The four access-entry management operations support `STANDARD` (the default) and `EC2_LINUX`. STANDARD accepts existing IAM users or roles, including principals in another account. EC2_LINUX requires a role in the cluster account and generates `system:node:{{EC2PrivateDNSName}}`; custom usernames and Kubernetes groups are not accepted for node entries. Tags supplied at creation are preserved. Repeating a create with the same client token and normalized parameters returns the existing entry. Listing accepts `maxResults` from 1 to 100 and cluster-specific `nextToken` values.
+The access-entry management operations support `STANDARD` (the default) and `EC2_LINUX`. STANDARD accepts existing IAM users or roles, including principals in another account. EC2_LINUX requires a role in the cluster account and generates `system:node:{{EC2PrivateDNSName}}`; custom usernames and Kubernetes groups are not accepted for node entries. Tags supplied at creation are preserved. `UpdateAccessEntry` replaces `kubernetesGroups` and `username` when supplied and keeps them otherwise; node entries have neither to change. `AssociateAccessPolicy` records one of the `ListAccessPolicies` policies with a `cluster` or `namespace` access scope on a STANDARD entry (re-associating a policy replaces its scope), and `ListAssociatedAccessPolicies` / `DisassociateAccessPolicy` read and remove it. Principal and policy ARNs are accepted in the request path either percent-encoded or raw. Repeating a create with the same client token and normalized parameters returns the existing entry. Listing accepts `maxResults` from 1 to 100 and cluster-specific `nextToken` values.
 
 Access entries use EKS storage and retain the IAM principal's stable ID internally. Cluster deletion removes its entries, and a cluster recreated with the same name does not inherit previous entries or pagination tokens.
 
@@ -111,7 +117,7 @@ rejects instance credentials. Obtain fresh IMDS credentials after upgrading so t
 includes the stable role ID.
 
 !!! note "Authentication scope"
-    Non-worker IAM users and ordinary STS sessions retain the existing cluster-admin compatibility behavior. STANDARD entries, access policies, aws-auth ConfigMap, the cluster-creator bootstrap flag and automatic managed-node entries are not enforced by this change. Updating authentication mode, UpdateAccessEntry, access-policy association, and entry tag updates remain unimplemented. Native AL2023 images, bootstrap RBAC/CSR approval, CNI and worker networking are separate requirements for registration and Ready.
+    Non-worker IAM users and ordinary STS sessions retain the existing cluster-admin compatibility behavior. STANDARD entries, access policies, aws-auth ConfigMap, the cluster-creator bootstrap flag and automatic managed-node entries are not enforced by this change. Updating authentication mode and entry tag updates remain unimplemented, and access-policy associations are recorded without granting Kubernetes permissions. Native AL2023 images, bootstrap RBAC/CSR approval, CNI and worker networking are separate requirements for registration and Ready.
 
 ```bash
 aws --endpoint-url http://localhost:4566 eks create-cluster \
@@ -179,7 +185,7 @@ Floci supports the EKS cluster addon management plane for AWS SDKs and Terraform
 
 ### Supported operations
 
-- **Creation**: `CreateAddon` creates an addon on an ACTIVE cluster. Supported addons include `vpc-cni`, `coredns`, `kube-proxy`, and `eks-pod-identity-agent`. If `addonVersion` is omitted, the default version compatible with the cluster Kubernetes version is resolved automatically. Referenced `serviceAccountRoleArn` must exist in IAM. Idempotency is supported via `clientRequestToken`.
+- **Creation**: `CreateAddon` creates an addon on an ACTIVE cluster. Supported addons include `vpc-cni`, `coredns`, `kube-proxy`, `eks-pod-identity-agent`, and the community add-on `metrics-server` (owner `community`). If `addonVersion` is omitted, the default version compatible with the cluster Kubernetes version is resolved automatically. Referenced `serviceAccountRoleArn` must exist in IAM. Idempotency is supported via `clientRequestToken`.
 - **Retrieval**: `DescribeAddon` returns the complete addon resource shape, including ARN, cluster name, version, status (`ACTIVE`), health issues, tags, service account role ARN, configuration values, pod identity associations, owner, and publisher.
 - **Listing**: `ListAddons` lists installed addon names with pagination (`maxResults` and `nextToken`).
 - **Updating**: `UpdateAddon` updates the addon version, configuration values, service account role ARN, or resolve-conflicts strategy. It returns an `Update` tracking object and updates the addon metadata.
@@ -315,6 +321,12 @@ EKS clusters support configuring KMS envelope encryption for secrets and control
 - **Omission**: When a structured input is not supplied, it is omitted from `CreateNodegroup` and `DescribeNodegroup` responses rather than serialized as an explicit `null`. The exception is `updateConfig`, which receives the AWS default of `{"maxUnavailable": 1}`.
 - **Validation**: When `launchTemplate` is supplied, Floci validates it against EC2. Requests must specify either `id` or `name`, but not both; supplying neither or both is rejected with `InvalidParameterException` (HTTP 400). The template and requested version (defaulting to the template's default version when omitted) must exist in EC2, otherwise the request is rejected with `InvalidParameterException` (HTTP 400). The other structured inputs (`remoteAccess`, `taints`, `nodeRepairConfig`, `warmPoolConfig`) are not validated against external resources.
 - **No backfill**: Node groups created before this was supported genuinely had no launch template, taints, remote access, node repair config, or warm pool config, so there is nothing to reconstruct. They continue to omit those members, which is the correct answer for them.
+
+### Updating node groups
+
+`UpdateNodegroupConfig` (`POST /clusters/{name}/node-groups/{nodegroupName}/update-config`) applies `scalingConfig` (members omitted keep their current value; `minSize <= desiredSize <= maxSize` is enforced), `labels` and `taints` as `addOrUpdate*` / `remove*` deltas (taints are keyed by key and effect), `updateConfig` (`maxUnavailable` or `maxUnavailablePercentage`, plus `updateStrategy`), and `nodeRepairConfig`. `UpdateNodegroupVersion` (`POST .../update-version`) moves the node group to `version` (default: the cluster's version, never newer than the cluster or older than the node group) and `releaseVersion` (default `<version>-eks-1`), and accepts a `launchTemplate` version for node groups created with one.
+
+Both return an `Update` (`ConfigUpdate` or `VersionUpdate`) whose `params` list the changes. The new configuration is visible immediately; the node group reports `UPDATING` and the update `InProgress` for a few seconds, then `ACTIVE` and `Successful`. `DescribeUpdate` with `nodegroupName` and `ListUpdates --nodegroup-name` return these updates, a repeated request with the same `clientRequestToken` and parameters returns the original update, and a node group that is still `UPDATING` rejects further updates with `ResourceInUseException`.
 
 ### Metadata only
 
@@ -824,6 +836,5 @@ eks.deleteCluster(r -> r.name("my-cluster"));
 The following EKS features are not yet supported:
 
 - `UpdateClusterConfig` / `UpdateClusterVersion`
-- `UpdateNodegroupConfig` / `UpdateNodegroupVersion`
 - Identity provider configs
-- Access-entry updates, access-policy association, and Kubernetes access-policy enforcement
+- Kubernetes enforcement of access policies

@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A Control Tower landing zone. Serialized with AWS's lowerCamelCase member names
@@ -20,6 +22,7 @@ public class LandingZone {
     private String driftStatus;
     private JsonNode manifest;
     private List<String> remediationTypes;
+    private Map<String, String> tags;
 
     public LandingZone() {
     }
@@ -95,6 +98,14 @@ public class LandingZone {
 
     public void setRemediationTypes(List<String> remediationTypes) {
         this.remediationTypes = remediationTypes == null ? null : List.copyOf(remediationTypes);
+    }
+
+    public Map<String, String> getTags() {
+        return tags;
+    }
+
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags == null ? null : new LinkedHashMap<>(tags);
     }
 
     private static JsonNode copy(JsonNode value) {

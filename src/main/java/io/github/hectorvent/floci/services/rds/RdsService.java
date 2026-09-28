@@ -38,6 +38,8 @@ import io.github.hectorvent.floci.services.rds.model.DbClusterSettings;
 import io.github.hectorvent.floci.services.rds.model.DbClusterSnapshot;
 import io.github.hectorvent.floci.services.rds.model.DbEndpoint;
 import io.github.hectorvent.floci.services.rds.model.DbInstance;
+import io.github.hectorvent.floci.services.rds.model.DbInstanceModification;
+import io.github.hectorvent.floci.services.rds.model.DbInstancePendingModifiedValues;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceSettings;
 import io.github.hectorvent.floci.services.rds.model.DbInstanceStatus;
 import io.github.hectorvent.floci.services.rds.model.DbParameterGroup;
@@ -76,6 +78,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
@@ -655,6 +658,14 @@ public class RdsService implements Resettable, ResourceProvider {
                 .withKmsKeyId(resolveKmsKeyArn(settings.kmsKeyId(), effectiveRegion));
         DbInstanceSettings.validateMonitoringPairOnCreate(
                 settings.monitoringInterval(), settings.monitoringRoleArn());
+        boolean clusterMember = dbClusterIdentifier != null && !dbClusterIdentifier.isBlank();
+        RdsInstanceStorage.Storage storage = clusterMember
+                && (engineParam == null || RdsInstanceStorage.isAurora(engineParam))
+                ? new RdsInstanceStorage.Storage(allocatedStorage, RdsInstanceStorage.AURORA, null, null)
+                : RdsInstanceStorage.forCreate(engineParam, allocatedStorage, settings.storageType(),
+                settings.iops(), settings.storageThroughput());
+        Integer maxAllocatedStorage = settings.maxAllocatedStorage() == null ? null
+                : maxAllocatedStorageFor(settings.maxAllocatedStorage(), storage.allocatedStorage());
         boolean mock = config.services().rds().mock();
         // Always reserve a unique port (even in mock) so endpoints stay distinct and usedPorts
         // is consistent; mock mode only skips starting the container and auth proxy.
@@ -761,6 +772,8 @@ public class RdsService implements Resettable, ResourceProvider {
         instance.setAutoMinorVersionUpgrade(autoMinorVersionUpgrade);
         instance.setEngineIdentifier(engineIdentifier);
         resolvedSettings.applyTo(instance);
+        applyStorage(instance, storage);
+        instance.setMaxAllocatedStorage(maxAllocatedStorage);
         instance.setPubliclyAccessible(publiclyAccessible != null
                 ? publiclyAccessible
                 : defaultPubliclyAccessible(engineParam, dbSubnetGroupName));
@@ -809,6 +822,7 @@ public class RdsService implements Resettable, ResourceProvider {
         }
 
         instance.setStatus(DbInstanceStatus.AVAILABLE);
+        RdsInstanceLifecycle.beginCreating(instance, Instant.now(), lifecyclePeriods());
         putInstanceForScope(accountId, effectiveRegion, id, instance);
         LOG.infov("DB instance {0} created, engine={1}, endpoint={2}:{3}",
                 id, engine, endpoint.address(), String.valueOf(endpoint.port()));
@@ -1259,13 +1273,17 @@ public class RdsService implements Resettable, ResourceProvider {
                 ? request.autoMinorVersionUpgrade() : source.isAutoMinorVersionUpgrade();
         // Backups stay off on a replica; the source's windows carry over, and encryption follows
         // the source because AWS never lets a replica be less protected than what it copies. The
-        // replica listens on the source's port, the documented default for Port.
+        // replica listens on the source's port, the documented default for Port, and keeps the
+        // source's storage type with its provisioned IOPS.
+        boolean provisionedIops = RdsInstanceStorage.IO1.equals(source.getStorageType())
+                || RdsInstanceStorage.IO2.equals(source.getStorageType());
         DbInstanceSettings settings = new DbInstanceSettings(
                 source.isStorageEncrypted() ? Boolean.TRUE : null,
                 source.isStorageEncrypted() && sameRegion ? source.getKmsKeyId() : null,
                 0, source.getPreferredBackupWindow(), source.getPreferredMaintenanceWindow(),
                 copyTagsToSnapshot, null, null, null, null, null, null, null, null,
-                instanceListenerPort(source));
+                instanceListenerPort(source), source.getStorageType(),
+                provisionedIops ? source.getIops() : null, null, null, null);
         Map<String, String> tags = request.tags() != null ? request.tags() : Map.of();
 
         DbInstance replica = createDbInstance(id, engineParam, source.getEngineVersion(),
@@ -2323,6 +2341,26 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     /**
+     * Deletes the secret RDS manages for a standalone instance's master user, when the instance
+     * is deleted or switched back to a caller-supplied password. A secret already gone is
+     * tolerated for the same reason as a cluster's.
+     */
+    private void detachManagedMasterUserSecret(DbInstance instance, String region) {
+        String secretArn = instance.getMasterUserSecretArn();
+        if (secretArn == null || secretsManagerService == null) {
+            return;
+        }
+        try {
+            secretsManagerService.deleteSecret(secretArn, null, true, region);
+        } catch (RuntimeException e) {
+            LOG.debugv(e, "Managed master user secret {0} could not be deleted", secretArn);
+        }
+        instance.setMasterUserSecretArn(null);
+        instance.setMasterUserSecretStatus(null);
+        instance.setMasterUserSecretKmsKeyId(null);
+    }
+
+    /**
      * Applies a new KMS key to a cluster's existing managed master user secret. AWS re-encrypts the
      * secret in place on {@code ModifyDBCluster}; silently keeping the old key would make the call
      * report a success it did not perform.
@@ -2398,8 +2436,10 @@ public class RdsService implements Resettable, ResourceProvider {
     /**
      * Reconciles the control-plane status with the Docker runtime before a describe response.
      * AWS does not keep reporting an instance as available after its database process is gone.
+     * Queued modifications whose maintenance window has started are applied first.
      */
     public synchronized DbInstance refreshDbInstanceRuntimeHealth(DbInstance instance) {
+        instance = settlePendingModifications(instance);
         if (instance == null
                 || config.services().rds().mock()
                 || instance.getStatus() != DbInstanceStatus.AVAILABLE
@@ -2525,36 +2565,124 @@ public class RdsService implements Resettable, ResourceProvider {
                 settings, null);
     }
 
+    /** Internal callers predate the pending-modification queue and apply every change at once. */
+    public DbInstance modifyDbInstance(
+            String id, String newPassword, Boolean iamEnabled,
+            String dbSubnetGroupName, List<String> vpcSecurityGroupIds,
+            String optionGroupName, String region, Boolean autoMinorVersionUpgrade,
+            DbInstanceSettings settings, Boolean publiclyAccessible) {
+        return modifyDbInstance(id, newPassword, iamEnabled, dbSubnetGroupName,
+                vpcSecurityGroupIds, optionGroupName, region, autoMinorVersionUpgrade,
+                settings, publiclyAccessible, DbInstanceModification.immediate());
+    }
+
+    /**
+     * ModifyDBInstance. With ApplyImmediately the request and every queued change take effect
+     * now. Without it, the changes RDS defers to the maintenance window are queued and reported
+     * as PendingModifiedValues: IAM authentication, the instance class, Multi-AZ, storage, and a
+     * backup retention change between zero and non-zero. Everything else, the password, public
+     * access, deletion protection, network type, log exports, the autoscaling ceiling and the
+     * parameter and security group associations, applies at once either way.
+     */
     // synchronized like the tag and delete paths: an unguarded read-modify-write here could
     // write an instance back after deleteDbInstance removed it
     public synchronized DbInstance modifyDbInstance(
             String id, String newPassword, Boolean iamEnabled,
             String dbSubnetGroupName, List<String> vpcSecurityGroupIds,
             String optionGroupName, String region, Boolean autoMinorVersionUpgrade,
-            DbInstanceSettings settings, Boolean publiclyAccessible) {
+            DbInstanceSettings settings, Boolean publiclyAccessible,
+            DbInstanceModification modification) {
         validateInstanceSettings(settings);
         String effectiveRegion = effectiveRegion(region);
-        DbInstance instance = getDbInstance(id, effectiveRegion);
+        Instant now = Instant.now();
+        DbInstance instance = settlePendingModifications(getDbInstance(id, effectiveRegion));
         // "You can't modify a stopped DB instance" (user guide, stopping an instance temporarily).
         if (isStoppedOrInTransit(instance.getStatus())) {
             throw new AwsException("InvalidDBInstanceState",
                     "DB instance " + id + " is in state " + instance.getStatus().name().toLowerCase(Locale.ROOT)
                             + " and cannot be modified.", 400);
         }
+        DbInstanceModification requested = modification != null ? modification : DbInstanceModification.none();
+        boolean applyImmediately = requested.appliesImmediately();
         DbInstanceSettings effective = withEffectiveWindows(settings, instance);
-        instance.setStatus(DbInstanceStatus.AVAILABLE);
+        String engineName = instanceEngineName(instance);
+        boolean clusterMember = instance.getDbClusterIdentifier() != null
+                && !instance.getDbClusterIdentifier().isBlank();
+
+        // Every check runs before the record changes, so a refused request leaves it as it was.
+        RdsInstanceStorage.Request storageRequest = new RdsInstanceStorage.Request(
+                requested.allocatedStorage(), settings.storageType(), settings.iops(), settings.storageThroughput());
+        RdsInstanceStorage.Storage appliedStorage = RdsInstanceStorage.current(instance, engineName);
+        RdsInstanceStorage.Storage targetStorage = RdsInstanceStorage.forModify(engineName,
+                applyImmediately
+                        ? RdsInstanceStorage.withPending(appliedStorage, instance.getPendingModifiedValues())
+                        : appliedStorage,
+                storageRequest);
+        boolean storageChanges = !storageRequest.isEmpty()
+                && RdsInstanceStorage.differs(targetStorage, appliedStorage);
+        if (storageChanges && applyImmediately && RdsInstanceLifecycle.storageOptimizing(instance, now)) {
+            throw new AwsException("InvalidParameterCombination",
+                    "You can't currently modify the storage of this DB instance because the previous "
+                            + "storage change is being optimized.", 400);
+        }
+        Integer maxAllocatedStorage = settings.maxAllocatedStorage() == null ? null
+                : maxAllocatedStorageFor(settings.maxAllocatedStorage(), targetStorage.allocatedStorage());
         if (optionGroupName != null && !optionGroupName.isBlank()) {
             validateInstanceOptionGroup(optionGroupName,
                     instance.getEngine() == null ? null : instance.getEngine().name().toLowerCase(),
                     instance.getEngineVersion(), effectiveRegion);
+        }
+        if (dbSubnetGroupName != null && !dbSubnetGroupName.isBlank()) {
+            getDbSubnetGroup(dbSubnetGroupName, effectiveRegion);
+        }
+        String parameterGroupName = requested.dbParameterGroupName() == null
+                || requested.dbParameterGroupName().isBlank() ? null : requested.dbParameterGroupName();
+        boolean parameterGroupChanged = parameterGroupName != null
+                && !parameterGroupName.equals(instance.getParameterGroupName());
+        if (parameterGroupChanged) {
+            validateInstanceParameterGroup(parameterGroupName, engineName, instance.getEngineVersion(),
+                    effectiveRegion);
+        }
+        boolean hasNewPassword = newPassword != null && !newPassword.isBlank();
+        Boolean manageMasterUserPassword = requested.manageMasterUserPassword();
+        boolean enablesManagedPassword = Boolean.TRUE.equals(manageMasterUserPassword)
+                && instance.getMasterUserSecretArn() == null;
+        boolean disablesManagedPassword = Boolean.FALSE.equals(manageMasterUserPassword)
+                && instance.getMasterUserSecretArn() != null;
+        if (Boolean.TRUE.equals(manageMasterUserPassword) && hasNewPassword) {
+            throw new AwsException("InvalidParameterCombination",
+                    "You can't specify MasterUserPassword when ManageMasterUserPassword is turned on.", 400);
+        }
+        if (enablesManagedPassword && clusterMember) {
+            throw new AwsException("InvalidParameterCombination",
+                    "The master user password of DB instance " + id + " is managed by its DB cluster "
+                            + instance.getDbClusterIdentifier() + ".", 400);
+        }
+        if (disablesManagedPassword && !hasNewPassword) {
+            throw new AwsException("InvalidParameterCombination",
+                    "You must specify MasterUserPassword when ManageMasterUserPassword is turned off.", 400);
+        }
+
+        boolean iamBefore = instance.isIamDatabaseAuthenticationEnabled();
+        instance.setStatus(DbInstanceStatus.AVAILABLE);
+        if (applyImmediately) {
+            applyPendingModifications(instance, engineName, now, true, lifecyclePeriods());
+        }
+        DbInstancePendingModifiedValues pending = instance.getPendingModifiedValues() != null
+                ? instance.getPendingModifiedValues() : new DbInstancePendingModifiedValues();
+        boolean queued = false;
+
+        if (optionGroupName != null && !optionGroupName.isBlank()) {
             instance.setOptionGroupName(optionGroupName);
         }
+        String passwordToSet = hasNewPassword ? newPassword
+                : enablesManagedPassword ? generatedMasterPassword() : null;
         boolean passwordRotated = false;
-        if (newPassword != null && !newPassword.isBlank()) {
+        if (passwordToSet != null) {
             String oldPassword = instance.getMasterPassword();
             boolean backendRunning = !config.services().rds().mock()
-                    && instance.getDbClusterIdentifier() == null && instance.getContainerId() != null;
-            passwordRotated = backendRunning && !newPassword.equals(oldPassword);
+                    && !clusterMember && instance.getContainerId() != null;
+            passwordRotated = backendRunning && !passwordToSet.equals(oldPassword);
             // Propagate the rotation into the running backend DB before overwriting the stored
             // password — this is the last moment the old credential (which the backend still
             // holds) is known. Without it every later connection fails: the proxy dials the
@@ -2562,17 +2690,26 @@ public class RdsService implements Resettable, ResourceProvider {
             if (passwordRotated) {
                 containerManager.rotateMasterPassword(
                         instance.getDockerVolumeName(), instance.getContainerId(),
-                        instance.getEngine(), instance.getMasterUsername(), oldPassword, newPassword);
+                        instance.getEngine(), instance.getMasterUsername(), oldPassword, passwordToSet);
             }
-            instance.setMasterPassword(newPassword);
+            instance.setMasterPassword(passwordToSet);
         }
-        boolean iamChanged = iamEnabled != null
-                && iamEnabled != instance.isIamDatabaseAuthenticationEnabled();
+        if (enablesManagedPassword) {
+            // RDS generates the new master password and keeps it in the secret it manages.
+            attachManagedMasterUserSecret(instance, effectiveRegion, requested.masterUserSecretKmsKeyId());
+        } else if (disablesManagedPassword) {
+            detachManagedMasterUserSecret(instance, effectiveRegion);
+        }
         if (iamEnabled != null) {
-            instance.setIamDatabaseAuthenticationEnabled(iamEnabled);
+            if (applyImmediately || iamEnabled == instance.isIamDatabaseAuthenticationEnabled()) {
+                instance.setIamDatabaseAuthenticationEnabled(iamEnabled);
+                pending.setIamDatabaseAuthenticationEnabled(null);
+            } else {
+                pending.setIamDatabaseAuthenticationEnabled(iamEnabled);
+                queued = true;
+            }
         }
         if (dbSubnetGroupName != null && !dbSubnetGroupName.isBlank()) {
-            getDbSubnetGroup(dbSubnetGroupName, effectiveRegion);
             instance.setDbSubnetGroupName(dbSubnetGroupName);
         }
         if (vpcSecurityGroupIds != null && !vpcSecurityGroupIds.isEmpty()) {
@@ -2581,10 +2718,66 @@ public class RdsService implements Resettable, ResourceProvider {
         if (autoMinorVersionUpgrade != null) {
             instance.setAutoMinorVersionUpgrade(autoMinorVersionUpgrade);
         }
-        effective.applyTo(instance);
+        // BackupRetentionPeriod: a change between zero and non-zero waits for the maintenance
+        // window unless applied immediately; one non-zero value to another applies as soon as
+        // possible either way.
+        Integer retention = effective.backupRetentionPeriod();
+        if (retention != null) {
+            boolean togglesBackups = (retention == 0) != (instance.getBackupRetentionPeriod() == 0);
+            if (!applyImmediately && togglesBackups) {
+                pending.setBackupRetentionPeriod(retention);
+                queued = true;
+            } else {
+                instance.setBackupRetentionPeriod(retention);
+                pending.setBackupRetentionPeriod(null);
+            }
+        }
+        effective.withBackupRetentionPeriod(null).applyTo(instance);
+        if (!storageRequest.isEmpty()) {
+            pending.clearStorageChanges();
+            if (storageChanges && applyImmediately) {
+                applyStorage(instance, targetStorage);
+                RdsInstanceLifecycle.beginStorageModification(instance, now, lifecyclePeriods());
+            } else if (storageChanges) {
+                queueStorage(pending, appliedStorage, targetStorage);
+                queued = true;
+            }
+        }
+        if (settings.maxAllocatedStorage() != null) {
+            instance.setMaxAllocatedStorage(maxAllocatedStorage);
+        }
+        String dbInstanceClass = requested.dbInstanceClass();
+        if (dbInstanceClass != null && !dbInstanceClass.isBlank()) {
+            if (applyImmediately || dbInstanceClass.equals(instance.getDbInstanceClass())) {
+                instance.setDbInstanceClass(dbInstanceClass);
+                pending.setDbInstanceClass(null);
+            } else {
+                pending.setDbInstanceClass(dbInstanceClass);
+                queued = true;
+            }
+        }
+        Boolean multiAz = requested.multiAz();
+        if (multiAz != null) {
+            if (applyImmediately || multiAz == instance.isMultiAz()) {
+                instance.setMultiAz(multiAz);
+                pending.setMultiAz(null);
+            } else {
+                pending.setMultiAz(multiAz);
+                queued = true;
+            }
+        }
+        // The group name changes at once; its parameters apply on the next reboot.
+        if (parameterGroupChanged) {
+            instance.setParameterGroupName(parameterGroupName);
+            instance.setParameterApplyStatus(RdsInstanceLifecycle.PENDING_REBOOT);
+        }
         if (publiclyAccessible != null) {
             instance.setPubliclyAccessible(publiclyAccessible);
         }
+        if (queued && pending.getQueuedAt() == null) {
+            pending.setQueuedAt(now);
+        }
+        instance.setPendingModifiedValues(pending.hasChanges() ? pending : null);
         putInstanceForScope(currentAccountId(), effectiveRegion, id, instance);
 
         // The running auth proxy holds a password snapshot from start time, so swap it in place
@@ -2594,13 +2787,127 @@ public class RdsService implements Resettable, ResourceProvider {
             proxyManager.updateMasterPassword(
                     rdsResourceRelayKey(instance.getDbInstanceArn(), id), instance.getMasterPassword());
         }
-        if (iamChanged) {
+        if (iamBefore != instance.isIamDatabaseAuthenticationEnabled()) {
             proxyManager.updateIamEnabled(
-                    rdsResourceRelayKey(instance.getDbInstanceArn(), id), iamEnabled);
+                    rdsResourceRelayKey(instance.getDbInstanceArn(), id),
+                    instance.isIamDatabaseAuthenticationEnabled());
+        }
+        if (hasNewPassword) {
+            recordInstanceEvent(instance, "Reset master credentials", "configuration change");
         }
 
         LOG.infov("DB instance {0} modified", id);
         return instance;
+    }
+
+    /**
+     * MaxAllocatedStorage as RDS keeps it: a ceiling equal to the allocation turns autoscaling
+     * off, which DescribeDBInstances reports by leaving the member out, and a ceiling below the
+     * allocation is refused.
+     */
+    private static Integer maxAllocatedStorageFor(int requested, int allocatedStorage) {
+        if (requested < allocatedStorage) {
+            throw new AwsException("InvalidParameterCombination",
+                    "Max storage size must be greater than storage size.", 400);
+        }
+        return requested == allocatedStorage ? null : requested;
+    }
+
+    private static void applyStorage(DbInstance instance, RdsInstanceStorage.Storage storage) {
+        instance.setAllocatedStorage(storage.allocatedStorage());
+        instance.setStorageType(storage.storageType());
+        instance.setIops(storage.iops());
+        instance.setStorageThroughput(storage.storageThroughput());
+    }
+
+    /** Queues the storage members that change, as PendingModifiedValues reports them. */
+    private static void queueStorage(DbInstancePendingModifiedValues pending,
+                                     RdsInstanceStorage.Storage applied, RdsInstanceStorage.Storage target) {
+        if (target.allocatedStorage() != applied.allocatedStorage()) {
+            pending.setAllocatedStorage(target.allocatedStorage());
+        }
+        if (!Objects.equals(target.storageType(), applied.storageType())) {
+            pending.setStorageType(target.storageType());
+        }
+        if (target.iops() != null && !target.iops().equals(applied.iops())) {
+            pending.setIops(target.iops());
+        }
+        if (target.storageThroughput() != null && !target.storageThroughput().equals(applied.storageThroughput())) {
+            pending.setStorageThroughput(target.storageThroughput());
+        }
+    }
+
+    private RdsInstanceLifecycle.Periods lifecyclePeriods() {
+        EmulatorConfig.RdsServiceConfig rds = config.services().rds();
+        return RdsInstanceLifecycle.Periods.ofMillis(rds.creatingStatusMillis(), rds.modifyingStatusMillis(),
+                rds.storageOptimizationStatusMillis());
+    }
+
+    /**
+     * Applies an instance's queued modifications and clears the queue. A modification applied
+     * immediately flushes the queue first; a maintenance window applies it on its own.
+     */
+    private static void applyPendingModifications(DbInstance instance, String engineName, Instant now,
+                                                  boolean reportStorageModification,
+                                                  RdsInstanceLifecycle.Periods periods) {
+        DbInstancePendingModifiedValues pending = instance.getPendingModifiedValues();
+        instance.setPendingModifiedValues(null);
+        if (pending == null || !pending.hasChanges()) {
+            return;
+        }
+        if (pending.hasStorageChanges()) {
+            applyStorage(instance, RdsInstanceStorage.withPending(
+                    RdsInstanceStorage.current(instance, engineName), pending));
+            if (reportStorageModification) {
+                RdsInstanceLifecycle.beginStorageModification(instance, now, periods);
+            }
+        }
+        if (pending.getDbInstanceClass() != null) {
+            instance.setDbInstanceClass(pending.getDbInstanceClass());
+        }
+        if (pending.getBackupRetentionPeriod() != null) {
+            instance.setBackupRetentionPeriod(pending.getBackupRetentionPeriod());
+        }
+        if (pending.getMultiAz() != null) {
+            instance.setMultiAz(pending.getMultiAz());
+        }
+        if (pending.getIamDatabaseAuthenticationEnabled() != null) {
+            instance.setIamDatabaseAuthenticationEnabled(pending.getIamDatabaseAuthenticationEnabled());
+        }
+    }
+
+    /** Applies the queued modifications of an instance whose maintenance window has started since. */
+    private DbInstance settlePendingModifications(DbInstance instance) {
+        Instant now = Instant.now();
+        if (instance == null || !RdsInstanceLifecycle.pendingModificationsDue(instance, now)) {
+            return instance;
+        }
+        boolean iamBefore = instance.isIamDatabaseAuthenticationEnabled();
+        applyPendingModifications(instance, instanceEngineName(instance), now, false, lifecyclePeriods());
+        putInstanceForScope(accountIdFromArn(instance.getDbInstanceArn()),
+                regionFromArn(instance.getDbInstanceArn()), instance.getDbInstanceIdentifier(), instance);
+        if (iamBefore != instance.isIamDatabaseAuthenticationEnabled()) {
+            proxyManager.updateIamEnabled(
+                    rdsResourceRelayKey(instance.getDbInstanceArn(), instance.getDbInstanceIdentifier()),
+                    instance.isIamDatabaseAuthenticationEnabled());
+        }
+        LOG.infov("DB instance {0} applied its pending modifications in its maintenance window",
+                instance.getDbInstanceIdentifier());
+        return instance;
+    }
+
+    /** The engine name AWS reports for the instance, which the storage rules are keyed on. */
+    private static String instanceEngineName(DbInstance instance) {
+        if (instance.getEngineIdentifier() != null && !instance.getEngineIdentifier().isBlank()) {
+            return instance.getEngineIdentifier().toLowerCase(Locale.ROOT);
+        }
+        return instance.getEngine() != null ? instance.getEngine().name().toLowerCase(Locale.ROOT) : null;
+    }
+
+    private void recordInstanceEvent(DbInstance instance, String message, String category) {
+        String eventId = "instance-event:" + UUID.randomUUID();
+        events.put(eventId, new RdsEvent(eventId, instance.getDbInstanceIdentifier(), "db-instance",
+                message, List.of(category), Instant.now(), instance.getDbInstanceArn()));
     }
 
     private static void validateInstanceSettings(DbInstanceSettings settings) {
@@ -2770,6 +3077,7 @@ public class RdsService implements Resettable, ResourceProvider {
             createDbSnapshot(snapshotId, id, null, effectiveRegion);
         }
 
+        RdsInstanceLifecycle.clearTransitions(instance);
         instance.setStatus(DbInstanceStatus.STOPPING);
         putInstanceForScope(accountId, effectiveRegion, id, instance);
         DbInstance response = RESPONSE_COPIER.convertValue(instance, DbInstance.class);
@@ -2813,6 +3121,7 @@ public class RdsService implements Resettable, ResourceProvider {
             throw new AwsException("InvalidDBInstanceState",
                     "DB instance " + id + " is not in stopped state.", 400);
         }
+        RdsInstanceLifecycle.clearTransitions(instance);
         instance.setStatus(DbInstanceStatus.STARTING);
         putInstanceForScope(accountId, effectiveRegion, id, instance);
         DbInstance response = RESPONSE_COPIER.convertValue(instance, DbInstance.class);
@@ -3070,6 +3379,9 @@ public class RdsService implements Resettable, ResourceProvider {
         String effectiveRegion = effectiveRegion(region);
         DbInstance instance = getDbInstance(id, effectiveRegion);
 
+        RdsInstanceLifecycle.clearTransitions(instance);
+        // A reboot applies the parameter group whose association is pending one.
+        instance.setParameterApplyStatus(null);
         instance.setStatus(DbInstanceStatus.REBOOTING);
         putInstanceForScope(currentAccountId(), effectiveRegion, id, instance);
 
@@ -3308,12 +3620,18 @@ public class RdsService implements Resettable, ResourceProvider {
                 .orElseThrow(() ->
                 new AwsException("DBInstanceNotFound", "DB instance " + id + " not found.", 404));
 
+        if (instance.isDeletionProtection()) {
+            throw new AwsException("InvalidParameterCombination",
+                    "Cannot delete protected DB Instance, please disable deletion protection and try again.", 400);
+        }
         if (isRegisteredProxyTarget(
                 "RDS_INSTANCE", id, regionFromArn(instance.getDbInstanceArn()))) {
             throw new AwsException("InvalidDBInstanceState",
                     "DB instance " + id + " is registered with a DB proxy target group.", 400);
         }
 
+        RdsInstanceLifecycle.clearTransitions(instance);
+        detachManagedMasterUserSecret(instance, effectiveRegion);
         instance.setStatus(DbInstanceStatus.DELETING);
         putInstanceForScope(currentAccountId(), effectiveRegion, id, instance);
         detachReadReplicaLinksBeforeDelete(instance);

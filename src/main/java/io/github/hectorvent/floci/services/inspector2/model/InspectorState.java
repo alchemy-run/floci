@@ -12,6 +12,7 @@ public class InspectorState {
     private String adminAccountId;
     private String status = "DISABLED";
     private int enablingPollsRemaining;
+    private int disablingPollsRemaining;
     private String ec2Status = "DISABLED";
     private String ecrStatus = "DISABLED";
     private String lambdaStatus = "DISABLED";
@@ -24,6 +25,7 @@ public class InspectorState {
     private boolean autoEnableCodeRepository;
     private String deepInspectionStatus = "DEACTIVATED";
     private Map<String, InspectorFilter> filters = new LinkedHashMap<>();
+    private Map<String, CisScanConfiguration> cisScanConfigurations = new LinkedHashMap<>();
     /** Epoch seconds at which each resource type was first activated; starts its free trial. */
     private Map<String, Double> freeTrialStarts = new LinkedHashMap<>();
 
@@ -36,6 +38,8 @@ public class InspectorState {
     public void setStatus(String status) { this.status = status; }
     public int getEnablingPollsRemaining() { return enablingPollsRemaining; }
     public void setEnablingPollsRemaining(int enablingPollsRemaining) { this.enablingPollsRemaining = enablingPollsRemaining; }
+    public int getDisablingPollsRemaining() { return disablingPollsRemaining; }
+    public void setDisablingPollsRemaining(int disablingPollsRemaining) { this.disablingPollsRemaining = disablingPollsRemaining; }
     public String getEc2Status() { return ec2Status; }
     public void setEc2Status(String value) { ec2Status = value; }
     public String getEcrStatus() { return ecrStatus; }
@@ -61,6 +65,10 @@ public class InspectorState {
     public void setDeepInspectionStatus(String value) { deepInspectionStatus = value; }
     public Map<String, InspectorFilter> getFilters() { return filters; }
     public void setFilters(Map<String, InspectorFilter> filters) { this.filters = filters; }
+    public Map<String, CisScanConfiguration> getCisScanConfigurations() { return cisScanConfigurations; }
+    public void setCisScanConfigurations(Map<String, CisScanConfiguration> cisScanConfigurations) {
+        this.cisScanConfigurations = cisScanConfigurations == null ? new LinkedHashMap<>() : cisScanConfigurations;
+    }
     public Map<String, Double> getFreeTrialStarts() { return freeTrialStarts; }
     public void setFreeTrialStarts(Map<String, Double> freeTrialStarts) {
         this.freeTrialStarts = freeTrialStarts == null ? new LinkedHashMap<>() : freeTrialStarts;

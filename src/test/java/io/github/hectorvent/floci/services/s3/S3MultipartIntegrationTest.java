@@ -115,7 +115,33 @@ class S3MultipartIntegrationTest {
         .then()
             .statusCode(200)
             .body(containsString("<UploadId>" + uploadId + "</UploadId>"))
-            .body(containsString("<Key>" + KEY + "</Key>"));
+            .body(containsString("<Key>" + KEY + "</Key>"))
+            .body(containsString("<IsTruncated>false</IsTruncated>"))
+            .body(containsString("<MaxUploads>1000</MaxUploads>"))
+            .body(containsString("<StorageClass>STANDARD_IA</StorageClass>"))
+            .body(containsString("<ChecksumAlgorithm>SHA256</ChecksumAlgorithm>"));
+    }
+
+    @Test
+    @Order(7)
+    void listMultipartUploadsHonoursPrefixAndMaxUploads() {
+        given()
+        .when()
+            .get("/" + BUCKET + "?uploads&prefix=no-such-prefix/&max-uploads=1")
+        .then()
+            .statusCode(200)
+            .body(containsString("<Prefix>no-such-prefix/</Prefix>"))
+            .body(containsString("<MaxUploads>1</MaxUploads>"))
+            .body(containsString("<IsTruncated>false</IsTruncated>"))
+            .body(not(containsString("<Upload>")));
+
+        given()
+        .when()
+            .get("/" + BUCKET + "?uploads&prefix=large-&max-uploads=1")
+        .then()
+            .statusCode(200)
+            .body(containsString("<UploadId>" + uploadId + "</UploadId>"))
+            .body(containsString("<IsTruncated>false</IsTruncated>"));
     }
 
     @Test

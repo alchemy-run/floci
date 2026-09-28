@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
@@ -77,7 +78,10 @@ public class ElastiCacheService implements ResourceProvider {
     private final KmsService kmsService;
     private final Ec2Service ec2Service;
     private final RegionResolver regionResolver;
+    private final ContainerEndpoints containerEndpoints;
     private final Set<Integer> usedPorts = ConcurrentHashMap.newKeySet();
+    /** Proxy ports published to containers, by replication group. */
+    private final Map<String, Integer> publishedProxyPorts = new ConcurrentHashMap<>();
     private final Set<String> provisioningGroupIds = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, Object> parameterGroupLocks = new ConcurrentHashMap<>();
     /**
@@ -89,7 +93,6 @@ public class ElastiCacheService implements ResourceProvider {
      */
     private final ConcurrentHashMap<String, Integer> reservedParameterGroups = new ConcurrentHashMap<>();
 
-    @Inject
     public ElastiCacheService(ElastiCacheContainerManager containerManager,
                               ElastiCacheProxyManager proxyManager,
                               ValkeyClusterFormation clusterFormation,
@@ -100,6 +103,23 @@ public class ElastiCacheService implements ResourceProvider {
                               Ec2Service ec2Service,
                               RegionResolver regionResolver,
                               KmsService kmsService) {
+        this(containerManager, proxyManager, clusterFormation, storageFactory, config, dockerHostResolver,
+                containerDetector, ec2Service, regionResolver, kmsService, null);
+    }
+
+    @Inject
+    public ElastiCacheService(ElastiCacheContainerManager containerManager,
+                              ElastiCacheProxyManager proxyManager,
+                              ValkeyClusterFormation clusterFormation,
+                              StorageFactory storageFactory,
+                              EmulatorConfig config,
+                              DockerHostResolver dockerHostResolver,
+                              ContainerDetector containerDetector,
+                              Ec2Service ec2Service,
+                              RegionResolver regionResolver,
+                              KmsService kmsService,
+                              ContainerEndpoints containerEndpoints) {
+        this.containerEndpoints = containerEndpoints;
         this.kmsService = kmsService;
         this.containerManager = containerManager;
         this.proxyManager = proxyManager;
@@ -247,22 +267,18 @@ public class ElastiCacheService implements ResourceProvider {
                                                       ReplicationGroupSettings resolvedSettings) {
         String groupId = request.replicationGroupId();
         AuthMode authMode = request.authMode();
-        int enginePort;
-        int proxyPort;
-        if (containerDetector.isRunningInContainer()) {
-            // Every group is its own container with its own address, as every AWS group has its
-            // own hostname, so the group's Port is never contended: the engine listens on it and
-            // the endpoint names it. The host-facing proxy is a separate listener on Floci's
-            // single address and takes whichever port of the range is free.
-            enginePort = request.port() != null
-                    ? validateRange("Port", request.port(), 1, 65535) : DEFAULT_ENGINE_PORT;
-            proxyPort = allocateProxyPortPreferring(enginePort);
-        } else {
-            // With Floci on the host the endpoint is the proxy on the host's single address, so
-            // the proxy port is the group's Port and two groups cannot both hold one.
-            proxyPort = allocateProxyPort(request.port());
-            enginePort = proxyPort;
-        }
+        // As on AWS every group has its own hostname, so its Port (6379 unless one is given) is
+        // never contended: the engine listens on it and the endpoint names it, and containers
+        // reach the group by name (see routeEndpoint). The auth proxy host clients use is a
+        // separate listener on Floci's single address, within the proxy range; it takes the
+        // group's Port when that is in the range and no other group's proxy holds it, otherwise
+        // a free port of the range.
+        int enginePort = request.port() != null
+                ? validateRange("Port", request.port(), 1, 65535) : DEFAULT_ENGINE_PORT;
+        int proxyPort = allocateProxyPortPreferring(enginePort);
+        String region = request.region() != null ? request.region() : regionResolver.getRegion();
+        String endpointHost = ElastiCacheEndpoints.primary(groupId, regionResolver.getAccountId(), region,
+                config.hostname());
         String image = config.services().elasticache().defaultImage();
 
         LOG.infov("Creating replication group {0} with authMode={1} on port {2}, proxy port {3}",
@@ -276,7 +292,7 @@ public class ElastiCacheService implements ResourceProvider {
             // the container.
             handle = containerManager.tryStart(groupId, image, enginePort);
 
-            Endpoint endpoint = endpointFor(handle, enginePort, proxyPort);
+            Endpoint endpoint = new Endpoint(endpointHost, enginePort);
             ReplicationGroup group = new ReplicationGroup(
                     groupId, request.description(), ReplicationGroupStatus.AVAILABLE,
                     authMode, endpoint, Instant.now(), proxyPort);
@@ -300,20 +316,21 @@ public class ElastiCacheService implements ResourceProvider {
             }
 
             synchronized (lockFor("rg:" + groupId)) {
-                groups.put(groupId, group);
                 if (handle != null) {
-                    proxyManager.startProxy(groupId, authMode, proxyPort,
-                            handle.getHost(), handle.getPort(),
-                            (username, password) -> validatePassword(groupId, username, password));
+                    proxyPort = startGroupProxy(groupId, authMode, proxyPort, enginePort, handle);
+                    group.setProxyPort(proxyPort);
+                    group.setConfigurationEndpoint(new Endpoint(endpointHost, endpointPortOf(group)));
                 } else {
                     LOG.warnv("Replication group {0} created without a backing cache container: no "
                             + "Docker daemon is reachable. Metadata operations work; connections to "
                             + "the cache do not until a daemon appears.", groupId);
                 }
+                groups.put(groupId, group);
+                routeEndpoint(group, handle);
             }
 
             LOG.infov("Replication group {0} created, endpoint={1}:{2}", groupId, endpoint.address(),
-                    String.valueOf(endpoint.port()));
+                    String.valueOf(group.getConfigurationEndpoint().port()));
             return group;
         } catch (RuntimeException e) {
             LOG.warnv("Replication group {0} provisioning failed, rolling back: {1}", groupId, e.getMessage());
@@ -617,7 +634,7 @@ public class ElastiCacheService implements ResourceProvider {
     private void reserveSingleNodeGroup(ReplicationGroup group, List<ReplicationGroup> toRestore) {
         try {
             group.setProxyPort(reserveOrAllocateProxyPort(group.getProxyPort()));
-            group.setConfigurationEndpoint(new Endpoint(resolveEndpointHost(), group.getProxyPort()));
+            group.setConfigurationEndpoint(new Endpoint(endpointHostFor(group), endpointPortOf(group)));
             group.setStatus(ReplicationGroupStatus.CREATING);
             toRestore.add(group);
         } catch (RuntimeException e) {
@@ -656,9 +673,8 @@ public class ElastiCacheService implements ResourceProvider {
                     group.setContainerId(handle.getContainerId());
                     group.setContainerHost(handle.getHost());
                     group.setContainerPort(handle.getPort());
-                    proxyManager.startProxy(groupId, group.getAuthMode(), group.getProxyPort(),
-                            handle.getHost(), handle.getPort(),
-                            (username, password) -> validatePassword(groupId, username, password));
+                    group.setProxyPort(startGroupProxy(groupId, group.getAuthMode(), group.getProxyPort(),
+                            enginePortOf(group), handle));
                 } else {
                     // Cleared rather than left alone: whatever the record carried describes a
                     // container from the previous process, and nothing must read it as live.
@@ -669,9 +685,10 @@ public class ElastiCacheService implements ResourceProvider {
                             + "Docker daemon is reachable. Metadata operations work; connections to "
                             + "the cache do not until a daemon appears.", groupId);
                 }
-                group.setConfigurationEndpoint(endpointFor(handle, enginePortOf(group), group.getProxyPort()));
+                group.setConfigurationEndpoint(new Endpoint(endpointHostFor(group), endpointPortOf(group)));
                 group.setStatus(ReplicationGroupStatus.AVAILABLE);
                 groups.put(groupId, group);
+                routeEndpoint(group, handle);
                 LOG.infov("Restored replication group {0}, endpoint={1}:{2}", groupId,
                         group.getConfigurationEndpoint().address(),
                         String.valueOf(group.getProxyPort()));
@@ -859,6 +876,9 @@ public class ElastiCacheService implements ResourceProvider {
     }
 
     private void rollbackReplicationGroup(String groupId, ElastiCacheContainerHandle handle, int proxyPort) {
+        if (containerEndpoints != null) {
+            withdrawProxyPort(groupId);
+        }
         try {
             if (handle != null) {
                 proxyManager.stopProxy(groupId);
@@ -881,16 +901,138 @@ public class ElastiCacheService implements ResourceProvider {
         }
     }
 
+    /** The group's AWS-shaped primary endpoint hostname, re-derived from its ARN and region. */
+    private String endpointHostFor(ReplicationGroup group) {
+        String account = AwsArnUtils.accountOrDefault(group.getArn(), regionResolver.getAccountId());
+        String region = group.getRegion() != null ? group.getRegion()
+                : AwsArnUtils.regionOrDefault(group.getArn(), regionResolver.getDefaultRegion());
+        return ElastiCacheEndpoints.primary(group.getReplicationGroupId(), account, region, config.hostname());
+    }
+
     /**
-     * With Floci in Docker the endpoint is the group's own cache container on the shared network,
-     * on the group's Port, which is what VPC workloads (Lambda, ECS) dial. On the host it is the
-     * proxy, whose port is the group's Port there.
+     * Starts the group's auth proxy for host clients. When the proxy was given the group's own
+     * Port and something else on this machine already listens there (a local Redis, say), the
+     * proxy moves to a free port of the range instead of failing the create. The Port the group
+     * reports is the engine's, which does not depend on where the proxy listens.
+     *
+     * @return the port the proxy listens on
      */
-    private Endpoint endpointFor(ElastiCacheContainerHandle handle, int enginePort, int proxyPort) {
-        if (handle != null && containerDetector.isRunningInContainer()) {
-            return new Endpoint(handle.getHost(), enginePort);
+    private int startGroupProxy(String groupId, AuthMode authMode, int proxyPort, int enginePort,
+                                ElastiCacheContainerHandle handle) {
+        try {
+            proxyManager.startProxy(groupId, authMode, proxyPort, handle.getHost(), handle.getPort(),
+                    (username, password) -> validatePassword(groupId, username, password));
+            return proxyPort;
+        } catch (RuntimeException e) {
+            if (proxyPort != enginePort) {
+                throw e;
+            }
+            int fallback = allocateProxyPort(null);
+            releaseProxyPort(proxyPort);
+            LOG.infov("Port {0} is not available on this host ({1}); replication group {2} keeps it as "
+                            + "its Port and serves host clients on {3}",
+                    String.valueOf(proxyPort), e.getMessage(), groupId, String.valueOf(fallback));
+            try {
+                proxyManager.startProxy(groupId, authMode, fallback, handle.getHost(), handle.getPort(),
+                        (username, password) -> validatePassword(groupId, username, password));
+            } catch (RuntimeException retryFailure) {
+                releaseProxyPort(fallback);
+                retryFailure.addSuppressed(e);
+                throw retryFailure;
+            }
+            return fallback;
         }
-        return new Endpoint(resolveEndpointHost(), proxyPort);
+    }
+
+    /**
+     * Makes a cluster-mode-disabled group reachable from the containers Floci launches on its
+     * endpoint hostname and Port, as on AWS, whatever other groups use the same Port:
+     *
+     * <ul>
+     *   <li>A group without authentication is served by its engine container, which listens on
+     *       the endpoint's Port, so the hostname resolves to that container.</li>
+     *   <li>A group with authentication must be reached through its auth proxy. When the proxy
+     *       holds the endpoint's Port on Floci's address, the hostname resolves to Floci and the
+     *       port is published to containers. Otherwise the group gets a relay of its own that
+     *       listens on the endpoint's Port and relays to its proxy, and the hostname resolves to
+     *       the relay.</li>
+     * </ul>
+     *
+     * Host clients reach a group at {@code 127.0.0.1:<Port>} only while its proxy holds that Port:
+     * every endpoint hostname resolves to the one loopback address there, so of the groups sharing
+     * a Port the first one created holds it and the others are served on their proxy port.
+     */
+    private void routeEndpoint(ReplicationGroup group, ElastiCacheContainerHandle handle) {
+        if (containerEndpoints == null) {
+            return;
+        }
+        String groupId = group.getReplicationGroupId();
+        Endpoint endpoint = group.getConfigurationEndpoint();
+        String hostname = endpoint != null && isRoutableHostname(endpoint.address()) ? endpoint.address() : null;
+        try {
+            withdrawProxyPort(groupId);
+            if (handle == null || endpoint == null) {
+                containerEndpoints.release(hostname);
+                return;
+            }
+            int endpointPort = endpoint.port();
+            if (hostname != null && group.getAuthMode() == AuthMode.NO_AUTH && handle.getNetworkIp() != null
+                    && enginePortOf(group) == endpointPort) {
+                containerEndpoints.routeToContainer(hostname, handle.getNetworkIp());
+                return;
+            }
+            if (group.getProxyPort() == endpointPort) {
+                containerEndpoints.release(hostname);
+                containerEndpoints.publishHostPort(group.getProxyPort());
+                publishedProxyPorts.put(groupId, group.getProxyPort());
+                return;
+            }
+            // A configured IP literal is every group's address, so it cannot be relayed per group.
+            if (hostname == null) {
+                return;
+            }
+            if (!containerEndpoints.relayToFloci(hostname, endpointPort, group.getProxyPort())) {
+                containerEndpoints.release(hostname);
+            }
+        } catch (RuntimeException e) {
+            // Never hand the name to whatever else listens on the Port: that is another group.
+            try {
+                containerEndpoints.refuse(hostname);
+            } catch (RuntimeException refuseFailure) {
+                e.addSuppressed(refuseFailure);
+            }
+            LOG.warnv("Replication group {0} is not reachable from containers on {1}:{2}: {3}", groupId,
+                    hostname, endpoint == null ? "" : String.valueOf(endpoint.port()), e.getMessage());
+        }
+    }
+
+    private void unrouteEndpoint(ReplicationGroup group) {
+        if (containerEndpoints == null) {
+            return;
+        }
+        withdrawProxyPort(group.getReplicationGroupId());
+        Endpoint endpoint = group.getConfigurationEndpoint();
+        if (endpoint != null && isRoutableHostname(endpoint.address())) {
+            containerEndpoints.release(endpoint.address());
+        }
+    }
+
+    private void withdrawProxyPort(String groupId) {
+        Integer published = publishedProxyPorts.remove(groupId);
+        if (published != null) {
+            containerEndpoints.withdrawHostPort(published);
+        }
+    }
+
+    /** A per-group name; a configured IP literal is shared by every group and is never routed. */
+    private static boolean isRoutableHostname(String address) {
+        return address != null && !address.matches("(?:\\d{1,3}\\.){3}\\d{1,3}")
+                && !"localhost".equalsIgnoreCase(address);
+    }
+
+    /** The Port a cluster-mode-disabled group's endpoint reports and serves: its engine's. */
+    private int endpointPortOf(ReplicationGroup group) {
+        return enginePortOf(group);
     }
 
     /** The port the group's engine listens on; records predating it used the proxy port. */
@@ -937,6 +1079,7 @@ public class ElastiCacheService implements ResourceProvider {
                     stopClusterNode(node);
                 }
             } else {
+                unrouteEndpoint(group);
                 proxyManager.stopProxy(groupId);
 
                 if (group.getContainerId() != null) {
@@ -1454,10 +1597,8 @@ public class ElastiCacheService implements ResourceProvider {
         return normalized;
     }
 
+    /** The host cluster-mode nodes announce: their endpoints are the per-node proxies on Floci's address. */
     private String resolveEndpointHost() {
-        // Host clients talk to the TCP proxy on localhost. When Floci itself
-        // runs in Docker, endpointFor() returns the cache container address
-        // instead so Lambda-in-Docker can reach it on the shared network.
         return config.hostname().orElse("localhost");
     }
 
@@ -1483,8 +1624,8 @@ public class ElastiCacheService implements ResourceProvider {
      * of the replication group accepts connections"), so a caller that pins one and reads back a
      * different value sees permanent drift: Terraform treats the port as replacement-forcing.
      *
-     * <p>This path serves groups whose endpoint is the proxy itself: Floci on the host, and
-     * cluster-mode groups, which announce proxy ports. An explicit port is therefore either
+     * <p>This path serves groups whose endpoint is the proxy itself: cluster-mode groups, which
+     * announce proxy ports. An explicit port is therefore either
      * honored or refused, never quietly changed. Substituting one reproduces the very drift
      * honoring it was meant to remove, and the substitution could only ever hit a caller who did
      * ask for a port: one who does not care passes null and never reaches that branch. Those
@@ -1531,9 +1672,11 @@ public class ElastiCacheService implements ResourceProvider {
     }
 
     /**
-     * A host-proxy port for a group whose endpoint is its own container: the group's Port when
-     * that is free and in the proxy range, so host access keeps the familiar port, otherwise any
-     * free port. The group's Port does not depend on which one the proxy gets.
+     * A host-proxy port for a cache whose endpoint is served by its own engine: the cache's Port
+     * when no other proxy holds it and this host can serve it there, so host access keeps the
+     * familiar port, otherwise a free port of the range. The cache's Port does not depend on
+     * which one the proxy gets. With Floci on the host its proxies can listen on any port; in
+     * Docker only the range is published, so the Port is taken only when it falls inside it.
      */
     private int allocateProxyPortPreferring(int preferred) {
         int base = config.services().elasticache().proxyBasePort();
@@ -1542,6 +1685,14 @@ public class ElastiCacheService implements ResourceProvider {
             return preferred;
         }
         return allocateProxyPort(null);
+    }
+
+    public int allocateHostProxyPort(int preferred) {
+        boolean onHost = containerDetector == null || !containerDetector.isRunningInContainer();
+        if (onHost && preferred > 0 && usedPorts.add(preferred)) {
+            return preferred;
+        }
+        return allocateProxyPortPreferring(preferred);
     }
 
     public void releaseProxyPort(int port) {

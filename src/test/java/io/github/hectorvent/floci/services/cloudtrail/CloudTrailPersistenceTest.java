@@ -14,6 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,7 +27,7 @@ class CloudTrailPersistenceTest {
     @Test
     void historyLakeMetadataAndCollectedEventsSurviveReconstruction(@TempDir Path directory) {
         StorageFactory first = factory(directory);
-        CloudTrailLakeService lake = new CloudTrailLakeService(first, regions, mapper);
+        CloudTrailLakeService lake = lake(first);
         CloudTrailEventService events = events(first, lake);
         ObjectNode created = lake.handle("CreateEventDataStore", mapper.createObjectNode()
                 .put("Name", "persistent-lake").put("RetentionPeriod", 7)
@@ -41,7 +42,7 @@ class CloudTrailPersistenceTest {
 
         StorageFactory second = factory(directory);
         try {
-            CloudTrailLakeService restoredLake = new CloudTrailLakeService(second, regions, mapper);
+            CloudTrailLakeService restoredLake = lake(second);
             CloudTrailEventService restoredEvents = events(second, restoredLake);
             ObjectNode observed = restoredLake.handle("GetEventDataStore", request, "us-east-1");
             assertEquals("persistent-lake", observed.path("Name").asText());
@@ -65,7 +66,7 @@ class CloudTrailPersistenceTest {
         }
         StorageFactory third = factory(directory);
         try {
-            CloudTrailLakeService deletedLake = new CloudTrailLakeService(third, regions, mapper);
+            CloudTrailLakeService deletedLake = lake(third);
             assertEquals("PENDING_DELETION", deletedLake.handle("GetEventDataStore", request, "us-east-1")
                     .path("Status").asText());
             deletedLake.handle("RestoreEventDataStore", request, "us-east-1");
@@ -83,12 +84,16 @@ class CloudTrailPersistenceTest {
                     new TypeReference<Map<String, ObjectNode>>() {});
             history.put("us-east-1:expired", mapper.createObjectNode().put("eventID", "expired")
                     .put("eventTime", Instant.now().minusSeconds(91L * 86400).toString()));
-            CloudTrailLakeService lake = new CloudTrailLakeService(factory, regions, mapper);
+            CloudTrailLakeService lake = lake(factory);
             assertTrue(events(factory, lake).lookup(mapper.createObjectNode(), "us-east-1").path("Events").isEmpty());
             assertTrue(history.keys().isEmpty());
         } finally {
             factory.shutdownAll();
         }
+    }
+
+    private CloudTrailLakeService lake(StorageFactory factory) {
+        return new CloudTrailLakeService(factory, regions, mapper, sql -> List.of(), Runnable::run);
     }
 
     private CloudTrailEventService events(StorageFactory factory, CloudTrailLakeService lake) {

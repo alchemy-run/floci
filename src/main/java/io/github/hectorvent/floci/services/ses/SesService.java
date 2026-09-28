@@ -279,7 +279,7 @@ public class SesService {
             additionalHeaders = additionalHeaders.stream().filter(MessageHeader::isSafe).toList();
         }
 
-        String messageId = UUID.randomUUID().toString();
+        String messageId = SesMessageIds.newMessageId();
         String effectiveReturnPath = firstNonBlank(returnPath, source);
         // SES accepts the message and then rejects it as a whole when the content scan trips, so
         // the send still succeeds and a REJECT event is published in place of any delivery.
@@ -387,7 +387,7 @@ public class SesService {
                         SesService::extractEmailAddress)
                 .forEach(suppressedReasons::putIfAbsent);
 
-        String messageId = UUID.randomUUID().toString();
+        String messageId = SesMessageIds.newMessageId();
         // The scan walks the decoded MIME, so a base64 attachment does not hide the content, and a
         // message the parser cannot read is refused outright rather than stored and relayed unseen.
         SesContentScan.Result scan = SesContentScan.scan(parsed.bytes(), parsed.message());
@@ -717,7 +717,7 @@ public class SesService {
         String body = template.getTemplateContent() == null ? "" : template.getTemplateContent();
         String renderedHtml = body + "<p>" + CUSTOM_VERIFICATION_DISCLAIMER + "</p>";
 
-        String messageId = UUID.randomUUID().toString();
+        String messageId = SesMessageIds.newMessageId();
         SentEmail email = new SentEmail(messageId, region, template.getFromEmailAddress(),
                 List.of(emailAddress), List.of(), List.of(), List.of(),
                 template.getTemplateSubject(), null, renderedHtml);
@@ -1734,7 +1734,7 @@ public class SesService {
             throw new AwsException("MessageRejected",
                     "Failed to generate a bounce for " + originalMessageId, 400);
         }
-        String bounceId = UUID.randomUUID().toString();
+        String bounceId = SesMessageIds.newMessageId();
         SentEmail bounce = new SentEmail(bounceId, region, sender,
                 List.of(), List.of(), List.of(), List.of(), "Bounce", "bounce", null);
         sentEmailService.record(region, bounceId, bounce);

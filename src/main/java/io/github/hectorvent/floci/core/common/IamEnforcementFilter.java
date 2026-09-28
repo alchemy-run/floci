@@ -50,7 +50,7 @@ import java.util.regex.Pattern;
  *
  * <p>Global {@code floci.services.iam.enforcement-enabled} stays off by default.
  * Assumed-role sessions (Lambda execution-role credentials) are still evaluated
- * for the explicitly modeled SES, KMS, EMR Serverless, GuardDuty, and Inspector2 actions
+ * for the explicitly modeled SES, KMS, Secrets Manager, EMR Serverless, GuardDuty, and Inspector2 actions
  * so scoped-IAM denial tests can observe {@code AccessDenied} without turning on
  * evaluation for every JSON 1.1 / Query operation.
  *

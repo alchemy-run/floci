@@ -24,10 +24,12 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -221,10 +223,78 @@ public class ApsController {
         return Response.status(202).build();
     }
 
+    @POST
+    @Path("/scrapers")
+    public Response createScraper(@Context HttpHeaders headers, Map<String, Object> request) {
+        return Response.status(202).entity(service.createScraper(regionResolver.resolveRegion(headers), request)).build();
+    }
+
+    @GET
+    @Path("/scrapers")
+    public Response listScrapers(@Context HttpHeaders headers, @Context UriInfo uriInfo,
+                                 @QueryParam("maxResults") String maxResultsParam,
+                                 @QueryParam("nextToken") String nextToken) {
+        // ListScrapers binds every other query parameter to its filters map (httpQueryParams).
+        Map<String, List<String>> filters = new HashMap<>();
+        uriInfo.getQueryParameters().forEach((name, values) -> {
+            if (!"maxResults".equals(name) && !"nextToken".equals(name)) {
+                filters.put(name, values);
+            }
+        });
+        PaginatedResult<ObjectNode> result = service.listScrapers(regionResolver.resolveRegion(headers), filters,
+                Pagination.parseMaxResults(maxResultsParam, "ValidationException"), nextToken);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("scrapers", objectMapper.valueToTree(result.items()));
+        if (result.nextToken() != null) {
+            response.put("nextToken", result.nextToken());
+        }
+        return Response.ok(response).build();
+    }
+
     @GET
     @Path("/scrapers/{scraperId}")
     public Response describeScraper(@Context HttpHeaders headers, @PathParam("scraperId") String scraperId) {
         return Response.ok(Map.of("scraper", service.describeScraper(regionResolver.resolveRegion(headers), scraperId))).build();
+    }
+
+    @PUT
+    @Path("/scrapers/{scraperId}")
+    public Response updateScraper(@Context HttpHeaders headers, @PathParam("scraperId") String scraperId,
+                                  Map<String, Object> request) {
+        return Response.status(202).entity(service.updateScraper(regionResolver.resolveRegion(headers),
+                scraperId, request)).build();
+    }
+
+    @DELETE
+    @Path("/scrapers/{scraperId}")
+    public Response deleteScraper(@Context HttpHeaders headers, @PathParam("scraperId") String scraperId) {
+        return Response.status(202).entity(service.deleteScraper(regionResolver.resolveRegion(headers), scraperId))
+                .build();
+    }
+
+    @GET
+    @Path("/scrapers/{scraperId}/logging-configuration")
+    public Response describeScraperLoggingConfiguration(@Context HttpHeaders headers,
+                                                        @PathParam("scraperId") String scraperId) {
+        return Response.ok(service.describeScraperLoggingConfiguration(regionResolver.resolveRegion(headers),
+                scraperId)).build();
+    }
+
+    @PUT
+    @Path("/scrapers/{scraperId}/logging-configuration")
+    public Response updateScraperLoggingConfiguration(@Context HttpHeaders headers,
+                                                      @PathParam("scraperId") String scraperId,
+                                                      Map<String, Object> request) {
+        return Response.status(202).entity(service.updateScraperLoggingConfiguration(
+                regionResolver.resolveRegion(headers), scraperId, request)).build();
+    }
+
+    @DELETE
+    @Path("/scrapers/{scraperId}/logging-configuration")
+    public Response deleteScraperLoggingConfiguration(@Context HttpHeaders headers,
+                                                      @PathParam("scraperId") String scraperId) {
+        service.deleteScraperLoggingConfiguration(regionResolver.resolveRegion(headers), scraperId);
+        return Response.status(202).build();
     }
 
     @GET

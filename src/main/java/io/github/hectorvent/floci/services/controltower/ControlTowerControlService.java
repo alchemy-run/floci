@@ -126,6 +126,63 @@ public class ControlTowerControlService {
         return operationId;
     }
 
+    /**
+     * Disables a control, identified either by its enabled-control ARN or by the
+     * control and target pair, and records a completed {@code DISABLE_CONTROL} operation.
+     */
+    public synchronized String disable(String accountId, String region, JsonNode request) {
+        requireObject(request);
+        String enabledControlIdentifier = optionalArn(request, "enabledControlIdentifier");
+        String controlIdentifier = optionalArn(request, "controlIdentifier");
+        String targetIdentifier = optionalArn(request, "targetIdentifier");
+        EnabledControl control;
+        if (enabledControlIdentifier != null) {
+            if (controlIdentifier != null || targetIdentifier != null) {
+                throw validation("Specify either enabledControlIdentifier or controlIdentifier and targetIdentifier.");
+            }
+            control = get(region, enabledControlIdentifier);
+        } else {
+            if (controlIdentifier == null || targetIdentifier == null) {
+                throw validation("enabledControlIdentifier, or controlIdentifier and targetIdentifier, are required.");
+            }
+            control = controls.get(key(region, targetIdentifier, controlIdentifier))
+                    .orElseThrow(() -> notFound("The request references an enabled control that does not exist."));
+        }
+        controls.delete(key(region, control.getTargetIdentifier(), control.getControlIdentifier()));
+        String operationId = UUID.randomUUID().toString();
+        record(accountId, region, operationId, "DISABLE_CONTROL", control);
+        return operationId;
+    }
+
+    public synchronized Map<String, String> listTags(String region, String arn) {
+        Map<String, String> tags = get(region, arn).getTags();
+        return tags == null ? Map.of() : new LinkedHashMap<>(tags);
+    }
+
+    public synchronized void tagResource(String region, String arn, Map<String, String> tags) {
+        EnabledControl control = get(region, arn);
+        tags.forEach((key, value) -> {
+            if (key == null || key.isBlank() || key.length() > 128 || value == null || value.length() > 256) {
+                throw validation("tags contain an invalid key or value.");
+            }
+        });
+        Map<String, String> merged = new LinkedHashMap<>(control.getTags() == null ? Map.of() : control.getTags());
+        merged.putAll(tags);
+        if (merged.size() > 200) {
+            throw validation("A resource can have at most 200 tags.");
+        }
+        control.setTags(merged);
+        controls.put(key(region, control.getTargetIdentifier(), control.getControlIdentifier()), control);
+    }
+
+    public synchronized void untagResource(String region, String arn, List<String> tagKeys) {
+        EnabledControl control = get(region, arn);
+        Map<String, String> remaining = new LinkedHashMap<>(control.getTags() == null ? Map.of() : control.getTags());
+        tagKeys.forEach(remaining::remove);
+        control.setTags(remaining);
+        controls.put(key(region, control.getTargetIdentifier(), control.getControlIdentifier()), control);
+    }
+
     public synchronized ControlOperation operation(String accountId, String region, String operationIdentifier) {
         if (operationIdentifier == null || !operationIdentifier.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")) {
             throw validation("operationIdentifier must be a UUID.");

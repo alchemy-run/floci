@@ -14,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -21,24 +22,41 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
-/** A private DNS/TLS bridge for a source-mode process; never publishes or claims a host port. */
+/**
+ * A private DNS/TLS bridge for a source-mode process; never publishes or claims a host port.
+ *
+ * <p>Besides DNS, HTTPS and the gateway port, it relays any port a Floci listener serves an
+ * advertised endpoint on ({@link #forwardPort}), so a container that resolves that endpoint's
+ * hostname to this helper reaches the listener on the host, on the port the endpoint names.
+ */
 @ApplicationScoped
 public class SourceNetworkHelper {
 
+    private static final Logger LOG = Logger.getLogger(SourceNetworkHelper.class);
     static final String DEFAULT_IMAGE = "floci/source-network-helper:local";
     static final String HOST_GATEWAY = "host.docker.internal";
+    private static final Pattern PID = Pattern.compile("\\d+");
     private final EmulatorConfig config;
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
+    /** Ports relayed to the host and how many listeners asked for each. */
+    private final Map<Integer, Integer> forwardedPorts = new HashMap<>();
+    /** The helper-side relay process of each forwarded port. */
+    private final Map<Integer, String> forwarderPids = new HashMap<>();
     private String containerId;
+
+    private record ExecOutput(long exitCode, String stdout, String stderr) {}
 
     @Inject
     public SourceNetworkHelper(EmulatorConfig config, ContainerBuilder containerBuilder,
@@ -85,6 +103,9 @@ public class SourceNetworkHelper {
             }
             String address = EmbeddedDnsServer.requireBridgeAddress(endpoint.getIpAddress());
             awaitListeners();
+            for (int port : new ArrayList<>(forwardedPorts.keySet())) {
+                startForwarder(port);
+            }
             return address;
         } catch (RuntimeException failure) {
             try {
@@ -113,6 +134,123 @@ public class SourceNetworkHelper {
                 + "socat TCP4-LISTEN:" + gatewayPort + ",reuseaddr,fork TCP4:" + HOST_GATEWAY + ":" + gatewayPort + " &\ngateway_pid=$!\n"
                 // PID 1 also reaps exec-probe watchdogs; only listener exits stop the relay.
                 + "wait -n \"$dns_pid\" \"$tls_pid\" \"$gateway_pid\"\nexit 1\n";
+    }
+
+    /**
+     * Relays TCP connections to {@code port} on the helper's address to the same port on the
+     * host. Each call must be paired with one {@link #releaseForwardedPort}; the relay runs while
+     * any caller holds the port. Ports the helper already serves (443 and the gateway port) are
+     * left alone. A port asked for before the helper starts is relayed once it has.
+     */
+    public synchronized void forwardPort(int port) {
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Not a TCP port: " + port);
+        }
+        if (isBuiltInListener(port)) {
+            return;
+        }
+        int holders = forwardedPorts.merge(port, 1, Integer::sum);
+        if (holders == 1 && containerId != null) {
+            startForwarder(port);
+        }
+    }
+
+    /** Releases one {@link #forwardPort} hold, stopping the relay with the last one. */
+    public synchronized void releaseForwardedPort(int port) {
+        Integer holders = forwardedPorts.get(port);
+        if (holders == null) {
+            return;
+        }
+        if (holders > 1) {
+            forwardedPorts.put(port, holders - 1);
+            return;
+        }
+        forwardedPorts.remove(port);
+        String pid = forwarderPids.remove(port);
+        if (pid == null || containerId == null) {
+            return;
+        }
+        try {
+            ExecOutput output = exec("kill " + pid + " 2>/dev/null || true");
+            if (output.exitCode() != 0) {
+                LOG.warnv("Source network helper could not stop the relay for port {0}: {1}",
+                        String.valueOf(port), output.stderr());
+            }
+        } catch (RuntimeException e) {
+            LOG.warnv("Source network helper could not stop the relay for port {0}: {1}",
+                    String.valueOf(port), e.getMessage());
+        }
+    }
+
+    /** Ports currently relayed to the host, for diagnostics and tests. */
+    synchronized Set<Integer> forwardedPorts() {
+        return Set.copyOf(forwardedPorts.keySet());
+    }
+
+    private boolean isBuiltInListener(int port) {
+        return port == 443 || port == config.port();
+    }
+
+    /**
+     * Starts the helper-side relay for {@code port}. A relay that cannot start is logged rather
+     * than thrown: the resource behind it exists either way, and only its container-side
+     * reachability is missing, which a client then observes as a refused connection.
+     */
+    private void startForwarder(int port) {
+        try {
+            ExecOutput output = exec(forwarderScript(port));
+            String pid = output.stdout().trim();
+            if (output.exitCode() != 0 || !PID.matcher(pid).matches()) {
+                LOG.warnv("Source network helper could not relay port {0} to the host (exit {1}): {2}",
+                        String.valueOf(port), String.valueOf(output.exitCode()), output.stderr());
+                return;
+            }
+            forwarderPids.put(port, pid);
+            LOG.infov("Source network helper relays container port {0} to the host", String.valueOf(port));
+        } catch (RuntimeException e) {
+            LOG.warnv("Source network helper could not relay port {0} to the host: {1}",
+                    String.valueOf(port), e.getMessage());
+        }
+    }
+
+    /** Starts one relay in the background, waits for its listener and prints its pid. */
+    static String forwarderScript(int port) {
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Not a TCP port: " + port);
+        }
+        return "set -u\n"
+                + "socat TCP4-LISTEN:" + port + ",reuseaddr,fork TCP4:" + HOST_GATEWAY + ":" + port
+                + " </dev/null >/dev/null 2>&1 &\n"
+                + "pid=$!\n"
+                + "for attempt in $(seq 1 50); do\n"
+                + "  if [ -n \"$(ss -H -ltn 'sport = :" + port + "')\" ]; then echo \"$pid\"; exit 0; fi\n"
+                + "  if ! kill -0 \"$pid\" 2>/dev/null; then echo 'relay exited' >&2; exit 1; fi\n"
+                + "  sleep 0.1\n"
+                + "done\n"
+                + "kill \"$pid\" 2>/dev/null || true\n"
+                + "echo 'relay did not listen' >&2\n"
+                + "exit 1\n";
+    }
+
+    private ExecOutput exec(String script) {
+        DockerClient docker = lifecycleManager.getDockerClient();
+        String execId = docker.execCreateCmd(containerId).withCmd("sh", "-c", script)
+                .withAttachStdout(true).withAttachStderr(true).exec().getId();
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        try (ExecStartResultCallback callback = new ExecStartResultCallback(stdout, stderr)) {
+            if (!docker.execStartCmd(execId).exec(callback).awaitCompletion(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Source network helper command timed out");
+            }
+            Long exitCode = docker.inspectExecCmd(execId).exec().getExitCodeLong();
+            return new ExecOutput(exitCode == null ? -1 : exitCode,
+                    stdout.toString(StandardCharsets.UTF_8), stderr.toString(StandardCharsets.UTF_8));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted running a source network helper command", e);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot run a source network helper command", e);
+        }
     }
 
     private void awaitListeners() {
@@ -230,7 +368,7 @@ public class SourceNetworkHelper {
         }
     }
 
-    private void ensureImage() {
+    synchronized void ensureImage() {
         if (!DEFAULT_IMAGE.equals(config.dns().sourceHelperImage())) {
             return;
         }
@@ -272,6 +410,7 @@ public class SourceNetworkHelper {
         if (containerId != null) {
             lifecycleManager.stopAndRemoveStrict(containerId, null);
             containerId = null;
+            forwarderPids.clear();
         }
     }
 }

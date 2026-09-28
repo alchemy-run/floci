@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.inspector2;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
@@ -244,17 +245,58 @@ public class Inspector2Controller {
     @Path("/enable")
     public Response enable(@Context HttpHeaders headers, String body) {
         JsonNode request = parse(body);
-        var enabled = service.enable(region(headers), requestContext.getAccountId(), request);
-        var response = objectMapper.createObjectNode();
-        var accounts = response.putArray("accounts");
-        enabled.forEach((accountId, state) -> {
-            var account = accounts.addObject();
+        return Response.ok(statusChangeResponse(
+                service.enable(region(headers), requestContext.getAccountId(), request))).build();
+    }
+
+    @POST
+    @Path("/disable")
+    public Response disable(@Context HttpHeaders headers, String body) {
+        JsonNode request = parse(body);
+        return Response.ok(statusChangeResponse(
+                service.disable(region(headers), requestContext.getAccountId(), request))).build();
+    }
+
+    @POST
+    @Path("/cis/scan-configuration/create")
+    public Response createCisScanConfiguration(@Context HttpHeaders headers, String body) {
+        String arn = service.createCisScanConfiguration(region(headers), requestContext.getAccountId(), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("scanConfigurationArn", arn)).build();
+    }
+
+    @POST
+    @Path("/cis/scan-configuration/update")
+    public Response updateCisScanConfiguration(@Context HttpHeaders headers, String body) {
+        String arn = service.updateCisScanConfiguration(region(headers), requestContext.getAccountId(), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("scanConfigurationArn", arn)).build();
+    }
+
+    @POST
+    @Path("/cis/scan-configuration/delete")
+    public Response deleteCisScanConfiguration(@Context HttpHeaders headers, String body) {
+        String arn = service.deleteCisScanConfiguration(region(headers), requestContext.getAccountId(), parse(body));
+        return Response.ok(objectMapper.createObjectNode().put("scanConfigurationArn", arn)).build();
+    }
+
+    private ObjectNode statusChangeResponse(Inspector2Service.StatusChange change) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode accounts = response.putArray("accounts");
+        change.accounts().forEach((accountId, state) -> {
+            ObjectNode account = accounts.addObject();
             account.put("accountId", accountId);
             account.put("status", state.getStatus());
             account.set("resourceStatus", resourceStatus(state));
         });
-        response.putArray("failedAccounts");
-        return Response.ok(response).build();
+        ArrayNode failedAccounts = response.putArray("failedAccounts");
+        for (Inspector2Service.FailedAccount failure : change.failedAccounts()) {
+            ObjectNode account = failedAccounts.addObject();
+            account.put("accountId", failure.accountId());
+            account.put("status", failure.state().getStatus());
+            account.set("resourceStatus", resourceStatus(failure.state()));
+            account.put("errorCode", failure.errorCode());
+            account.put("errorMessage", failure.errorMessage());
+        }
+        return response;
     }
 
     @POST

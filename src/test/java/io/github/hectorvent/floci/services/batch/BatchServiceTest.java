@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -1424,6 +1425,89 @@ class BatchServiceTest {
         AwsException env = assertThrows(AwsException.class, () ->
                 service.updateComputeEnvironment(json("{\"computeEnvironment\":\"missing-ce\"}")));
         assertTrue(env.getMessage().matches("compute-environment/.* does not exist"));
+    }
+
+    @Test
+    void runtimePlatformRoundTripsFromJobDefinitionToJob() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<>());
+        String queueArn = createQueue(service, "platform-ce", "platform-queue");
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"platform-job",
+                  "type":"container",
+                  "platformCapabilities":["FARGATE"],
+                  "containerProperties":{
+                    "image":"public.ecr.aws/example/job:latest",
+                    "runtimePlatform":{"cpuArchitecture":"ARM64","operatingSystemFamily":"LINUX"}
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        JsonNode definition = service.describeJobDefinitions(json("""
+                {"jobDefinitions":["%s"]}
+                """.formatted(definitionArn))).path("jobDefinitions").get(0);
+        JsonNode definitionPlatform = definition.path("containerProperties").path("runtimePlatform");
+        assertEquals("ARM64", definitionPlatform.path("cpuArchitecture").asText());
+        assertEquals("LINUX", definitionPlatform.path("operatingSystemFamily").asText());
+
+        String jobId = service.submitJob(json("""
+                {"jobName":"platform-submit","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+        JsonNode job = service.describeJobs(json("{\"jobs\":[\"%s\"]}".formatted(jobId))).path("jobs").get(0);
+        assertEquals("ARM64", job.path("container").path("runtimePlatform").path("cpuArchitecture").asText());
+    }
+
+    @Test
+    void dockerRunnerReceivesJobDefinitionRuntimePlatform() throws Exception {
+        BatchDockerRunner runner = mock(BatchDockerRunner.class);
+        when(runner.run(any(BatchJob.class), anyInt()))
+                .thenReturn(new BatchRunResult(0, null, "log-1", 1L, 2L, false));
+        BatchService service = dockerService(runner);
+        String computeArn = service.createComputeEnvironment(json("""
+                {"computeEnvironmentName":"docker-platform-ce","type":"MANAGED"}
+                """), REGION).path("computeEnvironmentArn").asText();
+        String queueArn = service.createJobQueue(json("""
+                {
+                  "jobQueueName":"docker-platform-queue",
+                  "priority":1,
+                  "computeEnvironmentOrder":[{"order":1,"computeEnvironment":"%s"}]
+                }
+                """.formatted(computeArn)), REGION).path("jobQueueArn").asText();
+        String definitionArn = service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"docker-platform-job",
+                  "type":"container",
+                  "containerProperties":{
+                    "image":"public.ecr.aws/example/job:latest",
+                    "runtimePlatform":{"cpuArchitecture":"ARM64"}
+                  }
+                }
+                """), REGION).path("jobDefinitionArn").asText();
+
+        String jobId = service.submitJob(json("""
+                {"jobName":"docker-platform-submit","jobQueue":"%s","jobDefinition":"%s"}
+                """.formatted(queueArn, definitionArn)), REGION).path("jobId").asText();
+
+        assertNotNull(waitForJobStatus(service, jobId, "SUCCEEDED"));
+        verify(runner).run(argThat((BatchJob submitted) -> submitted.getRuntimePlatform() != null
+                && "ARM64".equals(submitted.getRuntimePlatform().getCpuArchitecture())), anyInt());
+    }
+
+    @Test
+    void registerJobDefinitionRejectsUnknownCpuArchitecture() throws Exception {
+        BatchService service = immediateService(new InMemoryStorage<>());
+
+        AwsException error = assertThrows(AwsException.class, () -> service.registerJobDefinition(json("""
+                {
+                  "jobDefinitionName":"bad-platform-job",
+                  "type":"container",
+                  "containerProperties":{
+                    "image":"public.ecr.aws/example/job:latest",
+                    "runtimePlatform":{"cpuArchitecture":"SPARC"}
+                  }
+                }
+                """), REGION));
+        assertEquals("ClientException", error.getErrorCode());
     }
 
     @Test

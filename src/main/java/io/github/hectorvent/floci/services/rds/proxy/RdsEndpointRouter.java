@@ -13,6 +13,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -59,6 +60,7 @@ final class RdsEndpointRouter {
     private static final int TDS_PRELOGIN = 0x12;
     /** How long to wait for a client that speaks first before assuming a MySQL client. */
     private static final int SERVER_FIRST_PEEK_MILLIS = 1000;
+    private static final Duration ACCEPT_THREAD_STOP_TIMEOUT = Duration.ofSeconds(5);
 
     record Route(String key, Set<String> hostnames, int targetPort, DatabaseEngine engine) {}
 
@@ -181,6 +183,7 @@ final class RdsEndpointRouter {
         private final Map<String, Route> routes = new ConcurrentHashMap<>();
         private final Semaphore permits = new Semaphore(Math.max(1, maxConnections));
         private volatile ServerSocket serverSocket;
+        private volatile Thread acceptThread;
         private volatile boolean running;
 
         Listener(int port) {
@@ -198,13 +201,27 @@ final class RdsEndpointRouter {
             }
             serverSocket = socket;
             running = true;
-            Thread.ofVirtual().name("rds-endpoint-accept-" + port).start(this::acceptLoop);
+            acceptThread = Thread.ofVirtual().name("rds-endpoint-accept-" + port).start(this::acceptLoop);
             LOG.infov("RDS endpoint listener started on port {0}", String.valueOf(port));
         }
 
         void stop() {
             running = false;
             closeQuietly(serverSocket);
+            // Closing a socket a virtual thread is accepting on only wakes that thread; the
+            // descriptor is released when it leaves accept(). Wait for that so the port is free
+            // again (for the next listener on it) once stop() returns.
+            Thread thread = acceptThread;
+            if (thread != null && thread != Thread.currentThread()) {
+                try {
+                    if (!thread.join(ACCEPT_THREAD_STOP_TIMEOUT)) {
+                        LOG.warnv("RDS endpoint listener on port {0} did not stop within {1}",
+                                String.valueOf(port), ACCEPT_THREAD_STOP_TIMEOUT);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             LOG.infov("RDS endpoint listener stopped on port {0}", String.valueOf(port));
         }
 

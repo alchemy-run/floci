@@ -14,6 +14,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.notNullValue;
 
 /**
  * ListAccountsWithInvalidEffectivePolicy takes a required PolicyType drawn from the
@@ -187,5 +188,71 @@ class OrganizationsInvalidEffectivePolicyIntegrationTest {
         .then()
             .statusCode(403)
             .body("__type", equalTo("AccessDeniedException"));
+    }
+
+    /** Called on the management account for a policy type that is not enabled, AWS reports no
+     *  effective policy rather than an empty validation. */
+    @Test
+    @Order(11)
+    void listEffectivePolicyValidationErrorsRequiresTheEnabledPolicyType() {
+        organizations("ListEffectivePolicyValidationErrors",
+                "{\"AccountId\":\"" + MANAGEMENT_ACCOUNT + "\",\"PolicyType\":\"TAG_POLICY\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("EffectivePolicyNotFoundException"));
+    }
+
+    @Test
+    @Order(12)
+    void listEffectivePolicyValidationErrorsValidatesItsInput() {
+        organizations("ListEffectivePolicyValidationErrors",
+                "{\"AccountId\":\"" + MANAGEMENT_ACCOUNT + "\",\"PolicyType\":\"SERVICE_CONTROL_POLICY\"}")
+        .when().post("/")
+        .then().statusCode(400).body("__type", equalTo("InvalidInputException"));
+        organizations("ListEffectivePolicyValidationErrors", "{\"PolicyType\":\"TAG_POLICY\"}")
+        .when().post("/")
+        .then().statusCode(400).body("__type", equalTo("InvalidInputException"));
+        organizations("ListEffectivePolicyValidationErrors",
+                "{\"AccountId\":\"999999999999\",\"PolicyType\":\"TAG_POLICY\"}")
+        .when().post("/")
+        .then().statusCode(400).body("__type", equalTo("AccountNotFoundException"));
+        organizations("ListEffectivePolicyValidationErrors",
+                "{\"AccountId\":\"" + MANAGEMENT_ACCOUNT + "\",\"PolicyType\":\"TAG_POLICY\",\"MaxResults\":21}")
+        .when().post("/")
+        .then().statusCode(400).body("__type", equalTo("InvalidInputException"));
+        organizations(memberAccountId, "ListEffectivePolicyValidationErrors",
+                "{\"AccountId\":\"" + memberAccountId + "\",\"PolicyType\":\"TAG_POLICY\"}")
+        .when().post("/")
+        .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+    }
+
+    @Test
+    @Order(13)
+    void listEffectivePolicyValidationErrorsReportsTheAccountPath() {
+        String rootId = organizations("ListRoots", "{}")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().jsonPath().getString("Roots[0].Id");
+        String organizationId = organizations("DescribeOrganization", "{}")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().jsonPath().getString("Organization.Id");
+        organizations("EnablePolicyType", "{\"RootId\":\"" + rootId + "\",\"PolicyType\":\"TAG_POLICY\"}")
+        .when().post("/")
+        .then().statusCode(200);
+
+        organizations("ListEffectivePolicyValidationErrors",
+                "{\"AccountId\":\"" + memberAccountId + "\",\"PolicyType\":\"TAG_POLICY\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("AccountId", equalTo(memberAccountId))
+            .body("PolicyType", equalTo("TAG_POLICY"))
+            .body("Path", equalTo(organizationId + "/" + rootId + "/" + memberAccountId + "/"))
+            .body("EvaluationTimestamp", notNullValue())
+            .body("EffectivePolicyValidationErrors", empty());
     }
 }

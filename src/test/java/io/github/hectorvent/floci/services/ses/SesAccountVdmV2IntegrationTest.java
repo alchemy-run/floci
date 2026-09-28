@@ -128,6 +128,34 @@ class SesAccountVdmV2IntegrationTest {
                 .body("VdmAttributes.DashboardAttributes", nullValue())
                 .body("VdmAttributes.GuardianAttributes", nullValue());
     }
+
+    @Test
+    @Order(9)
+    void getMessageInsights_distinguishesMalformedFromUnknownIds() {
+        // Own region, so enabling VDM here cannot leak into the ordered cases above.
+        String auth = "AWS4-HMAC-SHA256 Credential=AKID/20260101/ap-southeast-2/ses/aws4_request";
+        given().contentType("application/json").header("Authorization", auth)
+                .body("{\"VdmAttributes\":{\"VdmEnabled\":\"ENABLED\"}}")
+        .when().put("/v2/email/account/vdm").then().statusCode(200);
+        try {
+            for (String malformed : new String[] {"not-a-message-id", "00000000-0000-0000-0000-000000000000"}) {
+                given().header("Authorization", auth)
+                .when().get("/v2/email/insights/" + malformed).then().statusCode(400)
+                        .body("__type", equalTo("BadRequestException"));
+            }
+            given().header("Authorization", auth)
+            .when().get("/v2/email/insights/0000000000000000-00000000-0000-0000-0000-000000000000-000000")
+                    .then().statusCode(404)
+                    .body("__type", equalTo("NotFoundException"));
+            given().header("Authorization", auth)
+            .when().get("/v2/email/insights/" + SesMessageIds.newMessageId()).then().statusCode(404)
+                    .body("__type", equalTo("NotFoundException"));
+        } finally {
+            given().contentType("application/json").header("Authorization", auth)
+                    .body("{\"VdmAttributes\":{\"VdmEnabled\":\"DISABLED\"}}")
+            .when().put("/v2/email/account/vdm").then().statusCode(200);
+        }
+    }
 }
 
 @QuarkusTest

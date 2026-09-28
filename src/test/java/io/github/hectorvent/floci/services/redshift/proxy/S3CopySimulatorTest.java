@@ -13,6 +13,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -56,12 +57,16 @@ class S3CopySimulatorTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        listener = new ServerSocket(0);
-        simClient = new Socket("localhost", listener.getLocalPort());
+        // Bound to and dialled on the loopback address itself: a wildcard listener shares its
+        // ephemeral port with anything bound to 127.0.0.1 alone, and "localhost" can reach that
+        // other listener instead, leaving accept() waiting forever.
+        InetAddress loopback = InetAddress.getLoopbackAddress();
+        listener = new ServerSocket(0, 1, loopback);
+        simClient = new Socket(loopback, listener.getLocalPort());
         testClient = listener.accept();
 
-        ServerSocket backendListener = new ServerSocket(0);
-        simBackend = new Socket("localhost", backendListener.getLocalPort());
+        ServerSocket backendListener = new ServerSocket(0, 1, loopback);
+        simBackend = new Socket(loopback, backendListener.getLocalPort());
         testBackend = backendListener.accept();
         backendListener.close();
 

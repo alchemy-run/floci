@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -53,6 +54,14 @@ public class EcrRegistryManager {
     private static final int REPOSITORY_DELETION_KILL_GRACE_SECONDS = 1;
     private static final String NAMED_VOLUME = "floci-ecr-registry-data";
     private static final String REPOSITORIES_PATH = "/var/lib/registry/docker/registry/v2/repositories/";
+    /**
+     * Marks a registry started without the in-memory blob descriptor cache. Repository
+     * deletion and garbage collection edit storage behind the registry process, and a
+     * cached descriptor keeps answering HEAD for blobs whose repository link is gone, so a
+     * recreated repository would report layers it never received.
+     */
+    static final String BLOB_CACHE_LABEL = "io.floci.ecr.blob-descriptor-cache";
+    static final String BLOB_CACHE_DISABLED = "disabled";
 
     /** Matches an AWS-shaped ECR image URI: {@code <account>.dkr.ecr.<region>.amazonaws.com/<repo>[:tag]}. */
     private static final java.util.regex.Pattern AWS_ECR_URI =
@@ -280,12 +289,15 @@ public class EcrRegistryManager {
         // Check for existing container to adopt
         var existing = lifecycleManager.findByName(name);
         if (existing.isPresent()) {
-            if (hasLoopbackBinding(existing.get())) {
+            boolean loopback = hasLoopbackBinding(existing.get());
+            boolean uncached = hasBlobCacheDisabled(existing.get());
+            if (loopback && uncached) {
                 adoptExisting(existing.get());
                 runReconcileOnce();
                 return;
             }
-            LOG.infov("Recreating ECR backing registry {0} with a loopback-only port binding", name);
+            LOG.infov("Recreating ECR backing registry {0} with {1}", name,
+                    loopback ? "its blob descriptor cache disabled" : "a loopback-only port binding");
             lifecycleManager.stopAndRemove(existing.get().getId(), null);
         }
 
@@ -301,7 +313,8 @@ public class EcrRegistryManager {
             List<String> env = new ArrayList<>(List.of(
                     "REGISTRY_STORAGE_DELETE_ENABLED=true",
                     "REGISTRY_HTTP_ADDR=0.0.0.0:" + CONTAINER_INTERNAL_PORT,
-                    "REGISTRY_HTTP_RELATIVEURLS=true"
+                    "REGISTRY_HTTP_RELATIVEURLS=true",
+                    "REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR=" + BLOB_CACHE_DISABLED
             ));
 
             // Build container spec
@@ -312,7 +325,8 @@ public class EcrRegistryManager {
                     .withDockerNetwork(resolveRegistryDockerNetwork())
                     .withLogRotation()
                     .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                            "ecr", null, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
+                            "ecr", null, regionResolver.getAccountId(), regionResolver.getDefaultRegion()))
+                    .withLabel(BLOB_CACHE_LABEL, BLOB_CACHE_DISABLED);
 
             // Handle persistence mounting based on storage configuration
             addPersistenceMounts(specBuilder, env);
@@ -635,6 +649,11 @@ public class EcrRegistryManager {
             }
         }
         return found;
+    }
+
+    private static boolean hasBlobCacheDisabled(Container container) {
+        Map<String, String> labels = container.getLabels();
+        return labels != null && BLOB_CACHE_DISABLED.equals(labels.get(BLOB_CACHE_LABEL));
     }
 
     private void ensureDataDir() {

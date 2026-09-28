@@ -33,6 +33,41 @@ class EmbeddedDnsServerTest {
     }
 
     @Test
+    void aRoutedEndpointHostnameIsAnsweredWithItsContainerAheadOfTheSuffixRule() {
+        String hostname = "master.cache-a.abc123.use1.cache.localhost.floci.io";
+        assertEquals(Optional.of("172.18.0.2"), dns.resolveARecord(hostname, "172.18.0.2"),
+                "Unrouted, the name is Floci's like every other name under the suffix");
+
+        dns.routeHost(hostname, "172.18.0.17");
+
+        assertEquals("172.18.0.17", dns.hostRoute(hostname).address());
+        assertEquals("172.18.0.17", dns.hostRoute(hostname.toUpperCase() + ".").address(),
+                "DNS names are case-insensitive and may be fully qualified");
+        assertNull(dns.hostRoute("master.cache-b.abc123.use1.cache.localhost.floci.io"),
+                "Only the routed name is affected");
+    }
+
+    @Test
+    void aRefusedEndpointHostnameHasNoAddressAndReleasingRestoresTheSuffixRule() {
+        String hostname = "master.secure.abc123.use1.cache.localhost.floci.io";
+
+        dns.refuseHost(hostname);
+        assertNotNull(dns.hostRoute(hostname));
+        assertNull(dns.hostRoute(hostname).address());
+
+        dns.releaseHost(hostname);
+        assertNull(dns.hostRoute(hostname));
+        assertEquals(Optional.of("172.18.0.2"), dns.resolveARecord(hostname, "172.18.0.2"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "cache.internal", "::1", "300.1.1.1", "10.0.0"})
+    void routedEndpointHostnamesNeedAnIpv4Address(String address) {
+        assertThrows(IllegalArgumentException.class,
+                () -> dns.routeHost("master.cache-a.abc123.use1.cache.localhost.floci.io", address));
+    }
+
+    @Test
     void sourceModeIsOptInAndDoesNotOpenAHostListenerByDefault() {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         Vertx vertx = mock(Vertx.class);

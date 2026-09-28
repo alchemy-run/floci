@@ -467,16 +467,18 @@ public class KinesisAnalyticsV2Service {
             throw new AwsException("InvalidArgumentException",
                     "Provided CreateTimestamp does not match application " + applicationName, 400);
         }
-        // AWS rejects deletion of a non-stopped application (RUNNING/STARTING) with
-        // ResourceInUseException; the caller must StopApplication first.
-        if (app.getApplicationStatus() != ApplicationStatus.READY) {
+        // AWS halts a READY/STARTING/RUNNING application's execution and deletes it; only an
+        // application already mid-transition (stopping, updating, deleting) is ResourceInUse.
+        ApplicationStatus status = app.getApplicationStatus();
+        if (status != ApplicationStatus.READY && status != ApplicationStatus.STARTING
+                && status != ApplicationStatus.RUNNING) {
             throw new AwsException("ResourceInUseException",
-                    "Application " + applicationName + " cannot be deleted while in state "
-                            + app.getApplicationStatus() + "; stop the application first", 400);
+                    "Application " + applicationName + " cannot be deleted while in state " + status, 400);
         }
         if (!config.services().kinesisAnalytics().mock()) {
-            // No-op for a READY app with no container; also clears any stale container left from a
-            // previous run (containerId is not persisted across an emulator restart).
+            // Force-stops a STARTING/RUNNING cluster without taking a snapshot. A no-op for a READY
+            // app with no container; also clears any stale container left from a previous run
+            // (containerId is not persisted across an emulator restart).
             containerManager.stopCluster(app);
             // Only on delete, never on a plain StopApplication (stopCluster above) — the savepoints
             // volume must survive a stop/restart cycle so snapshots remain describable/listable.

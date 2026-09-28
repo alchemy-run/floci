@@ -48,15 +48,18 @@ public class ElastiCacheQueryHandler {
     private final ElastiCacheService service;
     private final ElastiCacheMemcachedService memcachedService;
     private final RegionResolver regionResolver;
+    private final ElastiCacheServerlessQueryHandler serverlessHandler;
 
     @Inject
     public ElastiCacheQueryHandler(SigV4Validator sigV4Validator, ElastiCacheService service,
                                    ElastiCacheMemcachedService memcachedService,
-                                   RegionResolver regionResolver) {
+                                   RegionResolver regionResolver,
+                                   ElastiCacheServerlessQueryHandler serverlessHandler) {
         this.sigV4Validator = sigV4Validator;
         this.service = service;
         this.memcachedService = memcachedService;
         this.regionResolver = regionResolver;
+        this.serverlessHandler = serverlessHandler;
     }
 
     public Response handle(String action, MultivaluedMap<String, String> params) {
@@ -65,6 +68,10 @@ public class ElastiCacheQueryHandler {
 
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
         LOG.debugv("ElastiCache action: {0}", action);
+        // Serverless caches and snapshots, including tag actions on their ARNs.
+        if (serverlessHandler.handles(action, params)) {
+            return serverlessHandler.handle(action, params, region);
+        }
         return switch (action) {
             case "ValidateIamAuthToken"       -> handleValidateIamAuthToken(params);
             case "CreateReplicationGroup"     -> handleCreateReplicationGroup(params, region);
@@ -94,11 +101,6 @@ public class ElastiCacheQueryHandler {
             case "AddTagsToResource"          -> handleAddTagsToResource(params);
             case "RemoveTagsFromResource"     -> handleRemoveTagsFromResource(params);
             case "DescribeCacheParameterGroups" -> handleDescribeCacheParameterGroups(params);
-            case "DescribeServerlessCaches"   -> handleDescribeServerlessCaches(params);
-            case "DescribeServerlessCacheSnapshots" -> handleDescribeServerlessCacheSnapshots(params);
-            case "DeleteServerlessCacheSnapshot"    -> handleServerlessCacheSnapshotNotFound(params, "ServerlessCacheSnapshotName");
-            case "CopyServerlessCacheSnapshot"      -> handleServerlessCacheSnapshotNotFound(params, "SourceServerlessCacheSnapshotName");
-            case "ExportServerlessCacheSnapshot"    -> handleServerlessCacheSnapshotNotFound(params, "ServerlessCacheSnapshotName");
             case "DescribeEvents"             -> handleDescribeEvents(params);
             case "CreateCacheParameterGroup" -> handleCreateCacheParameterGroup(params);
             case "ModifyCacheParameterGroup" -> handleModifyCacheParameterGroup(params);
@@ -355,7 +357,8 @@ public class ElastiCacheQueryHandler {
         }
 
         try {
-            CacheCluster cluster = configureCacheCluster(memcachedService.createCacheCluster(clusterId), params);
+            CacheCluster cluster = configureCacheCluster(
+                    memcachedService.createCacheCluster(clusterId, intParam(params, "Port")), params);
             return Response.ok(AwsQueryResponse.envelope("CreateCacheCluster", AwsNamespaces.EC, cacheClusterXml(cluster))).build();
         } catch (AwsException e) {
             return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
@@ -813,46 +816,6 @@ public class ElastiCacheQueryHandler {
         } catch (AwsException e) {
             return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.EC, e.getHttpStatus());
         }
-    }
-
-    // ── Serverless caches (not modeled: the registry is always empty) ────────
-
-    private Response handleDescribeServerlessCaches(MultivaluedMap<String, String> params) {
-        String name = params.getFirst("ServerlessCacheName");
-        if (name != null && !name.isBlank()) {
-            return AwsQueryResponse.error("ServerlessCacheNotFoundFault",
-                    "Serverless cache " + name + " not found.", AwsNamespaces.EC, 404);
-        }
-        XmlBuilder xml = new XmlBuilder().start("ServerlessCaches").end("ServerlessCaches");
-        return Response.ok(AwsQueryResponse.envelope("DescribeServerlessCaches", AwsNamespaces.EC, xml.build())).build();
-    }
-
-    private Response handleDescribeServerlessCacheSnapshots(MultivaluedMap<String, String> params) {
-        String name = params.getFirst("ServerlessCacheSnapshotName");
-        if (name != null && !name.isBlank()) {
-            return serverlessCacheSnapshotNotFound(name);
-        }
-        String cacheName = params.getFirst("ServerlessCacheName");
-        if (cacheName != null && !cacheName.isBlank()) {
-            return AwsQueryResponse.error("ServerlessCacheNotFoundFault",
-                    "Serverless cache " + cacheName + " not found.", AwsNamespaces.EC, 404);
-        }
-        XmlBuilder xml = new XmlBuilder().start("ServerlessCacheSnapshots").end("ServerlessCacheSnapshots");
-        return Response.ok(AwsQueryResponse.envelope("DescribeServerlessCacheSnapshots", AwsNamespaces.EC, xml.build())).build();
-    }
-
-    private Response handleServerlessCacheSnapshotNotFound(MultivaluedMap<String, String> params, String nameParam) {
-        String name = params.getFirst(nameParam);
-        if (name == null || name.isBlank()) {
-            return AwsQueryResponse.error("InvalidParameterValue",
-                    nameParam + " is required.", AwsNamespaces.EC, 400);
-        }
-        return serverlessCacheSnapshotNotFound(name);
-    }
-
-    private static Response serverlessCacheSnapshotNotFound(String name) {
-        return AwsQueryResponse.error("ServerlessCacheSnapshotNotFoundFault",
-                "Serverless cache snapshot " + name + " not found.", AwsNamespaces.EC, 404);
     }
 
     private Response handleDescribeEvents(MultivaluedMap<String, String> params) {

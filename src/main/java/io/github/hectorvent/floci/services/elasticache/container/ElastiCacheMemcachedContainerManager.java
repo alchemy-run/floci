@@ -77,8 +77,16 @@ public class ElastiCacheMemcachedContainerManager {
      *         container was created
      */
     public ElastiCacheContainerHandle tryStart(String clusterId, String image) {
+        return tryStart(clusterId, image, BACKEND_PORT);
+    }
+
+    /**
+     * As {@link #tryStart(String, String)}, with Memcached listening on {@code backendPort} inside
+     * the container: the cluster's Port, which its endpoint reports and containers dial.
+     */
+    public ElastiCacheContainerHandle tryStart(String clusterId, String image, int backendPort) {
         try {
-            ElastiCacheContainerHandle handle = start(clusterId, image);
+            ElastiCacheContainerHandle handle = start(clusterId, image, backendPort);
             dockerUnavailableLogged = false;
             return handle;
         } catch (RuntimeException e) {
@@ -116,6 +124,10 @@ public class ElastiCacheMemcachedContainerManager {
     }
 
     public ElastiCacheContainerHandle start(String clusterId, String image) {
+        return start(clusterId, image, BACKEND_PORT);
+    }
+
+    private ElastiCacheContainerHandle start(String clusterId, String image, int backendPort) {
         LOG.infov("Starting Memcached container for cluster: {0}", clusterId);
 
         String containerName = ContainerStorageHelper.resourceName(config, "memcached", null, clusterId);
@@ -127,21 +139,32 @@ public class ElastiCacheMemcachedContainerManager {
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
                         "elasticache", clusterId, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
+        if (backendPort != BACKEND_PORT) {
+            // The image's entrypoint runs memcached with any arguments that start with a dash.
+            specBuilder.withCmd(List.of("-p", String.valueOf(backendPort)));
+        }
 
         if (!containerDetector.isRunningInContainer()) {
-            specBuilder.withDynamicPort(BACKEND_PORT);
+            specBuilder.withDynamicPort(backendPort);
         } else {
-            specBuilder.withExposedPort(BACKEND_PORT);
+            specBuilder.withExposedPort(backendPort);
         }
 
         ContainerSpec spec = specBuilder.build();
         ContainerInfo info = lifecycleManager.createAndStart(spec);
-        EndpointInfo endpoint = info.getEndpoint(BACKEND_PORT);
+        EndpointInfo endpoint = info.getEndpoint(backendPort);
 
         LOG.infov("Memcached backend for cluster {0}: {1}", clusterId, endpoint);
 
         ElastiCacheContainerHandle handle = new ElastiCacheContainerHandle(
                 info.containerId(), clusterId, endpoint.host(), endpoint.port());
+        try {
+            handle.setNetworkIp(lifecycleManager.resolveContainerNetworkIp(
+                    info.containerId(), config.services().elasticache().dockerNetwork().orElse(null)));
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not resolve network IP for Memcached container {0}: {1}",
+                    info.containerId(), e.getMessage());
+        }
         activeContainers.put(clusterId, handle);
 
         String shortId = info.containerId().length() >= 8

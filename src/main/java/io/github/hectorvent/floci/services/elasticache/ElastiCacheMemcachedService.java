@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.elasticache;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -31,6 +33,8 @@ public class ElastiCacheMemcachedService {
     private static final Logger LOG = Logger.getLogger(ElastiCacheMemcachedService.class);
     private static final String ENGINE = "memcached";
     private static final String ENGINE_VERSION = "1.6.22";
+    /** AWS's default Port for Memcached cache clusters. */
+    static final int DEFAULT_ENGINE_PORT = 11211;
 
     private final StorageBackend<String, CacheCluster> clusters;
     private final ElastiCacheMemcachedContainerManager containerManager;
@@ -39,7 +43,11 @@ public class ElastiCacheMemcachedService {
     private final EmulatorConfig config;
     private final DockerHostResolver dockerHostResolver;
     private final ContainerDetector containerDetector;
+    private final RegionResolver regionResolver;
+    private final ContainerEndpoints containerEndpoints;
     private final ConcurrentHashMap<String, Object> clusterLocks = new ConcurrentHashMap<>();
+    /** Proxy ports published to containers, by cache cluster. */
+    private final Map<String, Integer> publishedProxyPorts = new ConcurrentHashMap<>();
 
     @Inject
     public ElastiCacheMemcachedService(ElastiCacheMemcachedContainerManager containerManager,
@@ -48,7 +56,11 @@ public class ElastiCacheMemcachedService {
                                        StorageFactory storageFactory,
                                        EmulatorConfig config,
                                        DockerHostResolver dockerHostResolver,
-                                       ContainerDetector containerDetector) {
+                                       ContainerDetector containerDetector,
+                                       RegionResolver regionResolver,
+                                       ContainerEndpoints containerEndpoints) {
+        this.regionResolver = regionResolver;
+        this.containerEndpoints = containerEndpoints;
         this.containerManager = containerManager;
         this.proxyManager = proxyManager;
         this.elasticacheService = elasticacheService;
@@ -64,33 +76,68 @@ public class ElastiCacheMemcachedService {
                                        ElastiCacheService elasticacheService,
                                        StorageFactory storageFactory,
                                        EmulatorConfig config,
+                                       DockerHostResolver dockerHostResolver,
+                                       ContainerDetector containerDetector) {
+        // Floci's default account and region, for callers that construct the service directly.
+        this(containerManager, proxyManager, elasticacheService, storageFactory, config,
+                dockerHostResolver, containerDetector, new RegionResolver("us-east-1", "000000000000"), null);
+    }
+
+    public ElastiCacheMemcachedService(ElastiCacheMemcachedContainerManager containerManager,
+                                       ElastiCacheMemcachedProxyManager proxyManager,
+                                       ElastiCacheService elasticacheService,
+                                       StorageFactory storageFactory,
+                                       EmulatorConfig config,
                                        DockerHostResolver dockerHostResolver) {
         this(containerManager, proxyManager, elasticacheService, storageFactory, config,
                 dockerHostResolver, new ContainerDetector());
     }
 
     public CacheCluster createCacheCluster(String clusterId) {
+        return createCacheCluster(clusterId, null);
+    }
+
+    /**
+     * Creates a cluster whose Memcached container listens on {@code port}, 11211 when omitted as
+     * on AWS, behind its own AWS-shaped hostname that reports that Port. Every cluster's container
+     * has an address of its own, so any number of clusters use the same Port, and containers
+     * reach each by name. Host clients reach it through a relay on Floci's address, on the Port
+     * when no other cluster's relay holds it, otherwise on a free port of the proxy range.
+     */
+    public CacheCluster createCacheCluster(String clusterId, Integer port) {
         if (clusters.get(clusterId).isPresent()) {
             throw new AwsException("CacheClusterAlreadyExistsFault",
                     "Cache cluster " + clusterId + " already exists.", 400);
         }
+        if (port != null && (port < 1 || port > 65535)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Port must be between 1 and 65535.", 400);
+        }
+        int enginePort = port != null ? port : DEFAULT_ENGINE_PORT;
 
         String image = config.services().elasticache().defaultMemcachedImage();
-        LOG.infov("Creating Memcached cluster {0} with image {1}", clusterId, image);
+        LOG.infov("Creating Memcached cluster {0} with image {1} on port {2}", clusterId, image,
+                String.valueOf(enginePort));
 
-        int proxyPort = elasticacheService.allocateProxyPort();
+        int proxyPort = elasticacheService.allocateHostProxyPort(enginePort);
         ElastiCacheContainerHandle handle = null;
         try {
-            handle = containerManager.tryStart(clusterId, image);
+            handle = containerManager.tryStart(clusterId, image, enginePort);
             if (handle != null) {
-                proxyManager.startProxy(clusterId, proxyPort, handle.getHost(), handle.getPort());
+                proxyPort = startProxy(clusterId, proxyPort, enginePort, handle);
             }
 
-            Endpoint endpoint = endpointFor(handle, proxyPort);
+            String region = regionResolver.getRegion();
+            String accountId = regionResolver.getAccountId();
+            Endpoint endpoint = new Endpoint(ElastiCacheEndpoints.memcachedConfiguration(
+                    clusterId, accountId, region, config.hostname()), enginePort);
             CacheCluster cluster = new CacheCluster(
                     clusterId, CacheClusterStatus.AVAILABLE, ENGINE, ENGINE_VERSION,
                     endpoint, Instant.now());
             cluster.setProxyPort(proxyPort);
+            cluster.setEnginePort(enginePort);
+            cluster.setRegion(region);
+            cluster.setAccountId(accountId);
             if (handle != null) {
                 cluster.setContainerId(handle.getContainerId());
                 cluster.setContainerHost(handle.getHost());
@@ -98,15 +145,128 @@ public class ElastiCacheMemcachedService {
             }
 
             clusters.put(clusterId, cluster);
+            routeEndpoint(cluster, handle);
             LOG.infov("Memcached cluster {0} created, endpoint={1}:{2}",
                     clusterId, endpoint.address(), endpoint.port());
             return cluster;
         } catch (RuntimeException e) {
+            withdrawProxyPort(clusterId);
             proxyManager.stopProxy(clusterId);
             if (handle != null) containerManager.stop(handle);
             elasticacheService.releaseProxyPort(proxyPort);
             throw e;
         }
+    }
+
+    /**
+     * Starts the host relay, moving it to a free port of the range when the cluster's own Port
+     * is already taken on this machine (a local Memcached, say). The cluster's Port is its
+     * container's and does not depend on where the relay listens.
+     *
+     * @return the port the relay listens on
+     */
+    private int startProxy(String clusterId, int proxyPort, int enginePort, ElastiCacheContainerHandle handle) {
+        try {
+            proxyManager.startProxy(clusterId, proxyPort, handle.getHost(), handle.getPort());
+            return proxyPort;
+        } catch (RuntimeException e) {
+            if (proxyPort != enginePort) {
+                throw e;
+            }
+            int fallback = elasticacheService.allocateProxyPort();
+            elasticacheService.releaseProxyPort(proxyPort);
+            LOG.infov("Port {0} is not available on this host ({1}); Memcached cluster {2} keeps it as "
+                            + "its Port and serves host clients on {3}",
+                    String.valueOf(proxyPort), e.getMessage(), clusterId, String.valueOf(fallback));
+            try {
+                proxyManager.startProxy(clusterId, fallback, handle.getHost(), handle.getPort());
+            } catch (RuntimeException retryFailure) {
+                elasticacheService.releaseProxyPort(fallback);
+                retryFailure.addSuppressed(e);
+                throw retryFailure;
+            }
+            return fallback;
+        }
+    }
+
+    /**
+     * Memcached has no authentication, so containers reach the cluster's own container by name on
+     * its Port, whatever other clusters use the same Port. Without a container address the relay
+     * serves them instead: on Floci's address when it holds the Port, otherwise through a relay
+     * container of the cluster's own.
+     */
+    private void routeEndpoint(CacheCluster cluster, ElastiCacheContainerHandle handle) {
+        if (containerEndpoints == null) {
+            return;
+        }
+        String clusterId = cluster.getCacheClusterId();
+        Endpoint endpoint = cluster.getConfigurationEndpoint();
+        String hostname = endpoint != null && isRoutableHostname(endpoint.address()) ? endpoint.address() : null;
+        try {
+            withdrawProxyPort(clusterId);
+            if (handle == null) {
+                containerEndpoints.release(hostname);
+            } else if (hostname != null && handle.getNetworkIp() != null
+                    && enginePortOf(cluster) == endpointPortOf(cluster)) {
+                containerEndpoints.routeToContainer(hostname, handle.getNetworkIp());
+            } else if (cluster.getProxyPort() == endpointPortOf(cluster)) {
+                containerEndpoints.release(hostname);
+                containerEndpoints.publishHostPort(cluster.getProxyPort());
+                publishedProxyPorts.put(clusterId, cluster.getProxyPort());
+            } else if (hostname != null
+                    && !containerEndpoints.relayToFloci(hostname, endpointPortOf(cluster), cluster.getProxyPort())) {
+                containerEndpoints.release(hostname);
+            }
+        } catch (RuntimeException e) {
+            try {
+                containerEndpoints.refuse(hostname);
+            } catch (RuntimeException refuseFailure) {
+                e.addSuppressed(refuseFailure);
+            }
+            LOG.warnv("Memcached cluster {0} is not reachable from containers: {1}", clusterId, e.getMessage());
+        }
+    }
+
+    private void unrouteEndpoint(CacheCluster cluster) {
+        if (containerEndpoints == null) {
+            return;
+        }
+        withdrawProxyPort(cluster.getCacheClusterId());
+        Endpoint endpoint = cluster.getConfigurationEndpoint();
+        if (endpoint != null && isRoutableHostname(endpoint.address())) {
+            containerEndpoints.release(endpoint.address());
+        }
+    }
+
+    private void withdrawProxyPort(String clusterId) {
+        Integer published = publishedProxyPorts.remove(clusterId);
+        if (published != null && containerEndpoints != null) {
+            containerEndpoints.withdrawHostPort(published);
+        }
+    }
+
+    private static boolean isRoutableHostname(String address) {
+        return address != null && !address.matches("(?:\\d{1,3}\\.){3}\\d{1,3}")
+                && !"localhost".equalsIgnoreCase(address);
+    }
+
+    /** The Port a cluster's configuration endpoint reports and serves: its container's. */
+    private int endpointPortOf(CacheCluster cluster) {
+        return enginePortOf(cluster);
+    }
+
+    /** The port Memcached listens on; records predating it ran on the image default. */
+    private static int enginePortOf(CacheCluster cluster) {
+        return cluster.getEnginePort() > 0 ? cluster.getEnginePort() : DEFAULT_ENGINE_PORT;
+    }
+
+    /** The cluster's configuration endpoint hostname, re-derived for the account and region it was created in. */
+    private String endpointHostFor(CacheCluster cluster) {
+        String region = cluster.getRegion() != null ? cluster.getRegion() : regionResolver.getDefaultRegion();
+        String accountId = cluster.getAccountId() != null ? cluster.getAccountId()
+                : regionResolver.getDefaultAccountId();
+        return ElastiCacheEndpoints.memcachedConfiguration(cluster.getCacheClusterId(), accountId, region,
+                config.hostname());
     }
 
     /**
@@ -160,7 +320,7 @@ public class ElastiCacheMemcachedService {
         String image = config.services().elasticache().defaultMemcachedImage();
         ElastiCacheContainerHandle handle = null;
         try {
-            handle = containerManager.tryStart(clusterId, image);
+            handle = containerManager.tryStart(clusterId, image, enginePortOf(cluster));
             synchronized (lockFor(clusterId)) {
                 if (restoreTargetLost(clusterId)) {
                     abandonRestoredContainer(clusterId, handle);
@@ -170,7 +330,7 @@ public class ElastiCacheMemcachedService {
                     cluster.setContainerId(handle.getContainerId());
                     cluster.setContainerHost(handle.getHost());
                     cluster.setContainerPort(handle.getPort());
-                    proxyManager.startProxy(clusterId, cluster.getProxyPort(), handle.getHost(), handle.getPort());
+                    cluster.setProxyPort(startProxy(clusterId, cluster.getProxyPort(), enginePortOf(cluster), handle));
                 } else {
                     // Cleared rather than left alone: whatever the record carried describes a
                     // container from the previous process, and nothing must read it as live.
@@ -181,9 +341,10 @@ public class ElastiCacheMemcachedService {
                             + "daemon is reachable. Metadata operations work; connections to the cache "
                             + "do not until a daemon appears.", clusterId);
                 }
-                cluster.setConfigurationEndpoint(endpointFor(handle, cluster.getProxyPort()));
+                cluster.setConfigurationEndpoint(new Endpoint(endpointHostFor(cluster), endpointPortOf(cluster)));
                 cluster.setCacheClusterStatus(CacheClusterStatus.AVAILABLE);
                 clusters.put(clusterId, cluster);
+                routeEndpoint(cluster, handle);
                 LOG.infov("Restored Memcached cluster {0}, endpoint={1}:{2}", clusterId,
                         cluster.getConfigurationEndpoint().address(),
                         String.valueOf(cluster.getConfigurationEndpoint().port()));
@@ -298,6 +459,7 @@ public class ElastiCacheMemcachedService {
             cluster.setCacheClusterStatus(CacheClusterStatus.DELETING);
             clusters.put(clusterId, cluster);
 
+            unrouteEndpoint(cluster);
             proxyManager.stopProxy(clusterId);
             if (cluster.getContainerId() != null) {
                 containerManager.stop(new ElastiCacheContainerHandle(
@@ -316,16 +478,5 @@ public class ElastiCacheMemcachedService {
     public CacheCluster saveCacheCluster(CacheCluster cluster) {
         clusters.put(cluster.getCacheClusterId(), cluster);
         return cluster;
-    }
-
-    private Endpoint endpointFor(ElastiCacheContainerHandle handle, int proxyPort) {
-        if (handle != null && containerDetector.isRunningInContainer()) {
-            return new Endpoint(handle.getHost(), handle.getPort());
-        }
-        return new Endpoint(resolveEndpointHost(), proxyPort);
-    }
-
-    private String resolveEndpointHost() {
-        return config.hostname().orElse("localhost");
     }
 }

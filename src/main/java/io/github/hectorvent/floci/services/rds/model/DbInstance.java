@@ -56,6 +56,23 @@ public class DbInstance {
     private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
     /** Absent unless storage autoscaling is on, which is how AWS reports it. */
     private Integer maxAllocatedStorage;
+    // Null on a record persisted before storage was modelled, which reads as gp2 with no
+    // provisioned performance, what Floci used to report for every instance.
+    private String storageType;
+    private Integer iops;
+    private Integer storageThroughput;
+    private boolean deletionProtection;
+    /** Null on a record persisted before it was modelled, which reads as IPV4. */
+    private String networkType;
+    private DbInstancePendingModifiedValues pendingModifiedValues;
+    /** Null while the parameter group is in-sync; pending-reboot after an association change. */
+    private String parameterApplyStatus;
+    // An operation Floci completes at once still reports the status AWS shows while it runs
+    // ("creating", "modifying") until transitionalStatusUntil, and a storage change reports
+    // "storage-optimization" until storageOptimizationUntil.
+    private String transitionalStatus;
+    private Instant transitionalStatusUntil;
+    private Instant storageOptimizationUntil;
     private Map<String, String> subnetAvailabilityZones = new LinkedHashMap<>();
     private String dbiResourceId;
     private String dbInstanceArn;
@@ -304,5 +321,41 @@ public class DbInstance {
     public Integer getMaxAllocatedStorage() { return maxAllocatedStorage; }
     public void setMaxAllocatedStorage(Integer maxAllocatedStorage) {
         this.maxAllocatedStorage = maxAllocatedStorage;
+    }
+
+    public String getStorageType() { return storageType; }
+    public void setStorageType(String storageType) { this.storageType = storageType; }
+
+    public Integer getIops() { return iops; }
+    public void setIops(Integer iops) { this.iops = iops; }
+
+    public Integer getStorageThroughput() { return storageThroughput; }
+    public void setStorageThroughput(Integer storageThroughput) { this.storageThroughput = storageThroughput; }
+
+    public boolean isDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
+
+    public DbInstancePendingModifiedValues getPendingModifiedValues() { return pendingModifiedValues; }
+    public void setPendingModifiedValues(DbInstancePendingModifiedValues pendingModifiedValues) {
+        this.pendingModifiedValues = pendingModifiedValues;
+    }
+
+    public String getParameterApplyStatus() { return parameterApplyStatus; }
+    public void setParameterApplyStatus(String parameterApplyStatus) { this.parameterApplyStatus = parameterApplyStatus; }
+
+    public String getTransitionalStatus() { return transitionalStatus; }
+    public void setTransitionalStatus(String transitionalStatus) { this.transitionalStatus = transitionalStatus; }
+
+    public Instant getTransitionalStatusUntil() { return transitionalStatusUntil; }
+    public void setTransitionalStatusUntil(Instant transitionalStatusUntil) {
+        this.transitionalStatusUntil = transitionalStatusUntil;
+    }
+
+    public Instant getStorageOptimizationUntil() { return storageOptimizationUntil; }
+    public void setStorageOptimizationUntil(Instant storageOptimizationUntil) {
+        this.storageOptimizationUntil = storageOptimizationUntil;
     }
 }

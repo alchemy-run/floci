@@ -426,6 +426,9 @@ floci:
       proxy-handshake-timeout-millis: 10000       # Max time a client has to complete the startup/auth handshake
       proxy-backend-connect-timeout-millis: 5000  # Max time to wait for the backend TCP connect
       proxy-max-connections: 100                  # Max concurrent proxy connections before new ones are refused
+      creating-status-millis: 1000                # How long a new instance reports "creating"
+      modifying-status-millis: 1000               # How long a storage change reports "modifying"
+      storage-optimization-status-millis: 2000    # "storage-optimization" period; blocks further storage changes
     rds-data:
       enabled: true
       transaction-ttl-seconds: 180
@@ -649,6 +652,8 @@ floci:
     sagemaker:
       enabled: true
       # docker-network: floci-network
+      # HyperPod nodes run their lifecycle scripts in this image, one short-lived container per node.
+      hyperpod-node-image: public.ecr.aws/docker/library/ubuntu:22.04
       gpu:
         # Off by default: an existing deployment keeps launching CPU-only
         # containers. How many GPUs an ml.* type has is shipped in

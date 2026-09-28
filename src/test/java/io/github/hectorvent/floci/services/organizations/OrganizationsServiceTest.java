@@ -279,6 +279,76 @@ class OrganizationsServiceTest {
                 .stream().anyMatch(policy -> policy.getName().startsWith("aws-guardrails-")));
     }
 
+    @Test
+    void controlTowerGuardrailsSkipBaselinesWhoseOuWasDeleted() {
+        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+        String rootId = organization.getRoot().getId();
+        String kept = service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, rootId, "Workloads", null).getId();
+        String deleted = service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, rootId, "Sandbox", null).getId();
+        service.ensureControlTowerGuardrails(MANAGEMENT_ACCOUNT, Set.of(kept, deleted));
+
+        service.deleteOrganizationalUnit(MANAGEMENT_ACCOUNT, deleted);
+        service.ensureControlTowerGuardrails(MANAGEMENT_ACCOUNT, Set.of(kept, deleted));
+        service.ensureControlTowerGuardrails(MANAGEMENT_ACCOUNT, Set.of(deleted));
+
+        OrganizationPolicy guardrail =
+                service.describePolicy(MANAGEMENT_ACCOUNT, OrganizationsService.CONTROL_TOWER_GUARDRAIL_ID);
+        assertTrue(guardrail.getTargets().contains(kept));
+        assertFalse(guardrail.getTargets().contains(deleted));
+    }
+
+    @Test
+    void everyAwsPolicyTypeIsAcceptedAndCanBeCreatedBeforeItIsEnabled() {
+        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+        String rootId = organization.getRoot().getId();
+        for (String type : List.of("SERVICE_CONTROL_POLICY", "RESOURCE_CONTROL_POLICY", "TAG_POLICY",
+                "BACKUP_POLICY", "AISERVICES_OPT_OUT_POLICY", "CHATBOT_POLICY", "DECLARATIVE_POLICY_EC2",
+                "SECURITYHUB_POLICY", "INSPECTOR_POLICY", "UPGRADE_ROLLOUT_POLICY", "BEDROCK_POLICY",
+                "S3_POLICY", "NETWORK_SECURITY_DIRECTOR_POLICY")) {
+            assertNotNull(service.listPolicies(MANAGEMENT_ACCOUNT, type), type);
+        }
+
+        OrganizationPolicy bedrock = service.createPolicy(MANAGEMENT_ACCOUNT, "{}", null, "Bedrock",
+                "BEDROCK_POLICY", null);
+        assertEquals("BEDROCK_POLICY", bedrock.getType());
+        AwsException notEnabled = assertThrows(AwsException.class,
+                () -> service.attachPolicy(MANAGEMENT_ACCOUNT, bedrock.getId(), rootId));
+        assertEquals("PolicyTypeNotEnabledException", notEnabled.getErrorCode());
+
+        service.enablePolicyType(MANAGEMENT_ACCOUNT, rootId, "BEDROCK_POLICY");
+        service.attachPolicy(MANAGEMENT_ACCOUNT, bedrock.getId(), rootId);
+        assertEquals(List.of(bedrock.getId()), service.listPoliciesForTarget(MANAGEMENT_ACCOUNT, rootId,
+                "BEDROCK_POLICY").stream().map(OrganizationPolicy::getId).toList());
+
+        AwsException unknown = assertThrows(AwsException.class,
+                () -> service.listPolicies(MANAGEMENT_ACCOUNT, "NOT_A_POLICY"));
+        assertEquals("InvalidInputException", unknown.getErrorCode());
+    }
+
+    @Test
+    void unknownParentsReportParentNotFound() {
+        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+        String rootId = organization.getRoot().getId();
+        String missingOu = "ou-" + rootId.substring(2) + "-zzzzzzzz";
+        String missingRoot = "r-zzzz";
+        for (String parent : List.of(missingOu, missingRoot)) {
+            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
+                    () -> service.listOrganizationalUnitsForParent(MANAGEMENT_ACCOUNT, parent)).getErrorCode());
+            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
+                    () -> service.listChildren(MANAGEMENT_ACCOUNT, parent, "ACCOUNT")).getErrorCode());
+            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
+                    () -> service.listAccountsForParent(MANAGEMENT_ACCOUNT, parent)).getErrorCode());
+            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
+                    () -> service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, parent, "Child", null))
+                    .getErrorCode());
+        }
+
+        String member = service.createAccount(MANAGEMENT_ACCOUNT, "m@example.com", "M", null, false)
+                .getAccountId();
+        assertEquals("SourceParentNotFoundException", assertThrows(AwsException.class,
+                () -> service.moveAccount(MANAGEMENT_ACCOUNT, member, missingOu, rootId)).getErrorCode());
+    }
+
     // ──────────────────────────── effective SCP levels ────────────────────────────
 
     private static final String DENY_S3 =

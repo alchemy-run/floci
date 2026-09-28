@@ -70,6 +70,8 @@ public class AppSyncService {
     // that value: it is what clients send in the x-api-key header.
     private static final String API_KEY_PREFIX = "da2-";
     private static final String API_KEY_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+    /** Route 53 alias hosted zone shared by every CloudFront distribution. */
+    private static final String CLOUDFRONT_HOSTED_ZONE_ID = "Z2FDTNDATAQYW2";
     private static final int API_KEY_RANDOM_LENGTH = 26;
 
     private final StorageBackend<String, GraphqlApi> apiStore;
@@ -1042,9 +1044,10 @@ public class AppSyncService {
         dn.setDomainName(domainName);
         dn.setDescription((String) request.get("description"));
         dn.setCertificateArn(certificateArn);
-        String shortId = generateShortId();
-        dn.setAppsyncDomainName(shortId + ".appsync-api.us-east-1.amazonaws.com");
-        dn.setHostedZoneId("Z" + generateShortId());
+        // AppSync custom domains are fronted by a CloudFront distribution; the target is minted
+        // once here and persisted with the domain.
+        dn.setAppsyncDomainName(generateCloudFrontDomainName());
+        dn.setHostedZoneId(CLOUDFRONT_HOSTED_ZONE_ID);
         dn.setDomainNameArn(regionResolver.buildArn("appsync", regionResolver.getDefaultRegion(),
             "domainnames/" + domainName));
 
@@ -1442,6 +1445,14 @@ public class AppSyncService {
 
     private String generateShortId() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 7);
+    }
+
+    private String generateCloudFrontDomainName() {
+        StringBuilder sb = new StringBuilder("d");
+        for (int i = 0; i < 13; i++) {
+            sb.append(API_KEY_ALPHABET.charAt(apiKeyRandom.nextInt(API_KEY_ALPHABET.length())));
+        }
+        return sb.append(".cloudfront.net").toString();
     }
 
     private String generateApiKeyId() {

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -521,6 +522,53 @@ class ControlTowerServiceTest {
                 () -> service.getEnabledBaseline(ACCOUNT, REGION, "arn:aws:controltower:us-east-1:000000000101:enabledbaseline/missing"));
         assertEquals("ResourceNotFoundException", error.getErrorCode());
         assertEquals(404, error.getHttpStatus());
+    }
+
+    @Test
+    void disableBaselineRemovesStoredBaselineAndRecordsDisableOperation() throws Exception {
+        String baselineArn = service.listBaselines(REGION).stream()
+                .filter(b -> "AWSControlTowerBaseline".equals(b.get("name").asText()))
+                .findFirst().orElseThrow().get("arn").asText();
+        String ouArn = "arn:aws:organizations::000000000101:ou/o-floci0001/ou-disable-00000001";
+        ControlTowerService.EnableBaselineResult enabled = service.enableBaseline(ACCOUNT, REGION,
+                objectMapper.readTree("""
+                        {"baselineIdentifier":"%s","baselineVersion":"4.0","targetIdentifier":"%s",
+                         "tags":{"fixture":"baseline"}}
+                        """.formatted(baselineArn, ouArn)));
+        assertEquals(Map.of("fixture", "baseline"), service.listTags(ACCOUNT, REGION, enabled.arn()));
+        service.tagResource(ACCOUNT, REGION, enabled.arn(), Map.of("alchemy::id", "OuBaseline"));
+        service.untagResource(ACCOUNT, REGION, enabled.arn(), List.of("fixture"));
+        assertEquals(Map.of("alchemy::id", "OuBaseline"), service.listTags(ACCOUNT, REGION, enabled.arn()));
+
+        String operation = service.disableBaseline(ACCOUNT, REGION, enabled.arn());
+        assertEquals("DISABLE_BASELINE", service.getBaselineOperationType(ACCOUNT, REGION, operation));
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.getEnabledBaseline(ACCOUNT, REGION, enabled.arn())).getErrorCode());
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.disableBaseline(ACCOUNT, REGION, enabled.arn())).getErrorCode());
+        assertFalse(service.listEnabledBaselines(ACCOUNT, REGION).stream()
+                .anyMatch(e -> ouArn.equals(e.getTargetIdentifier())));
+
+        EnabledBaseline identityCenter = service.listEnabledBaselines(ACCOUNT, REGION).stream()
+                .filter(e -> e.getArn().endsWith("/FLOCIIDCBASELINE1"))
+                .findFirst().orElseThrow();
+        assertEquals("ValidationException", assertThrows(AwsException.class,
+                () -> service.disableBaseline(ACCOUNT, REGION, identityCenter.getArn())).getErrorCode());
+    }
+
+    @Test
+    void landingZoneTagsAreStoredOnCreateAndMutable() throws Exception {
+        ControlTowerService unseeded = new ControlTowerService(
+                new InMemoryStorage<>(), new InMemoryStorage<>(), null, false);
+        ControlTowerService.CreateLandingZoneResult created = unseeded.createLandingZone(ACCOUNT, REGION,
+                objectMapper.readTree("{\"version\":\"4.0\",\"manifest\":{},\"tags\":{\"env\":\"test\"}}"));
+        assertEquals(Map.of("env", "test"), unseeded.listTags(ACCOUNT, REGION, created.arn()));
+        unseeded.tagResource(ACCOUNT, REGION, created.arn(), Map.of("owner", "platform"));
+        unseeded.untagResource(ACCOUNT, REGION, created.arn(), List.of("env"));
+        assertEquals(Map.of("owner", "platform"), unseeded.listTags(ACCOUNT, REGION, created.arn()));
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> unseeded.listTags(ACCOUNT, REGION,
+                        "arn:aws:controltower:us-east-1:000000000101:landingzone/MISSING")).getErrorCode());
     }
 
     @Test

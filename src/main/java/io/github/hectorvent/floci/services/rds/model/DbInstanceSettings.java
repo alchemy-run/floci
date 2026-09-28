@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.BackupWindows;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 
@@ -12,7 +13,8 @@ import java.util.Set;
  * The storage and backup settings of a DB instance as a request carries them: a null member is
  * one the request left out. On create that means the AWS default, on modify it means unchanged.
  * {@code port} is CreateDBInstance's listener port; ModifyDBInstance's DBPortNumber is applied
- * separately because it moves the endpoint.
+ * separately because it moves the endpoint. The storage type, IOPS and throughput are resolved
+ * by the service against the engine and the allocation, so {@link #applyTo} leaves them alone.
  */
 @RegisterForReflection
 public record DbInstanceSettings(Boolean storageEncrypted,
@@ -29,7 +31,35 @@ public record DbInstanceSettings(Boolean storageEncrypted,
                                  List<String> enabledCloudwatchLogsExports,
                                  LogExportChanges logExportChanges,
                                  Integer maxAllocatedStorage,
-                                 Integer port) {
+                                 Integer port,
+                                 String storageType,
+                                 Integer iops,
+                                 Integer storageThroughput,
+                                 Boolean deletionProtection,
+                                 String networkType) {
+
+    /** The settings without storage performance, protection or network type. */
+    public DbInstanceSettings(Boolean storageEncrypted,
+                              String kmsKeyId,
+                              Integer backupRetentionPeriod,
+                              String preferredBackupWindow,
+                              String preferredMaintenanceWindow,
+                              Boolean copyTagsToSnapshot,
+                              Integer monitoringInterval,
+                              String monitoringRoleArn,
+                              Boolean performanceInsightsEnabled,
+                              Integer performanceInsightsRetentionPeriod,
+                              String engineLifecycleSupport,
+                              List<String> enabledCloudwatchLogsExports,
+                              LogExportChanges logExportChanges,
+                              Integer maxAllocatedStorage,
+                              Integer port) {
+        this(storageEncrypted, kmsKeyId, backupRetentionPeriod, preferredBackupWindow,
+                preferredMaintenanceWindow, copyTagsToSnapshot, monitoringInterval, monitoringRoleArn,
+                performanceInsightsEnabled, performanceInsightsRetentionPeriod, engineLifecycleSupport,
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port,
+                null, null, null, null, null);
+    }
 
     /** The settings without a listener port, which the service defaults from the engine. */
     public DbInstanceSettings(Boolean storageEncrypted,
@@ -66,6 +96,9 @@ public record DbInstanceSettings(Boolean storageEncrypted,
 
     /** MonitoringInterval documents these as its valid values. */
     private static final Set<Integer> MONITORING_INTERVALS = Set.of(0, 1, 5, 10, 15, 30, 60);
+
+    /** NetworkType documents these for a DB instance. */
+    private static final Set<String> NETWORK_TYPES = Set.of("IPV4", "DUAL");
 
     public static final String ENGINE_LIFECYCLE_SUPPORT_ENABLED = "open-source-rds-extended-support";
     public static final String ENGINE_LIFECYCLE_SUPPORT_DISABLED =
@@ -119,6 +152,10 @@ public record DbInstanceSettings(Boolean storageEncrypted,
                     "Invalid engine lifecycle support: " + engineLifecycleSupport
                             + ". Valid values are " + ENGINE_LIFECYCLE_SUPPORT_ENABLED + ", "
                             + ENGINE_LIFECYCLE_SUPPORT_DISABLED + ".", 400);
+        }
+        if (networkType != null && !NETWORK_TYPES.contains(networkType.toUpperCase(Locale.ROOT))) {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid network type " + networkType + ". Valid values are IPV4 and DUAL.", 400);
         }
     }
 
@@ -198,7 +235,8 @@ public record DbInstanceSettings(Boolean storageEncrypted,
                 backupWindow, maintenanceWindow, copyTagsToSnapshot,
                 monitoringInterval, monitoringRoleArn, performanceInsightsEnabled,
                 performanceInsightsRetentionPeriod, engineLifecycleSupport,
-                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port);
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port,
+                storageType, iops, storageThroughput, deletionProtection, networkType);
     }
 
     public DbInstanceSettings withKmsKeyId(String resolvedKmsKeyId) {
@@ -206,10 +244,27 @@ public record DbInstanceSettings(Boolean storageEncrypted,
                 preferredBackupWindow, preferredMaintenanceWindow, copyTagsToSnapshot,
                 monitoringInterval, monitoringRoleArn, performanceInsightsEnabled,
                 performanceInsightsRetentionPeriod, engineLifecycleSupport,
-                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port);
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port,
+                storageType, iops, storageThroughput, deletionProtection, networkType);
     }
 
-    /** The listener port is not applied here: it moves the endpoint, which the service owns. */
+    /**
+     * The same settings with another retention period. A modification whose retention change is
+     * queued for the maintenance window applies the rest without it.
+     */
+    public DbInstanceSettings withBackupRetentionPeriod(Integer retentionPeriod) {
+        return new DbInstanceSettings(storageEncrypted, kmsKeyId, retentionPeriod,
+                preferredBackupWindow, preferredMaintenanceWindow, copyTagsToSnapshot,
+                monitoringInterval, monitoringRoleArn, performanceInsightsEnabled,
+                performanceInsightsRetentionPeriod, engineLifecycleSupport,
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, port,
+                storageType, iops, storageThroughput, deletionProtection, networkType);
+    }
+
+    /**
+     * The listener port is not applied here: it moves the endpoint, which the service owns. Nor
+     * is storage, which the service resolves against the engine and allocation.
+     */
     public void applyTo(DbInstance instance) {
         if (storageEncrypted != null) {
             instance.setStorageEncrypted(storageEncrypted);
@@ -254,6 +309,12 @@ public record DbInstanceSettings(Boolean storageEncrypted,
         }
         if (maxAllocatedStorage != null) {
             instance.setMaxAllocatedStorage(maxAllocatedStorage);
+        }
+        if (deletionProtection != null) {
+            instance.setDeletionProtection(deletionProtection);
+        }
+        if (networkType != null && !networkType.isBlank()) {
+            instance.setNetworkType(networkType.toUpperCase(Locale.ROOT));
         }
     }
 }

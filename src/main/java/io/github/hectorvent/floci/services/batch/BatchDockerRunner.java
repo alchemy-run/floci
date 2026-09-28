@@ -16,6 +16,7 @@ import io.github.hectorvent.floci.services.batch.model.BatchKeyValue;
 import io.github.hectorvent.floci.services.batch.model.BatchNodeExecution;
 import io.github.hectorvent.floci.services.batch.model.BatchResourceRequirement;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
+import io.github.hectorvent.floci.services.batch.model.BatchRuntimePlatform;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -88,7 +89,8 @@ public class BatchDockerRunner implements ContainerTeardown {
         String containerName = ContainerStorageHelper.dockerName(config, "floci-batch-" + job.getJobId() + "-" + attemptNumber);
         return runContainer(job, job.getJobId(), containerName, logStreamName,
                 "batch:" + job.getJobName() + ":" + job.getJobId(),
-                job.getContainerImage(), "Job definition container image is missing",
+                job.getContainerImage(), BatchRuntimePlatform.dockerPlatform(job.getRuntimePlatform()),
+                "Job definition container image is missing",
                 job.getResolvedCommand(), buildEnvironment(job, attemptNumber), job.getResourceRequirements());
     }
 
@@ -100,13 +102,14 @@ public class BatchDockerRunner implements ContainerTeardown {
         String inFlightKey = job.getJobId() + "#node" + node.getNodeIndex();
         return runContainer(job, inFlightKey, containerName, logStreamName,
                 "batch:" + job.getJobName() + ":" + job.getJobId() + ":node" + node.getNodeIndex(),
-                node.getContainerImage(), "Node " + node.getNodeIndex() + " container image is missing",
+                node.getContainerImage(), BatchRuntimePlatform.dockerPlatform(node.getRuntimePlatform()),
+                "Node " + node.getNodeIndex() + " container image is missing",
                 node.getResolvedCommand(), buildNodeEnvironment(job, attemptNumber, node), node.getResourceRequirements());
     }
 
     private BatchRunResult runContainer(BatchJob job, String inFlightKey, String containerName, String logStreamName,
-                                        String logSourceLabel, String image, String missingImageMessage,
-                                        List<String> command, List<String> env,
+                                        String logSourceLabel, String image, String platform,
+                                        String missingImageMessage, List<String> command, List<String> env,
                                         List<BatchResourceRequirement> resourceRequirements) {
         long startedAt = System.currentTimeMillis();
         Closeable logHandle = null;
@@ -136,8 +139,11 @@ public class BatchDockerRunner implements ContainerTeardown {
             applyResourceRequirements(builder, resourceRequirements, job.getJobId());
 
             ContainerSpec spec = builder.build();
-            containerId = lifecycleManager.createAndStart(spec).containerId();
+            // AWS runs the image variant for the job's CPU architecture, not the host's, so a
+            // single-platform image (e.g. built for linux/amd64) must be pulled and run as such.
+            containerId = lifecycleManager.create(spec, platform);
             inFlightContainers.put(inFlightKey, containerId);
+            lifecycleManager.startCreated(containerId, spec);
             if (stopRequestedJobs.contains(job.getJobId())) {
                 releaseAndStop(inFlightKey, containerId, null);
                 return stopped(startedAt, logStreamName);

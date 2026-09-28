@@ -18,9 +18,19 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.junit.jupiter.api.Test;
 
+import javax.net.SocketFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
+import java.io.FilterInputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -44,7 +54,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -70,6 +82,14 @@ public class IotMqttWebSocketIntegrationTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final short CLOSE_UNSUPPORTED_DATA = 1003;
     private static final int CHURN_THREADS = 10;
+    /**
+     * Paho 1.2.5 base64-encodes the WebSocket key, and later the Sec-WebSocket-Accept it expects,
+     * through one static encoder that stores each result in a field and reads it back unlocked
+     * ({@code org.eclipse.paho.client.mqttv3.internal.websocket.Base64}). Clients handshaking at
+     * once can read each other's value and reject a correct 101, so every Paho WebSocket client
+     * here holds this permit around those encoder calls.
+     */
+    private static final Semaphore PAHO_BASE64 = new Semaphore(1);
 
     @ConfigProperty(name = "quarkus.http.test-ssl-port", defaultValue = "0")
     int testSslPort;
@@ -353,6 +373,182 @@ public class IotMqttWebSocketIntegrationTest {
         return ctx;
     }
 
+    /**
+     * Sockets for plain WebSocket clients that hold {@link #PAHO_BASE64} only while Paho encodes:
+     * from the TCP connect until the upgrade request is written (the key), and from the end of the
+     * response headers until another thread uses the socket (the accept check; Paho's receiver
+     * thread takes over once it passes). Upgrade requests and responses of concurrent clients
+     * still overlap on the wire.
+     */
+    private static final class PahoHandshakeGuard extends SocketFactory {
+
+        @Override
+        public Socket createSocket() {
+            return new GuardedSocket();
+        }
+
+        @Override
+        public Socket createSocket(String host, int port) throws IOException {
+            return connected(new InetSocketAddress(host, port), null);
+        }
+
+        @Override
+        public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException {
+            return connected(new InetSocketAddress(host, port), new InetSocketAddress(localHost, localPort));
+        }
+
+        @Override
+        public Socket createSocket(InetAddress host, int port) throws IOException {
+            return connected(new InetSocketAddress(host, port), null);
+        }
+
+        @Override
+        public Socket createSocket(InetAddress host, int port, InetAddress localHost, int localPort) throws IOException {
+            return connected(new InetSocketAddress(host, port), new InetSocketAddress(localHost, localPort));
+        }
+
+        private static Socket connected(InetSocketAddress remote, InetSocketAddress local) throws IOException {
+            Socket socket = new GuardedSocket();
+            if (local != null) {
+                socket.bind(local);
+            }
+            socket.connect(remote);
+            return socket;
+        }
+    }
+
+    private static final class GuardedSocket extends Socket {
+        private static final byte[] END_OF_HEADERS = {'\r', '\n', '\r', '\n'};
+
+        private final AtomicBoolean holding = new AtomicBoolean();
+        private volatile Thread handshakeThread;
+        private volatile boolean requestWritten;
+        private volatile boolean responseRead;
+        private int headerEndMatched;
+
+        @Override
+        public void connect(SocketAddress endpoint, int timeout) throws IOException {
+            super.connect(endpoint, timeout);
+            handshakeThread = Thread.currentThread();
+            hold();
+        }
+
+        @Override
+        public InputStream getInputStream() throws IOException {
+            return new FilterInputStream(super.getInputStream()) {
+                @Override
+                public int read() throws IOException {
+                    beforeIo(false);
+                    int value = in.read();
+                    if (value >= 0) {
+                        afterRead(new byte[]{(byte) value}, 0, 1);
+                    }
+                    return value;
+                }
+
+                @Override
+                public int read(byte[] buffer, int offset, int length) throws IOException {
+                    beforeIo(false);
+                    int count = in.read(buffer, offset, length);
+                    if (count > 0) {
+                        afterRead(buffer, offset, count);
+                    }
+                    return count;
+                }
+
+                @Override
+                public int available() throws IOException {
+                    beforeIo(false);
+                    return in.available();
+                }
+
+                @Override
+                public void close() throws IOException {
+                    release();
+                    in.close();
+                }
+            };
+        }
+
+        @Override
+        public OutputStream getOutputStream() throws IOException {
+            return new FilterOutputStream(super.getOutputStream()) {
+                @Override
+                public void write(int value) throws IOException {
+                    beforeIo(true);
+                    out.write(value);
+                }
+
+                @Override
+                public void write(byte[] buffer, int offset, int length) throws IOException {
+                    beforeIo(true);
+                    out.write(buffer, offset, length);
+                }
+
+                @Override
+                public void close() throws IOException {
+                    release();
+                    out.close();
+                }
+            };
+        }
+
+        @Override
+        public void close() throws IOException {
+            release();
+            super.close();
+        }
+
+        /** Paho encodes the key before writing the request, and checks the accept on its handshake thread. */
+        private void beforeIo(boolean write) {
+            if (!requestWritten) {
+                if (write) {
+                    requestWritten = true;
+                    release();
+                }
+                return;
+            }
+            if (write || Thread.currentThread() != handshakeThread) {
+                release();
+            }
+        }
+
+        private void afterRead(byte[] buffer, int offset, int count) throws IOException {
+            if (responseRead || !requestWritten || Thread.currentThread() != handshakeThread) {
+                return;
+            }
+            for (int i = offset; i < offset + count; i++) {
+                byte value = buffer[i];
+                if (value == END_OF_HEADERS[headerEndMatched]) {
+                    headerEndMatched++;
+                } else {
+                    headerEndMatched = value == '\r' ? 1 : 0;
+                }
+                if (headerEndMatched == END_OF_HEADERS.length) {
+                    responseRead = true;
+                    hold();
+                    return;
+                }
+            }
+        }
+
+        private void hold() throws InterruptedIOException {
+            try {
+                PAHO_BASE64.acquire();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new InterruptedIOException("interrupted waiting for the Paho handshake permit");
+            }
+            holding.set(true);
+        }
+
+        private void release() {
+            if (holding.compareAndSet(true, false)) {
+                PAHO_BASE64.release();
+            }
+        }
+    }
+
     private static final class WsClient implements AutoCloseable {
         private final MqttClient client;
         private final BlockingQueue<byte[]> payloads = new LinkedBlockingQueue<>();
@@ -383,14 +579,26 @@ public class IotMqttWebSocketIntegrationTest {
             MqttConnectOptions options = new MqttConnectOptions();
             options.setCleanSession(true);
             options.setConnectionTimeout(10);
-            if (url.startsWith("wss://")) {
-                options.setSocketFactory(trustOnlyFlociCa().getSocketFactory());
-            }
+            // Without a pinned version a failed attempt is retried as MQTT 3.1, whose 23-character
+            // client id limit then hides the original failure behind an EOFException.
+            options.setMqttVersion(MqttConnectOptions.MQTT_VERSION_3_1_1);
             if (username != null) {
                 options.setUserName(username);
                 options.setPassword(password.toCharArray());
             }
-            client.connect(options);
+            if (url.startsWith("wss://")) {
+                options.setSocketFactory(trustOnlyFlociCa().getSocketFactory());
+                // A TLS socket's handshake bytes cannot be observed, so its whole connect holds the permit.
+                PAHO_BASE64.acquire();
+                try {
+                    client.connect(options);
+                } finally {
+                    PAHO_BASE64.release();
+                }
+            } else {
+                options.setSocketFactory(new PahoHandshakeGuard());
+                client.connect(options);
+            }
             return wsClient;
         }
 

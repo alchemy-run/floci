@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.services.elasticache;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
@@ -24,10 +26,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -57,14 +62,61 @@ class ElastiCacheMemcachedServiceTest {
         when(config.hostname()).thenReturn(Optional.of("localhost"));
 
         when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
-        when(containerManager.tryStart(anyString(), anyString()))
+        when(containerManager.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "cluster", "localhost", 11211));
-        when(elasticacheService.allocateProxyPort()).thenReturn(6379, 6380, 6381);
+        when(elasticacheService.allocateHostProxyPort(anyInt())).thenReturn(6379, 6380, 6381);
 
         this.config = config;
         containerDetector = mock(ContainerDetector.class);
+        // Floci in Docker, where every cluster's container has an address of its own; the tests
+        // for Floci on the host switch this off.
+        when(containerDetector.isRunningInContainer()).thenReturn(true);
         service = new ElastiCacheMemcachedService(containerManager, proxyManager, elasticacheService,
                 storageFactory, config, dockerHostResolver, containerDetector);
+    }
+
+    @Test
+    void onTheHostEveryClusterReportsItsOwnPortAndOnlyTheHostRelayMoves() {
+        // As on AWS every cluster reports 11211 on its own hostname; containers reach each by name.
+        // Host clients share one loopback address, so only the first cluster's relay holds 11211.
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+        when(elasticacheService.allocateHostProxyPort(11211)).thenReturn(11211, 6379);
+
+        CacheCluster first = service.createCacheCluster("cluster-a");
+        CacheCluster second = service.createCacheCluster("cluster-b");
+
+        assertEquals(11211, first.getConfigurationEndpoint().port());
+        assertEquals(11211, second.getConfigurationEndpoint().port());
+        assertEquals(11211, first.getProxyPort());
+        assertEquals(6379, second.getProxyPort());
+        verify(containerManager).tryStart(eq("cluster-b"), anyString(), eq(11211));
+        verify(proxyManager).startProxy(eq("cluster-b"), eq(6379), anyString(), anyInt());
+    }
+
+    @Test
+    void onTheHostAPinnedPortHeldByAnotherCacheIsStillTheClustersPort() {
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+        when(elasticacheService.allocateHostProxyPort(11300)).thenReturn(6379);
+
+        CacheCluster cluster = service.createCacheCluster("my-cluster", 11300);
+
+        assertEquals(11300, cluster.getConfigurationEndpoint().port());
+        assertEquals(6379, cluster.getProxyPort());
+        verify(containerManager).tryStart(eq("my-cluster"), anyString(), eq(11300));
+    }
+
+    @Test
+    void onTheHostAnUnpinnedClusterWhosePortIsTakenLocallyKeepsItsPort() {
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+        when(elasticacheService.allocateHostProxyPort(anyInt())).thenReturn(11211);
+        when(elasticacheService.allocateProxyPort()).thenReturn(6390);
+        doThrow(new RuntimeException("Address already in use"))
+                .when(proxyManager).startProxy(eq("my-cluster"), eq(11211), anyString(), anyInt());
+
+        CacheCluster cluster = service.createCacheCluster("my-cluster");
+
+        assertEquals(6390, cluster.getProxyPort());
+        assertEquals(11211, cluster.getConfigurationEndpoint().port());
     }
 
     @Test
@@ -74,7 +126,117 @@ class ElastiCacheMemcachedServiceTest {
         assertEquals("my-cluster", cluster.getCacheClusterId());
         assertEquals(CacheClusterStatus.AVAILABLE, cluster.getCacheClusterStatus());
         assertEquals("memcached", cluster.getEngine());
-        assertEquals("localhost", cluster.getConfigurationEndpoint().address());
+        assertEquals(configurationHostname("my-cluster"), cluster.getConfigurationEndpoint().address());
+        assertEquals(11211, cluster.getConfigurationEndpoint().port());
+        verify(containerManager).tryStart(eq("my-cluster"), anyString(), eq(11211));
+    }
+
+    @Test
+    void everyClusterReportsItsOwnHostnameOnTheDefaultPort() {
+        // AWS's default Memcached Port is 11211 for every cluster; the hostname tells them apart.
+        CacheCluster first = service.createCacheCluster("cluster-a");
+        CacheCluster second = service.createCacheCluster("cluster-b");
+
+        assertEquals(11211, first.getConfigurationEndpoint().port());
+        assertEquals(11211, second.getConfigurationEndpoint().port());
+        assertEquals(configurationHostname("cluster-b"), second.getConfigurationEndpoint().address());
+        verify(elasticacheService, times(2)).allocateHostProxyPort(11211);
+    }
+
+    @Test
+    void aRequestedPortIsTheEnginePort() {
+        CacheCluster cluster = service.createCacheCluster("my-cluster", 11300);
+
+        assertEquals(11300, cluster.getConfigurationEndpoint().port());
+        assertEquals(11300, cluster.getEnginePort());
+        verify(containerManager).tryStart(eq("my-cluster"), anyString(), eq(11300));
+    }
+
+    @Test
+    void anInvalidPortIsRejectedBeforeAContainerStarts() {
+        AwsException ex = assertThrows(AwsException.class, () -> service.createCacheCluster("my-cluster", 0));
+
+        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        verify(containerManager, never()).tryStart(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void containersReachTheClusterContainerByName() {
+        ContainerEndpoints endpoints = mock(ContainerEndpoints.class);
+        ElastiCacheContainerHandle handle = new ElastiCacheContainerHandle("cid", "my-cluster", "localhost", 32770);
+        handle.setNetworkIp("172.18.0.7");
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenReturn(handle);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        when(storageFactory.create(anyString(), anyString(), any()))
+                .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
+        ElastiCacheMemcachedService routed = new ElastiCacheMemcachedService(containerManager, proxyManager,
+                elasticacheService, storageFactory, config, mock(DockerHostResolver.class), containerDetector,
+                new RegionResolver("us-east-1", "000000000000"), endpoints);
+
+        routed.createCacheCluster("my-cluster");
+        verify(endpoints).routeToContainer(configurationHostname("my-cluster"), "172.18.0.7");
+        verify(endpoints, never()).publishHostPort(anyInt());
+
+        routed.deleteCacheCluster("my-cluster");
+        verify(endpoints).release(configurationHostname("my-cluster"));
+    }
+
+    @Test
+    void withoutAContainerAddressTheRelayOnThePortIsPublished() {
+        ContainerEndpoints endpoints = mock(ContainerEndpoints.class);
+        when(elasticacheService.allocateHostProxyPort(anyInt())).thenReturn(11211);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        when(storageFactory.create(anyString(), anyString(), any()))
+                .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
+        ElastiCacheMemcachedService routed = new ElastiCacheMemcachedService(containerManager, proxyManager,
+                elasticacheService, storageFactory, config, mock(DockerHostResolver.class), containerDetector,
+                new RegionResolver("us-east-1", "000000000000"), endpoints);
+
+        routed.createCacheCluster("my-cluster");
+        verify(endpoints).publishHostPort(11211);
+
+        routed.deleteCacheCluster("my-cluster");
+        verify(endpoints).withdrawHostPort(11211);
+    }
+
+    @Test
+    void withoutAContainerAddressAClusterWhosePortIsHeldElsewhereGetsARelayOfItsOwn() {
+        ContainerEndpoints endpoints = mock(ContainerEndpoints.class);
+        when(endpoints.relayToFloci(anyString(), anyInt(), anyInt())).thenReturn(true);
+        when(elasticacheService.allocateHostProxyPort(anyInt())).thenReturn(6390);
+        StorageFactory storageFactory = mock(StorageFactory.class);
+        when(storageFactory.create(anyString(), anyString(), any()))
+                .thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
+        ElastiCacheMemcachedService routed = new ElastiCacheMemcachedService(containerManager, proxyManager,
+                elasticacheService, storageFactory, config, mock(DockerHostResolver.class), containerDetector,
+                new RegionResolver("us-east-1", "000000000000"), endpoints);
+
+        CacheCluster cluster = routed.createCacheCluster("my-cluster");
+
+        assertEquals(11211, cluster.getConfigurationEndpoint().port());
+        verify(endpoints).relayToFloci(configurationHostname("my-cluster"), 11211, 6390);
+        verify(endpoints, never()).publishHostPort(anyInt());
+        verify(endpoints, never()).refuse(anyString());
+    }
+
+    @Test
+    void aTakenPortMovesTheHostRelayInsteadOfFailingTheCreate() {
+        when(elasticacheService.allocateHostProxyPort(anyInt())).thenReturn(11211);
+        when(elasticacheService.allocateProxyPort()).thenReturn(6390);
+        doThrow(new RuntimeException("Address already in use"))
+                .when(proxyManager).startProxy(eq("my-cluster"), eq(11211), anyString(), anyInt());
+
+        CacheCluster cluster = service.createCacheCluster("my-cluster");
+
+        assertEquals(11211, cluster.getConfigurationEndpoint().port());
+        assertEquals(6390, cluster.getProxyPort());
+        verify(elasticacheService).releaseProxyPort(11211);
+        verify(proxyManager).startProxy("my-cluster", 6390, "localhost", 11211);
+    }
+
+    private static String configurationHostname(String clusterId) {
+        return clusterId + "." + ElastiCacheEndpoints.hash("000000000000", "us-east-1")
+                + ".cfg.use1.cache.localhost.floci.io";
     }
 
     @Test
@@ -120,7 +282,7 @@ class ElastiCacheMemcachedServiceTest {
     }
 
     @Test
-    void createClusterUsesLocalhostWhenHostnameNotConfigured() {
+    void createClusterUsesAnAwsShapedHostnameWhenHostnameNotConfigured() {
         ElastiCacheMemcachedContainerManager containerManager = mock(ElastiCacheMemcachedContainerManager.class);
         ElastiCacheMemcachedProxyManager proxyManager = mock(ElastiCacheMemcachedProxyManager.class);
         ElastiCacheService elasticacheService = mock(ElastiCacheService.class);
@@ -137,28 +299,28 @@ class ElastiCacheMemcachedServiceTest {
         when(dockerHostResolver.resolve()).thenReturn("172.20.0.2");
 
         when(storageFactory.create(anyString(), anyString(), any())).thenAnswer(inv -> AccountAwareStorageBackend.inMemory("000000000000"));
-        when(containerManager.tryStart(anyString(), anyString()))
+        when(containerManager.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "cluster", "172.20.0.10", 11211));
-        when(elasticacheService.allocateProxyPort()).thenReturn(6379);
+        when(elasticacheService.allocateHostProxyPort(anyInt())).thenReturn(6379);
 
         ElastiCacheMemcachedService containerModeService =
                 new ElastiCacheMemcachedService(containerManager, proxyManager, elasticacheService, storageFactory, config, dockerHostResolver);
 
         CacheCluster cluster = containerModeService.createCacheCluster("container-cluster");
 
-        assertEquals("localhost", cluster.getConfigurationEndpoint().address());
+        assertEquals(configurationHostname("container-cluster"), cluster.getConfigurationEndpoint().address());
     }
 
     @Test
-    void createClusterUsesContainerHostWhenHostnameNotConfigured() {
+    void createClusterInDockerReportsItsHostnameAndPortNotTheContainerAddress() {
         when(config.hostname()).thenReturn(Optional.empty());
         when(containerDetector.isRunningInContainer()).thenReturn(true);
-        when(containerManager.tryStart(anyString(), anyString()))
+        when(containerManager.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "cluster", "172.20.0.10", 11211));
 
         CacheCluster cluster = service.createCacheCluster("container-cluster");
 
-        assertEquals("172.20.0.10", cluster.getConfigurationEndpoint().address());
+        assertEquals(configurationHostname("container-cluster"), cluster.getConfigurationEndpoint().address());
         assertEquals(11211, cluster.getConfigurationEndpoint().port());
     }
 
@@ -166,14 +328,14 @@ class ElastiCacheMemcachedServiceTest {
     void createClusterWithoutDockerDaemonStillReachesAvailable() {
         // tryStart() returns null when no Docker daemon is reachable. The cache cluster record is
         // metadata, so the create still succeeds and the cluster reaches 'available' on the first
-        // describe (what SDK/Terraform waiters poll), on its reserved proxy port.
-        when(containerManager.tryStart(anyString(), anyString())).thenReturn(null);
+        // describe (what SDK/Terraform waiters poll), on its Port.
+        when(containerManager.tryStart(anyString(), anyString(), anyInt())).thenReturn(null);
 
         CacheCluster cluster = service.createCacheCluster("no-docker-cluster");
 
         assertEquals(CacheClusterStatus.AVAILABLE, cluster.getCacheClusterStatus());
-        assertEquals("localhost", cluster.getConfigurationEndpoint().address());
-        assertEquals(6379, cluster.getConfigurationEndpoint().port());
+        assertEquals(configurationHostname("no-docker-cluster"), cluster.getConfigurationEndpoint().address());
+        assertEquals(11211, cluster.getConfigurationEndpoint().port());
         assertEquals("no-docker-cluster",
                 service.getCacheCluster("no-docker-cluster").getCacheClusterId());
 
@@ -186,36 +348,39 @@ class ElastiCacheMemcachedServiceTest {
     void restorePersistedRuntimeRestartsTheContainerAndRepointsTheEndpoint() {
         StorageFactory storageFactory = sharedStorageFactory();
         ElastiCacheMemcachedContainerManager beforeRestart = mock(ElastiCacheMemcachedContainerManager.class);
-        when(beforeRestart.tryStart(anyString(), anyString()))
+        when(beforeRestart.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "my-cluster", "localhost", 32770));
         serviceWith(storageFactory, beforeRestart).createCacheCluster("my-cluster");
 
         ElastiCacheMemcachedContainerManager restarted = mock(ElastiCacheMemcachedContainerManager.class);
-        when(restarted.tryStart(anyString(), anyString()))
+        when(restarted.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid2", "my-cluster", "localhost", 32771));
         ElastiCacheMemcachedService restartedService = serviceWith(storageFactory, restarted);
 
         restartedService.restorePersistedRuntime().join();
 
-        verify(restarted).tryStart(eq("my-cluster"), anyString());
+        verify(restarted).tryStart(eq("my-cluster"), anyString(), anyInt());
         CacheCluster cluster = restartedService.getCacheCluster("my-cluster");
         assertEquals(CacheClusterStatus.AVAILABLE, cluster.getCacheClusterStatus());
-        assertEquals(32771, cluster.getConfigurationEndpoint().port(),
-                "Docker publishes a fresh host port per run, so the endpoint must follow it");
+        assertEquals(11211, cluster.getConfigurationEndpoint().port(),
+                "The endpoint reports the cluster's Port, not the host port Docker published this run");
+        assertEquals(32771, cluster.getContainerPort(), "The relay must follow the fresh backend port");
     }
 
     @Test
     void restoreKeepsTheHostProxyEndpointAndRebindsTheNewBackend() {
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
         service.createCacheCluster("host-cluster");
         when(elasticacheService.reserveOrAllocateProxyPort(6379)).thenReturn(6379);
-        when(containerManager.tryStart(eq("host-cluster"), anyString()))
+        when(containerManager.tryStart(eq("host-cluster"), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("restored", "host-cluster", "localhost", 32771));
 
         service.restorePersistedRuntime().join();
 
         CacheCluster restored = service.getCacheCluster("host-cluster");
-        assertEquals(6379, restored.getConfigurationEndpoint().port());
-        assertEquals("localhost", restored.getConfigurationEndpoint().address());
+        assertEquals(11211, restored.getConfigurationEndpoint().port());
+        assertEquals(6379, restored.getProxyPort());
+        assertEquals(configurationHostname("host-cluster"), restored.getConfigurationEndpoint().address());
         verify(elasticacheService).reserveOrAllocateProxyPort(6379);
         verify(proxyManager).startProxy("host-cluster", 6379, "localhost", 32771);
         service.deleteCacheCluster("host-cluster");
@@ -227,12 +392,12 @@ class ElastiCacheMemcachedServiceTest {
     void memcachedRestoreFailureReportsRestoreFailed() {
         StorageFactory storageFactory = sharedStorageFactory();
         ElastiCacheMemcachedContainerManager beforeRestart = mock(ElastiCacheMemcachedContainerManager.class);
-        when(beforeRestart.tryStart(anyString(), anyString()))
+        when(beforeRestart.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "my-cluster", "localhost", 11211));
         serviceWith(storageFactory, beforeRestart).createCacheCluster("my-cluster");
 
         ElastiCacheMemcachedContainerManager restarted = mock(ElastiCacheMemcachedContainerManager.class);
-        when(restarted.tryStart(anyString(), anyString()))
+        when(restarted.tryStart(anyString(), anyString(), anyInt()))
                 .thenThrow(new RuntimeException("container failed"));
         ElastiCacheMemcachedService restartedService = serviceWith(storageFactory, restarted);
 
@@ -248,7 +413,7 @@ class ElastiCacheMemcachedServiceTest {
     void restoreDoesNotResurrectAClusterDeletedWhileItWasRestoring() {
         StorageFactory storageFactory = sharedStorageFactory();
         ElastiCacheMemcachedContainerManager beforeRestart = mock(ElastiCacheMemcachedContainerManager.class);
-        when(beforeRestart.tryStart(anyString(), anyString()))
+        when(beforeRestart.tryStart(anyString(), anyString(), anyInt()))
                 .thenReturn(new ElastiCacheContainerHandle("cid", "my-cluster", "localhost", 32770));
         serviceWith(storageFactory, beforeRestart).createCacheCluster("my-cluster");
 
@@ -258,7 +423,7 @@ class ElastiCacheMemcachedServiceTest {
                 new ElastiCacheContainerHandle("cid2", "my-cluster", "localhost", 32771);
         // The delete lands in the window the cluster's monitor closes: the container is up, the
         // record has not been written back yet.
-        when(restarted.tryStart(anyString(), anyString())).thenAnswer(inv -> {
+        when(restarted.tryStart(anyString(), anyString(), anyInt())).thenAnswer(inv -> {
             restartedService.deleteCacheCluster("my-cluster");
             return restoredHandle;
         });
@@ -290,7 +455,7 @@ class ElastiCacheMemcachedServiceTest {
         when(config.hostname()).thenReturn(Optional.of("localhost"));
         ElastiCacheMemcachedProxyManager proxyManager = mock(ElastiCacheMemcachedProxyManager.class);
         ElastiCacheService elasticacheService = mock(ElastiCacheService.class);
-        when(elasticacheService.allocateProxyPort()).thenReturn(6379);
+        when(elasticacheService.allocateHostProxyPort(anyInt())).thenReturn(6379);
         when(elasticacheService.reserveOrAllocateProxyPort(6379)).thenReturn(6379);
         ContainerDetector detector = mock(ContainerDetector.class);
         when(detector.isRunningInContainer()).thenReturn(true);

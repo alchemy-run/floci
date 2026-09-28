@@ -41,16 +41,16 @@ public class Inspector2TagHandler implements TagHandler {
 
     @Override
     public Map<String, String> listTags(String region, String arn) {
-        return service.listFilterTags(region, requestContext.getAccountId(), arn);
+        return service.listTags(region, requestContext.getAccountId(), arn);
     }
 
     @Override
     public void tagResource(String region, String arn, Map<String, String> tags) {
-        service.tagFilter(region, requestContext.getAccountId(), arn, tags);
+        service.tagResource(region, requestContext.getAccountId(), arn, tags);
     }
 
     @Override
     public void untagResource(String region, String arn, List<String> tagKeys) {
-        service.untagFilter(region, requestContext.getAccountId(), arn, tagKeys);
+        service.untagResource(region, requestContext.getAccountId(), arn, tagKeys);
     }
 }

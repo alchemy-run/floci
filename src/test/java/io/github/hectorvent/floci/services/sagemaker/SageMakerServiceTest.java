@@ -192,6 +192,89 @@ class SageMakerServiceTest {
         assertEquals("InProgress", describeStatus(service, "reset-job"));
     }
 
+    @Test
+    void describeEndpointReportsProductionVariantsOnceInServiceAndWeightsCanBeUpdated() throws Exception {
+        InMemoryStorage<String, EndpointResource> endpoints = new InMemoryStorage<>();
+        SageMakerService service = new SageMakerService(new InMemoryStorage<String, ModelResource>(),
+                new InMemoryStorage<String, EndpointConfigResource>(), endpoints,
+                new InMemoryStorage<String, TrainingJobResource>(),
+                new RegionResolver("us-east-1", "000000000000"), mapper,
+                mock(SageMakerEndpointManager.class), mock(SageMakerTrainingRunner.class));
+        service.createModel(mapper.readTree("""
+                {"ModelName":"m1","PrimaryContainer":{"Image":"busybox:stable"}}
+                """), "us-east-1");
+        service.createEndpointConfig(mapper.readTree("""
+                {"EndpointConfigName":"cfg","ProductionVariants":[
+                  {"VariantName":"Instances","ModelName":"m1","InitialInstanceCount":2,"InitialVariantWeight":0.5,"InstanceType":"ml.t2.medium"},
+                  {"VariantName":"Serverless","ModelName":"m1","ServerlessConfig":{"MemorySizeInMB":2048,"MaxConcurrency":1}}]}
+                """), "us-east-1");
+        service.createEndpoint(mapper.readTree("{\"EndpointName\":\"ep\",\"EndpointConfigName\":\"cfg\"}"), "us-east-1");
+        JsonNode describeRequest = mapper.readTree("{\"EndpointName\":\"ep\"}");
+
+        JsonNode creating = service.describeEndpoint(describeRequest, "us-east-1");
+        assertEquals("Creating", creating.path("EndpointStatus").asText());
+        assertTrue(creating.path("ProductionVariants").isMissingNode());
+
+        EndpointResource ep = endpoints.scan(key -> true).get(0);
+        assertEquals(List.of("busybox:stable"), service.deployedImages(ep));
+        ep.endpointStatus = "InService";
+        ep.resolvedImages = new java.util.LinkedHashMap<>(java.util.Map.of("busybox:stable",
+                "busybox@sha256:" + "a".repeat(64)));
+        assertTrue(service.finalizeEndpointStart(ep));
+
+        JsonNode variants = service.describeEndpoint(describeRequest, "us-east-1").path("ProductionVariants");
+        assertEquals(2, variants.size());
+        JsonNode instances = variants.get(0);
+        assertEquals("Instances", instances.path("VariantName").asText());
+        assertEquals(0.5, instances.path("CurrentWeight").asDouble());
+        assertEquals(0.5, instances.path("DesiredWeight").asDouble());
+        assertEquals(2, instances.path("CurrentInstanceCount").asInt());
+        assertEquals(2, instances.path("DesiredInstanceCount").asInt());
+        JsonNode image = instances.path("DeployedImages").get(0);
+        assertEquals("busybox:stable", image.path("SpecifiedImage").asText());
+        assertEquals("busybox@sha256:" + "a".repeat(64), image.path("ResolvedImage").asText());
+        assertTrue(image.path("ResolutionTime").isNumber());
+        JsonNode serverless = variants.get(1);
+        assertEquals(1.0, serverless.path("CurrentWeight").asDouble());
+        assertEquals(2048, serverless.path("CurrentServerlessConfig").path("MemorySizeInMB").asInt());
+        assertTrue(serverless.path("CurrentInstanceCount").isMissingNode());
+
+        service.updateEndpointWeightsAndCapacities(mapper.readTree("""
+                {"EndpointName":"ep","DesiredWeightsAndCapacities":[
+                  {"VariantName":"Instances","DesiredWeight":2,"DesiredInstanceCount":3},
+                  {"VariantName":"Serverless","ServerlessUpdateConfig":{"MaxConcurrency":5}}]}
+                """), "us-east-1");
+        JsonNode updated = service.describeEndpoint(describeRequest, "us-east-1");
+        assertEquals("InService", updated.path("EndpointStatus").asText());
+        assertEquals(2.0, updated.path("ProductionVariants").get(0).path("CurrentWeight").asDouble());
+        assertEquals(3, updated.path("ProductionVariants").get(0).path("DesiredInstanceCount").asInt());
+        assertEquals(5, updated.path("ProductionVariants").get(1).path("DesiredServerlessConfig").path("MaxConcurrency").asInt());
+        assertEquals(2048, updated.path("ProductionVariants").get(1).path("CurrentServerlessConfig").path("MemorySizeInMB").asInt());
+
+        AwsException unknownVariant = assertThrows(AwsException.class, () -> service.updateEndpointWeightsAndCapacities(
+                mapper.readTree("{\"EndpointName\":\"ep\",\"DesiredWeightsAndCapacities\":[{\"VariantName\":\"nope\",\"DesiredWeight\":1}]}"),
+                "us-east-1"));
+        assertEquals("ValidationException", unknownVariant.getErrorCode());
+        AwsException countOnServerless = assertThrows(AwsException.class, () -> service.updateEndpointWeightsAndCapacities(
+                mapper.readTree("{\"EndpointName\":\"ep\",\"DesiredWeightsAndCapacities\":[{\"VariantName\":\"Serverless\",\"DesiredInstanceCount\":1}]}"),
+                "us-east-1"));
+        assertEquals("ValidationException", countOnServerless.getErrorCode());
+
+        service.updateEndpoint(mapper.readTree("{\"EndpointName\":\"ep\",\"EndpointConfigName\":\"cfg\"}"), "us-east-1");
+        AwsException inProgress = assertThrows(AwsException.class, () -> service.updateEndpointWeightsAndCapacities(
+                mapper.readTree("{\"EndpointName\":\"ep\",\"DesiredWeightsAndCapacities\":[{\"VariantName\":\"Instances\",\"DesiredWeight\":1}]}"),
+                "us-east-1"));
+        assertEquals("ValidationException", inProgress.getErrorCode());
+    }
+
+    @Test
+    void repositoryOfStripsTagsAndDigestsButNotRegistryPorts() {
+        assertEquals("busybox", SageMakerEndpointManager.repositoryOf("busybox:stable"));
+        assertEquals("localhost:5000/repo", SageMakerEndpointManager.repositoryOf("localhost:5000/repo:tag"));
+        assertEquals("localhost:5000/repo", SageMakerEndpointManager.repositoryOf("localhost:5000/repo"));
+        assertEquals("repo", SageMakerEndpointManager.repositoryOf("repo@sha256:" + "b".repeat(64)));
+    }
+
     private String describeStatus(SageMakerService service, String name) throws Exception {
         return service.describeTrainingJob(mapper.readTree("{\"TrainingJobName\":\"" + name + "\"}"), "us-east-1")
                 .path("TrainingJobStatus").asText();
